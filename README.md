@@ -68,3 +68,8 @@ Several seeded tests still expect shared pieces not in this repo yet (`scripts/t
 `sidecar/pipeline_v2.py`, `schemas/`, `fixtures/`). Those fail until ported from the
 incubator tree — they are not regressions from the M2 sync work.
 
+## Public repo note
+
+This repository is public. Do not commit session logs, `map_images/`, `.env`, or
+machine-specific secrets. `.gitignore` already covers the common runtime paths.
+
