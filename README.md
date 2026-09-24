@@ -56,7 +56,15 @@ here**. SP with the flag off keeps the existing ladder.
 LAN probe: `docs/civ6_lan_probe.md`. Pass = no new OOS, identical unit plots,
 host `apply|ok|move_unit`.
 
-## Public repo note
+## Tests
 
-This repository is public. Do not commit session logs, `map_images/`, `.env`, or
-machine-specific secrets. `.gitignore` already covers the common runtime paths.
+From repo root (after `pip install -r requirements.txt`):
+
+```bash
+PYTHONPATH=. python3 -m unittest sidecar.tests.test_civ6_mp_sync_wire sidecar.tests.test_civ6_autotest_analyze sidecar.tests.test_civ6_assets -v
+```
+
+Several seeded tests still expect shared pieces not in this repo yet (`scripts/testbed/*`,
+`sidecar/pipeline_v2.py`, `schemas/`, `fixtures/`). Those fail until ported from the
+incubator tree — they are not regressions from the M2 sync work.
+
