@@ -1,0 +1,41 @@
+# sessions / runtime
+sessions/
+**/sessions/
+logs/
+**/logs/
+*.log
+map_images/
+**/map_images/
+
+# python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+**/runtime_secrets*
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# zip seeds
+*.zip
+
+# generated pending-apply session dumps
+mod/Civ6Ai/InGame/Civ6Ai_PendingApply_autotest_*.lua
