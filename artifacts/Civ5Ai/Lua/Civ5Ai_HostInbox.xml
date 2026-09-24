@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Context Name="Civ5AiHostInbox">
+  <!-- Top strip above TopPanel so host click/paste lands on this EditBox, same control as chat. -->
+    <Box ID="HostInboxBox" Anchor="L,T" Size="Full,28" Offset="0,0" Color="0,0,0,1" ConsumeMouse="1" Hidden="1">
+    <EditBox ID="HostChannelInput" Anchor="L,T" Offset="0,2" Size="Full,24" Font="TwCenMT14" EditMode="1" Hidden="1" ConsumeMouse="1" MaxLength="65536" />
+  </Box>
+</Context>

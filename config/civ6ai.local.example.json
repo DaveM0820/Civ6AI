@@ -1,0 +1,15 @@
+{
+  "schema_version": "civ6ai-local/1",
+  "provider": "lmstudio",
+  "endpoint": "http://localhost:1234/v1",
+  "model": "qwen/qwen3-vl-8b",
+  "api_key": "lm-studio",
+  "timeout_seconds": 600,
+  "max_retries": 3,
+  "vision": true,
+  "reasoning": "on",
+  "context_budget": true,
+  "queue_shared_model": true,
+  "mp_move_sync": false,
+  "comment": "Copy to config/civ6ai.local.json (gitignored) or override via env. reasoning is on|off only — never send reasoning_effort=on to LM Studio. Env overrides: CIV6AI_MODEL_PROVIDER, LMSTUDIO_BASE_URL, LMSTUDIO_MODEL, LMSTUDIO_API_KEY, CIV6AI_LMSTUDIO_TIMEOUT_SECONDS, CIV6AI_LMSTUDIO_VISION, CIV6AI_LMSTUDIO_REASONING, CIV6AI_CONTEXT_BUDGET, CIV6AI_QUEUE_SHARED_MODEL, CIV6AI_MP_MOVE_SYNC."
+}

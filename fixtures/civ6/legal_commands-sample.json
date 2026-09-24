@@ -1,0 +1,191 @@
+{
+  "legal_commands": [
+    {
+      "command_id": "CMD_athens_prod_settler",
+      "kind": "queue_production",
+      "description": "Queue settler in Athens",
+      "fixed_arguments": {
+        "city_id": "CITY_ATHENS",
+        "build_id": "UNIT_SETTLER"
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "CITY_ATHENS"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_athens_prod_monument",
+      "kind": "queue_production",
+      "description": "Queue monument in Athens",
+      "fixed_arguments": {
+        "city_id": "CITY_ATHENS",
+        "build_id": "BUILDING_MONUMENT"
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "CITY_ATHENS"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_scout_move_15_24",
+      "kind": "move_unit",
+      "description": "Move scout",
+      "fixed_arguments": {
+        "unit_id": "UNIT_SCOUT_1",
+        "target_x": 15,
+        "target_y": 24
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "UNIT_SCOUT_1"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_scout_move_16_24",
+      "kind": "move_unit",
+      "description": "Move scout",
+      "fixed_arguments": {
+        "unit_id": "UNIT_SCOUT_1",
+        "target_x": 16,
+        "target_y": 24
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "UNIT_SCOUT_1"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_scout_move_14_25",
+      "kind": "move_unit",
+      "description": "Move scout",
+      "fixed_arguments": {
+        "unit_id": "UNIT_SCOUT_1",
+        "target_x": 14,
+        "target_y": 25
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "UNIT_SCOUT_1"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_settler_move_17_25",
+      "kind": "move_unit",
+      "description": "Move settler",
+      "fixed_arguments": {
+        "unit_id": "UNIT_SETTLER_1",
+        "target_x": 17,
+        "target_y": 25
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "UNIT_SETTLER_1"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_settler_move_18_26",
+      "kind": "move_unit",
+      "description": "Move settler",
+      "fixed_arguments": {
+        "unit_id": "UNIT_SETTLER_1",
+        "target_x": 18,
+        "target_y": 26
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "UNIT_SETTLER_1"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_settler_move_16_26",
+      "kind": "move_unit",
+      "description": "Move settler",
+      "fixed_arguments": {
+        "unit_id": "UNIT_SETTLER_1",
+        "target_x": 16,
+        "target_y": 26
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "UNIT_SETTLER_1"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_spearman_move_16_23",
+      "kind": "move_unit",
+      "description": "Move spearman",
+      "fixed_arguments": {
+        "unit_id": "UNIT_SPEARMAN_1",
+        "target_x": 16,
+        "target_y": 23
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "UNIT_SPEARMAN_1"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_spearman_move_15_24",
+      "kind": "move_unit",
+      "description": "Move spearman",
+      "fixed_arguments": {
+        "unit_id": "UNIT_SPEARMAN_1",
+        "target_x": 15,
+        "target_y": 24
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "UNIT_SPEARMAN_1"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_spearman_fortify",
+      "kind": "unit_posture_fortify",
+      "description": "Fortify spearman",
+      "fixed_arguments": {
+        "unit_id": "UNIT_SPEARMAN_1"
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "UNIT_SPEARMAN_1"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_spearman_skip",
+      "kind": "unit_skip",
+      "description": "Skip spearman",
+      "fixed_arguments": {
+        "unit_id": "UNIT_SPEARMAN_1"
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "UNIT_SPEARMAN_1"
+      ],
+      "runtime_status": "tested"
+    },
+    {
+      "command_id": "CMD_research_tech_pottery",
+      "kind": "set_research_tech",
+      "description": "Research pottery",
+      "fixed_arguments": {
+        "tech_id": "TECH_POTTERY"
+      },
+      "parameter_domains": {},
+      "affected_ids": [
+        "TECH_POTTERY"
+      ],
+      "runtime_status": "tested"
+    }
+  ]
+}

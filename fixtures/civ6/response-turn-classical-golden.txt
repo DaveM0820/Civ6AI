@@ -1,0 +1,7 @@
+﻿thought.situation = Two cities, Pottery in two turns, settler idle near Athens — Cleopatra close in score; barbarian scout east of Corinth.
+thought.strategy = Finish Pottery, queue settler in Athens after spearman, scout south for third city site; fortify spearman toward Corinth.
+decision_summary = Research Pottery; scout south; advance settler east; fortify spearman
+scout_1.moveTo = (15,24)
+settler_1.moveTo = (17,25)
+spearman_1.stance = fortify
+legal.research.tech = TECH_POTTERY

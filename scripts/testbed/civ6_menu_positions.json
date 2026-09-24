@@ -1,0 +1,48 @@
+{
+  "ref_w": 1600,
+  "ref_h": 1024,
+  "items": {
+    "main_single_player": {
+      "client_x": 748,
+      "client_y": 440,
+      "pct_x": 0.4675,
+      "pct_y": 0.4297
+    },
+    "sp_load_game": {
+      "pct_x": 0.54,
+      "pct_y": 0.52,
+      "client_x": 864,
+      "client_y": 533
+    },
+    "sp_create_game": {
+      "client_x": 869,
+      "client_y": 585,
+      "pct_x": 0.5431,
+      "pct_y": 0.5713
+    },
+    "sp_scenarios": {
+      "pct_x": 0.54,
+      "pct_y": 0.59,
+      "client_x": 864,
+      "client_y": 604
+    },
+    "start_game": {
+      "client_x": 800,
+      "client_y": 1003,
+      "pct_x": 0.5,
+      "pct_y": 0.9795
+    },
+    "continue_intro": {
+      "pct_x": 0.38,
+      "pct_y": 0.8,
+      "client_x": 608,
+      "client_y": 819
+    },
+    "begin_game": {
+      "client_x": 579,
+      "client_y": 774,
+      "pct_x": 0.3619,
+      "pct_y": 0.7559
+    }
+  }
+}

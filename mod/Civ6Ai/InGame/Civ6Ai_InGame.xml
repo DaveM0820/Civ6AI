@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Context Name="Civ6AiInGame">
+  <EditBox ID="HostChannelInput" Size="1400,24" Offset="0,0" Hidden="1" ConsumeMouse="1" FontSize="10" MaxLength="65536" />
+</Context>

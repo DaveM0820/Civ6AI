@@ -1,0 +1,2513 @@
+{
+  "advciv": {
+    "default_unit_controller": "advciv",
+    "fallback_policy": "After you give your commands, AdvCiv (the base AI mod) runs movement, production, and improvements for anything you did not override.",
+    "recommendations": [
+      {
+        "affected_ids": [
+          "TECH_MYSTICISM"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "research",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_RESEARCH_2",
+        "summary": "Continue current research TECH_MYSTICISM"
+      },
+      {
+        "affected_ids": [
+          "COMMERCE_GOLD"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "commerce",
+        "proposed_command_ids": [
+          "CMD_set_commerce_COMMERCE_GOLD_PERCENT_0"
+        ],
+        "rationale_facts": [],
+        "recommendation_id": "REC_COMMERCE_GOLD_2",
+        "summary": "COMMERCE_GOLD allocation is 0 percent"
+      },
+      {
+        "affected_ids": [
+          "COMMERCE_RESEARCH"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "commerce",
+        "proposed_command_ids": [
+          "CMD_set_commerce_COMMERCE_RESEARCH_PERCENT_100"
+        ],
+        "rationale_facts": [],
+        "recommendation_id": "REC_COMMERCE_RESEARCH_2",
+        "summary": "COMMERCE_RESEARCH allocation is 100 percent"
+      },
+      {
+        "affected_ids": [
+          "COMMERCE_CULTURE"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "commerce",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_COMMERCE_CULTURE_2",
+        "summary": "COMMERCE_CULTURE allocation is 0 percent"
+      },
+      {
+        "affected_ids": [
+          "COMMERCE_ESPIONAGE"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "commerce",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_COMMERCE_ESPIONAGE_2",
+        "summary": "COMMERCE_ESPIONAGE allocation is 0 percent"
+      },
+      {
+        "affected_ids": [
+          "CITY_0_8192",
+          "UNIT_WORKER"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "city_production",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_PRODUCTION_CITY_0_8192_2",
+        "summary": "CITY_0_8192 is producing UNIT_WORKER"
+      },
+      {
+        "affected_ids": [
+          "CIVICOPTION_GOVERNMENT",
+          "CIVIC_DESPOTISM"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "civic",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_CIVIC_CIVICOPTION_GOVERNMENT_2",
+        "summary": "Current civic CIVIC_DESPOTISM"
+      },
+      {
+        "affected_ids": [
+          "CIVICOPTION_LEGAL",
+          "CIVIC_BARBARISM"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "civic",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_CIVIC_CIVICOPTION_LEGAL_2",
+        "summary": "Current civic CIVIC_BARBARISM"
+      },
+      {
+        "affected_ids": [
+          "CIVICOPTION_LABOR",
+          "CIVIC_TRIBALISM"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "civic",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_CIVIC_CIVICOPTION_LABOR_2",
+        "summary": "Current civic CIVIC_TRIBALISM"
+      },
+      {
+        "affected_ids": [
+          "CIVICOPTION_ECONOMY",
+          "CIVIC_DECENTRALIZATION"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "civic",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_CIVIC_CIVICOPTION_ECONOMY_2",
+        "summary": "Current civic CIVIC_DECENTRALIZATION"
+      },
+      {
+        "affected_ids": [
+          "CIVICOPTION_RELIGION",
+          "CIVIC_PREHISTORIC_RELIGION"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "civic",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_CIVIC_CIVICOPTION_RELIGION_2",
+        "summary": "Current civic CIVIC_PREHISTORIC_RELIGION"
+      }
+    ]
+  },
+  "decision": {
+    "phase": "strategic_decision",
+    "player_id": "PLAYER_0",
+    "reason": "turn_start",
+    "turn": 2,
+    "year": -30000
+  },
+  "diplomacy": {
+    "active_deals": [],
+    "available_proposals": [],
+    "legal_trade_inventory": [],
+    "pending_requests": [],
+    "private_inbox": [],
+    "relations": []
+  },
+  "game": {
+    "calendar_id": "CALENDAR_DEFAULT",
+    "climate_id": "CLIMATE_TEMPERATE",
+    "difficulty_id": "HANDICAP_UNKNOWN",
+    "era_id": "ERA_ANCIENT",
+    "game_speed_id": "GAMESPEED_TURBO",
+    "map_height": 56,
+    "map_script": "Archipelago",
+    "map_width": 78,
+    "max_turns": 250,
+    "network_multiplayer": false,
+    "options": [
+      "GAMEOPTION_AGGRESSIVE_AI",
+      "GAMEOPTION_NO_EVENTS"
+    ],
+    "sea_level_id": "SEALEVEL_MEDIUM",
+    "start_era_id": "ERA_ANCIENT",
+    "victory_ids": [],
+    "world_size_id": "WORLDSIZE_STANDARD",
+    "wrap_x": false,
+    "wrap_y": false
+  },
+  "history": {
+    "accepted_decisions": [
+      {
+        "affected_ids": [
+          "CMD_unit_mission_UNIT_0_8192_MISSION_FOUND_INT_-1_INT_-1_PLOT_27_30",
+          "CMD_unit_mission_UNIT_0_24578_MISSION_FORTIFY_INT_-1_INT_-1_NONE"
+        ],
+        "kind": "AI_DECISION",
+        "summary": "Found the capital city Washington at the starting location to secure our first foothold and begin production. Deploy the scout to explore the immediate vicinity of the island, and set the archer to fortify the new city to ensure domestic tranquility and defense.",
+        "turn": 1
+      }
+    ],
+    "command_results": [],
+    "diplomacy_events": [],
+    "memory_summary": "Found the capital city Washington at the starting location to secure our first foothold and begin production. Deploy the scout to explore the immediate vicinity of the island, and set the archer to fortify the new city to ensure domestic tranquility and defense.",
+    "public_events": [
+      {
+        "affected_ids": [
+          "PLAYER_1"
+        ],
+        "kind": "CHAT_PUBLIC",
+        "summary": "The horizon of this new world is mine to chart. Lisbon rises today, the first anchor of a global empire.",
+        "turn": 0
+      },
+      {
+        "affected_ids": [
+          "PLAYER_2"
+        ],
+        "kind": "CHAT_PUBLIC",
+        "summary": "The dawn of India is upon us. Here, on these shores, we lay the first stone of our eternal legacy.",
+        "turn": 0
+      },
+      {
+        "affected_ids": [
+          "PLAYER_3"
+        ],
+        "kind": "CHAT_PUBLIC",
+        "summary": "The sun rises upon our island cradle. We shall harvest the bounty of the sea and work the earth to prepare our people for the great expansion beyond these shores.",
+        "turn": 0
+      },
+      {
+        "affected_ids": [
+          "PLAYER_4"
+        ],
+        "kind": "CHAT_PUBLIC",
+        "summary": "The only thing we have to fear is fear itself. Today, we plant the seeds of a new American era on these shores.",
+        "turn": 0
+      },
+      {
+        "affected_ids": [
+          "PLAYER_4"
+        ],
+        "kind": "CHAT_PUBLIC",
+        "summary": "Let us survey the land and sea; expansion is the lifeblood of our future. Scouts, move out!",
+        "turn": 0
+      },
+      {
+        "affected_ids": [
+          "PLAYER_0"
+        ],
+        "kind": "CHAT_PUBLIC",
+        "summary": "The only thing we have to fear is the fog of war itself. Today, we plant our flag and build a new world from these shores. Washington rises!",
+        "turn": 1
+      },
+      {
+        "affected_ids": [
+          "PLAYER_1"
+        ],
+        "kind": "CHAT_PUBLIC",
+        "summary": "The land is but a stepping stone! We shall tap the bounty of the ocean first, for the wealth of Portugal has always been found upon the waves.",
+        "turn": 1
+      },
+      {
+        "affected_ids": [
+          "PLAYER_3"
+        ],
+        "kind": "CHAT_PUBLIC",
+        "summary": "The worker toils so that the empire may feast. While the warrior scouts the unknown, we shall tame the land and the tides.",
+        "turn": 1
+      },
+      {
+        "affected_ids": [
+          "PLAYER_4"
+        ],
+        "kind": "CHAT_PUBLIC",
+        "summary": "The site is chosen. Let Washington rise from the earth, a beacon of democracy in these uncharted waters! We march toward a destiny defined by our own resolve.",
+        "turn": 1
+      }
+    ],
+    "thought_memory": [
+      {
+        "situation": "**My Immediate Civilization IV Strategy**",
+        "strategy": "Alright, the user wants me to channel FDR in this round of Civ IV. Got it. I'm starting with a Settler and a couple of military units \u2013 an Archer and a Scout \u2013 at coordinates (27, 30). This is on an Archipelago map, which means land is going to be a precious commodity. And from the looks of this initial image, I'm starting on a rather small island. That's my immediate focus \u2013 survival!\n\nMy first move is crystal clear: **Found the capital city right here at (27, 30) immediately**. No dawdling, no exploring first. Securing that single tile is paramount. This initial settlement is going to be the bedrock of my civilization, its prosperity and, ultimately, its survival. Once I have the city, then I can see what resources are available on the island, and then start making intelligent choices.",
+        "turn": 1
+      }
+    ]
+  },
+  "known_map": {
+    "areas": [
+      {
+        "area_id": "AREA_1998848",
+        "revealed_plot_count": 0,
+        "water": true
+      },
+      {
+        "area_id": "AREA_2236445",
+        "revealed_plot_count": 0,
+        "water": false
+      },
+      {
+        "area_id": "AREA_2261024",
+        "revealed_plot_count": 0,
+        "water": false
+      }
+    ],
+    "format": "plot-grid-v1",
+    "frontiers": [
+      {
+        "adjacent_area_ids": [
+          "AREA_1998848"
+        ],
+        "frontier_id": "FRONTIER_AREA_1998848",
+        "plot_ids": []
+      },
+      {
+        "adjacent_area_ids": [
+          "AREA_2236445"
+        ],
+        "frontier_id": "FRONTIER_AREA_2236445",
+        "plot_ids": []
+      },
+      {
+        "adjacent_area_ids": [
+          "AREA_2261024"
+        ],
+        "frontier_id": "FRONTIER_AREA_2261024",
+        "plot_ids": []
+      }
+    ],
+    "image": {
+      "archive_path": "C:\\Users\\dmitc\\OneDrive\\Documents\\My Games\\beyond the sword\\civ4ai-autotest\\map_images\\seed-045cdccc-045cdccc\\PLAYER_0_turn_000002.map.png",
+      "attached": true,
+      "format": "png-grid-v1",
+      "height": 56,
+      "known_plot_tiles": 41,
+      "label_ids": [
+        "CITY_0_8192"
+      ],
+      "legend": [
+        {
+          "meaning": "unrevealed fog",
+          "symbol": "?"
+        },
+        {
+          "meaning": "your city",
+          "symbol": "yellow"
+        },
+        {
+          "meaning": "your unit",
+          "symbol": "cyan"
+        },
+        {
+          "meaning": "foreign unit",
+          "symbol": "red"
+        },
+        {
+          "meaning": "unit stack",
+          "symbol": "green"
+        }
+      ],
+      "png_bytes": 688,
+      "sha256": "167bd9f1bf2319b555b184a517e8ccff2bb2a53b12f4c6e0b849f6138d6a837b",
+      "width": 78
+    },
+    "plots": [
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "remembered",
+        "last_seen_turn": null,
+        "peak": false,
+        "plot_id": "PLOT_26_27",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 26,
+        "y": 27,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_2236445",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": "FEATURE_JUNGLE",
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_27_27",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 27,
+        "y": 27,
+        "yields": {
+          "commerce": 0,
+          "food": 2,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "remembered",
+        "last_seen_turn": null,
+        "peak": false,
+        "plot_id": "PLOT_28_27",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 28,
+        "y": 27,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_24_28",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 24,
+        "y": 28,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_25_28",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_OCEAN",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 25,
+        "y": 28,
+        "yields": {
+          "commerce": 1,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_26_28",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 26,
+        "y": 28,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_2236445",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": "FEATURE_JUNGLE",
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_27_28",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 27,
+        "y": 28,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2236445",
+        "city_id": null,
+        "defense_percent": 25,
+        "feature_id": "FEATURE_JUNGLE",
+        "fresh_water": false,
+        "hills": true,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_28_28",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 28,
+        "y": 28,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_29_28",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 29,
+        "y": 28,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_30_28",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 30,
+        "y": 28,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_24_29",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 24,
+        "y": 29,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_25_29",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 25,
+        "y": 29,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_26_29",
+        "resource_id": "BONUS_FISH",
+        "revealed_owner_id": "PLAYER_0",
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": "CITY_0_8192",
+        "x": 26,
+        "y": 29,
+        "yields": {
+          "commerce": 2,
+          "food": 2,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_27_29",
+        "resource_id": null,
+        "revealed_owner_id": "PLAYER_0",
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": "CITY_0_8192",
+        "x": 27,
+        "y": 29,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_28_29",
+        "resource_id": "BONUS_MOLLUSCS",
+        "revealed_owner_id": "PLAYER_0",
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": "CITY_0_8192",
+        "x": 28,
+        "y": 29,
+        "yields": {
+          "commerce": 2,
+          "food": 2,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_29_29",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 29,
+        "y": 29,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_30_29",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 30,
+        "y": 29,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "remembered",
+        "last_seen_turn": null,
+        "peak": false,
+        "plot_id": "PLOT_24_30",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 24,
+        "y": 30,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_25_30",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 25,
+        "y": 30,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": true,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_26_30",
+        "resource_id": null,
+        "revealed_owner_id": "PLAYER_0",
+        "river_edges": [
+          "W"
+        ],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": "CITY_0_8192",
+        "x": 26,
+        "y": 30,
+        "yields": {
+          "commerce": 1,
+          "food": 2,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": "CITY_0_8192",
+        "defense_percent": 25,
+        "feature_id": null,
+        "fresh_water": true,
+        "hills": true,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_27_30",
+        "resource_id": null,
+        "revealed_owner_id": "PLAYER_0",
+        "river_edges": [],
+        "route_id": "ROUTE_ROAD",
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [
+          "STACK_27_30_0"
+        ],
+        "water": false,
+        "worked_by_city_id": "CITY_0_8192",
+        "x": 27,
+        "y": 30,
+        "yields": {
+          "commerce": 1,
+          "food": 2,
+          "production": 2
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 50,
+        "feature_id": "FEATURE_FOREST",
+        "fresh_water": false,
+        "hills": true,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_28_30",
+        "resource_id": null,
+        "revealed_owner_id": "PLAYER_0",
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": "CITY_0_8192",
+        "x": 28,
+        "y": 30,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 3
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_29_30",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 29,
+        "y": 30,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 25,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": true,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_30_30",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 30,
+        "y": 30,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 2
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "remembered",
+        "last_seen_turn": null,
+        "peak": false,
+        "plot_id": "PLOT_24_31",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 24,
+        "y": 31,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": "FEATURE_JUNGLE",
+        "fresh_water": true,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_25_31",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 25,
+        "y": 31,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": true,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_26_31",
+        "resource_id": "BONUS_GRAPES",
+        "revealed_owner_id": "PLAYER_0",
+        "river_edges": [
+          "W"
+        ],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": "CITY_0_8192",
+        "x": 26,
+        "y": 31,
+        "yields": {
+          "commerce": 1,
+          "food": 2,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 25,
+        "feature_id": "FEATURE_FOREST",
+        "fresh_water": true,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_27_31",
+        "resource_id": null,
+        "revealed_owner_id": "PLAYER_0",
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [
+          "STACK_27_31_0"
+        ],
+        "water": false,
+        "worked_by_city_id": "CITY_0_8192",
+        "x": 27,
+        "y": 31,
+        "yields": {
+          "commerce": 0,
+          "food": 2,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 25,
+        "feature_id": "FEATURE_FOREST",
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_28_31",
+        "resource_id": null,
+        "revealed_owner_id": "PLAYER_0",
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": "CITY_0_8192",
+        "x": 28,
+        "y": 31,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 2
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_29_31",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 29,
+        "y": 31,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_30_31",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 30,
+        "y": 31,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": true,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_25_32",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [
+          "W"
+        ],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 25,
+        "y": 32,
+        "yields": {
+          "commerce": 1,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": true,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_26_32",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [
+          "N"
+        ],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 26,
+        "y": 32,
+        "yields": {
+          "commerce": 1,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": "FEATURE_JUNGLE",
+        "fresh_water": true,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_27_32",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 27,
+        "y": 32,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 50,
+        "feature_id": "FEATURE_FOREST",
+        "fresh_water": false,
+        "hills": true,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_28_32",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 28,
+        "y": 32,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 3
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_29_32",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 29,
+        "y": 32,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_1998848",
+        "city_id": null,
+        "defense_percent": 10,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": false,
+        "plot_id": "PLOT_30_32",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_COAST",
+        "visible_stack_ids": [],
+        "water": true,
+        "worked_by_city_id": null,
+        "x": 30,
+        "y": 32,
+        "yields": {
+          "commerce": 2,
+          "food": 1,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 2,
+        "peak": true,
+        "plot_id": "PLOT_25_33",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_DESERT",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 25,
+        "y": 33,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "remembered",
+        "last_seen_turn": null,
+        "peak": false,
+        "plot_id": "PLOT_26_33",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 26,
+        "y": 33,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "remembered",
+        "last_seen_turn": null,
+        "peak": false,
+        "plot_id": "PLOT_27_33",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_PLAINS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 27,
+        "y": 33,
+        "yields": {
+          "commerce": 0,
+          "food": 1,
+          "production": 1
+        }
+      },
+      {
+        "area_id": "AREA_2261024",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "remembered",
+        "last_seen_turn": null,
+        "peak": false,
+        "plot_id": "PLOT_28_33",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_DESERT",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 28,
+        "y": 33,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      }
+    ],
+    "visibility_grid": [
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????~.~?????????????????????????????????????????????????",
+      "????????????????????????~~~..~~???????????????????????????????????????????????",
+      "????????????????????????~~~~~~~???????????????????????????????????????????????",
+      "????????????????????????~......???????????????????????????????????????????????",
+      "????????????????????????......~???????????????????????????????????????????????",
+      "?????????????????????????.....~???????????????????????????????????????????????",
+      "?????????????????????????....?????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????",
+      "??????????????????????????????????????????????????????????????????????????????"
+    ],
+    "visibility_mode": "player_visible",
+    "visible_stacks": [
+      {
+        "average_health_percent": 100,
+        "movement_ready": true,
+        "owner_player_id": "PLAYER_0",
+        "plot_id": "PLOT_27_30",
+        "stack_id": "STACK_27_30_0",
+        "type_mix_ids": [
+          "UNIT_ARCHER"
+        ],
+        "unit_count": 1,
+        "visible_strength": 2
+      },
+      {
+        "average_health_percent": 100,
+        "movement_ready": true,
+        "owner_player_id": "PLAYER_0",
+        "plot_id": "PLOT_27_31",
+        "stack_id": "STACK_27_31_0",
+        "type_mix_ids": [
+          "UNIT_SCOUT"
+        ],
+        "unit_count": 1,
+        "visible_strength": 1
+      }
+    ]
+  },
+  "known_other_cities": [
+    {
+      "area_id": "AREA_2261024",
+      "city_id": "CITY_0_8192",
+      "is_capital": true,
+      "knowledge": "visible",
+      "last_seen_turn": 2,
+      "name": "CITY_0_8192",
+      "owner_player_id": "PLAYER_0",
+      "plot_id": "PLOT_27_30",
+      "population": 1,
+      "visible_defense": null
+    }
+  ],
+  "known_players": [],
+  "legal_commands": [
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "INT_0",
+        "TASK_CLEAR_ORDERS"
+      ],
+      "command_id": "CMD_city_task_CITY_0_8192_TASK_CLEAR_ORDERS_INT_0_INT_0",
+      "description": "Host-approved clear_queue",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CLEAR_ORDERS"
+      },
+      "kind": "clear_queue",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "INT_0",
+        "INT_1",
+        "TASK_SET_AUTOMATED_CITIZENS"
+      ],
+      "command_id": "CMD_city_task_CITY_0_8192_TASK_SET_AUTOMATED_CITIZENS_INT_0_INT_1",
+      "description": "Host-approved set_citizen_automation",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_1",
+        "task_id": "TASK_SET_AUTOMATED_CITIZENS"
+      },
+      "kind": "set_citizen_automation",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "INT_0",
+        "INT_1",
+        "TASK_SET_AUTOMATED_PRODUCTION"
+      ],
+      "command_id": "CMD_city_task_CITY_0_8192_TASK_SET_AUTOMATED_PRODUCTION_INT_0_INT_1",
+      "description": "Host-approved set_production_automation",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_1",
+        "task_id": "TASK_SET_AUTOMATED_PRODUCTION"
+      },
+      "kind": "set_production_automation",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "INT_0",
+        "TASK_CLEAR_RALLY_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_0_8192_TASK_CLEAR_RALLY_PLOT_INT_0_INT_0",
+      "description": "Host-approved clear_rally_point",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CLEAR_RALLY_PLOT"
+      },
+      "kind": "clear_rally_point",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "INT_0",
+        "INT_1",
+        "TASK_CHANGE_SPECIALIST"
+      ],
+      "command_id": "CMD_city_task_CITY_0_8192_TASK_CHANGE_SPECIALIST_INT_0_INT_1",
+      "description": "Host-approved change_specialist",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_1",
+        "task_id": "TASK_CHANGE_SPECIALIST"
+      },
+      "kind": "change_specialist",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_0_8192_TASK_CHANGE_WORKING_PLOT_INT_0_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "INT_1",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_0_8192_TASK_CHANGE_WORKING_PLOT_INT_1_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "data1_id": "INT_1",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "INT_2",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_0_8192_TASK_CHANGE_WORKING_PLOT_INT_2_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "data1_id": "INT_2",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "INT_3",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_0_8192_TASK_CHANGE_WORKING_PLOT_INT_3_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "data1_id": "INT_3",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "INT_7",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_0_8192_TASK_CHANGE_WORKING_PLOT_INT_7_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "data1_id": "INT_7",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "INT_8",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_0_8192_TASK_CHANGE_WORKING_PLOT_INT_8_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "data1_id": "INT_8",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_SETTLER",
+        "CITY_0_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_0_8192_TRAIN_UNIT_SETTLER",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_SETTLER",
+        "city_id": "CITY_0_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_WORKER",
+        "CITY_0_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_0_8192_TRAIN_UNIT_WORKER",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_WORKER",
+        "city_id": "CITY_0_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_SCOUT",
+        "CITY_0_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_0_8192_TRAIN_UNIT_SCOUT",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_SCOUT",
+        "city_id": "CITY_0_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_WARRIOR",
+        "CITY_0_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_0_8192_TRAIN_UNIT_WARRIOR",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_WARRIOR",
+        "city_id": "CITY_0_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_ARCHER",
+        "CITY_0_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_0_8192_TRAIN_UNIT_ARCHER",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_ARCHER",
+        "city_id": "CITY_0_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_BARRACKS",
+        "CITY_0_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_0_8192_CONSTRUCT_BUILDING_BARRACKS",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_BARRACKS",
+        "city_id": "CITY_0_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "ROLE:EMPHASIZE_FOOD"
+      ],
+      "command_id": "CMD_set_city_role_CITY_0_8192_ROLE_EMPHASIZE_FOOD",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "role_id": "ROLE:EMPHASIZE_FOOD"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "ROLE:EMPHASIZE_PRODUCTION"
+      ],
+      "command_id": "CMD_set_city_role_CITY_0_8192_ROLE_EMPHASIZE_PRODUCTION",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "role_id": "ROLE:EMPHASIZE_PRODUCTION"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "ROLE:EMPHASIZE_COMMERCE"
+      ],
+      "command_id": "CMD_set_city_role_CITY_0_8192_ROLE_EMPHASIZE_COMMERCE",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "role_id": "ROLE:EMPHASIZE_COMMERCE"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "ROLE:EMPHASIZE_RESEARCH"
+      ],
+      "command_id": "CMD_set_city_role_CITY_0_8192_ROLE_EMPHASIZE_RESEARCH",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "role_id": "ROLE:EMPHASIZE_RESEARCH"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "ROLE:EMPHASIZE_GREAT_PEOPLE"
+      ],
+      "command_id": "CMD_set_city_role_CITY_0_8192_ROLE_EMPHASIZE_GREAT_PEOPLE",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "role_id": "ROLE:EMPHASIZE_GREAT_PEOPLE"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_0_8192",
+        "ROLE:EMPHASIZE_AVOID_GROWTH"
+      ],
+      "command_id": "CMD_set_city_role_CITY_0_8192_ROLE_EMPHASIZE_AVOID_GROWTH",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_0_8192",
+        "role_id": "ROLE:EMPHASIZE_AVOID_GROWTH"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "COMMERCE_GOLD",
+        "PERCENT_0"
+      ],
+      "command_id": "CMD_set_commerce_COMMERCE_GOLD_PERCENT_0",
+      "description": "Host-approved change_commerce",
+      "fixed_arguments": {
+        "commerce_id": "COMMERCE_GOLD",
+        "percent_id": "PERCENT_0"
+      },
+      "kind": "change_commerce",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "COMMERCE_RESEARCH",
+        "PERCENT_100"
+      ],
+      "command_id": "CMD_set_commerce_COMMERCE_RESEARCH_PERCENT_100",
+      "description": "Host-approved change_commerce",
+      "fixed_arguments": {
+        "commerce_id": "COMMERCE_RESEARCH",
+        "percent_id": "PERCENT_100"
+      },
+      "kind": "change_commerce",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "PRIORITY_SETTLE",
+        "AREA_2261024"
+      ],
+      "command_id": "CMD_set_expansion_priority_PRIORITY_SETTLE_AREA_2261024",
+      "description": "Host-approved set_target_city_or_area",
+      "fixed_arguments": {
+        "priority_id": "PRIORITY_SETTLE",
+        "target_area_id": "AREA_2261024"
+      },
+      "kind": "set_target_city_or_area",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "PRIORITY_BALANCED",
+        "AREA_2261024"
+      ],
+      "command_id": "CMD_set_expansion_priority_PRIORITY_BALANCED_AREA_2261024",
+      "description": "Host-approved set_target_city_or_area",
+      "fixed_arguments": {
+        "priority_id": "PRIORITY_BALANCED",
+        "target_area_id": "AREA_2261024"
+      },
+      "kind": "set_target_city_or_area",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "PRIORITY_DEFEND",
+        "AREA_2261024"
+      ],
+      "command_id": "CMD_set_expansion_priority_PRIORITY_DEFEND_AREA_2261024",
+      "description": "Host-approved set_target_city_or_area",
+      "fixed_arguments": {
+        "priority_id": "PRIORITY_DEFEND",
+        "target_area_id": "AREA_2261024"
+      },
+      "kind": "set_target_city_or_area",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "POLICY_BALANCED",
+        "UNITCLASS_LION"
+      ],
+      "command_id": "CMD_set_upgrade_policy_UNITCLASS_LION_POLICY_BALANCED",
+      "description": "Host-approved set_upgrade_reserve",
+      "fixed_arguments": {
+        "policy_id": "POLICY_BALANCED",
+        "unit_class_id": "UNITCLASS_LION"
+      },
+      "kind": "set_upgrade_reserve",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "POLICY_BALANCED",
+        "UNITCLASS_BEAR"
+      ],
+      "command_id": "CMD_set_upgrade_policy_UNITCLASS_BEAR_POLICY_BALANCED",
+      "description": "Host-approved set_upgrade_reserve",
+      "fixed_arguments": {
+        "policy_id": "POLICY_BALANCED",
+        "unit_class_id": "UNITCLASS_BEAR"
+      },
+      "kind": "set_upgrade_reserve",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "POLICY_BALANCED",
+        "UNITCLASS_PANTHER"
+      ],
+      "command_id": "CMD_set_upgrade_policy_UNITCLASS_PANTHER_POLICY_BALANCED",
+      "description": "Host-approved set_upgrade_reserve",
+      "fixed_arguments": {
+        "policy_id": "POLICY_BALANCED",
+        "unit_class_id": "UNITCLASS_PANTHER"
+      },
+      "kind": "set_upgrade_reserve",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SKIP",
+        "NONE",
+        "UNIT_0_16385"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_0_16385_MISSION_SKIP_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SKIP",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_0_16385"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_FORTIFY",
+        "NONE",
+        "UNIT_0_16385"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_0_16385_MISSION_FORTIFY_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_FORTIFY",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_0_16385"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SENTRY",
+        "NONE",
+        "UNIT_0_16385"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_0_16385_MISSION_SENTRY_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SENTRY",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_0_16385"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SKIP",
+        "NONE",
+        "UNIT_0_24578"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_0_24578_MISSION_SKIP_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SKIP",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_0_24578"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SENTRY",
+        "NONE",
+        "UNIT_0_24578"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_0_24578_MISSION_SENTRY_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SENTRY",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_0_24578"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    }
+  ],
+  "personality": {
+    "civilization_id": "CIVILIZATION_AMERICA",
+    "identity": "LEADER_FRANKLIN_ROOSEVELT-4",
+    "leader_id": "LEADER_FRANKLIN_ROOSEVELT",
+    "leader_name": "LEADER_FRANKLIN_ROOSEVELT"
+  },
+  "schema_version": "civ4ai-input/2",
+  "strategic_summary": {
+    "city_alerts": [],
+    "diplomacy_alerts": [],
+    "economy_alerts": [],
+    "military_alerts": [
+      {
+        "affected_ids": [],
+        "kind": "IDLE_UNITS",
+        "severity": "warning",
+        "text": "2 owned units need orders"
+      }
+    ],
+    "ratios": [
+      {
+        "basis": "military units per owned city",
+        "denominator": 1,
+        "kind": "MILITARY_PER_CITY",
+        "numerator": 2
+      },
+      {
+        "basis": "owned units needing orders",
+        "denominator": 2,
+        "kind": "UNITS_NEEDING_ORDERS",
+        "numerator": 2
+      }
+    ],
+    "resource_alerts": []
+  },
+  "visible_other_units": [],
+  "your_cities": [
+    {
+      "area_id": "AREA_2261024",
+      "automation": {
+        "citizens": true,
+        "production": false
+      },
+      "buildings": [
+        "BUILDING_PALACE"
+      ],
+      "city_id": "CITY_0_8192",
+      "commerce": {
+        "culture": {
+          "percent": 0,
+          "rate": 2
+        },
+        "espionage": {
+          "percent": 0,
+          "rate": 4
+        },
+        "gold": {
+          "percent": 0,
+          "rate": 0
+        },
+        "research": {
+          "percent": 0,
+          "rate": 9
+        }
+      },
+      "corporations": [],
+      "culture": {
+        "change_per_turn": 0,
+        "current": 2,
+        "maximum": 0
+      },
+      "defense": {
+        "bombard_damage": 0,
+        "percent": 0
+      },
+      "food": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 0
+      },
+      "garrison_unit_ids": [],
+      "great_people": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 0
+      },
+      "happiness": {
+        "negative": 1,
+        "net": 4,
+        "positive": 5
+      },
+      "health": {
+        "negative": 3,
+        "net": 3,
+        "positive": 6
+      },
+      "is_capital": true,
+      "is_coastal": true,
+      "maintenance": 0,
+      "name": "CITY_0_8192",
+      "occupation_turns": 0,
+      "plot_id": "PLOT_27_30",
+      "population": 1,
+      "production": {
+        "cost": 25,
+        "estimated_turns_remaining": 3,
+        "item_id": "UNIT_WORKER",
+        "production_per_turn": 7,
+        "progress": 7
+      },
+      "production_queue": [
+        {
+          "cost": 25,
+          "item_id": "UNIT_WORKER",
+          "kind": "unit",
+          "order_index": 0,
+          "progress": 7
+        }
+      ],
+      "religions": [],
+      "specialists": [],
+      "trade_routes": [],
+      "worked_plot_ids": [
+        "PLOT_27_30",
+        "PLOT_28_30"
+      ],
+      "yields": {
+        "commerce": 9,
+        "food": 2,
+        "production": 5
+      }
+    }
+  ],
+  "your_empire": {
+    "anarchy_turns": 0,
+    "civics": [
+      {
+        "id": "CIVIC_DESPOTISM",
+        "key": "CIVICOPTION_GOVERNMENT"
+      },
+      {
+        "id": "CIVIC_BARBARISM",
+        "key": "CIVICOPTION_LEGAL"
+      },
+      {
+        "id": "CIVIC_TRIBALISM",
+        "key": "CIVICOPTION_LABOR"
+      },
+      {
+        "id": "CIVIC_DECENTRALIZATION",
+        "key": "CIVICOPTION_ECONOMY"
+      },
+      {
+        "id": "CIVIC_PREHISTORIC_RELIGION",
+        "key": "CIVICOPTION_RELIGION"
+      }
+    ],
+    "commerce": {
+      "culture": {
+        "percent": 0,
+        "rate": 2
+      },
+      "espionage": {
+        "percent": 0,
+        "rate": 4
+      },
+      "gold": {
+        "percent": 0,
+        "rate": 0
+      },
+      "research": {
+        "percent": 100,
+        "rate": 10
+      }
+    },
+    "costs": {
+      "city_maintenance": 0,
+      "civic_upkeep": 0,
+      "inflation": 0,
+      "unit_cost": 0,
+      "unit_supply": 0
+    },
+    "gold": 0,
+    "gold_per_turn": 0,
+    "golden_age_turns": 0,
+    "religion": {
+      "conversion_timer": 0,
+      "convertible_religion_ids": [],
+      "state_religion_id": null
+    },
+    "research": {
+      "cost": 20,
+      "estimated_turns_remaining": null,
+      "known_tech_ids": [
+        "TECH_POTTERY",
+        "TECH_HUNTING"
+      ],
+      "progress": 10,
+      "queue": [
+        "TECH_MYSTICISM"
+      ],
+      "research_per_turn": 10,
+      "tech_id": "TECH_MYSTICISM"
+    },
+    "resources": [],
+    "score": 33,
+    "team_id": "TEAM_0",
+    "unit_counts": {
+      "great_people": 0,
+      "idle": 2,
+      "military": 2,
+      "missionaries": 0,
+      "settlers": 0,
+      "spies": 0,
+      "total": 2,
+      "upgradeable": 0,
+      "workers": 0
+    },
+    "victory_progress": [],
+    "war_weariness": 0
+  },
+  "your_units": [
+    {
+      "activity_id": "ACTIVITY_AWAKE",
+      "can_act": true,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_LAND",
+      "experience": 0,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 60,
+        "maximum": 60
+      },
+      "needs_orders": true,
+      "plot_id": "PLOT_27_30",
+      "promotion_ids": [
+        "PROMOTION_RETREAT1"
+      ],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 2,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_CITY_DEFENSE",
+      "unit_class_id": "UNITCLASS_ARCHER",
+      "unit_id": "UNIT_0_16385",
+      "unit_type_id": "UNIT_ARCHER",
+      "upgrade_options": []
+    },
+    {
+      "activity_id": "ACTIVITY_SLEEP",
+      "can_act": true,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_LAND",
+      "experience": 0,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 120,
+        "maximum": 120
+      },
+      "needs_orders": true,
+      "plot_id": "PLOT_27_31",
+      "promotion_ids": [
+        "PROMOTION_WOODSMAN1",
+        "PROMOTION_RETREAT1"
+      ],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 1,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_EXPLORE",
+      "unit_class_id": "UNITCLASS_SCOUT",
+      "unit_id": "UNIT_0_24578",
+      "unit_type_id": "UNIT_SCOUT",
+      "upgrade_options": []
+    }
+  ]
+}

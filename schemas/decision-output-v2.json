@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://civ4ai.local/schema/decision-output-v2.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["decision_summary", "recommendation_decisions", "commands", "chat_messages"],
+  "properties": {
+    "thought": {
+      "type": "object", "additionalProperties": false,
+      "required": ["situation", "strategy"],
+      "properties": {
+        "situation": {"type": "string", "minLength": 0, "maxLength": 8000},
+        "strategy": {"type": "string", "minLength": 0, "maxLength": 8000}
+      }
+    },
+    "decision_summary": {"type": "string", "minLength": 1, "maxLength": 1200},
+    "recommendation_decisions": {
+      "type": "array", "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["recommendation_id", "decision", "replacement_command_ids"],
+        "properties": {
+          "recommendation_id": {"$ref": "#/$defs/id"},
+          "decision": {"enum": ["accept", "reject", "replace"]},
+          "replacement_command_ids": {"type": "array", "maxItems": 16, "items": {"$ref": "#/$defs/id"}}
+        }
+      }
+    },
+    "commands": {
+      "type": "array", "maxItems": 64,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["command_id", "arguments"],
+        "properties": {
+          "command_id": {"$ref": "#/$defs/id"},
+          "arguments": {"type": "object", "maxProperties": 16, "additionalProperties": {"oneOf": [{"$ref": "#/$defs/id"}, {"type": "integer"}, {"type": "boolean"}]}}
+        }
+      }
+    },
+    "chat_messages": {
+      "type": "array", "maxItems": 12,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["target", "text", "grounding_ids"],
+        "properties": {
+          "target": {"enum": ["all", "team", "player"]},
+          "target_player_id": {"type": "string", "pattern": "^PLAYER_[0-9]+$"},
+          "text": {"type": "string", "minLength": 1, "maxLength": 240, "pattern": "^[^\\u0000-\\u001F]*$"},
+          "grounding_ids": {"$ref": "#/$defs/grounding"}
+        }
+      }
+    },
+    "player_opinions": {
+      "type": "object",
+      "maxProperties": 16,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "updated_turn"],
+        "properties": {
+          "text": {"type": "string", "minLength": 1, "maxLength": 1200},
+          "updated_turn": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "player_histories": {
+      "type": "object",
+      "maxProperties": 16,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["text", "updated_turn"],
+        "properties": {
+          "text": {"type": "string", "minLength": 1, "maxLength": 4000},
+          "updated_turn": {"type": "integer", "minimum": 0}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "grounding": {"type": "array", "maxItems": 12, "items": {"$ref": "#/$defs/id"}}
+  }
+}

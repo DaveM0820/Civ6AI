@@ -1,0 +1,546 @@
+{
+  "schema_version": "civ6ai-command-capabilities/1",
+  "rule": "Only currently executable instances enter legal_commands; unsupported kinds are never advertised.",
+  "reference": "artifacts/reference/civ6-mcp",
+  "mcp_tool_count": 32,
+  "mcp_tools": [
+    "appoint_governor",
+    "assign_governor",
+    "change_government",
+    "choose_dedication",
+    "choose_pantheon",
+    "city_action",
+    "dismiss_popup",
+    "end_turn",
+    "form_alliance",
+    "found_religion",
+    "patronize_great_person",
+    "promote_governor",
+    "promote_unit",
+    "propose_peace",
+    "propose_trade",
+    "purchase_item",
+    "purchase_tile",
+    "queue_wc_votes",
+    "recruit_great_person",
+    "reject_great_person",
+    "respond_to_diplomacy",
+    "respond_to_trade",
+    "send_diplomatic_action",
+    "send_envoy",
+    "set_city_focus",
+    "set_city_production",
+    "set_policies",
+    "set_research",
+    "skip_remaining_units",
+    "spy_action",
+    "unit_action",
+    "upgrade_unit"
+  ],
+  "tier_notes": {
+    "v1": "Required for hybrid-control single-player gate",
+    "v1.1": "Implement after v1 soak",
+    "host": "Mod host only, not LLM",
+    "deferred": "Not v1"
+  },
+  "capabilities": [
+    {
+      "kind": "activate_great_person",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.activate",
+      "mcp_action": "activate",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "appoint_governor",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.governor.appoint",
+      "mcp_tool": "appoint_governor"
+    },
+    {
+      "kind": "archaeologist_excavate",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.excavate"
+    },
+    {
+      "kind": "assign_governor",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.governor.assign",
+      "mcp_tool": "assign_governor"
+    },
+    {
+      "kind": "attack_target",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.attackTo",
+      "mcp_action": "attack",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "automate_explore",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.automate=explore",
+      "mcp_action": "automate",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "cancel_deal",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.deal.cancel.{Leader}"
+    },
+    {
+      "kind": "change_government",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.government",
+      "mcp_tool": "change_government"
+    },
+    {
+      "kind": "chat",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "chat.all|chat.{Leader}",
+      "authority": "social_only"
+    },
+    {
+      "kind": "choose_dedication",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.dedication",
+      "mcp_tool": "choose_dedication"
+    },
+    {
+      "kind": "choose_pantheon",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.pantheon",
+      "mcp_tool": "choose_pantheon"
+    },
+    {
+      "kind": "city_attack",
+      "tier": "v1.1",
+      "wire_scope": "city",
+      "wire": "{City}.attack",
+      "mcp_action": "attack",
+      "mcp_tool": "city_action"
+    },
+    {
+      "kind": "clear_production_queue",
+      "tier": "v1",
+      "wire_scope": "city",
+      "wire": "{City}.clearQueue"
+    },
+    {
+      "kind": "coastal_raid",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.coastalRaid"
+    },
+    {
+      "kind": "delete_unit",
+      "tier": "v1.1",
+      "wire_scope": "unit",
+      "wire": "{unit}.delete",
+      "mcp_action": "delete",
+      "risk": "high",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "disembark",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.disembark"
+    },
+    {
+      "kind": "dismiss_popup",
+      "tier": "host",
+      "wire_scope": "host",
+      "mcp_tool": "dismiss_popup"
+    },
+    {
+      "kind": "embark",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.embark"
+    },
+    {
+      "kind": "end_turn",
+      "tier": "host",
+      "wire_scope": "host",
+      "mcp_tool": "end_turn"
+    },
+    {
+      "kind": "form_alliance",
+      "tier": "v1.1",
+      "wire_scope": "empire",
+      "wire": "legal.alliance.{Leader}",
+      "mcp_tool": "form_alliance"
+    },
+    {
+      "kind": "found_city",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.foundCity",
+      "mcp_action": "found_city",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "found_religion",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.religion",
+      "mcp_tool": "found_religion"
+    },
+    {
+      "kind": "move_unit",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.moveTo",
+      "mcp_action": "move",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "naturalist_national_park",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.nationalPark"
+    },
+    {
+      "kind": "patronize_great_person",
+      "tier": "v1.1",
+      "wire_scope": "empire",
+      "wire": "legal.gp.patronize",
+      "mcp_tool": "patronize_great_person"
+    },
+    {
+      "kind": "pillage_improvement",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.pillage"
+    },
+    {
+      "kind": "promote_governor",
+      "tier": "v1.1",
+      "wire_scope": "empire",
+      "wire": "legal.governor.promote",
+      "mcp_tool": "promote_governor"
+    },
+    {
+      "kind": "promote_unit",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.promote",
+      "mcp_tool": "promote_unit"
+    },
+    {
+      "kind": "propose_peace",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.peace.{Leader}",
+      "mcp_tool": "propose_peace"
+    },
+    {
+      "kind": "propose_trade",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.trade.offer.{Leader}",
+      "mcp_tool": "propose_trade"
+    },
+    {
+      "kind": "purchase_item",
+      "tier": "v1",
+      "wire_scope": "city",
+      "wire": "{City}.purchase",
+      "mcp_tool": "purchase_item"
+    },
+    {
+      "kind": "purchase_tile",
+      "tier": "v1.1",
+      "wire_scope": "city",
+      "wire": "{City}.buyTile",
+      "mcp_tool": "purchase_tile"
+    },
+    {
+      "kind": "queue_production",
+      "tier": "v1",
+      "wire_scope": "city",
+      "wire": "{City}.changeProduction",
+      "mcp_tool": "set_city_production"
+    },
+    {
+      "kind": "queue_wc_votes",
+      "tier": "v1.1",
+      "wire_scope": "empire",
+      "wire": "legal.wc.votes",
+      "mcp_tool": "queue_wc_votes"
+    },
+    {
+      "kind": "rebase_aircraft",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.rebase"
+    },
+    {
+      "kind": "recruit_great_person",
+      "tier": "v1.1",
+      "wire_scope": "empire",
+      "wire": "legal.gp.recruit",
+      "mcp_tool": "recruit_great_person"
+    },
+    {
+      "kind": "reject_great_person",
+      "tier": "v1.1",
+      "wire_scope": "empire",
+      "wire": "legal.gp.reject",
+      "mcp_tool": "reject_great_person"
+    },
+    {
+      "kind": "remove_queue_order",
+      "tier": "v1",
+      "wire_scope": "city",
+      "wire": "{City}.removeQueueOrder"
+    },
+    {
+      "kind": "resolve_city_capture",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.capture",
+      "risk": "high on raze",
+      "mcp_tool": "city_action"
+    },
+    {
+      "kind": "respond_to_diplomacy",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.diplomacy.respond.{Leader}",
+      "mcp_tool": "respond_to_diplomacy"
+    },
+    {
+      "kind": "respond_to_trade",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.trade.respond.{Leader}",
+      "mcp_tool": "respond_to_trade"
+    },
+    {
+      "kind": "rock_band_concert",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.concert"
+    },
+    {
+      "kind": "sacrifice_charges",
+      "tier": "v1.1",
+      "wire_scope": "unit",
+      "wire": "{unit}.sacrificeCharges",
+      "mcp_action": "sacrifice_charges",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "seaside_resort",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.seasideResort"
+    },
+    {
+      "kind": "send_diplomatic_action",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.diplomacy.{Leader}",
+      "risk": "high when war",
+      "mcp_tool": "send_diplomatic_action"
+    },
+    {
+      "kind": "send_envoy",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.envoy",
+      "mcp_tool": "send_envoy"
+    },
+    {
+      "kind": "set_city_focus",
+      "tier": "v1",
+      "wire_scope": "city",
+      "wire": "{City}.changeFocus",
+      "mcp_tool": "set_city_focus"
+    },
+    {
+      "kind": "set_policies",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.policies",
+      "mcp_tool": "set_policies"
+    },
+    {
+      "kind": "set_research_civic",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.research.civic",
+      "mcp_tool": "set_research"
+    },
+    {
+      "kind": "set_research_tech",
+      "tier": "v1",
+      "wire_scope": "empire",
+      "wire": "legal.research.tech",
+      "mcp_tool": "set_research"
+    },
+    {
+      "kind": "skip_remaining_units",
+      "tier": "host",
+      "wire_scope": "host",
+      "mcp_tool": "skip_remaining_units"
+    },
+    {
+      "kind": "spread_religion",
+      "tier": "v1.1",
+      "wire_scope": "unit",
+      "wire": "{unit}.spreadReligion",
+      "mcp_action": "spread_religion",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "spy_escape_route",
+      "tier": "host",
+      "wire_scope": "host",
+      "lua_builder": "espionage.build_spy_escape_route"
+    },
+    {
+      "kind": "spy_mission",
+      "tier": "v1.1",
+      "wire_scope": "unit",
+      "wire": "{spy}.spyAction=MISSION@(x,y)",
+      "mcp_tool": "spy_action"
+    },
+    {
+      "kind": "spy_travel",
+      "tier": "v1.1",
+      "wire_scope": "unit",
+      "wire": "{spy}.spyAction=travel@(x,y)",
+      "mcp_action": "travel",
+      "mcp_tool": "spy_action"
+    },
+    {
+      "kind": "swap_units",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.swapTo"
+    },
+    {
+      "kind": "teleport_trader",
+      "tier": "v1.1",
+      "wire_scope": "unit",
+      "wire": "{unit}.teleport",
+      "mcp_action": "teleport",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "trade_route",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.tradeRoute",
+      "mcp_action": "trade_route",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "unit_posture_alert",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.stance=alert",
+      "mcp_action": "alert",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "unit_posture_fortify",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.stance=fortify",
+      "mcp_action": "fortify",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "unit_posture_heal",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.stance=heal",
+      "mcp_action": "heal",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "unit_posture_sleep",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.stance=sleep",
+      "mcp_action": "sleep",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "unit_skip",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.stance=skip",
+      "mcp_action": "skip",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "upgrade_unit",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.upgrade",
+      "mcp_tool": "upgrade_unit"
+    },
+    {
+      "kind": "wmd_strike",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "cmd.N",
+      "risk": "high"
+    },
+    {
+      "kind": "worker_build_route",
+      "tier": "v1.1",
+      "wire_scope": "unit",
+      "wire": "{unit}.buildRoute",
+      "mcp_action": "build_route",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "worker_improve",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.improve",
+      "mcp_action": "improve",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "worker_remove_feature",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.removeFeature",
+      "mcp_action": "remove_feature",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "worker_remove_improvement",
+      "tier": "v1.1",
+      "wire_scope": "unit",
+      "wire": "{unit}.removeImprovement",
+      "mcp_action": "remove_improvement",
+      "mcp_tool": "unit_action"
+    },
+    {
+      "kind": "worker_repair",
+      "tier": "v1",
+      "wire_scope": "unit",
+      "wire": "{unit}.repair",
+      "mcp_action": "repair",
+      "mcp_tool": "unit_action"
+    }
+  ]
+}

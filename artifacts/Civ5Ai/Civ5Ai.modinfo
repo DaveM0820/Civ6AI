@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Mod id="f4e5d6c7-b8a9-0123-cdef-civ5aifull01" version="2">
+  <Properties>
+    <Name>Civ5Ai</Name>
+    <Teaser>LLM AI host (Civ4AI)</Teaser>
+    <Description>Civ5Ai — snapshot, sidecar bridge, hybrid native fallback, autotest.</Description>
+    <Authors>Civ4AI</Authors>
+    <AffectsSavedGames>0</AffectsSavedGames>
+    <SupportsSinglePlayer>1</SupportsSinglePlayer>
+    <SupportsMultiplayer>1</SupportsMultiplayer>
+    <SupportsHotSeat>1</SupportsHotSeat>
+    <SupportsMac>0</SupportsMac>
+  </Properties>
+  <Dependencies>
+    <Mod id="d1b6328c-ff44-4b0d-aad7-c657f83610cd" minversion="1" maxversion="999" title="Community Patch" />
+  </Dependencies>
+  <Files>
+    <File import="0">Lua/Civ5Ai_Util.lua</File>
+    <File import="0">Lua/Civ5Ai_Paths.lua</File>
+    <File import="0">Lua/Civ5Ai_Config.lua</File>
+    <File import="0">Lua/Civ5Ai_Seats.lua</File>
+    <File import="0">Lua/Civ5Ai_Commands.lua</File>
+    <File import="0">Lua/Civ5Ai_Diplo.lua</File>
+    <File import="0">Lua/Civ5Ai_Congress.lua</File>
+    <File import="0">Lua/Civ5Ai_Chat.lua</File>
+    <File import="0">Lua/Civ5Ai_Snapshot.lua</File>
+    <File import="0">Lua/Civ5Ai_Apply.lua</File>
+    <File import="0">Lua/Civ5Ai_Net.lua</File>
+    <File import="0">Lua/Civ5Ai_Bridge.lua</File>
+    <File import="0">Lua/Civ5Ai_Autotest.lua</File>
+    <File import="0">Lua/Civ5Ai_InGame.lua</File>
+    <File import="0">Lua/Civ5Ai_HostChannel.lua</File>
+    <File import="0">Lua/Civ5Ai_HostInbox.lua</File>
+    <File import="0">Lua/Civ5Ai_HostInbox.xml</File>
+    <File import="0">Lua/Civ5Ai_LeaderHead.lua</File>
+    <File import="0">Lua/Civ5Ai_LeaderHead.xml</File>
+  </Files>
+  <EntryPoints>
+    <EntryPoint type="InGameUIAddin" file="Lua/Civ5Ai_InGame.lua">
+      <Name>Civ5Ai InGame</Name>
+      <Description>LLM host bridge and apply</Description>
+    </EntryPoint>
+    <EntryPoint type="DiplomacyUIAddin" file="Lua/Civ5Ai_LeaderHead.lua">
+      <Name>Civ5Ai LeaderHead</Name>
+      <Description>Keep ticks running while a leader greeting has focus</Description>
+    </EntryPoint>
+  </EntryPoints>
+</Mod>

@@ -1,0 +1,392 @@
+{
+  "schema_version": "civ4ai-command-capabilities/2",
+  "rule": "Only current legal command instances enter legal_commands; unsupported entries are never advertised.",
+  "capabilities": [
+    {
+      "kind": "end_turn",
+      "hook": "sendTurnComplete",
+      "stage": 4,
+      "runtime": "tested"
+    },
+    {
+      "kind": "auto_moves",
+      "hook": "sendAutoMoves",
+      "stage": 4,
+      "runtime": "tested"
+    },
+    {
+      "kind": "choose_research",
+      "hook": "sendResearch/canResearch/pushResearch",
+      "stage": 1,
+      "runtime": "tested"
+    },
+    {
+      "kind": "replace_research_queue",
+      "hook": "research queue APIs",
+      "stage": 1
+    },
+    {
+      "kind": "adopt_civics",
+      "hook": "sendUpdateCivics/canRevolution",
+      "stage": 1,
+      "runtime": "tested"
+    },
+    {
+      "kind": "convert_religion",
+      "hook": "sendConvert",
+      "stage": 1
+    },
+    {
+      "kind": "change_commerce",
+      "hook": "sendPercentChange",
+      "stage": 1,
+      "runtime": "tested"
+    },
+    {
+      "kind": "change_espionage_weight",
+      "hook": "sendEspionageSpendingWeightChange",
+      "stage": 1
+    },
+    {
+      "kind": "queue_production",
+      "hook": "sendPushOrder",
+      "stage": 1
+    },
+    {
+      "kind": "remove_queue_order",
+      "hook": "sendPopOrder",
+      "stage": 1
+    },
+    {
+      "kind": "clear_queue",
+      "hook": "TASK_CLEAR_ORDERS",
+      "stage": 1
+    },
+    {
+      "kind": "set_production_automation",
+      "hook": "TASK_SET_AUTOMATED_PRODUCTION",
+      "stage": 1
+    },
+    {
+      "kind": "set_citizen_automation",
+      "hook": "TASK_SET_AUTOMATED_CITIZENS",
+      "stage": 1
+    },
+    {
+      "kind": "set_city_emphasis",
+      "hook": "TASK_SET_EMPHASIZE",
+      "stage": 1
+    },
+    {
+      "kind": "change_specialist",
+      "hook": "TASK_CHANGE_SPECIALIST",
+      "stage": 1
+    },
+    {
+      "kind": "change_worked_plot",
+      "hook": "TASK_CHANGE_WORKING_PLOT",
+      "stage": 1
+    },
+    {
+      "kind": "clear_worked_plot_override",
+      "hook": "TASK_CLEAR_WORKING_OVERRIDE",
+      "stage": 1
+    },
+    {
+      "kind": "hurry_production",
+      "hook": "TASK_HURRY",
+      "stage": 1
+    },
+    {
+      "kind": "draft_unit",
+      "hook": "TASK_CONSCRIPT",
+      "stage": 1
+    },
+    {
+      "kind": "set_rally_point",
+      "hook": "TASK_RALLY_PLOT",
+      "stage": 2
+    },
+    {
+      "kind": "clear_rally_point",
+      "hook": "TASK_CLEAR_RALLY_PLOT",
+      "stage": 2
+    },
+    {
+      "kind": "liberate_city",
+      "hook": "TASK_LIBERATE",
+      "stage": 3
+    },
+    {
+      "kind": "cede_city",
+      "hook": "TASK_CEDE",
+      "stage": 3
+    },
+    {
+      "kind": "gift_city",
+      "hook": "TASK_GIFT",
+      "stage": 3
+    },
+    {
+      "kind": "raze_city",
+      "hook": "TASK_RAZE",
+      "stage": 3,
+      "risk": "high"
+    },
+    {
+      "kind": "disband_city",
+      "hook": "TASK_DISBAND",
+      "stage": 3,
+      "risk": "high"
+    },
+    {
+      "kind": "promote_unit",
+      "hook": "COMMAND_PROMOTION",
+      "stage": 2
+    },
+    {
+      "kind": "upgrade_unit",
+      "hook": "COMMAND_UPGRADE",
+      "stage": 2
+    },
+    {
+      "kind": "gift_unit",
+      "hook": "COMMAND_GIFT",
+      "stage": 3
+    },
+    {
+      "kind": "delete_unit",
+      "hook": "COMMAND_DELETE",
+      "stage": 3,
+      "risk": "high"
+    },
+    {
+      "kind": "automate_unit",
+      "hook": "COMMAND_AUTOMATE",
+      "stage": 2
+    },
+    {
+      "kind": "stop_unit_automation",
+      "hook": "COMMAND_STOP_AUTOMATION",
+      "stage": 2
+    },
+    {
+      "kind": "wake_or_cancel_group",
+      "hook": "wake/cancel commands",
+      "stage": 2
+    },
+    {
+      "kind": "join_or_split_group",
+      "hook": "sendJoinGroup",
+      "stage": 2
+    },
+    {
+      "kind": "load_or_unload",
+      "hook": "unit command messages",
+      "stage": 2
+    },
+    {
+      "kind": "unit_posture_mission",
+      "hook": "sleep/fortify/heal/sentry missions",
+      "stage": 2,
+      "runtime": "tested"
+    },
+    {
+      "kind": "found_city",
+      "hook": "MISSION_FOUND",
+      "stage": 2,
+      "runtime": "tested"
+    },
+    {
+      "kind": "worker_build",
+      "hook": "MISSION_BUILD",
+      "stage": 2,
+      "runtime": "tested"
+    },
+    {
+      "kind": "spread_religion",
+      "hook": "MISSION_SPREAD",
+      "stage": 2
+    },
+    {
+      "kind": "spread_corporation",
+      "hook": "MISSION_SPREAD_CORPORATION",
+      "stage": 2
+    },
+    {
+      "kind": "join_specialist",
+      "hook": "MISSION_JOIN",
+      "stage": 2
+    },
+    {
+      "kind": "construct_special_building",
+      "hook": "MISSION_CONSTRUCT",
+      "stage": 2
+    },
+    {
+      "kind": "discover_technology",
+      "hook": "MISSION_DISCOVER",
+      "stage": 2
+    },
+    {
+      "kind": "great_person_hurry",
+      "hook": "MISSION_HURRY",
+      "stage": 2
+    },
+    {
+      "kind": "trade_mission",
+      "hook": "MISSION_TRADE",
+      "stage": 2
+    },
+    {
+      "kind": "great_work",
+      "hook": "MISSION_GREAT_WORK",
+      "stage": 2
+    },
+    {
+      "kind": "infiltrate",
+      "hook": "MISSION_INFILTRATE",
+      "stage": 2
+    },
+    {
+      "kind": "golden_age",
+      "hook": "MISSION_GOLDEN_AGE",
+      "stage": 2
+    },
+    {
+      "kind": "attach_leader",
+      "hook": "MISSION_LEAD",
+      "stage": 2
+    },
+    {
+      "kind": "espionage_mission",
+      "hook": "MISSION_ESPIONAGE",
+      "stage": 2
+    },
+    {
+      "kind": "move_group",
+      "hook": "MISSION_MOVE_TO",
+      "stage": 3
+    },
+    {
+      "kind": "attack_target",
+      "hook": "MISSION_MOVE_TO attack",
+      "stage": 3
+    },
+    {
+      "kind": "pillage_or_bombard",
+      "hook": "mission messages",
+      "stage": 3
+    },
+    {
+      "kind": "airlift_recon_paradrop",
+      "hook": "mission messages",
+      "stage": 3
+    },
+    {
+      "kind": "air_strike_or_bomb",
+      "hook": "mission messages",
+      "stage": 3
+    },
+    {
+      "kind": "nuclear_strike",
+      "hook": "MISSION_NUKE",
+      "stage": 3,
+      "risk": "high"
+    },
+    {
+      "kind": "propose_deal",
+      "hook": "TradeData/canTradeItem/implementDeal",
+      "stage": 4
+    },
+    {
+      "kind": "respond_to_deal",
+      "hook": "pending diplomacy record",
+      "stage": 4
+    },
+    {
+      "kind": "counteroffer",
+      "hook": "AI_counterPropose/legal inventory",
+      "stage": 4
+    },
+    {
+      "kind": "cancel_deal",
+      "hook": "CvDeal cancelability",
+      "stage": 4
+    },
+    {
+      "kind": "declare_war",
+      "hook": "sendChangeWar/CvNetChangeWar",
+      "stage": 4,
+      "risk": "high"
+    },
+    {
+      "kind": "make_peace",
+      "hook": "peace deal/change-war",
+      "stage": 4
+    },
+    {
+      "kind": "set_diplomacy_posture",
+      "hook": "AI_setAttitudeExtra",
+      "stage": 1,
+      "runtime": "tested"
+    },
+    {
+      "kind": "set_war_plan",
+      "hook": "AI_setWarPlan",
+      "stage": 1
+    },
+    {
+      "kind": "set_target_city_or_area",
+      "hook": "AdvCiv target hooks",
+      "stage": 1
+    },
+    {
+      "kind": "set_upgrade_reserve",
+      "hook": "AI_setExtraGoldTarget",
+      "stage": 1,
+      "runtime": "tested"
+    },
+    {
+      "kind": "choose_election",
+      "hook": "sendChooseElection",
+      "stage": 4
+    },
+    {
+      "kind": "cast_vote",
+      "hook": "sendDiploVote",
+      "stage": 4
+    },
+    {
+      "kind": "choose_event",
+      "hook": "sendEventTriggered",
+      "stage": 4
+    },
+    {
+      "kind": "split_empire",
+      "hook": "sendEmpireSplit/canSplitArea",
+      "stage": 4
+    },
+    {
+      "kind": "launch_victory",
+      "hook": "sendLaunch",
+      "stage": 4
+    },
+    {
+      "kind": "found_prompted_religion",
+      "hook": "sendFoundReligion",
+      "stage": 4
+    },
+    {
+      "kind": "advanced_start_action",
+      "hook": "sendAdvancedStartAction",
+      "stage": 4
+    },
+    {
+      "kind": "chat",
+      "hook": "custom synchronized AI chat",
+      "stage": 4,
+      "authority": "social_only"
+    }
+  ]
+}

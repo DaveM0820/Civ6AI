@@ -1,0 +1,305 @@
+{
+  "authority": "host",
+  "protocol_version": 1,
+  "assets": {
+    "mod_id": "AdvCiv-SAS",
+    "mod_version": "fixture-2",
+    "dll_sha256": "sha256:fixture-dll"
+  },
+  "game_uuid": "game-fixture-0001",
+  "snapshot_id": "turn-0001-p0",
+  "turn": 1,
+  "phase": "begin_player_turn",
+  "decision_sequence": 0,
+  "active_player_id": 0,
+  "settings": {
+    "map_script": "MAPSCRIPT_TEST",
+    "world_size": "WORLDSIZE_DUEL",
+    "climate": "CLIMATE_TEMPERATE",
+    "sea_level": "SEALEVEL_MEDIUM",
+    "game_speed": "GAMESPEED_QUICK",
+    "start_era": "ERA_ANCIENT",
+    "max_turns": 500,
+    "width": 5,
+    "height": 5,
+    "options": ["GAMEOPTION_NO_CITY_RAZING"]
+  },
+  "player": {
+    "id": 0,
+    "leader_id": "LEADER_ALEXANDER",
+    "leader_name": "Alexander",
+    "leader_traits": {
+      "aggression": "high",
+      "diplomacy": "guarded",
+      "risk_tolerance": "medium",
+      "economic_bias": "production"
+    },
+    "civ_id": "CIV_GREECE",
+    "era_id": "ERA_ANCIENT",
+    "research_id": "TECH_POTTERY",
+    "research_progress": 0,
+    "research_rate": 100,
+    "gold": 20,
+    "civics": {
+      "government": "CIVIC_DESPOTISM"
+    },
+    "economy": {
+      "food": 2,
+      "production": 1,
+      "commerce": 3
+    },
+    "cities": [
+      {
+        "id": "CITY_0",
+        "name": "Athens",
+        "population": 1
+      }
+    ]
+  },
+  "public": {
+    "players": [
+      {
+        "id": 1,
+        "leader_id": "LEADER_RIVAL",
+        "score": 42,
+        "cities": 1,
+        "population": 2,
+        "power": 18,
+        "capital": {
+          "city_id": "CITY_10",
+          "x": 4,
+          "y": 1,
+          "distance_from_own_capital": 3
+        }
+      },
+      {
+        "id": 2,
+        "leader_id": "LEADER_RIVAL_TWO",
+        "score": 37,
+        "cities": 1,
+        "population": 2,
+        "power": 21
+      },
+      {
+        "id": 3,
+        "leader_id": "LEADER_RIVAL_THREE",
+        "score": 29,
+        "cities": 1,
+        "population": 1,
+        "power": 15
+      }
+    ],
+    "known_cities": [
+      {
+        "id": "CITY_10",
+        "owner_id": 1,
+        "name": "Rivalville"
+      }
+    ],
+    "known_resources": [
+      {
+        "id": "RESOURCE_WHEAT",
+        "x": 2,
+        "y": 2
+      }
+    ],
+    "known_borders": ["AREA_1"],
+    "diplomacy": [
+      {
+        "player_id": 1,
+        "state": "peace"
+      }
+    ],
+    "diplomacy_proposals": [
+      {
+        "proposal_id": "PROPOSAL_OPEN_BORDERS_1",
+        "target_player_id": "PLAYER_1",
+        "terms": ["OPEN_BORDERS"]
+      }
+    ],
+    "diplomacy_requests": [
+      {
+        "request_id": "REQUEST_1",
+        "from_player_id": "PLAYER_1",
+        "kind": "OPEN_BORDERS",
+        "response_ids": ["RESPONSE_ACCEPT", "RESPONSE_REJECT"]
+      }
+    ],
+    "stats": {
+      "score_screen": true,
+      "power_graph": true
+    },
+    "events": [],
+    "power": []
+  },
+  "history": {
+    "accepted_decisions": [],
+    "public_events": [],
+    "goal_summary": "Improve food and science.",
+    "private_messages": [
+      {
+        "message_id": "CHAT_1_TO_0_0001",
+        "from_player_id": "PLAYER_1",
+        "target_player_id": "PLAYER_0",
+        "turn": 0,
+        "text": "Our scouts report a calm border."
+      }
+    ]
+  },
+  "visibility_mode": "player_visible",
+  "network_multiplayer": false,
+  "shareable_release": false,
+  "chat_reason_ids": [
+    "science",
+    "food_supply",
+    "defense",
+    "expansion",
+    "diplomacy"
+  ],
+  "visible": {
+    "width": 5,
+    "height": 5,
+    "grid": [
+      ".....",
+      ".C..C",
+      "..r..",
+      ".....",
+      "....."
+    ],
+    "cities": [
+      {
+        "id": 0,
+        "owner_id": 0,
+        "name": "Athens",
+        "population": 1,
+        "x": 1,
+        "y": 1
+      },
+      {
+        "id": 10,
+        "owner_id": 1,
+        "name": "Rivalville",
+        "population": 2,
+        "x": 4,
+        "y": 1
+      }
+    ],
+    "units": [
+      {
+        "id": 0,
+        "owner_id": 0,
+        "unit_type_id": "UNIT_WARRIOR",
+        "x": 1,
+        "y": 1,
+        "strength": 2,
+        "movement_ready": true
+      },
+      {
+        "id": 1,
+        "owner_id": 1,
+        "unit_type_id": "UNIT_WARRIOR",
+        "x": 3,
+        "y": 1,
+        "strength": 2,
+        "movement_ready": false
+      }
+    ],
+    "stacks": [
+      {
+        "stack_id": "STACK_0",
+        "owner_id": 0,
+        "count": 1,
+        "broad_mix": ["melee"],
+        "movement_ready": true,
+        "x": 1,
+        "y": 1
+      },
+      {
+        "stack_id": "STACK_1",
+        "owner_id": 1,
+        "count": 1,
+        "broad_mix": ["melee"],
+        "movement_ready": false,
+        "x": 3,
+        "y": 1
+      }
+    ],
+    "resources": [
+      {
+        "id": "RESOURCE_WHEAT",
+        "x": 2,
+        "y": 2
+      }
+    ],
+    "borders": ["AREA_0", "AREA_1"],
+    "areas": [
+      {
+        "id": "AREA_0",
+        "owner_id": 0
+      },
+      {
+        "id": "AREA_1",
+        "owner_id": 1
+      }
+    ],
+    "frontiers": [
+      {
+        "id": "FRONTIER_NORTH",
+        "x": 2,
+        "y": 0
+      }
+    ],
+    "diplomacy": [
+      {
+        "player_id": 1,
+        "state": "peace"
+      }
+    ],
+    "diplomacy_requests": [
+      {
+        "request_id": "REQUEST_1",
+        "from_player_id": "PLAYER_1",
+        "kind": "OPEN_BORDERS",
+        "response_ids": ["RESPONSE_ACCEPT", "RESPONSE_REJECT"]
+      }
+    ]
+  },
+  "legal_actions": {
+    "set_research": [
+      {
+        "action_id": "research:TECH_AGRICULTURE",
+        "kind": "set_research",
+        "tech_id": "TECH_AGRICULTURE"
+      },
+      {
+        "action_id": "research:TECH_MINING",
+        "kind": "set_research",
+        "tech_id": "TECH_MINING"
+      }
+    ],
+    "set_civic": [],
+    "set_city_production": [],
+    "set_city_role": [],
+    "set_expansion_priority": [],
+    "set_upgrade_policy": [],
+    "set_diplomacy_posture": [],
+    "propose_diplomacy": [
+      {
+        "action_id": "diplomacy:PLAYER_1:PROPOSAL_OPEN_BORDERS_1",
+        "kind": "propose_diplomacy",
+        "target_player_id": "PLAYER_1",
+        "proposal_id": "PROPOSAL_OPEN_BORDERS_1"
+      }
+    ],
+    "respond_diplomacy": [
+      {
+        "action_id": "diplomacy-response:REQUEST_1:RESPONSE_ACCEPT",
+        "kind": "respond_diplomacy",
+        "request_id": "REQUEST_1",
+        "response_id": "RESPONSE_ACCEPT"
+      }
+    ],
+    "set_war_posture": [],
+    "set_army_objective": []
+  }
+}
