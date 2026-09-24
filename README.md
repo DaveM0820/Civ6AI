@@ -13,6 +13,9 @@ friend has the same mod).
 **Active workstream:** MP unit-command sync without OOS. See
 `docs/MP_SYNC_TRANSPORT.md` and `docs/MP_UNIT_COMMANDS.md`.
 
+**Agent rules:** [`AGENTS.md`](AGENTS.md) — read before editing (honesty, Windows
+hidden processes, MP sync, LM Studio, prompt coaching, public-repo safety).
+
 ## Layout
 
 ```
