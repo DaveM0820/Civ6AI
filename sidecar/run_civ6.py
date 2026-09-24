@@ -508,6 +508,12 @@ def main() -> None:
 
     civ6ai_root = _civ6ai_root_from_session(args.session_dir)
     _load_dotenv_files(civ6ai_root)
+    try:
+        from sidecar.civ6_config import apply_config_to_environ, load_local_config
+
+        apply_config_to_environ(load_local_config())
+    except Exception:
+        pass
 
     raw = _read(state_path)
     snapshot = civ6_adapter.upgrade_runtime_snapshot(raw) if args.from_game else raw

@@ -49,6 +49,8 @@ def decision_suppresses_sidecar(player_dir: Path) -> bool:
 
 
 def _run_job(job: dict[str, Any], repo: Path) -> None:
+    import sys
+
     python = str(job.get("python") or "python")
     script = str(job.get("script") or "sidecar/run_civ6.py")
     args = job.get("args")
@@ -56,7 +58,29 @@ def _run_job(job: dict[str, Any], repo: Path) -> None:
         args = []
     script_path = repo / script
     cmd = [python, str(script_path), *[str(arg) for arg in args]]
-    subprocess.run(cmd, cwd=str(repo), check=True, timeout=int(job.get("timeout_seconds") or 60))
+    timeout = int(job.get("timeout_seconds") or 0)
+    if timeout <= 0:
+        try:
+            from sidecar.civ6_config import load_local_config
+
+            timeout = int(load_local_config().timeout_seconds)
+        except Exception:
+            timeout = 600
+    kwargs: dict[str, Any] = {
+        "cwd": str(repo),
+        "check": True,
+        "timeout": timeout,
+    }
+    scripts_dir = Path(__file__).resolve().parents[1]
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    try:
+        from windows_process import hidden_popen_kwargs
+
+        kwargs.update(hidden_popen_kwargs())
+    except Exception:
+        pass
+    subprocess.run(cmd, **kwargs)
 
 
 def process_sidecar_jobs(civ6ai_roots: list[Path] | Path) -> int:

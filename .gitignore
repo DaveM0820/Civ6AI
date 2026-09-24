@@ -39,6 +39,12 @@ Thumbs.db
 # zip seeds
 *.zip
 
+# local runtime config (may contain machine-specific paths; example is committed)
+config/civ6ai.local.json
+
+# live worker PIDs / logs
+runtime/
+
 # generated pending-apply session dumps
 mod/Civ6Ai/InGame/Civ6Ai_PendingApply_autotest_*.lua
 

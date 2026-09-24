@@ -56,6 +56,24 @@ here**. SP with the flag off keeps the existing ladder.
 LAN probe: `docs/civ6_lan_probe.md`. Pass = no new OOS, identical unit plots,
 host `apply|ok|move_unit`.
 
+## Real Windows + LM Studio test
+
+See **`docs/REAL_TEST.md`**. Short path:
+
+```powershell
+copy config\civ6ai.local.example.json config\civ6ai.local.json
+python -m pip install -r requirements.txt
+python scripts\preflight.py
+python scripts\start_live.py --dry-run
+python scripts\install_mod.py
+python scripts\start_live.py
+# ... play Civ6 SP ...
+python scripts\stop_live.py
+```
+
+Workers start with hidden consoles (`pythonw` / `CREATE_NO_WINDOW`). Civ6 and LM Studio
+paths are **untested in CI** — David must run preflight on his PC first.
+
 ## Tests
 
 From repo root (after `pip install -r requirements.txt`):

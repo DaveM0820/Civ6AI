@@ -713,7 +713,9 @@ def model_provider() -> str:
         "CIV6AI_MODEL_PROVIDER",
         os.environ.get("CIV4AI_MODEL_PROVIDER", "gemini"),
     ).strip().lower()
-    return raw if raw in {"gemini", "openai"} else "gemini"
+    if raw in {"gemini", "openai", "lmstudio"}:
+        return raw
+    return "gemini"
 
 
 def openai_reasoning_effort() -> str:
@@ -4719,8 +4721,23 @@ def call_model(
     gemini_api_key: str | None = None,
     opener: Callable[..., Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Primary Gemini Flash call with optional OpenAI fallback on rate limits."""
+    """Primary model call: LM Studio (local), Gemini, or OpenAI with optional fallback."""
     provider = model_provider()
+    if provider == "lmstudio":
+        from sidecar import lmstudio_client
+        from sidecar.civ6_config import load_local_config
+
+        cfg = load_local_config()
+        if timeout_seconds and timeout_seconds > cfg.timeout_seconds:
+            cfg.timeout_seconds = int(timeout_seconds)
+        result, metadata = lmstudio_client.call_lmstudio_chat(
+            snapshot,
+            cfg=cfg,
+            image_data_url=image_data_url,
+            opener=opener,
+        )
+        return result, metadata
+
     gemini_key = (gemini_api_key or resolve_gemini_api_key()).strip()
     openai_key = openai_api_key.strip()
 
