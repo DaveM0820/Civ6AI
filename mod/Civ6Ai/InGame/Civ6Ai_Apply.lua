@@ -38,22 +38,72 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision)
   end
   Civ6Ai_Apply._orderedUnits = Civ6Ai_Apply._orderedUnits or {}
   Civ6Ai_Apply._orderedUnits[playerID] = {}
-  for _, command in ipairs(decision.commands) do
-    local ok, reason, fixedArgs = Civ6Ai_Apply._ApplyCommand(playerID, command)
-    Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs)
-    if ok then
-      local unitId = (command.arguments and command.arguments.unit_id) or (fixedArgs and fixedArgs.unit_id)
-      if unitId ~= nil then
-        local numeric = Civ6Ai_Apply._ParseUnitNumericId(unitId)
-        if numeric ~= nil then
-          Civ6Ai_Apply._orderedUnits[playerID][numeric] = true
+  local commands = decision.commands
+  local maxPasses = 4
+  local pending = {}
+  for _, command in ipairs(commands) do
+    table.insert(pending, command)
+  end
+  for passIndex = 1, maxPasses do
+    if #pending == 0 then
+      break
+    end
+    local nextPending = {}
+    local progress = false
+    for _, command in ipairs(pending) do
+      local ok, reason, fixedArgs = Civ6Ai_Apply._ApplyCommand(playerID, command)
+      Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs)
+      if ok then
+        progress = true
+        local unitId = (command.arguments and command.arguments.unit_id) or (fixedArgs and fixedArgs.unit_id)
+        if unitId ~= nil then
+          local numeric = Civ6Ai_Apply._ParseUnitNumericId(unitId)
+          if numeric ~= nil then
+            Civ6Ai_Apply._orderedUnits[playerID][numeric] = true
+          end
+        end
+        Civ6Ai_Util.Log("apply|ok|" .. tostring(command.kind) .. "|" .. tostring(command.command_id))
+      else
+        local retryable = Civ6Ai_Apply._IsPlotOccupiedRetryable(command.kind, reason)
+        if retryable and passIndex < maxPasses then
+          table.insert(nextPending, command)
+          Civ6Ai_Util.Log(
+            "apply|retry_plot_occupied|pass="
+              .. tostring(passIndex)
+              .. "|"
+              .. tostring(command.kind)
+              .. "|"
+              .. tostring(command.command_id)
+          )
+        else
+          Civ6Ai_Util.Log("apply|fail|" .. tostring(command.kind) .. "|" .. tostring(reason))
         end
       end
-      Civ6Ai_Util.Log("apply|ok|" .. tostring(command.kind) .. "|" .. tostring(command.command_id))
-    else
-      Civ6Ai_Util.Log("apply|fail|" .. tostring(command.kind) .. "|" .. tostring(reason))
     end
+    if not progress then
+      for _, command in ipairs(nextPending) do
+        Civ6Ai_Util.Log(
+          "apply|fail|"
+            .. tostring(command.kind)
+            .. "|plot_occupied_exhausted|"
+            .. tostring(command.command_id)
+        )
+      end
+      break
+    end
+    pending = nextPending
   end
+end
+
+function Civ6Ai_Apply._IsPlotOccupiedRetryable(kind, reason)
+  if kind ~= "move_unit" and kind ~= "attack_target" then
+    return false
+  end
+  local text = tostring(reason or "")
+  return text == "plot_occupied"
+    or text == "operation_illegal"
+    or text == "operation_rejected"
+    or string.find(text, "occupied", 1, true) ~= nil
 end
 
 function Civ6Ai_Apply._TrySkipUnit(unit)

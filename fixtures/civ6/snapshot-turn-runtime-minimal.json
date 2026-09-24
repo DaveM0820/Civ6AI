@@ -1,0 +1,36 @@
+{
+  "schema_version": "civ6ai-input/1",
+  "decision": {
+    "turn": 5,
+    "year": 5,
+    "phase": "strategic_decision",
+    "player_id": "PLAYER_1",
+    "reason": "turn_start"
+  },
+  "personality": {
+    "identity": "Gandhi",
+    "leader_id": "LEADER_GANDHI",
+    "leader_name": "Gandhi",
+    "civilization_id": "CIVILIZATION_INDIA"
+  },
+  "your_empire": {
+    "team_id": "TEAM_0",
+    "score": 42,
+    "gold": 120,
+    "gold_per_turn": 3
+  },
+  "legal_commands": [
+    {
+      "command_id": "CMD_research_TECH_MINING",
+      "kind": "set_research_tech",
+      "fixed_arguments": {"tech_id": "TECH_MINING"},
+      "parameter_domains": {},
+      "affected_ids": [],
+      "runtime_status": "implemented_untested"
+    }
+  ],
+  "civ6": {
+    "session_id": "gate0-test",
+    "research_tech": "TECH_POTTERY"
+  }
+}

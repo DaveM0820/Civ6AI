@@ -1,0 +1,146 @@
+=== CURRENT SITUATION ===
+player = Alexander playing as GREECE (PLAYER_0)
+turn = 18
+game.year = -3400
+game.era = ERA_ANCIENT
+game.speed = GAMESPEED_STANDARD
+game.difficulty = HANDICAP_PRINCE
+game.world_size = WORLDSIZE_STANDARD
+empire.score = 142
+empire.cities = 2
+empire.gold = 86
+empire.gold_per_turn = 12
+empire.science = 18
+empire.culture = 11
+empire.faith = 0
+empire.favor = 0
+empire.research.tech = TECH_POTTERY
+empire.research.tech.progress = 4
+empire.research.tech.cost = 25
+empire.research.tech.per_turn = 18
+empire.research.tech.turns_left = 2
+empire.research.civic = CIVIC_CRAFTSMANSHIP
+empire.research.civic.progress = 12
+empire.research.civic.turns_left = 4
+empire.government = GOVERNMENT_CHIEFDOM
+empire.units.total = 5
+empire.units.military = 2
+empire.units.settlers = 1
+empire.units.idle = 3
+Athens.population = 4
+Athens.capital = true
+Athens.loyalty = 100
+Athens.hp = 0
+Athens.currentProduction = UNIT_SPEARMAN
+Corinth.population = 3
+Corinth.hp = 0
+Corinth.currentProduction = BUILDING_GRANARY
+scout_1.position = (14,22)
+scout_1.moves = 2
+scout_1.needsOrders = true
+settler_1.position = (16,24)
+settler_1.moves = 2
+settler_1.needsOrders = true
+spearman_1.position = (15,23)
+spearman_1.moves = 2
+spearman_1.needsOrders = true
+units.nativeControl = Firaxis AI moves unmoved units after your commands; use fortify/sleep/alert to hold a unit.
+rival.PLAYER_1.leader = Cleopatra
+rival.PLAYER_1.civ = EGYPT
+rival.PLAYER_1.score = 138
+alert.military.0 = Barbarian scout spotted east of Corinth
+history.memory = Expand to third city after Pottery; scout eastern coast.
+
+=== MAP ===
+map.width = 44
+map.height = 26
+map.hex = odd-r
+map.coords = grid x,y; Y increases south
+map.script = Continents
+# minimap attached — coast, islands, fog, and unit positions visible in image
+
+=== LEGAL COMMANDS ===
+# Issue as many command lines as you need this turn.
+# City: cityName.property = value. Unit: unitId.property = value.
+# Unit movement: unitId.moveTo or stack.moveTo = (x,y)
+# Districts: cityName.changeProduction = DISTRICT_CAMPUS@(x,y)
+# Empire: legal.research.*, legal.policies, legal.diplomacy.*, legal.trade.*
+Athens.changeProduction = UNIT_SETTLER | BUILDING_MONUMENT
+scout_1.moveTo = (15,24) | (16,24) | (14,25)
+settler_1.moveTo = (17,25) | (18,26) | (16,26)
+spearman_1.moveTo = (16,23) | (15,24)
+spearman_1.stance = fortify | skip
+legal.research.tech = TECH_POTTERY
+
+=== INSTRUCTIONS ===
+You are Alexander, playing as the GREECE civilization in Civilization VI.
+Read CURRENT SITUATION, MAP, ATTENTION (if present), and LEGAL COMMANDS above.
+Reply with flat key=value lines only — never JSON, braces, or code fences.
+The host ends your turn automatically after this response.
+
+=== REQUIRED COMMANDS THIS TURN ===
+# required.count = 8 (thought/map-read rows + game orders)
+1. strategicmap.read = one short paragraph on the attached strategic map (land vs water, chokes, your borders, one takeaway)
+2. tacticalmap.read = one short paragraph on the attached tactical map (key (x,y) for units, cities, resources)
+3. thought.situation = one paragraph board read this turn (economy, science, amenities, military, geography; new observations only)
+4. thought.strategy = one paragraph: long-term path to victory, then this turn's plan for each required and optional command you will issue
+5. Units needing orders (issue at least one legal order each): scout_1, settler_1, spearman_1
+6. Cities needing production choice: Athens: BUILDING_MONUMENT | UNIT_SETTLER
+
+OPTIONAL COMMANDS are encouraged every turn — not leftovers. Required rows are only the minimum.
+Issue as many optional commands as you want this turn: chat.all, chat.LeaderName, diplomacy deals, research, map.viewport, extra unit/city orders, and any other listed shape.
+There is no cap. Models often emit only required rows — you may keep going with useful optionals.
+thought.freethinking = ... is optional free-form reflection (not counted as required).
+There are 8 required commands. Respond with every required command, enumerated from 1 to 8.
+After row 8, add as many optional commands as useful starting at 9. There is no cap.
+
+Also include when useful (not counted above unless listed as required):
+- opinion.LeaderName = short line when your view of a rival changes
+- history.LeaderName = T{n} fragment only on major relationship events
+- decision_summary = one line naming concrete actions
+- Commands: cityName.changeProduction = …; unitId.moveTo = (x,y); legal.research.* / legal.trade.*
+- chat.all / chat.LeaderName (optional)
+- thought.freethinking = optional free-form reflection
+
+Rules:
+- The host applies your overrides first; Firaxis native AI moves unmoved units after your commands; cities keep auto production unless you override.
+- Carefully observe the attached map to choose a settle location, and remember it for as many turns as the walk takes. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold).
+- Settlers and new cities are worth prioritizing when expansion is viable; foundCity is optional — moving first is fine.
+- Diplomacy: model what rivals want and fear, probe and trade when it advances your win — DMs for deals, plotting, and banter; chat.all for posture when the lobby isn't already noisy every turn; use diplomacy.proposal.* and CMD_* when legal.
+- Use set_diplomacy_posture (POSTURE_FRIENDLY, POSTURE_HOSTILE, POSTURE_TRADE, etc.) to set how you feel toward each met rival; feelings do not gate your trade or war commands.
+- Whenever you issue a propose_deal command (cmd.N = CMD_propose_*), you MUST also send a private chat line to that leader (chat.LeaderName = ...) explaining the offer.
+- In thought.strategy, name which rivals you are courting, isolating, or appeasing and why.
+- Diplomacy: when legal.trade / deal rows list a rival, prefer a clear propose line (legal.trade.offer.Leader = ...) and answer pending deals with accept/reject/counter shapes.
+- Soft advice: haggle in private DMs (chat.LeaderName) before or with a formal deal — explain what you want and what you offer.
+- chat.all is broadcast posture — funny/original tone is welcome; skip spam when the lobby is already noisy every turn; keep military secrets in DMs.
+- Issue only command ids listed under LEGAL COMMANDS this turn; a settler that already founded is a city, so foundCity is legal only while that settler still exists.
+- Movement: use coordinates listed under LEGAL COMMANDS (e.g. scout_1.moveTo = (15,24)).
+- Before moving, carefully inspect the attached minimap and each unit's position in CURRENT SITUATION — pick a tile that advances exploration, expansion, or defense.
+- Map axes on the strategic/tactical images: game-plot x increases east (right on the image); game-plot y increases south (down on the image) — Civ6 hex grid. This map does not wrap on X; treat left/right edges as map borders.
+- Civ6 stacking: typically one military formation-class unit per tile, plus one civilian or support unit; two military units of the same formation class cannot share a tile. Use corps/armies and support units (e.g. battering ram, siege tower) intentionally.
+- A unit with leftover movement can often still attack this turn after moving — do not treat "already moved" as "cannot attack" unless the unit has 0 moves left or the attack is otherwise illegal.
+- Hybrid control: native AI moves unmoved units; use fortify/sleep/alert to hold a unit.
+- Cities auto-pick production unless you set changeProduction.
+- War attacks on new enemies begin next turn.
+- Do not queue production already building.
+- decision_summary must name concrete actions.
+- When at war, attack options are appended onto unit move/stance lines when legal (no separate `| none` attack row).
+- Chat tone: sparse lobby banter — funny, sharp, unmistakably your leader; never generic filler.
+- Skim chat.public.* history — chat.all is mostly broadcast posture; occasional replies are fine when the lobby isn't noisy.
+- chat.all is broadcast to every major civilization — do not reveal military plans, weak cities, or hidden ambitions; keep sensitive details in private DMs.
+- Private messages are tagged by turn (chat.private.tN.*); reply only to DMs from this turn, not older lines.
+- Proactively DM rivals when you have trade bait, probes, or taunts worth sending.
+- DM recipients: Cleopatra
+- chat.all should be rare — skip most turns; silence is normal.
+- Read chat.public.* — if public lines land nearly every turn, hold off on chat.all this turn.
+- When the lobby is quiet, one punchy chat.all line (wit, taunt, flex) is fine; avoid rapid turn-by-turn chains.
+- Never spam chat.all with greetings, pleasantries, or empty filler.
+- You have not spoken publicly yet — an optional punchy opener is fine; skip solemn welcomes.
+- Read chat.public.* in CURRENT SITUATION — chat.all is mostly posture, not a group chat.
+- If public lobby lines appear nearly every turn, hold off on chat.all so the room stays readable.
+- When the lobby is quiet, an occasional chat.all reply is fine; prefer chat.LeaderName for quick back-and-forth.
+- thought.tN.situation lines in CURRENT SITUATION are your prior board reads — use them for long-term memory.
+- opinion.* lines are your stored rival view — emit opinion.LeaderName only when it changes.
+- history.* is append-only; add a T{n} fragment only for major relationship shifts, not every message.
+units.nativeControl = Firaxis AI moves unmoved units after your commands; use fortify/sleep/alert to hold a unit.
+cities.nativeProduction = Cities keep auto production unless you set changeProduction.

@@ -4,8 +4,6 @@ from __future__ import annotations
 import os
 import re
 import struct
-import threading
-import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -14,7 +12,6 @@ ROOT = Path(__file__).resolve().parent
 CACHE_DIR = ROOT / "assets" / "civ6"
 ICON_CACHE_DIR = CACHE_DIR / "icons"
 STRATEGIC_CACHE_DIR = CACHE_DIR / "strategic"
-_icon_cache_lock = threading.Lock()
 
 _ICON_XML_GLOBS = (
     "Icons_Units.xml",
@@ -398,20 +395,7 @@ def _save_png(image: Any, path: Path, size: int | None = None) -> None:
     if size is not None and work.size != (size, size):
         work = work.resize((size, size), Image.Resampling.LANCZOS)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.stem}.{os.getpid()}.part")
-    work.save(tmp, format="PNG")
-    for attempt in range(6):
-        try:
-            tmp.replace(path)
-            return
-        except PermissionError:
-            if attempt >= 5:
-                raise
-            time.sleep(0.05 * (attempt + 1))
-
-
-def icon_cache_lock() -> threading.Lock:
-    return _icon_cache_lock
+    work.save(path)
 
 
 def extract_icon(icon_name: str, out_size: int = 32) -> Path | None:
@@ -421,25 +405,22 @@ def extract_icon(icon_name: str, out_size: int = 32) -> Path | None:
     if entry is None or pantry is None:
         return None
     filename, icon_size, per_row, index = entry
+    dds_path = pantry / filename
+    if not dds_path.is_file():
+        return None
+    image = load_rgba_image(dds_path)
+    if image is None:
+        return None
+    column = index % per_row
+    row = index // per_row
+    tile = image.crop((
+        column * icon_size,
+        row * icon_size,
+        (column + 1) * icon_size,
+        (row + 1) * icon_size,
+    ))
     out_path = ICON_CACHE_DIR / f"{icon_name}_atlas{icon_size}.png"
-    with _icon_cache_lock:
-        if out_path.is_file():
-            return out_path
-        dds_path = pantry / filename
-        if not dds_path.is_file():
-            return None
-        image = load_rgba_image(dds_path)
-        if image is None:
-            return None
-        column = index % per_row
-        row = index // per_row
-        tile = image.crop((
-            column * icon_size,
-            row * icon_size,
-            (column + 1) * icon_size,
-            (row + 1) * icon_size,
-        ))
-        _save_png(tile, out_path, out_size)
+    _save_png(tile, out_path, out_size)
     return out_path
 
 

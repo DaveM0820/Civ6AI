@@ -1,0 +1,80 @@
+{
+  "_stability": "DO NOT EDIT without user approval — see .cursor/rules/civ6-stable-runtime.mdc. Re-record via Invoke-Civ6RecordMenuSequence.ps1.",
+  "ref_w": 1600,
+  "ref_h": 1024,
+  "recorded_at": "2026-08-18T12:10:31",
+  "steps": [
+    {
+      "label": "click_1",
+      "delay_before_s": 11.16,
+      "pct_x": 0.4644,
+      "pct_y": 0.4297,
+      "client_x": 743,
+      "client_y": 440
+    },
+    {
+      "label": "click_2",
+      "delay_before_s": 2.8,
+      "pct_x": 0.5669,
+      "pct_y": 0.5742,
+      "client_x": 907,
+      "client_y": 588
+    },
+    {
+      "label": "click_3",
+      "delay_before_s": 9.67,
+      "pct_x": 0.3044,
+      "pct_y": 0.5811,
+      "client_x": 487,
+      "client_y": 595
+    },
+    {
+      "label": "click_4",
+      "delay_before_s": 4.02,
+      "pct_x": 0.3625,
+      "pct_y": 0.7188,
+      "client_x": 580,
+      "client_y": 736
+    },
+    {
+      "label": "click_5",
+      "delay_before_s": 0.68,
+      "pct_x": 0.355,
+      "pct_y": 0.7725,
+      "client_x": 568,
+      "client_y": 791
+    },
+    {
+      "label": "click_6",
+      "delay_before_s": 0.9,
+      "pct_x": 0.3613,
+      "pct_y": 0.7676,
+      "client_x": 578,
+      "client_y": 786
+    },
+    {
+      "label": "click_7",
+      "delay_before_s": 1.56,
+      "pct_x": 0.3556,
+      "pct_y": 0.7676,
+      "client_x": 569,
+      "client_y": 786
+    },
+    {
+      "label": "click_8",
+      "delay_before_s": 2.29,
+      "pct_x": 0.3594,
+      "pct_y": 0.7578,
+      "client_x": 575,
+      "client_y": 776
+    },
+    {
+      "label": "click_9",
+      "delay_before_s": 10.65,
+      "pct_x": 0.3594,
+      "pct_y": 0.7969,
+      "client_x": 575,
+      "client_y": 816
+    }
+  ]
+}

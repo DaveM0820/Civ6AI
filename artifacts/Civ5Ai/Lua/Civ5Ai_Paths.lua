@@ -1,0 +1,31 @@
+-- Default paths (re-run Invoke-Civ5AiModSync.ps1 to regenerate).
+Civ5Ai_Paths = {
+  Python = "python",
+  Repo = "",
+  Civ5AiRoot = "MODS/Civ5Ai/runtime",
+  LogDir = "",
+  SidecarTimeoutSeconds = 120,
+  -- Optional per-seat turn cap from turn start; defaults to SidecarTimeoutSeconds.
+  -- SeatTurnCapSeconds = 180,
+  SidecarScript = "sidecar/run_civ5.py",
+  Autotest = 0,
+  CoActive = 0,
+  ParallelPulses = 0,
+  NetApply = 1,
+  SidecarLive = 0,
+  FastEndTurn = 0,
+  AutotestStopTurn = 20,
+  -- llm_human on all managed seats for parity. Interactive play: HumanSeat=human ManagedSeats=1,2,3.
+  ManagedSeats = "0,1,2,3",
+  HumanSeat = "llm_human",
+  ComputerMode = "llm_human",
+  MajorCount = 4,
+  WorldSize = "WORLDSIZE_DUEL",
+  GameSpeed = "",
+  MapType = "MAP_TERRA",
+  MapScript = "Assets\\Maps\\Terra.lua",
+  Handicap = "HANDICAP_PRINCE",
+  FairHandicap = 1,
+  SessionId = "",
+  ApplyPendingPaths = {},
+}

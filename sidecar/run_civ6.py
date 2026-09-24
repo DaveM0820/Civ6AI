@@ -15,7 +15,10 @@ if __package__ in {None, ""}:
 
 from sidecar import civ6_adapter
 from sidecar import civ6_wire
+from sidecar import context_budget
+from sidecar import map_situational
 from sidecar.map_render_civ6 import render_civ6_map_for_model
+from sidecar.map_situational import prepare_civ6_situational_maps
 from sidecar import pipeline_v2 as pipeline
 from sidecar.pipeline_v2 import CircuitBreaker
 
@@ -239,36 +242,90 @@ def _persist_thought_memory(
     return thought_memory
 
 
+def _civ6_at_war(snapshot: dict) -> bool:
+    diplo = snapshot.get("diplomacy") if isinstance(snapshot.get("diplomacy"), dict) else {}
+    for row in diplo.get("relations", []) or []:
+        if isinstance(row, dict) and row.get("at_war") is True:
+            return True
+    return False
+
+
 def _prepare_map_image(
     snapshot: dict,
     journal: Path,
     civ6ai_root: Path | None,
     session_id: str,
-) -> tuple[str | None, Path, Path | None, dict]:
+    thought_memory: dict | None = None,
+    *,
+    attach: bool | None = None,
+    overview_size: int | None = None,
+    tactical_size: int | None = None,
+    omit_tactical: bool | None = None,
+    focus_size: int | None = None,
+    omit_focus: bool | None = True,
+) -> tuple[list[dict[str, str]] | str | None, Path, Path | None, dict]:
     turn = int(snapshot["decision"]["turn"])
     player_id = str(snapshot["decision"]["player_id"])
-    map_path = journal.with_name("map.png")
+    map_path = journal.with_name("map_overview.png")
     archive_dir = None
     archive_path = None
     if civ6ai_root is not None:
         archive_dir = civ6ai_root / "map_images" / session_id
-        archive_path = archive_dir / f"{player_id}_turn_{turn:06d}.png"
-    attach = pipeline.map_image_attach_turn(snapshot)
-    if not attach:
-        return None, map_path, archive_path, {"attached": False}
-    meta = render_civ6_map_for_model(snapshot, map_path)
-    if archive_path is not None:
+        archive_path = archive_dir / f"{player_id}_turn_{turn:06d}_overview.png"
+    should_attach = pipeline.map_image_attach_turn(snapshot) if attach is None else attach
+    memory = thought_memory if isinstance(thought_memory, dict) else {}
+    memory = map_situational.resolve_tactical_viewport(memory, snapshot)
+    map_viewport = memory.get("map_viewport")
+    if not isinstance(map_viewport, dict):
+        map_viewport = None
+    bundle = prepare_civ6_situational_maps(
+        snapshot,
+        journal.parent,
+        attach=should_attach,
+        map_viewport=map_viewport,
+        at_war=_civ6_at_war(snapshot),
+        overview_size=overview_size,
+        tactical_size=tactical_size,
+        omit_tactical=omit_tactical,
+        focus_size=focus_size,
+        omit_focus=omit_focus,
+    )
+    if not bundle.get("attached"):
+        # Fall back to single map render when situational attach is off.
+        if not should_attach:
+            return None, map_path, archive_path, {"attached": False, "images": [], "manifest": []}
+        meta = render_civ6_map_for_model(snapshot, map_path)
+        if archive_path is not None:
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            archive_path.write_bytes(map_path.read_bytes())
+        known_map = snapshot.setdefault("known_map", {})
+        if isinstance(known_map, dict):
+            image = known_map.setdefault("image", {})
+            if isinstance(image, dict):
+                image["attached"] = True
+                image["path"] = str(map_path)
+                if archive_path is not None:
+                    image["archive_path"] = str(archive_path)
+        data_url = meta.get("data_url")
+        return data_url, map_path, archive_path, meta
+    images = bundle.get("images", [])
+    if archive_path is not None and images:
         archive_dir.mkdir(parents=True, exist_ok=True)
-        archive_path.write_bytes(map_path.read_bytes())
-    known_map = snapshot.setdefault("known_map", {})
-    if isinstance(known_map, dict):
-        image = known_map.setdefault("image", {})
-        if isinstance(image, dict):
-            image["attached"] = True
-            image["path"] = str(map_path)
-            if archive_path is not None:
-                image["archive_path"] = str(archive_path)
-    return meta.get("data_url"), map_path, archive_path, meta
+        archive_path.write_bytes(Path(images[0]["path"]).read_bytes())
+        map_path = Path(images[0]["path"])
+    return (
+        bundle.get("data_urls", []),
+        map_path,
+        archive_path,
+        {
+            "attached": True,
+            "images": images,
+            "manifest": bundle.get("manifest", []),
+            "image_count": len(images),
+            "sha256": images[0].get("sha256") if images else None,
+            "image_bytes": images[0].get("image_bytes") if images else None,
+        },
+    )
 
 
 def _seat_experiment_response(snapshot: dict) -> dict:
@@ -457,13 +514,6 @@ def main() -> None:
     civ6_adapter.normalize_civ6_snapshot(snapshot)
     _apply_personality(snapshot, args.personality)
 
-    wire_text = civ6_wire.build_civ6_model_wire_text(snapshot)
-    if args.wire_only:
-        sys.stdout.write(wire_text)
-        if not wire_text.endswith("\n"):
-            sys.stdout.write("\n")
-        return
-
     game_uuid = args.session_id or "civ6-runtime"
     if isinstance(snapshot.get("civ6"), dict) and snapshot["civ6"].get("session_id"):
         game_uuid = str(snapshot["civ6"]["session_id"])
@@ -473,6 +523,30 @@ def main() -> None:
     thought_path = _thought_memory_path(civ6ai_root, game_uuid, player_id)
     thought_memory = pipeline.load_thought_memory(thought_path, session_key, snapshot)
     pipeline.inject_thought_history(snapshot, thought_memory)
+
+    attach_maps = pipeline.map_image_attach_turn(snapshot)
+    limit_info = context_budget.resolve_model_context_limit()
+    _max_out = getattr(pipeline, "chat_max_output_tokens", lambda _effort=None: None)(None)
+    if hasattr(context_budget, "align_reserve_with_max_output"):
+        limit_info = context_budget.align_reserve_with_max_output(limit_info, _max_out)
+
+    def _wire_for_plan(plan: context_budget.BudgetPlan) -> str:
+        context_budget.apply_plan_to_snapshot(snapshot, plan, limit_info)
+        return civ6_wire.build_civ6_model_wire_text(snapshot)
+
+    budget_plan, wire_text, estimated_prompt_tokens = context_budget.choose_budget_plan(
+        info=limit_info,
+        build_wire=_wire_for_plan,
+        attach_images=attach_maps,
+    )
+    context_budget.apply_plan_to_snapshot(snapshot, budget_plan, limit_info)
+    wire_text = civ6_wire.build_civ6_model_wire_text(snapshot)
+
+    if args.wire_only:
+        sys.stdout.write(wire_text)
+        if not wire_text.endswith("\n"):
+            sys.stdout.write("\n")
+        return
 
     breaker_path = metrics_dir / "circuit_breaker.json"
     breaker = _load_circuit_breaker(breaker_path)
@@ -495,9 +569,44 @@ def main() -> None:
     )
 
     sidecar_started = time.monotonic()
-    image_url, image_path, archive_path, render_meta = _prepare_map_image(
-        snapshot, args.journal, civ6ai_root, game_uuid,
+    image_attachments, image_path, archive_path, render_meta = _prepare_map_image(
+        snapshot,
+        args.journal,
+        civ6ai_root,
+        game_uuid,
+        thought_memory,
+        attach=attach_maps and budget_plan.overview_image_size > 0,
+        overview_size=budget_plan.overview_image_size if budget_plan.overview_image_size > 0 else None,
+        tactical_size=0 if budget_plan.omit_tactical else budget_plan.tactical_image_size,
+        omit_tactical=budget_plan.omit_tactical,
+        focus_size=0,
+        omit_focus=True,
     )
+    advciv = snapshot.setdefault("advciv", {})
+    if isinstance(advciv, dict) and render_meta.get("manifest"):
+        advciv["map_images"] = render_meta["manifest"]
+        wire_text = civ6_wire.build_civ6_model_wire_text(snapshot)
+
+    actual_sizes: list[int] = []
+    for item in render_meta.get("images") or []:
+        if not isinstance(item, dict):
+            continue
+        size = item.get("width") or item.get("image_size")
+        if isinstance(size, int) and size > 0:
+            actual_sizes.append(size)
+    if not actual_sizes and image_attachments:
+        actual_sizes = context_budget.plan_image_sizes(budget_plan)
+    estimated_prompt_tokens = context_budget.estimate_prompt_tokens(
+        wire_text, image_sizes=actual_sizes,
+    )
+    budget_log = context_budget.format_budget_log_line(
+        limit_info,
+        budget_plan,
+        estimated_prompt_tokens,
+    )
+    if isinstance(advciv, dict):
+        advciv["context_budget_log"] = budget_log
+
     input_log = _write_io_log(args.journal, "_input.json", {
         "schema_version": snapshot.get("schema_version"),
         "decision": snapshot.get("decision"),
@@ -505,10 +614,13 @@ def main() -> None:
         "your_empire": snapshot.get("your_empire"),
         "snapshot_hash": pipeline.canonical_hash(snapshot),
         "wire_chars": len(wire_text),
+        "estimated_prompt_tokens": estimated_prompt_tokens,
+        "context_budget_steps": list(budget_plan.steps_applied),
+        "context_budget_log": budget_log,
         "wire_path": str(args.journal.parent / "io_logs" / (args.journal.stem + "_wire.txt")),
         "map_image_path": str(image_path),
         "map_image_archive_path": str(archive_path) if archive_path else None,
-        "map_image_attached": bool(image_url),
+        "map_image_attached": bool(image_attachments),
         "previous_response_id": previous_response_id,
         "snapshot": snapshot,
     })
@@ -523,7 +635,7 @@ def main() -> None:
             response, model = pipeline.call_model(
                 snapshot,
                 os.environ.get("OPENAI_API_KEY", ""),
-                image_url,
+                image_attachments,
                 previous_response_id,
             )
         elif args.seat_experiment:
@@ -587,7 +699,7 @@ def main() -> None:
         "context_chars": len(wire_text),
         "legal_commands": len(snapshot.get("legal_commands", [])),
         "known_plots": len(snapshot.get("known_map", {}).get("plots", [])),
-        "image_attached": bool(image_url),
+        "image_attached": bool(image_attachments),
         "map_image_path": str(image_path),
         "map_image_archive_path": str(archive_path) if archive_path else None,
         "map_image_sha256": render_meta.get("sha256"),

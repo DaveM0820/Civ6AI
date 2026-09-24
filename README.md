@@ -61,15 +61,18 @@ host `apply|ok|move_unit`.
 From repo root (after `pip install -r requirements.txt`):
 
 ```bash
-PYTHONPATH=. python3 -m unittest sidecar.tests.test_civ6_mp_sync_wire sidecar.tests.test_civ6_autotest_analyze sidecar.tests.test_civ6_assets -v
+PYTHONPATH=. python3 -m unittest discover -s sidecar/tests -v
 ```
 
-Several seeded tests still expect shared pieces not in this repo yet (`scripts/testbed/*`,
-`sidecar/pipeline_v2.py`, `schemas/`, `fixtures/`). Those fail until ported from the
-incubator tree — they are not regressions from the M2 sync work.
+Shared fixtures/schemas/testbed modules from the incubator tree are included so the
+Civ6 sidecar suite can run offline. See `docs/CIV5_TO_CIV6_PORT.md` for Civ5→Civ6
+prompt ports and before/after counts.
+
+**In-game Civ6 play and MP sync remain unverified here** (no Civ6 binary in CI).
 
 ## Public repo note
 
-This repository is public. Do not commit session logs, `map_images/`, `.env`, or
-machine-specific secrets. `.gitignore` already covers the common runtime paths.
+This repository is public. Do not commit session logs, `map_images/`, `.env`,
+Community Patch / Vox Populi caches, or machine-specific secrets. `.gitignore`
+already covers the common runtime paths.
 

@@ -1,0 +1,267 @@
+{
+  "schema_version": "civ5ai-command-capabilities/1",
+  "rule": "Only currently executable instances enter legal_commands; unsupported kinds are never advertised.",
+  "reference": "Community Patch Civ5",
+  "capabilities": [
+    {
+      "kind": "adopt_ideology",
+      "tier": "v1",
+      "description": "Choose Freedom, Order, or Autocracy when eligible"
+    },
+    {
+      "kind": "adopt_social_policy",
+      "tier": "v1",
+      "description": "Adopt social policy or ideology tenet when culture allows"
+    },
+    {
+      "kind": "air_patrol",
+      "tier": "v1",
+      "description": "Fighter intercept from current base"
+    },
+    {
+      "kind": "attack_target",
+      "tier": "v1",
+      "description": "Attack plot with unit"
+    },
+    {
+      "kind": "automate_unit",
+      "tier": "v1",
+      "description": "Automate worker builds or scout exploration"
+    },
+    {
+      "kind": "buy_with_faith",
+      "phase": 3,
+      "description": "Purchase unit or building with faith",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "buy_with_gold",
+      "phase": 3,
+      "description": "Purchase unit or building with gold",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "cancel_deal",
+      "tier": "v1",
+      "description": "Cancel an active bilateral deal"
+    },
+    {
+      "kind": "chat",
+      "tier": "v1",
+      "description": "Send chat message (sidecar chat_messages, not apply commands)",
+      "mp_via": "chat_encode"
+    },
+    {
+      "kind": "choose_maya_bonus",
+      "tier": "v1",
+      "description": "Maya Long Count great person choice"
+    },
+    {
+      "kind": "city_range_strike",
+      "phase": 6,
+      "description": "City bombard at range",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "congress_propose",
+      "phase": 5,
+      "description": "World Congress proposal during session",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "congress_vote",
+      "phase": 5,
+      "description": "World Congress vote during session",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "create_great_work",
+      "tier": "v1",
+      "description": "Great artist or musician creates a great work"
+    },
+    {
+      "kind": "declare_war",
+      "tier": "v1",
+      "description": "Declare war on a met major this turn via SendChangeWar"
+    },
+    {
+      "kind": "diplomacy_deal",
+      "phase": 7,
+      "description": "Structured diplomacy deal (gold, luxuries, war/peace)",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "discover_tech",
+      "tier": "v1",
+      "description": "Great scientist bulbs a technology"
+    },
+    {
+      "kind": "enhance_religion",
+      "phase": 3,
+      "description": "Enhance religion with additional beliefs",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "establish_trade_route",
+      "phase": 4,
+      "description": "Caravan or cargo ship trade route to legal destination",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "found_city",
+      "tier": "v1",
+      "description": "Found city with settler"
+    },
+    {
+      "kind": "found_pantheon",
+      "phase": 3,
+      "description": "Found pantheon when faith threshold reached",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "found_religion",
+      "phase": 3,
+      "description": "Found religion with prophet and belief picker",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "hurry_production",
+      "tier": "v1",
+      "description": "Great engineer hurries city production"
+    },
+    {
+      "kind": "improve_tile",
+      "tier": "v1",
+      "description": "Worker or work boat improves the unit's current plot"
+    },
+    {
+      "kind": "move_spy",
+      "phase": 5,
+      "description": "Assign spy to city",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "move_unit",
+      "tier": "v1",
+      "description": "Move unit to plot (open coordinates or injected)"
+    },
+    {
+      "kind": "nuke",
+      "tier": "v1",
+      "description": "Nuclear strike at a legal plot"
+    },
+    {
+      "kind": "paradrop",
+      "tier": "v1",
+      "description": "Paratrooper paradrop to a legal plot"
+    },
+    {
+      "kind": "pillage",
+      "tier": "v1",
+      "description": "Pillage the improvement on the unit's current plot"
+    },
+    {
+      "kind": "promote_unit",
+      "tier": "v1",
+      "description": "Choose unit promotion when XP threshold reached"
+    },
+    {
+      "kind": "propose_deal",
+      "tier": "v1",
+      "description": "Propose a catalog diplomacy deal to another major civ"
+    },
+    {
+      "kind": "queue_production",
+      "tier": "v1",
+      "description": "Queue city production (unit, building, project, or process)"
+    },
+    {
+      "kind": "range_attack",
+      "tier": "v1",
+      "description": "Range attack plot"
+    },
+    {
+      "kind": "rebase",
+      "tier": "v1",
+      "description": "Air unit rebase to a city or carrier"
+    },
+    {
+      "kind": "remove_heresy",
+      "tier": "v1",
+      "description": "Inquisitor removes heresy on the current city tile"
+    },
+    {
+      "kind": "respond_to_deal",
+      "tier": "v1",
+      "description": "Accept or reject a pending trade proposal"
+    },
+    {
+      "kind": "set_city_status",
+      "phase": 4,
+      "description": "Puppet, annex, or raze captured city",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "set_research_tech",
+      "tier": "v1",
+      "description": "Set empire research technology"
+    },
+    {
+      "kind": "spread_religion",
+      "tier": "v1",
+      "description": "Missionary spreads religion on the current city tile"
+    },
+    {
+      "kind": "stage_coup",
+      "phase": 5,
+      "description": "Spy stages coup in foreign city",
+      "tier": "v1.1"
+    },
+    {
+      "kind": "start_golden_age",
+      "tier": "v1",
+      "description": "Great person starts a golden age"
+    },
+    {
+      "kind": "trade_mission",
+      "tier": "v1",
+      "description": "Great merchant trade mission on current plot"
+    },
+    {
+      "kind": "unit_posture_alert",
+      "tier": "v1",
+      "description": "Alert unit"
+    },
+    {
+      "kind": "unit_posture_fortify",
+      "tier": "v1",
+      "description": "Fortify unit"
+    },
+    {
+      "kind": "unit_posture_heal",
+      "tier": "v1",
+      "description": "Heal unit"
+    },
+    {
+      "kind": "unit_posture_sleep",
+      "tier": "v1",
+      "description": "Sleep unit"
+    },
+    {
+      "kind": "unit_skip",
+      "tier": "v1",
+      "description": "Skip unit turn"
+    },
+    {
+      "kind": "unlock_policy_branch",
+      "tier": "v1",
+      "description": "Unlock a policy branch when prerequisites are met"
+    },
+    {
+      "kind": "upgrade_unit",
+      "tier": "v1",
+      "description": "Upgrade unit when gold and tech allow"
+    }
+  ],
+  "deferred_capabilities": []
+}

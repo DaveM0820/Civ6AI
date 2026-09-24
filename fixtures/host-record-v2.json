@@ -1,0 +1,10 @@
+{
+  "game_uuid": "game-fixture-0001",
+  "turn": 1,
+  "phase": "strategic_decision",
+  "player_id": "PLAYER_0",
+  "state_hash": "fixture-state",
+  "catalog_hash": "fixture-catalog",
+  "dll_fingerprint": "fixture-dll",
+  "sequence_cursor": 0
+}

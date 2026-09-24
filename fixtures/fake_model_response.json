@@ -1,0 +1,35 @@
+{
+  "protocol_version": 1,
+  "envelope_version": 1,
+  "authority": "host",
+  "assets": {
+    "mod_id": "{{mod_id}}",
+    "mod_version": "{{mod_version}}",
+    "dll_sha256": "{{dll_sha256}}"
+  },
+  "game_uuid": "{{game_uuid}}",
+  "snapshot_id": "{{snapshot_id}}",
+  "state_hash": "{{state_hash}}",
+  "turn": "{{turn}}",
+  "phase": "{{phase}}",
+  "active_player_id": "{{active_player_id}}",
+  "decision_sequence": "{{decision_sequence}}",
+  "journal_id": "fixture-journal-{{snapshot_id}}",
+  "actions": [
+    {
+      "sequence": 0,
+      "action_id": "{{action_id}}",
+      "kind": "set_research",
+      "tech_id": "{{tech_id}}"
+    }
+  ],
+  "chat_note": {
+    "sender_player_id": "{{active_player_id}}",
+    "target_kind": "all",
+    "target_player_id": null,
+    "text": "I have no named rival cities in view. I will research {{tech_id}} to improve our position.",
+    "awareness_ids": [],
+    "action_sequences": [0],
+    "reason_id": "food_supply"
+  }
+}

@@ -407,6 +407,20 @@ function Civ6Ai_Snapshot._BuildKnownMap(playerID, turn, yourUnits, yourCities)
     end
     table.insert(visibility_grid, row)
   end
+  local revealedCount = 0
+  for y = 0, mapHeight - 1 do
+    for x = 0, mapWidth - 1 do
+      local plot = Map.GetPlot(x, y)
+      if plot ~= nil and vis:IsRevealed(plot:GetIndex()) then
+        revealedCount = revealedCount + 1
+      end
+    end
+  end
+  local totalPlots = mapWidth * mapHeight
+  local exploredPercent = 0
+  if totalPlots > 0 then
+    exploredPercent = math.floor(100 * revealedCount / totalPlots)
+  end
   return {
     format = "plot-grid-v1",
     visibility_mode = "player_visible",
@@ -415,6 +429,8 @@ function Civ6Ai_Snapshot._BuildKnownMap(playerID, turn, yourUnits, yourCities)
     frontiers = {},
     visible_stacks = {},
     visibility_grid = visibility_grid,
+    revealed_count = revealedCount,
+    explored_percent = exploredPercent,
     viewport = {
       x0 = minX,
       y0 = minY,
@@ -455,6 +471,58 @@ function Civ6Ai_Snapshot._PlotIsCoastal(x, y)
     return false
   end
   return plot:IsCoastalLand() == true
+end
+
+function Civ6Ai_Snapshot._CityAmenities(city)
+  local amenities = {positive = 0, negative = 0, net = 0}
+  if city == nil then
+    return amenities
+  end
+  local growth = nil
+  if city.GetGrowth ~= nil then
+    growth = city:GetGrowth()
+  end
+  if growth ~= nil then
+    local pos = 0
+    local neg = 0
+    if growth.GetAmenities ~= nil then
+      pos = Civ6Ai_Snapshot._Int(growth:GetAmenities())
+    end
+    if growth.GetAmenitiesNeeded ~= nil then
+      neg = Civ6Ai_Snapshot._Int(growth:GetAmenitiesNeeded())
+    end
+    amenities.positive = pos
+    amenities.negative = neg
+    amenities.net = pos - neg
+  end
+  return amenities
+end
+
+function Civ6Ai_Snapshot._CityDefense(city)
+  local defense = {percent = 100, health_percent = 100, bombard_damage = 0}
+  if city == nil then
+    return defense
+  end
+  local maxHp = 200
+  local damage = 0
+  if city.GetMaxHitPoints ~= nil then
+    maxHp = city:GetMaxHitPoints() or maxHp
+  elseif city.GetMaxDamage ~= nil then
+    maxHp = city:GetMaxDamage() or maxHp
+  end
+  if city.GetDamage ~= nil then
+    damage = city:GetDamage() or 0
+  end
+  local current = maxHp - damage
+  if current < 0 then
+    current = 0
+  end
+  if maxHp > 0 then
+    defense.percent = math.floor(100 * current / maxHp)
+    defense.health_percent = defense.percent
+  end
+  defense.bombard_damage = damage
+  return defense
 end
 
 function Civ6Ai_Snapshot._BuildYourCities(playerID)
@@ -504,8 +572,9 @@ function Civ6Ai_Snapshot._BuildYourCities(playerID)
       culture = Civ6Ai_Snapshot._EmptyAmounts(),
       great_people = Civ6Ai_Snapshot._EmptyAmounts(),
       happiness = {positive = 0, negative = 0, net = 0},
+      amenities = Civ6Ai_Snapshot._CityAmenities(city),
       health = {positive = 0, negative = 0, net = 0},
-      defense = {percent = 0, bombard_damage = 0},
+      defense = Civ6Ai_Snapshot._CityDefense(city),
       maintenance = 0,
       occupation_turns = 0,
       religions = {},
@@ -590,11 +659,24 @@ function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
   if culture ~= nil then
     commerce.culture.rate = Civ6Ai_Snapshot._Int(culture:GetCultureYield())
   end
+  local amenityNet = 0
+  local amenityPos = 0
+  local amenityNeg = 0
+  local cities = Civ6Ai_Snapshot._BuildYourCities(playerID)
+  for _, city in ipairs(cities) do
+    local amenities = city.amenities
+    if amenities ~= nil then
+      amenityPos = amenityPos + Civ6Ai_Snapshot._Int(amenities.positive)
+      amenityNeg = amenityNeg + Civ6Ai_Snapshot._Int(amenities.negative)
+      amenityNet = amenityNet + Civ6Ai_Snapshot._Int(amenities.net)
+    end
+  end
   return {
     team_id = "TEAM_" .. tostring(player:GetTeam()),
     score = Civ6Ai_Snapshot._Int(player:GetScore()),
     gold = gold,
     gold_per_turn = gpt,
+    amenities = {positive = amenityPos, negative = amenityNeg, net = amenityNet},
     research = research,
     commerce = commerce,
     unit_counts = Civ6Ai_Snapshot._BuildUnitCounts(playerID),
@@ -942,6 +1024,42 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   return unit:GetMovesRemaining() > 0
 end
 
+function Civ6Ai_Snapshot._UnitHealth(unit)
+  -- Civ6: damage accumulates toward MaxDamage; remaining HP = max - damage.
+  local maxHp = 100
+  if unit.GetMaxDamage ~= nil then
+    maxHp = unit:GetMaxDamage() or maxHp
+  elseif unit.GetMaxHitPoints ~= nil then
+    maxHp = unit:GetMaxHitPoints() or maxHp
+  end
+  local damage = 0
+  if unit.GetDamage ~= nil then
+    damage = unit:GetDamage() or 0
+  end
+  local current = maxHp - damage
+  if current < 0 then
+    current = 0
+  end
+  if maxHp <= 0 then
+    maxHp = 100
+    current = 100
+  end
+  return current, maxHp
+end
+
+function Civ6Ai_Snapshot._UnitPromotionReady(unit)
+  if unit == nil then
+    return false
+  end
+  if unit.IsPromotionReady ~= nil then
+    return unit:IsPromotionReady() == true
+  end
+  if unit.CanPromote ~= nil then
+    return unit:CanPromote() == true
+  end
+  return false
+end
+
 function Civ6Ai_Snapshot._BuildYourUnits(playerID)
   local player = Players[playerID]
   if player == nil then
@@ -954,24 +1072,28 @@ function Civ6Ai_Snapshot._BuildYourUnits(playerID)
     local moves = unit:GetMovesRemaining()
     local maxMoves = unit:GetMaxMoves()
     local needsOrders = Civ6Ai_Snapshot._UnitNeedsOrders(unit)
+    local curHp, maxHp = Civ6Ai_Snapshot._UnitHealth(unit)
+    local promoReady = Civ6Ai_Snapshot._UnitPromotionReady(unit)
     table.insert(units, {
       unit_id = Civ6Ai_Snapshot._UnitWireId(unit),
       unit_type_id = Civ6Ai_Snapshot._UnitTypeName(unit),
       unit_class_id = "UNITCLASS_UNKNOWN",
       domain_id = "DOMAIN_LAND",
       plot_id = Civ6Ai_Util.PlotId(x, y),
-      health = {current = 100, maximum = 100, change_per_turn = 0},
+      health = {current = curHp, maximum = maxHp, change_per_turn = 0},
+      health_percent = maxHp > 0 and math.floor(100 * curHp / maxHp) or 100,
       strength = {current = 0, maximum = 0, change_per_turn = 0},
       movement = {current = moves, maximum = maxMoves, change_per_turn = 0},
       level = 1,
       experience = 0,
       promotion_ids = {},
+      promotion_ready = promoReady,
       activity_id = "ACTIVITY_UNKNOWN",
       mission_queue = {},
       unit_ai_role = "UNITAI_UNKNOWN",
       cargo_unit_ids = {},
       can_act = needsOrders,
-      needs_orders = needsOrders,
+      needs_orders = needsOrders or promoReady,
       upgrade_options = {},
     })
   end

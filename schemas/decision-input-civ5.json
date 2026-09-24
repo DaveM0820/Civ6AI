@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://civ4ai.local/schema/decision-input-civ5.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "decision",
+    "personality",
+    "game",
+    "your_empire",
+    "your_cities",
+    "your_units",
+    "known_players",
+    "known_other_cities",
+    "visible_other_units",
+    "diplomacy",
+    "known_map",
+    "strategic_summary",
+    "history",
+    "advciv",
+    "legal_commands",
+    "civ5"
+  ],
+  "properties": {
+    "schema_version": {"const": "civ5ai-input/1"},
+    "decision": {"$ref": "decision-input-v2.json#/$defs/decision"},
+    "personality": {"$ref": "decision-input-v2.json#/$defs/personality"},
+    "game": {"$ref": "decision-input-v2.json#/$defs/game"},
+    "your_empire": {"$ref": "decision-input-v2.json#/$defs/empire"},
+    "your_cities": {"type": "array", "items": {"$ref": "decision-input-v2.json#/$defs/owned_city"}},
+    "your_units": {"type": "array", "items": {"$ref": "decision-input-v2.json#/$defs/owned_unit"}},
+    "known_players": {"type": "array", "items": {"$ref": "decision-input-v2.json#/$defs/known_player"}},
+    "known_other_cities": {"type": "array", "items": {"$ref": "decision-input-v2.json#/$defs/known_city"}},
+    "visible_other_units": {"type": "array", "items": {"$ref": "decision-input-v2.json#/$defs/visible_unit"}},
+    "diplomacy": {"$ref": "decision-input-v2.json#/$defs/diplomacy"},
+    "known_map": {"$ref": "decision-input-v2.json#/$defs/known_map"},
+    "strategic_summary": {"$ref": "decision-input-v2.json#/$defs/summary"},
+    "history": {"$ref": "decision-input-v2.json#/$defs/history"},
+    "advciv": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["default_unit_controller", "fallback_policy", "recommendations"],
+      "properties": {
+        "default_unit_controller": {"type": "string", "minLength": 1},
+        "fallback_policy": {"type": "string", "minLength": 1},
+        "recommendations": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {"$ref": "decision-input-v2.json#/$defs/recommendation"}
+        }
+      }
+    },
+    "legal_commands": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {"$ref": "decision-input-v2.json#/$defs/legal_command"}
+    },
+    "civ5": {"$ref": "#/$defs/civ5_extension"}
+  },
+  "$defs": {
+    "civ5_extension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["yields", "map"],
+      "properties": {
+        "yields": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["gold", "science", "culture", "faith", "happiness"],
+          "properties": {
+            "gold": {"type": "integer"},
+            "science": {"type": "integer"},
+            "culture": {"type": "integer"},
+            "faith": {"type": "integer"},
+            "happiness": {"type": "integer"}
+          }
+        },
+        "research_tech": {"type": ["string", "null"]},
+        "session_id": {"type": "string"},
+        "map": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["width", "height"],
+          "properties": {
+            "width": {"type": "integer", "minimum": 1},
+            "height": {"type": "integer", "minimum": 1},
+            "hex_layout": {"type": "string"},
+            "coords_note": {"type": "string"}
+          }
+        },
+        "settle_sites": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {"$ref": "#/$defs/settle_site"}
+        }
+      }
+    },
+    "settle_site": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit_id", "here", "look"],
+      "properties": {
+        "unit_id": {"$ref": "decision-input-v2.json#/$defs/id"},
+        "here": {"$ref": "#/$defs/settle_tile"},
+        "look": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {"$ref": "#/$defs/settle_tile"}
+        }
+      }
+    },
+    "settle_tile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "distance", "coast", "lake", "river", "hills", "can_found", "resources", "score"],
+      "properties": {
+        "x": {"type": "integer", "minimum": 0},
+        "y": {"type": "integer", "minimum": 0},
+        "distance": {"type": "integer", "minimum": 0},
+        "coast": {"type": "boolean"},
+        "lake": {"type": "boolean"},
+        "river": {"type": "boolean"},
+        "hills": {"type": "boolean"},
+        "ruins": {"type": "boolean"},
+        "can_found": {"type": "boolean"},
+        "resources": {"type": "array", "items": {"type": "string"}},
+        "score": {"type": "integer"}
+      }
+    }
+  }
+}

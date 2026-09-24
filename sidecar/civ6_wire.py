@@ -5,6 +5,7 @@ import copy
 from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
+from sidecar import civ6_prompt_coaching as coaching
 
 UNITS_NATIVE_CONTROL_HINT = (
     "Firaxis AI moves unmoved units after your commands; use fortify/sleep/alert to hold a unit."
@@ -155,10 +156,40 @@ def _group_civ6_unit_commands(commands: list[dict[str, Any]]) -> dict[str, list[
     return grouped
 
 
-def _compact_civ6_unit_legal_lines(unit_wire_id: str, commands: list[dict[str, Any]]) -> list[str]:
+def _compact_civ6_unit_legal_lines(
+    unit_wire_id: str,
+    commands: list[dict[str, Any]],
+    snapshot: dict[str, Any] | None = None,
+) -> list[str]:
+    options_by_prop = _group_civ6_unit_commands(commands)
+    unit_id = None
+    for command in commands:
+        if isinstance(command, dict):
+            fixed = command.get("fixed_arguments") or {}
+            if isinstance(fixed, dict) and isinstance(fixed.get("unit_id"), str):
+                unit_id = fixed["unit_id"]
+                break
+    attack_tokens: list[str] = []
+    if unit_id and isinstance(snapshot, dict):
+        attack_tokens = coaching.civ6_attack_option_tokens_for_unit(unit_id, snapshot)
     lines: list[str] = []
-    for prop_name, values in sorted(_group_civ6_unit_commands(commands).items()):
-        lines.append(pipeline._wire_line(f"{unit_wire_id}.{prop_name}", " | ".join(values)))
+    appended_attacks = False
+    for prop_name, values in sorted(options_by_prop.items()):
+        if prop_name == "attackTo":
+            # Prefer appending onto move/stance; skip standalone until end.
+            continue
+        merged = list(values)
+        if prop_name in ("moveTo", "stance") and attack_tokens and not appended_attacks:
+            merged = coaching.append_attack_options_to_unit_line(merged, attack_tokens)
+            appended_attacks = True
+        lines.append(pipeline._wire_line(f"{unit_wire_id}.{prop_name}", " | ".join(merged)))
+    leftover = []
+    if not appended_attacks and attack_tokens:
+        leftover = attack_tokens
+    elif "attackTo" in options_by_prop and not appended_attacks:
+        leftover = options_by_prop["attackTo"]
+    if leftover:
+        lines.append(pipeline._wire_line(f"{unit_wire_id}.attackTo", " | ".join(leftover)))
     return lines
 
 
@@ -267,7 +298,13 @@ def _append_civ6_unit_situation_wire(lines: list[str], snapshot: dict[str, Any])
             maximum = health.get("maximum")
             if isinstance(current, int) and isinstance(maximum, int) and maximum > 0:
                 pct = int(current * 100 / maximum)
-                lines.append(pipeline._wire_line(f"{prefix}.hp", pct))
+                # Hide full-health noise; show live % only when wounded.
+                if pct < 100:
+                    lines.append(pipeline._wire_line(f"{prefix}.hp", pct))
+        elif isinstance(unit.get("health_percent"), int) and unit["health_percent"] < 100:
+            lines.append(pipeline._wire_line(f"{prefix}.hp", unit["health_percent"]))
+        if unit.get("promotion_ready"):
+            lines.append(pipeline._wire_line(f"{prefix}.promotionReady", True))
         movement = unit.get("movement", {})
         if isinstance(movement, dict):
             current = movement.get("current")
@@ -296,6 +333,18 @@ def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any])
         loyalty = extra.get("loyalty")
         if isinstance(loyalty, int):
             lines.append(pipeline._wire_line(f"{name}.loyalty", loyalty))
+        amenities = city.get("amenities")
+        if isinstance(amenities, dict):
+            net = amenities.get("net")
+            if isinstance(net, int):
+                lines.append(pipeline._wire_line(f"{name}.amenities", net))
+        defense = city.get("defense")
+        if isinstance(defense, dict):
+            hp = defense.get("health_percent")
+            if isinstance(hp, int) and hp < 100:
+                lines.append(pipeline._wire_line(f"{name}.hp", hp))
+            elif isinstance(defense.get("percent"), int) and defense["percent"] < 100:
+                lines.append(pipeline._wire_line(f"{name}.hp", defense["percent"]))
         production = city.get("production", {})
         if isinstance(production, dict) and production.get("item_id"):
             lines.append(pipeline._wire_line(f"{name}.currentProduction", _production_label(production["item_id"])))
@@ -312,6 +361,12 @@ def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None
         lines.append(pipeline._wire_line("empire.cities", len(cities)))
     pipeline._append_int_wire(lines, "empire.gold", empire.get("gold"))
     pipeline._append_int_wire(lines, "empire.gold_per_turn", empire.get("gold_per_turn"))
+    amenities = empire.get("amenities")
+    if isinstance(amenities, dict):
+        pipeline._append_int_wire(lines, "empire.amenities.net", amenities.get("net"))
+    known = snapshot.get("known_map")
+    if isinstance(known, dict) and isinstance(known.get("explored_percent"), int):
+        pipeline._append_int_wire(lines, "empire.map.explored_percent", known.get("explored_percent"))
     for field in ("science", "culture", "faith", "favor"):
         value = yields.get(field)
         if isinstance(value, int):
@@ -426,61 +481,90 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
             continue
         required_city_specs.append((city_name, sorted(options)))
 
+    thought_rows = coaching.civ6_required_thought_rows(snapshot)
+    required_game_rows = 0
+    if required_unit_wires:
+        required_game_rows += len(required_unit_wires)
+    if required_city_specs:
+        required_game_rows += len(required_city_specs)
+    # Pending promotions are required when the snapshot marks them.
+    promo_units = [
+        unit_wire_ids.get(str(unit.get("unit_id")))
+        for unit in units
+        if unit.get("promotion_ready") and isinstance(unit.get("unit_id"), str)
+    ]
+    promo_units = sorted({p for p in promo_units if p})
+    required_total = len(thought_rows) + required_game_rows + len(promo_units)
+
     lines = [
         "=== INSTRUCTIONS ===",
         f"You are {leader_label}.",
-        "Read CURRENT SITUATION, MAP, and LEGAL COMMANDS above.",
+        "Read CURRENT SITUATION, MAP, ATTENTION (if present), and LEGAL COMMANDS above.",
         "Reply with flat key=value lines only — never JSON, braces, or code fences.",
         "The host ends your turn automatically after this response.",
         "",
-        "=== REQUIRED ORDERS THIS TURN ===",
-        ("- Issue at least one order for every unit below with needsOrders = true. "
-         f"Units needing orders: {', '.join(required_unit_wires) if required_unit_wires else '(none)'}"),
-        (
-            "- For every city below, set changeProduction this turn (pick one of the legal queue_production options). "
-            + (
-                "Cities needing production choice: "
-                + ("; ".join(f"{name}: {' | '.join(opts)}" for name, opts in required_city_specs) if required_city_specs else '(none)')
-            )
-        ),
+        "=== REQUIRED COMMANDS THIS TURN ===",
+        f"# required.count = {required_total} (thought/map-read rows + game orders)",
+    ]
+    row_i = 1
+    for row in thought_rows:
+        lines.append(f"{row_i}. {row}")
+        row_i += 1
+    lines.append(
+        f"{row_i}. Units needing orders (issue at least one legal order each): "
+        f"{', '.join(required_unit_wires) if required_unit_wires else '(none)'}"
+    )
+    row_i += 1
+    lines.append(
+        f"{row_i}. Cities needing production choice: "
+        + (
+            "; ".join(f"{name}: {' | '.join(opts)}" for name, opts in required_city_specs)
+            if required_city_specs
+            else "(none)"
+        )
+    )
+    row_i += 1
+    if promo_units:
+        lines.append(
+            f"{row_i}. Promote pending units (legal *.promote): {', '.join(promo_units)}"
+        )
+        row_i += 1
+    lines.append("")
+    lines.extend(coaching.civ6_optional_commands_preamble_lines(required_total))
+    lines.extend([
         "",
-        "Required reply format (in this order):",
-        "1. thought.situation = your read of the board in this leader's inner voice — rivals, "
-        "economy, threats, momentum (still factual, but colored by their personality)",
-        "2. thought.strategy = your long-term path to victory in character — expansion "
-        "(settlers and new cities), diplomacy (alliances, trades, rival psychology), and "
-        "concrete actions for this turn",
-        "3. opinion.LeaderName = one short line when your view of a met/heard rival changes (trust, threat); "
-        "omit unchanged rivals",
-        "4. history.LeaderName = only on a major relationship event this turn (first meet, deal, war, betrayal); "
-        "one terse T{n} fragment; skip routine chat and filler",
-        "5. decision_summary = one line naming concrete actions; a brief in-character phrase is welcome",
-        "6. Commands — issue as many city/unit/empire lines as you need this turn:",
-        "   cityName.changeProduction = BUILDING_* / UNIT_* / DISTRICT_*@(x,y)",
-        "   unitId.moveTo = (x,y), unitId.stance = fortify|skip|alert|sleep|heal, unitId.foundCity = apply",
-        "   legal.research.tech / legal.research.civic, legal.policies, legal.diplomacy.*, legal.trade.*",
-        "7. chat.all / chat.team / chat.LeaderName (optional, sparse — skip most turns; if chat.public.* shows "
-        "messages nearly every turn, hold off on chat.all):",
+        "Also include when useful (not counted above unless listed as required):",
+        "- opinion.LeaderName = short line when your view of a rival changes",
+        "- history.LeaderName = T{n} fragment only on major relationship events",
+        "- decision_summary = one line naming concrete actions",
+        "- Commands: cityName.changeProduction = …; unitId.moveTo = (x,y); legal.research.* / legal.trade.*",
+        "- chat.all / chat.LeaderName (optional)",
+        "- thought.freethinking = optional free-form reflection",
         "",
         "Rules:",
         f"- The host applies your overrides first; {CIV6_NATIVE_FALLBACK_POLICY}",
-        "- Settlers and new cities are worth prioritizing: keep cities building settlers when "
-        "expansion is viable, move idle settlers toward good sites, and found with foundCity "
-        "when you like the current tile (foundCity is optional — moving first is fine).",
-    ]
+        f"- {coaching.CIV6_SETTLER_MAP_ADVICE}" if coaching.settler_present(snapshot) else None,
+        "- Settlers and new cities are worth prioritizing when expansion is viable; foundCity is optional — moving first is fine.",
+    ])
+    lines = [line for line in lines if line is not None]
     lines.extend(f"- {line}" for line in pipeline._diplomatic_strategy_guidance(snapshot))
+    lines.extend(f"- {line}" for line in coaching.civ6_diplomacy_guidance(snapshot))
     lines.extend([
         "- Issue only command ids listed under LEGAL COMMANDS this turn; a settler that already "
         "founded is a city, so foundCity is legal only while that settler still exists.",
         "- Movement: use coordinates listed under LEGAL COMMANDS (e.g. scout_1.moveTo = (15,24)).",
         "- Before moving, carefully inspect the attached minimap and each unit's position in "
         "CURRENT SITUATION — pick a tile that advances exploration, expansion, or defense.",
+        f"- {coaching.civ6_map_axes_wrap_guidance(snapshot)}",
+        f"- {coaching.CIV6_UNIT_STACKING_GUIDANCE}",
+        f"- {coaching.CIV6_MOVE_THEN_ATTACK_GUIDANCE}",
         "- Hybrid control: native AI moves unmoved units; use fortify/sleep/alert to hold a unit.",
         "- Cities auto-pick production unless you set changeProduction.",
-        "- Hex grid: Y increases south.",
         "- War attacks on new enemies begin next turn.",
         "- Do not queue production already building.",
         "- decision_summary must name concrete actions.",
+        "- When at war, attack options are appended onto unit move/stance lines when legal "
+        "(no separate `| none` attack row).",
     ])
     lines.extend(f"- {line}" for line in pipeline._chat_voice_guidance(snapshot))
     lines.extend(f"- {line}" for line in pipeline._chat_format_guidance(snapshot))
@@ -656,14 +740,25 @@ def build_civ6_wire_prompt(context: dict[str, Any], map_stats: list[str] | None 
     for city_name in sorted(city_commands):
         legal_lines.extend(_compact_civ6_city_legal_lines(city_name, city_commands[city_name]))
     for unit_wire_id in sorted(unit_commands):
-        legal_lines.extend(_compact_civ6_unit_legal_lines(unit_wire_id, unit_commands[unit_wire_id]))
+        legal_lines.extend(
+            _compact_civ6_unit_legal_lines(unit_wire_id, unit_commands[unit_wire_id], context)
+        )
     legal_lines.extend(_compact_civ6_empire_legal_lines(empire_commands))
 
-    return "\n\n".join([
+    attention = coaching.collect_civ6_attention_items(context if isinstance(context, dict) else {})
+    sections = [
         pipeline._wire_section("CURRENT SITUATION", situation),
         pipeline._wire_section("MAP", map_lines),
-        pipeline._wire_section("LEGAL COMMANDS", legal_lines),
-    ])
+    ]
+    if attention:
+        sections.append(
+            pipeline._wire_section(
+                "ATTENTION",
+                [pipeline._wire_line(f"attention.{i}", note) for i, note in enumerate(attention)],
+            )
+        )
+    sections.append(pipeline._wire_section("LEGAL COMMANDS", legal_lines))
+    return "\n\n".join(sections)
 
 
 def build_civ6_playable_context(snapshot: dict[str, Any]) -> dict[str, Any]:

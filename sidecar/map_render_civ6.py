@@ -12,24 +12,13 @@ from sidecar import map_icons
 from sidecar import map_render
 from sidecar import pipeline_v2 as pipeline
 
-RIVER_STROKE = "#2f7d78"
-RIVER_CORE = "#dff6ff"  # unused leftover (bright core never drawn)
-CIV5_TERRITORY_OVERLAY_ALPHA = 0.32
-CIV5_OCEAN_SPRITE_OVERLAY_ALPHA = 0.86
-CIV5_COAST_SPRITE_OVERLAY_ALPHA = 0.78
-OCEAN_NAVY_RGB = map_render._hex_to_rgb(map_render.TERRAIN_COLORS["TERRAIN_OCEAN"])
-COAST_NAVY_RGB = map_render._hex_to_rgb(map_render.TERRAIN_COLORS["TERRAIN_COAST"])
+RIVER_STROKE = "#4ec8f0"
+RIVER_CORE = "#dff6ff"
 RIVER_LABEL = "river edge"
 SETTLE_LOOK_COLOR = "#f4c040"
 SETTLE_HERE_COLOR = "#f7f3e8"
 SETTLE_LOOK_LABEL = "better settle tile"
 SETTLE_HERE_LABEL = "settler tile"
-CIV5_LEGEND_ROLES = frozenset({"overview", "strategic", "viewport", "focus"})
-YIELD_LEGEND_SLUGS = {
-    "food": "__yield_food__",
-    "production": "__yield_production__",
-    "gold": "__yield_gold__",
-}
 UNEXPLORED = map_render.UNEXPLORED_FILL
 # Tight Civ5 view is about 8x12. Twice that many cells uses axis labels only.
 HEX_AXIS_ONLY_MIN_CELLS = 8 * 12 * 2
@@ -85,13 +74,10 @@ def _odd_r_cell_center(
 
 
 def _odd_r_map_size(vw: int, vh: int, tile_px: int, gutter: int) -> tuple[int, int]:
-    """Canvas size for odd-r hex grid with equal gutters on all four sides."""
     radius, horiz, vert = _hex_metrics(tile_px)
     map_w = int(horiz * vw + horiz / 2)
     map_h = int((vh - 1) * vert + 2 * radius)
-    # Left/top gutters offset cell centers; matching right/bottom gutters keep
-    # axis numbers readable on every edge without covering hexes.
-    return 2 * gutter + map_w, 2 * gutter + map_h
+    return gutter + map_w, gutter + map_h
 
 
 def _hex_edge_segment(
@@ -183,38 +169,25 @@ def _river_edge_for_item(
     vh: int,
     prefer_civ5: bool,
 ) -> int | None:
-    """Pick the hex edge to stroke for one river_edges item.
-
-    Civ5 Lua stores dx/dy of the *lookup* neighbor (W / NW / NE), which is
-    opposite the river. With flip_y, face that neighbor then take (edge+3)%6.
-    Ignore Lua's dummy fallback {SE, dx=0, dy=-1} (not a real lookup).
-    """
-    dx = item.get("dx")
-    dy = item.get("dy")
-    if dx is not None and dy is not None:
-        dx_i, dy_i = int(dx), int(dy)
-        if prefer_civ5:
-            if _civ5_river_edge_from_delta(wx, wy, dx_i, dy_i) is None:
-                return None
-            if flip_y:
-                nx, ny = wx + dx_i, wy + dy_i
-                ncx, ncy, _, _ = _odd_r_cell_center(
-                    nx, ny, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
-                )
-                facing = _edge_index_toward_neighbor(cx, cy, ncx, ncy, corners)
-                return (facing + 3) % 6
-            return _civ5_river_edge_from_delta(wx, wy, dx_i, dy_i)
-        if flip_y:
-            nx, ny = wx + dx_i, wy + dy_i
-            ncx, ncy, _, _ = _odd_r_cell_center(
-                nx, ny, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
-            )
-            return _edge_index_toward_neighbor(cx, cy, ncx, ncy, corners)
-        return _edge_index_for_neighbor(wx, wy, dx_i, dy_i)
     edge_id = item.get("edge_id")
     if prefer_civ5 and isinstance(edge_id, str):
-        return CIV5_RIVER_EDGE_INDEX.get(edge_id.strip().upper())
-    return None
+        edge = CIV5_RIVER_EDGE_INDEX.get(edge_id.strip().upper())
+        if edge is not None:
+            return edge
+    dx = item.get("dx")
+    dy = item.get("dy")
+    if dx is None or dy is None:
+        return None
+    dx_i, dy_i = int(dx), int(dy)
+    if prefer_civ5:
+        return _civ5_river_edge_from_delta(wx, wy, dx_i, dy_i)
+    if flip_y:
+        nx, ny = wx + dx_i, wy + dy_i
+        ncx, ncy, _, _ = _odd_r_cell_center(
+            nx, ny, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
+        )
+        return _edge_index_toward_neighbor(cx, cy, ncx, ncy, corners)
+    return _edge_index_for_neighbor(wx, wy, dx_i, dy_i)
 
 
 def _iter_river_neighbor_deltas(
@@ -416,8 +389,8 @@ def _draw_river_network(
     if not segments:
         return
     stroke = map_render._rgb_tuple(RIVER_STROKE)
-    width = max(3, width)
-    rad = max(2, (width + 1) // 2)
+    width = max(4, width)
+    rad = max(3, (width * 2 + 2) // 3)
     weld_r = max(rad, 4)
     welded = _weld_segments(segments, weld_r)
     for path in _river_polylines(welded):
@@ -455,18 +428,6 @@ def _dim_rgba_image(image: Any, factor: float) -> Any:
     return work
 
 
-def _scale_rgba_alpha(image: Any, factor: float) -> Any:
-    from PIL import Image
-
-    work = image.convert("RGBA")
-    factor = max(0.0, min(1.0, factor))
-    if factor >= 1.0:
-        return work
-    red, green, blue, alpha = work.split()
-    alpha = alpha.point(lambda value: int(value * factor))
-    return Image.merge("RGBA", (red, green, blue, alpha))
-
-
 def _paste_hex_sprite_layers(
     canvas: Any,
     sprite_paths: list[Path],
@@ -474,8 +435,6 @@ def _paste_hex_sprite_layers(
     cy: float,
     hex_radius: float,
     dim_factor: float = 1.0,
-    *,
-    prefer_civ5_sprites: bool = False,
 ) -> bool:
     if not sprite_paths:
         return False
@@ -486,27 +445,10 @@ def _paste_hex_sprite_layers(
     tcx, tcy = width / 2, height / 2
     for sprite_path in sprite_paths:
         name = sprite_path.name.lower()
-        if prefer_civ5_sprites:
-            from sidecar import civ5_assets
-
-            layer_scale = civ5_assets.strategic_layer_scale(name)
-            layer_alpha = civ5_assets.strategic_layer_alpha(name)
-        else:
-            layer_scale = 0.72 if "mountain" in name else 1.0
-            layer_alpha = 1.0
+        layer_scale = 0.72 if "mountain" in name else 1.0
         layer_w = max(4, int(width * layer_scale))
         layer_h = max(4, int(height * layer_scale))
-        from PIL import Image
-
-        icon = Image.open(sprite_path).convert("RGBA")
-        target = (layer_w, layer_h)
-        if icon.size != target:
-            icon = icon.resize(target, Image.Resampling.LANCZOS)
-        if layer_alpha < 1.0:
-            icon = _scale_rgba_alpha(icon, layer_alpha)
-        x = int(tcx - target[0] / 2)
-        y = int(tcy - target[1] / 2)
-        tile.paste(icon, (x, y), icon)
+        map_render._paste_image_raster_fit(tile, sprite_path, tcx, tcy, layer_w, layer_h)
     if dim_factor < 1.0:
         tile = _dim_rgba_image(tile, dim_factor)
     local_corners: list[tuple[float, float]] = []
@@ -518,57 +460,6 @@ def _paste_hex_sprite_layers(
     ImageDraw.Draw(mask).polygon(local_corners, fill=255)
     canvas.paste(tile, (int(origin_x), int(origin_y)), mask)
     return True
-
-
-
-def _plot_is_ocean(plot: dict[str, Any] | None) -> bool:
-    """True for ocean tiles only (not coast). Plot field is terrain_id."""
-    if not isinstance(plot, dict):
-        return False
-    terrain = plot.get("terrain_id")
-    if not isinstance(terrain, str):
-        return False
-    upper = terrain.upper()
-    return upper == "TERRAIN_OCEAN" or upper.endswith("OCEAN")
-
-
-def _plot_is_coast(plot: dict[str, Any] | None) -> bool:
-    """True for coast/shore tiles only (not ocean)."""
-    if not isinstance(plot, dict):
-        return False
-    terrain = plot.get("terrain_id")
-    if not isinstance(terrain, str):
-        return False
-    upper = terrain.upper()
-    return upper == "TERRAIN_COAST" or upper.endswith("COAST") or upper.endswith("SHORE")
-
-
-def _overlay_filled_hex(
-    canvas: Any,
-    corners: list[tuple[float, float]],
-    rgb: tuple[int, int, int],
-    alpha: float,
-) -> None:
-    """Alpha-composite a filled hex so terrain sprites stay visible under the tint."""
-    from PIL import Image, ImageDraw
-
-    if not corners:
-        return
-    xs = [point[0] for point in corners]
-    ys = [point[1] for point in corners]
-    ox = max(0, int(math.floor(min(xs))) - 1)
-    oy = max(0, int(math.floor(min(ys))) - 1)
-    right = min(canvas.width, int(math.ceil(max(xs))) + 1)
-    bottom = min(canvas.height, int(math.ceil(max(ys))) + 1)
-    width = max(1, right - ox)
-    height = max(1, bottom - oy)
-    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    local = [(x - ox, y - oy) for x, y in corners]
-    fill = rgb + (int(round(255 * max(0.0, min(1.0, alpha)))),)
-    ImageDraw.Draw(layer).polygon(local, fill=fill)
-    dest = canvas.crop((ox, oy, ox + width, oy + height))
-    dest.alpha_composite(layer)
-    canvas.paste(dest, (ox, oy))
 
 
 def _paste_strategic_hex(
@@ -589,10 +480,7 @@ def _paste_strategic_hex(
             if civ5_assets.assets_available():
                 paths = civ5_assets.strategic_layer_png_paths(plot)
                 if paths:
-                    return _paste_hex_sprite_layers(
-                        canvas, paths, cx, cy, hex_radius, dim_factor,
-                        prefer_civ5_sprites=True,
-                    )
+                    return _paste_hex_sprite_layers(canvas, paths, cx, cy, hex_radius, dim_factor)
         except ImportError:
             pass
         sprite_path = map_render._strategic_sprite_path(plot, prefer_civ5_sprites=True)
@@ -725,121 +613,9 @@ def _paste_ruins_marker(
     draw.ellipse((cx - r // 2, cy - r // 2, cx + r // 2, cy + r // 2), fill=outline)
 
 
-def _format_tile_yields(tile: dict[str, Any]) -> str | None:
-    yields = tile.get("yields")
-    if not isinstance(yields, dict):
-        return None
-    food = yields.get("food")
-    production = yields.get("production")
-    gold = yields.get("gold", yields.get("commerce"))
-    if not all(isinstance(value, (int, float)) for value in (food, production, gold)):
-        return None
-    return f"{int(food)}/{int(production)}/{int(gold)}"
-
-
-def _unit_legend_label(unit_type_id: str, foreign: bool) -> str:
-    name = unit_type_id.replace("UNIT_", "").replace("_", " ").strip().lower() or "unit"
-    return f"foreign {name}" if foreign else f"your {name}"
-
-
-def collect_civ5_viewport_icon_legend(
-    *,
-    tile_markers: dict[tuple[int, int], list[dict[str, Any]]],
-    plot_index: dict[tuple[int, int], dict[str, Any]],
-    viewport: dict[str, int],
-    snapshot: dict[str, Any],
-    include_yields: bool,
-) -> list[tuple[str, str]]:
-    """Icon slugs and labels for every marker type visible on this Civ5 map crop."""
-    entries: list[tuple[str, str]] = []
-    seen: set[str] = set()
-    player_id = str(snapshot.get("decision", {}).get("player_id", "PLAYER_0"))
-
-    def add(slug: str, label: str) -> None:
-        key = f"{slug}\0{label}"
-        if key in seen:
-            return
-        seen.add(key)
-        entries.append((slug, label))
-
-    own_city = False
-    own_capital = False
-    for markers in tile_markers.values():
-        for marker in markers:
-            kind = marker.get("kind")
-            if kind == "city":
-                owner = str(marker.get("owner_player_id") or player_id)
-                is_capital = bool(marker.get("is_capital"))
-                if owner == player_id:
-                    own_city = True
-                    if is_capital:
-                        own_capital = True
-                else:
-                    name = str(marker.get("name", "city"))
-                    add(map_icons.city_icon_slug(is_capital), f"{name} (other civ)")
-            elif kind == "stack":
-                add("UNIT_FLAG:UNIT_WARRIOR", "unit stack")
-            elif kind == "unit":
-                unit_type = str(marker.get("unit_type_id", "UNIT"))
-                foreign = bool(marker.get("foreign"))
-                add(f"UNIT_FLAG:{unit_type}", _unit_legend_label(unit_type, foreign))
-
-    if own_capital:
-        add(map_icons.city_icon_slug(True), "your capital")
-    elif own_city:
-        add(map_icons.city_icon_slug(False), "your city")
-
-    for slug, label in map_render.collect_civ6_viewport_resource_legend(plot_index, viewport):
-        add(slug, label)
-
-    x0, y0 = viewport["x0"], viewport["y0"]
-    vw, vh = viewport["width"], viewport["height"]
-    if any(
-        _plot_has_ruins(plot_index.get((x0 + vx, y0 + vy)))
-        for vy in range(vh)
-        for vx in range(vw)
-    ):
-        add("", "ancient ruins")
-
-    if include_yields:
-        add(YIELD_LEGEND_SLUGS["food"], "food yield (apple)")
-        add(YIELD_LEGEND_SLUGS["production"], "production yield (hammer)")
-        add(YIELD_LEGEND_SLUGS["gold"], "gold yield (coin)")
-
-    return entries
-
-
-def _paste_legend_icon_raster(canvas: Any, slug: str, x: int, y: int, size: int) -> bool:
-    if slug in YIELD_LEGEND_SLUGS.values():
-        from sidecar import civ5_assets
-
-        kind = next(key for key, value in YIELD_LEGEND_SLUGS.items() if value == slug)
-        path = civ5_assets.yield_icon_png(kind)
-        if path is None:
-            return False
-        from PIL import Image
-
-        try:
-            icon = Image.open(path).convert("RGBA")
-        except OSError:
-            return False
-        if icon.width != size or icon.height != size:
-            icon = icon.resize((size, size), Image.LANCZOS)
-        canvas.paste(icon, (x, y), icon)
-        return True
-    if slug:
-        map_render._paste_icon_raster(canvas, slug, x, y, size)
-        return True
-    return False
-
-
 def collect_settle_markers(snapshot: dict[str, Any]) -> list[tuple[int, int, str]]:
-    """Settle ranking overlays disabled; LLM reads the map."""
-    return []
-
-
-def collect_settle_yield_labels(snapshot: dict[str, Any]) -> list[tuple[int, int, str]]:
-    """Settle yield overlays disabled; LLM reads the map."""
+    """No ranked settle overlays (Civ5 policy): model reads the map itself."""
+    _ = snapshot
     return []
 
 
@@ -853,86 +629,6 @@ def _hex_coord_label_flags(vw: int, vh: int) -> tuple[bool, bool]:
     return False, True
 
 
-def _draw_hex_center_grid(
-    draw: Any,
-    *,
-    x0: int,
-    y0: int,
-    vw: int,
-    vh: int,
-    tile_px: int,
-    axis_gutter: int,
-    flip_y: bool,
-) -> None:
-    line_color = (200, 200, 200, map_render.GRID_CENTER_LINE_ALPHA)
-    for vx in range(vw):
-        wx = x0 + vx
-        points: list[tuple[float, float]] = []
-        for vy in range(vh):
-            cx, cy, _, _ = _odd_r_cell_center(
-                wx, y0 + vy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
-            )
-            points.append((cx, cy))
-        for index in range(len(points) - 1):
-            draw.line([points[index], points[index + 1]], fill=line_color, width=1)
-    for vy in range(vh):
-        points = []
-        for vx in range(vw):
-            wx = x0 + vx
-            cx, cy, _, _ = _odd_r_cell_center(
-                wx, y0 + vy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
-            )
-            points.append((cx, cy))
-        for index in range(len(points) - 1):
-            draw.line([points[index], points[index + 1]], fill=line_color, width=1)
-
-
-def _city_name_font_px(tile_px: int, zoomed_out: bool) -> int:
-    """Zoomed-out canvases downsample to 512px; bump font so labels stay readable."""
-    if zoomed_out:
-        return max(14, tile_px // 2)
-    return max(7, tile_px // 4)
-
-
-def _city_population(marker: dict[str, Any]) -> int:
-    try:
-        return int(marker.get("population") if marker.get("population") is not None else 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _nameplated_city_tiles(
-    tile_markers: dict[tuple[int, int], list[dict[str, Any]]],
-    *,
-    zoomed_out: bool,
-    max_per_owner: int = 2,
-) -> set[tuple[int, int]]:
-    """Which city tiles get a nameplate. Large maps: top 1-2 population per owner."""
-    cities: list[tuple[tuple[int, int], dict[str, Any]]] = []
-    for key, markers in tile_markers.items():
-        for marker in markers:
-            if marker.get("kind") == "city":
-                cities.append((key, marker))
-    if not zoomed_out:
-        return {key for key, _marker in cities}
-    by_owner: dict[str, list[tuple[tuple[int, int], dict[str, Any]]]] = {}
-    for key, marker in cities:
-        owner = str(marker.get("owner_player_id") or "")
-        by_owner.setdefault(owner, []).append((key, marker))
-    chosen: set[tuple[int, int]] = set()
-    for rows in by_owner.values():
-        rows.sort(
-            key=lambda item: (
-                -_city_population(item[1]),
-                0 if item[1].get("is_capital") else 1,
-                str(item[1].get("name") or ""),
-            )
-        )
-        for key, _marker in rows[:max_per_owner]:
-            chosen.add(key)
-    return chosen
-
-
 def _draw_hex_ring(
     draw: Any,
     corners: list[tuple[float, float]],
@@ -943,84 +639,6 @@ def _draw_hex_ring(
         return
     points = list(corners) + [corners[0]]
     draw.line(points, fill=map_render._rgb_tuple(color), width=max(1, width))
-
-
-
-def _yield_label_counts(label: str) -> tuple[int, int, int] | None:
-    parts = str(label).split("/")
-    if len(parts) != 3:
-        return None
-    try:
-        return int(parts[0]), int(parts[1]), int(parts[2])
-    except ValueError:
-        return None
-
-
-def _text_px(font: Any, text: str) -> int:
-    if hasattr(font, "getbbox"):
-        left, _top, right, _bottom = font.getbbox(text)
-        return max(1, right - left)
-    if hasattr(font, "getlength"):
-        return max(1, int(font.getlength(text)))
-    if hasattr(font, "getsize"):
-        return max(1, int(font.getsize(text)[0]))
-    return max(1, 6 * len(text))
-
-
-def _draw_settle_yield_label(
-    canvas: Any,
-    draw: Any,
-    cx: float,
-    cy: float,
-    label: str,
-    tile_px: int,
-    font: Any,
-) -> None:
-    """Apple/hammer/coin from YieldAtlas plus counts. Text fallback if icons missing."""
-    from PIL import Image
-
-    from sidecar import civ5_assets
-
-    counts = _yield_label_counts(label)
-    icon_px = max(9, min(16, tile_px // 6))
-    chips: list[tuple[Any | None, str]] = []
-    if counts is not None:
-        for kind, value in (("food", counts[0]), ("production", counts[1]), ("gold", counts[2])):
-            icon = None
-            path = civ5_assets.yield_icon_png(kind)
-            if path is not None:
-                try:
-                    icon = Image.open(path).convert("RGBA")
-                    if icon.width != icon_px or icon.height != icon_px:
-                        icon = icon.resize((icon_px, icon_px), Image.LANCZOS)
-                except OSError:
-                    icon = None
-            chips.append((icon, str(value)))
-    if chips and any(icon is not None for icon, _count in chips):
-        gap = max(1, tile_px // 40)
-        widths: list[int] = []
-        for icon, count in chips:
-            widths.append((icon_px if icon is not None else 0) + 1 + _text_px(font, count))
-        total = sum(widths) + gap * (len(chips) - 1)
-        x = int(cx - total / 2)
-        y_icon = int(cy - icon_px / 2)
-        for (icon, count), width in zip(chips, widths):
-            cursor = x
-            if icon is not None:
-                canvas.paste(icon, (cursor, y_icon), icon)
-                cursor += icon_px + 1
-            _draw_outlined_text(
-                draw,
-                (cursor, cy),
-                count,
-                font,
-                fill="#f8f8f8",
-                outline="#101010",
-                anchor="lm",
-            )
-            x += width + gap
-        return
-    _draw_outlined_text(draw, (cx, cy), label, font, fill="#f8f8f8", outline="#101010")
 
 
 def _draw_outlined_text(
@@ -1055,7 +673,7 @@ def render_civ6_map_png(
     pipeline.ensure_known_map_plots(snapshot)
     tile_px_base = map_render.resolve_map_tile_px()
     if prefer_civ5_sprites:
-        tile_px_base = max(tile_px_base, map_render.resolve_civ5_map_tile_px())
+        tile_px_base = max(tile_px_base, 64)
     plot_index = map_render.build_render_plot_index(snapshot)
     viewport_pad = 1 if prefer_civ5_sprites else map_render.DEFAULT_VIEWPORT_PAD
     min_viewport = 1 if prefer_civ5_sprites else map_render.MIN_VIEWPORT_TILES
@@ -1078,10 +696,10 @@ def render_civ6_map_png(
     vw, vh = viewport["width"], viewport["height"]
     tile_px = map_render._effective_tile_px(tile_px_base, vw, vh)
     if prefer_civ5_sprites:
-        cap = max(80, map_render.resolve_civ5_max_canvas_px() // max(vw, vh))
-        tile_px = max(80, min(tile_px_base, cap))
+        cap = max(52, map_render.resolve_max_canvas_px() // max(vw, vh))
+        tile_px = max(52, min(tile_px_base, cap))
     flip_y = prefer_civ5_sprites
-    show_legend = image_role in CIV5_LEGEND_ROLES if prefer_civ5_sprites else True
+    _ = image_role
     show_axis, show_tile_coords = _hex_coord_label_flags(vw, vh)
     axis_font = map_render._axis_label_font(tile_px, x0, y0, vw, vh)
     if prefer_civ5_sprites:
@@ -1116,89 +734,62 @@ def render_civ6_map_png(
         terrain_items, terrain_strip_h = map_render._layout_legend_items(
             terrain_legend, map_w, legend_font, legend_swatch, legend_font_pil,
         )
-    settle_markers = collect_settle_markers(snapshot)
-    if image_role in ("overview", "strategic"):
-        settle_yield_labels = []
-    else:
-        settle_yield_labels = collect_settle_yield_labels(snapshot)
     territory_labels = [
         (map_render._player_label(snapshot, player_id), map_render._player_color(player_id))
         for player_id in territory_owners
     ]
-    legend_wire_entries: list[dict[str, str]] = []
-    if show_legend:
-        territory_items, territory_strip_h = map_render._layout_legend_items(
-            territory_labels, map_w, legend_font, legend_swatch, legend_font_pil,
-        ) if territory_labels else ([], 0)
-        resource_legend = map_render.collect_civ6_viewport_resource_legend(plot_index, viewport)
-        has_ruins = any(_plot_has_ruins(plot) for plot in plot_index.values())
-        if prefer_civ5_sprites:
-            civ5_icon_legend = collect_civ5_viewport_icon_legend(
-                tile_markers=tile_markers,
-                plot_index=plot_index,
-                viewport=viewport,
-                snapshot=snapshot,
-                include_yields=image_role in {"viewport", "focus"},
-            )
-            marker_entries = civ5_icon_legend
-            icon_legend_rows = [(label, "#888888") for _slug, label in civ5_icon_legend]
-            icon_slugs_for_draw = [slug for slug, _label in civ5_icon_legend]
-            legend_wire_entries = [
-                {"symbol": slug or "●", "meaning": label}
-                for slug, label in civ5_icon_legend
-            ]
-        else:
-            marker_entries = map_icons.legend_marker_entries(tile_markers, snapshot)
-            icon_legend_rows = [(meaning, "#888888") for _, meaning in marker_entries]
-            icon_legend_rows.extend([(label, "#888888") for _, label in resource_legend])
-            if has_ruins:
-                icon_legend_rows.append(("ruins", "#e8c448"))
-            icon_slugs_for_draw = [slug for slug, _ in marker_entries]
-            icon_slugs_for_draw.extend(slug for slug, _ in resource_legend)
-            if has_ruins:
-                icon_slugs_for_draw.append("")
-        icon_items, icon_strip_h = map_render._layout_legend_items(
-            icon_legend_rows, map_w, legend_font, legend_icon, legend_font_pil,
-        ) if icon_legend_rows else ([], 0)
-        show_river_legend = map_render.viewport_has_river_edges(plot_index, viewport)
-        river_items, river_strip_h = map_render._layout_legend_items(
-            [(RIVER_LABEL, RIVER_STROKE)], map_w, legend_font, legend_swatch, legend_font_pil,
-        ) if show_river_legend else ([], 0)
-        settle_legend_rows: list[tuple[str, str]] = []
-        if any(role == "look" for _x, _y, role in settle_markers):
-            settle_legend_rows.append((SETTLE_LOOK_LABEL, SETTLE_LOOK_COLOR))
-        if any(role == "here" for _x, _y, role in settle_markers):
-            settle_legend_rows.append((SETTLE_HERE_LABEL, SETTLE_HERE_COLOR))
-        settle_items, settle_strip_h = map_render._layout_legend_items(
-            settle_legend_rows, map_w, legend_font, legend_swatch, legend_font_pil,
-        ) if settle_legend_rows else ([], 0)
-        viewport_header_h = legend_font + map_render.LEGEND_HEADER_GAP
-        legend_strip_h = viewport_header_h + terrain_strip_h + river_strip_h
-        if settle_items:
-            legend_strip_h += map_render.LEGEND_HEADER_GAP + settle_strip_h
-        if territory_items:
-            legend_strip_h += map_render.LEGEND_HEADER_GAP + territory_strip_h
-        if icon_items:
-            legend_strip_h += map_render.LEGEND_HEADER_GAP + icon_strip_h
-        legend_strip_h += 4
-    else:
+    territory_items, territory_strip_h = map_render._layout_legend_items(
+        territory_labels, map_w, legend_font, legend_swatch, legend_font_pil,
+    ) if territory_labels else ([], 0)
+    resource_legend = map_render.collect_civ6_viewport_resource_legend(plot_index, viewport)
+    has_ruins = any(_plot_has_ruins(plot) for plot in plot_index.values())
+    if prefer_civ5_sprites:
         marker_entries = []
-        resource_legend = []
-        territory_items, territory_strip_h = [], 0
-        icon_items, icon_strip_h = [], 0
-        icon_slugs_for_draw = []
-        river_items, river_strip_h = [], 0
-        settle_items, settle_strip_h = [], 0
-        legend_strip_h = 0
+    else:
+        marker_entries = map_icons.legend_marker_entries(tile_markers, snapshot)
+    icon_legend_rows = [(meaning, "#888888") for _, meaning in marker_entries]
+    icon_legend_rows.extend([(label, "#888888") for _, label in resource_legend])
+    if has_ruins:
+        icon_legend_rows.append(("ruins", "#e8c448"))
+    icon_items, icon_strip_h = map_render._layout_legend_items(
+        icon_legend_rows, map_w, legend_font, legend_icon, legend_font_pil,
+    ) if icon_legend_rows else ([], 0)
+    icon_slugs_for_draw = [slug for slug, _ in marker_entries]
+    if prefer_civ5_sprites:
+        icon_slugs_for_draw.extend("_" for _ in resource_legend)
+    else:
+        icon_slugs_for_draw.extend(slug for slug, _ in resource_legend)
+    if has_ruins:
+        icon_slugs_for_draw.append("")
+    show_river_legend = map_render.viewport_has_river_edges(plot_index, viewport)
+    river_items, river_strip_h = map_render._layout_legend_items(
+        [(RIVER_LABEL, RIVER_STROKE)], map_w, legend_font, legend_swatch, legend_font_pil,
+    ) if show_river_legend else ([], 0)
+    settle_markers = collect_settle_markers(snapshot)
+    settle_legend_rows: list[tuple[str, str]] = []
+    if any(role == "look" for _x, _y, role in settle_markers):
+        settle_legend_rows.append((SETTLE_LOOK_LABEL, SETTLE_LOOK_COLOR))
+    if any(role == "here" for _x, _y, role in settle_markers):
+        settle_legend_rows.append((SETTLE_HERE_LABEL, SETTLE_HERE_COLOR))
+    settle_items, settle_strip_h = map_render._layout_legend_items(
+        settle_legend_rows, map_w, legend_font, legend_swatch, legend_font_pil,
+    ) if settle_legend_rows else ([], 0)
+    viewport_header_h = legend_font + map_render.LEGEND_HEADER_GAP
+    legend_strip_h = viewport_header_h + terrain_strip_h + river_strip_h
+    if settle_items:
+        legend_strip_h += map_render.LEGEND_HEADER_GAP + settle_strip_h
+    if territory_items:
+        legend_strip_h += map_render.LEGEND_HEADER_GAP + territory_strip_h
+    if icon_items:
+        legend_strip_h += map_render.LEGEND_HEADER_GAP + icon_strip_h
+    legend_strip_h += 4
     total_h = map_h + legend_strip_h
 
     canvas = Image.new("RGBA", (map_w, total_h), map_render._rgb_tuple("#121218") + (255,))
     draw = ImageDraw.Draw(canvas)
     radius, _, _ = _hex_metrics(tile_px)
     hex_radius = radius
-    river_width = max(5, tile_px // 10) if prefer_civ5_sprites else max(4, tile_px // 8)
-    zoomed_out = (vw * vh) >= HEX_AXIS_ONLY_MIN_CELLS
-    nameplated_cities = _nameplated_city_tiles(tile_markers, zoomed_out=zoomed_out)
+    river_width = max(10, tile_px // 5) if prefer_civ5_sprites else max(4, tile_px // 8)
     rendered_tiles = 0
     river_edges_drawn = 0
 
@@ -1217,25 +808,10 @@ def render_civ6_map_png(
             )
             draw.text((cx_even, even_label_y), str(wx), fill="#9a9a9a", font=axis_label_font, anchor="mm")
             draw.text((cx_odd, odd_label_y), str(wx), fill="#d0d0d0", font=axis_label_font, anchor="mm")
-            draw.text(
-                (cx_even, map_h - even_label_y),
-                str(wx),
-                fill="#9a9a9a",
-                font=axis_label_font,
-                anchor="mm",
-            )
-            draw.text(
-                (cx_odd, map_h - odd_label_y),
-                str(wx),
-                fill="#d0d0d0",
-                font=axis_label_font,
-                anchor="mm",
-            )
         for vy in range(vh):
             wy = y0 + vy
             _, cy, _, _ = _odd_r_cell_center(x0, y0 + vy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
             draw.text((axis_gutter - 2, cy), str(wy), fill="#999999", font=axis_label_font, anchor="rm")
-            draw.text((map_w - axis_gutter + 2, cy), str(wy), fill="#999999", font=axis_label_font, anchor="lm")
 
     for vy in range(vh):
         wy = y0 + vy
@@ -1260,21 +836,6 @@ def render_civ6_map_png(
                     draw.polygon(corners, fill=map_render._rgb_tuple(fill), outline="#333333")
                 elif not prefer_civ5_sprites:
                     draw.polygon(corners, outline="#333333")
-                else:
-                    if _plot_is_ocean(plot):
-                        _overlay_filled_hex(
-                            canvas, corners, OCEAN_NAVY_RGB, CIV5_OCEAN_SPRITE_OVERLAY_ALPHA,
-                        )
-                    elif _plot_is_coast(plot):
-                        _overlay_filled_hex(
-                            canvas, corners, COAST_NAVY_RGB, CIV5_COAST_SPRITE_OVERLAY_ALPHA,
-                        )
-                    if territory_owner is not None:
-                        red, green, blue = map_render._hex_to_rgb(map_render._player_color(territory_owner))
-                        alpha = CIV5_TERRITORY_OVERLAY_ALPHA
-                        if plot is not None and plot.get("knowledge") == "remembered":
-                            alpha *= 0.6
-                        _overlay_filled_hex(canvas, corners, (red, green, blue), alpha)
                 _paste_resource_icon(canvas, plot, cx, cy, hex_radius, tile_px)
                 _paste_ruins_marker(canvas, plot, cx, cy, hex_radius)
                 if territory_owner is not None:
@@ -1300,17 +861,6 @@ def render_civ6_map_png(
             else:
                 draw.polygon(corners, fill=map_render._rgb_tuple(fill))
 
-    _draw_hex_center_grid(
-        draw,
-        x0=x0,
-        y0=y0,
-        vw=vw,
-        vh=vh,
-        tile_px=tile_px,
-        axis_gutter=axis_gutter,
-        flip_y=flip_y,
-    )
-
     if show_tile_coords:
         for vy in range(vh):
             wy = y0 + vy
@@ -1321,7 +871,7 @@ def render_civ6_map_png(
                 _draw_outlined_text(
                     draw,
                     (cx, cy + hex_radius * 0.52),
-                    f"({wx},{wy})",
+                    f"{wx},{wy}",
                     map_render._coord_label_font(coord_font),
                 )
 
@@ -1336,9 +886,7 @@ def render_civ6_map_png(
             for marker in cities:
                 slug = map_icons.city_icon_slug(bool(marker.get("is_capital")))
                 _paste_civ5_overlay(canvas, slug, cx, cy, tile_px, 0.62)
-                if (vx, vy) not in nameplated_cities:
-                    continue
-                name_font = map_render._load_bitmap_font(_city_name_font_px(tile_px, zoomed_out))
+                name_font = map_render._load_bitmap_font(max(7, tile_px // 4))
                 _draw_city_nameplate(
                     draw,
                     name_font,
@@ -1401,7 +949,6 @@ def render_civ6_map_png(
                     )
 
     settle_rings_drawn = 0
-    settle_yield_font = map_render._load_bitmap_font(max(9, tile_px // 8))
     for wx, wy, role in settle_markers:
         if wx < x0 or wy < y0 or wx >= x0 + vw or wy >= y0 + vh:
             continue
@@ -1409,15 +956,9 @@ def render_civ6_map_png(
         corners = _flat_top_hex_corners(cx, cy, hex_radius)
         if role == "look":
             _draw_hex_ring(draw, corners, SETTLE_LOOK_COLOR, max(3, tile_px // 7))
-            settle_rings_drawn += 1
-        elif role == "here":
+        else:
             _draw_hex_ring(draw, corners, SETTLE_HERE_COLOR, max(2, tile_px // 10))
-            settle_rings_drawn += 1
-    for wx, wy, label in settle_yield_labels:
-        if wx < x0 or wy < y0 or wx >= x0 + vw or wy >= y0 + vh:
-            continue
-        cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
-        _draw_settle_yield_label(canvas, draw, cx, cy, label, tile_px, settle_yield_font)
+        settle_rings_drawn += 1
 
     river_segments, river_edges_drawn = _collect_river_segments(
         plot_index, normalized, known_map, has_visibility_grid, viewport,
@@ -1426,28 +967,36 @@ def render_civ6_map_png(
     )
     _draw_river_network(draw, river_segments, river_width)
 
-    if show_legend:
-        draw.line((0, map_h, map_w, map_h), fill="#444444", width=1)
-        ly_header = map_h + 6
-        draw.text(
-            (4, ly_header),
-            "Legend — icons on this map"
-            if prefer_civ5_sprites
-            else f"viewport x0={x0} y0={y0} {vw}x{vh} flat-top odd-r hex",
-            fill="#cccccc",
-            font=font,
+    draw.line((0, map_h, map_w, map_h), fill="#444444", width=1)
+    ly_header = map_h + 6
+    draw.text(
+        (4, ly_header),
+        f"viewport x0={x0} y0={y0} {vw}x{vh} flat-top odd-r hex",
+        fill="#cccccc",
+        font=font,
+    )
+    legend_y = ly_header + viewport_header_h
+    for lx, ly_row, label, color in terrain_items:
+        row_y = legend_y + ly_row
+        draw.rectangle(
+            (lx, row_y - legend_swatch, lx + legend_swatch, row_y),
+            fill=map_render._rgb_tuple(color),
+            outline="#555555",
         )
-        legend_y = ly_header + viewport_header_h
-        for lx, ly_row, label, color in terrain_items:
-            row_y = legend_y + ly_row
-            draw.rectangle(
-                (lx, row_y - legend_swatch, lx + legend_swatch, row_y),
-                fill=map_render._rgb_tuple(color),
-                outline="#555555",
-            )
-            draw.text((lx + legend_swatch + 3, row_y), label, fill="#bbbbbb", font=font, anchor="ls")
-        legend_y += terrain_strip_h
-        for lx, ly_row, label, color in river_items:
+        draw.text((lx + legend_swatch + 3, row_y), label, fill="#bbbbbb", font=font, anchor="ls")
+    legend_y += terrain_strip_h
+    for lx, ly_row, label, color in river_items:
+        row_y = legend_y + ly_row
+        draw.line(
+            (lx, row_y - legend_swatch // 2, lx + legend_swatch, row_y - legend_swatch // 2),
+            fill=map_render._rgb_tuple(color),
+            width=max(2, legend_swatch // 3),
+        )
+        draw.text((lx + legend_swatch + 3, row_y), label, fill="#bbbbbb", font=font, anchor="ls")
+    legend_y += river_strip_h
+    if settle_items:
+        legend_y += map_render.LEGEND_HEADER_GAP
+        for lx, ly_row, label, color in settle_items:
             row_y = legend_y + ly_row
             draw.line(
                 (lx, row_y - legend_swatch // 2, lx + legend_swatch, row_y - legend_swatch // 2),
@@ -1455,48 +1004,40 @@ def render_civ6_map_png(
                 width=max(2, legend_swatch // 3),
             )
             draw.text((lx + legend_swatch + 3, row_y), label, fill="#bbbbbb", font=font, anchor="ls")
-        legend_y += river_strip_h
-        if settle_items:
-            legend_y += map_render.LEGEND_HEADER_GAP
-            for lx, ly_row, label, color in settle_items:
-                row_y = legend_y + ly_row
-                draw.line(
-                    (lx, row_y - legend_swatch // 2, lx + legend_swatch, row_y - legend_swatch // 2),
-                    fill=map_render._rgb_tuple(color),
-                    width=max(2, legend_swatch // 3),
+        legend_y += settle_strip_h
+    if territory_items:
+        legend_y += map_render.LEGEND_HEADER_GAP
+        for lx, ly_row, label, color in territory_items:
+            row_y = legend_y + ly_row
+            draw.rectangle(
+                (lx, row_y - legend_swatch, lx + legend_swatch, row_y),
+                fill=map_render._rgb_tuple(color),
+                outline="#555555",
+            )
+            draw.text((lx + legend_swatch + 3, row_y), label, fill="#bbbbbb", font=font, anchor="ls")
+        legend_y += territory_strip_h
+    if icon_items:
+        legend_y += map_render.LEGEND_HEADER_GAP
+        for (lx, ly_row, meaning, _), slug in zip(icon_items, icon_slugs_for_draw):
+            row_y = legend_y + ly_row
+            if slug:
+                map_render._paste_icon_raster(canvas, slug, lx, row_y - legend_icon, legend_icon)
+            else:
+                draw.ellipse(
+                    (lx, row_y - legend_icon, lx + legend_icon, row_y),
+                    fill=(232, 196, 72),
+                    outline=(90, 60, 10),
                 )
-                draw.text((lx + legend_swatch + 3, row_y), label, fill="#bbbbbb", font=font, anchor="ls")
-            legend_y += settle_strip_h
-        if territory_items:
-            legend_y += map_render.LEGEND_HEADER_GAP
-            for lx, ly_row, label, color in territory_items:
-                row_y = legend_y + ly_row
-                draw.rectangle(
-                    (lx, row_y - legend_swatch, lx + legend_swatch, row_y),
-                    fill=map_render._rgb_tuple(color),
-                    outline="#555555",
-                )
-                draw.text((lx + legend_swatch + 3, row_y), label, fill="#bbbbbb", font=font, anchor="ls")
-            legend_y += territory_strip_h
-        if icon_items:
-            legend_y += map_render.LEGEND_HEADER_GAP
-            for (lx, ly_row, meaning, _), slug in zip(icon_items, icon_slugs_for_draw):
-                row_y = legend_y + ly_row
-                if not _paste_legend_icon_raster(canvas, slug, lx, row_y - legend_icon, legend_icon):
-                    draw.ellipse(
-                        (lx, row_y - legend_icon, lx + legend_icon, row_y),
-                        fill=(232, 196, 72),
-                        outline=(90, 60, 10),
-                    )
-                draw.text((lx + legend_icon + 3, row_y), meaning, fill="#bbbbbb", font=legend_font_pil, anchor="ls")
-            legend_y += icon_strip_h
+            draw.text((lx + legend_icon + 3, row_y), meaning, fill="#bbbbbb", font=legend_font_pil, anchor="ls")
+        legend_y += icon_strip_h
 
-    model_size = target_size or map_render.resolve_model_image_size(civ5=prefer_civ5_sprites)
-    raw, mime = map_render.encode_model_image_bytes(canvas, target_size=model_size)
+    raw, mime = map_render.encode_model_image_bytes(canvas, target_size=target_size)
     digest = hashlib.sha256(raw).hexdigest()
     data_url = map_render.model_image_data_url(raw, mime)
+    model_size = target_size or map_render.MODEL_IMAGE_SIZE
     if path is not None:
-        map_render.atomic_write_bytes(path, raw)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw)
     return {
         "format": "png-hex-flat-top-v2",
         "mime_type": mime,
@@ -1517,10 +1058,8 @@ def render_civ6_map_png(
         "hex_layout": "odd-r-flat-top",
         "show_axis_labels": show_axis,
         "show_tile_coords": show_tile_coords,
-        "show_legend": show_legend,
         "legend_has_terrain": bool(terrain_items),
         "legend_has_markers": bool(marker_entries),
-        "legend": legend_wire_entries,
     }
 
 

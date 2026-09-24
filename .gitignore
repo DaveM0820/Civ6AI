@@ -6,6 +6,8 @@ logs/
 *.log
 map_images/
 **/map_images/
+memory/
+**/memory/
 
 # python
 __pycache__/
@@ -39,3 +41,8 @@ Thumbs.db
 
 # generated pending-apply session dumps
 mod/Civ6Ai/InGame/Civ6Ai_PendingApply_autotest_*.lua
+
+# third-party Civ5 Community Patch / Vox Populi reference (never commit)
+**/Community-Patch*/
+**/Vox Populi*/
+artifacts/cache/

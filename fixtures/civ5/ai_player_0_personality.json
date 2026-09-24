@@ -1,0 +1,6 @@
+{
+  "strategic_priorities": ["diplomacy", "expansion"],
+  "diplomacy_style": "active_trader",
+  "communication_tone": "formal",
+  "risk_tolerance": "moderate"
+}

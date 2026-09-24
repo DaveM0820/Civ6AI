@@ -1,0 +1,3378 @@
+{
+  "advciv": {
+    "default_unit_controller": "advciv",
+    "fallback_policy": "After you give your commands, AdvCiv (the base AI mod) runs movement, production, and improvements for anything you did not override.",
+    "recommendations": [
+      {
+        "affected_ids": [
+          "TECH_MINING"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "research",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_RESEARCH_32",
+        "summary": "Continue current research TECH_MINING"
+      },
+      {
+        "affected_ids": [
+          "COMMERCE_GOLD"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "commerce",
+        "proposed_command_ids": [
+          "CMD_set_commerce_COMMERCE_GOLD_PERCENT_0"
+        ],
+        "rationale_facts": [],
+        "recommendation_id": "REC_COMMERCE_GOLD_32",
+        "summary": "COMMERCE_GOLD allocation is 0 percent"
+      },
+      {
+        "affected_ids": [
+          "COMMERCE_RESEARCH"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "commerce",
+        "proposed_command_ids": [
+          "CMD_set_commerce_COMMERCE_RESEARCH_PERCENT_100"
+        ],
+        "rationale_facts": [],
+        "recommendation_id": "REC_COMMERCE_RESEARCH_32",
+        "summary": "COMMERCE_RESEARCH allocation is 100 percent"
+      },
+      {
+        "affected_ids": [
+          "COMMERCE_CULTURE"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "commerce",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_COMMERCE_CULTURE_32",
+        "summary": "COMMERCE_CULTURE allocation is 0 percent"
+      },
+      {
+        "affected_ids": [
+          "COMMERCE_ESPIONAGE"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "commerce",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_COMMERCE_ESPIONAGE_32",
+        "summary": "COMMERCE_ESPIONAGE allocation is 0 percent"
+      },
+      {
+        "affected_ids": [
+          "CITY_4_8192",
+          "UNIT_SETTLER"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "city_production",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_PRODUCTION_CITY_4_8192_32",
+        "summary": "CITY_4_8192 is producing UNIT_SETTLER"
+      },
+      {
+        "affected_ids": [
+          "CITY_4_16385",
+          "UNIT_LONGBOWMAN"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "city_production",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_PRODUCTION_CITY_4_16385_32",
+        "summary": "CITY_4_16385 is producing UNIT_LONGBOWMAN"
+      },
+      {
+        "affected_ids": [
+          "CIVICOPTION_GOVERNMENT",
+          "CIVIC_DESPOTISM"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "civic",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_CIVIC_CIVICOPTION_GOVERNMENT_32",
+        "summary": "Current civic CIVIC_DESPOTISM"
+      },
+      {
+        "affected_ids": [
+          "CIVICOPTION_LEGAL",
+          "CIVIC_BARBARISM"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "civic",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_CIVIC_CIVICOPTION_LEGAL_32",
+        "summary": "Current civic CIVIC_BARBARISM"
+      },
+      {
+        "affected_ids": [
+          "CIVICOPTION_LABOR",
+          "CIVIC_TRIBALISM"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "civic",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_CIVIC_CIVICOPTION_LABOR_32",
+        "summary": "Current civic CIVIC_TRIBALISM"
+      },
+      {
+        "affected_ids": [
+          "CIVICOPTION_ECONOMY",
+          "CIVIC_DECENTRALIZATION"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "civic",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_CIVIC_CIVICOPTION_ECONOMY_32",
+        "summary": "Current civic CIVIC_DECENTRALIZATION"
+      },
+      {
+        "affected_ids": [
+          "CIVICOPTION_RELIGION",
+          "CIVIC_PREHISTORIC_RELIGION"
+        ],
+        "execution_state": "applied_reversible",
+        "kind": "civic",
+        "proposed_command_ids": [],
+        "rationale_facts": [],
+        "recommendation_id": "REC_CIVIC_CIVICOPTION_RELIGION_32",
+        "summary": "Current civic CIVIC_PREHISTORIC_RELIGION"
+      }
+    ]
+  },
+  "decision": {
+    "phase": "strategic_decision",
+    "player_id": "PLAYER_4",
+    "reason": "turn_start",
+    "turn": 32,
+    "year": -2300
+  },
+  "diplomacy": {
+    "active_deals": [],
+    "available_proposals": [],
+    "legal_trade_inventory": [],
+    "pending_requests": [],
+    "private_inbox": [],
+    "relations": [
+      {
+        "player_id": "PLAYER_6",
+        "relation": {
+          "at_war": false,
+          "attitude_id": "ATTITUDE_4",
+          "attitude_value": 0,
+          "defensive_pact": false,
+          "met": true,
+          "open_borders": false,
+          "vassal": false
+        }
+      }
+    ]
+  },
+  "game": {
+    "calendar_id": "CALENDAR_DEFAULT",
+    "climate_id": "CLIMATE_TEMPERATE",
+    "difficulty_id": "HANDICAP_UNKNOWN",
+    "era_id": "ERA_ANCIENT",
+    "game_speed_id": "GAMESPEED_TURBO",
+    "map_height": 56,
+    "map_script": "Archipelago",
+    "map_width": 78,
+    "max_turns": 250,
+    "network_multiplayer": false,
+    "options": [
+      "GAMEOPTION_AGGRESSIVE_AI",
+      "GAMEOPTION_NO_EVENTS"
+    ],
+    "sea_level_id": "SEALEVEL_MEDIUM",
+    "start_era_id": "ERA_ANCIENT",
+    "victory_ids": [],
+    "world_size_id": "WORLDSIZE_STANDARD",
+    "wrap_x": false,
+    "wrap_y": false
+  },
+  "history": {
+    "accepted_decisions": [
+      {
+        "affected_ids": [
+          "CMD_unit_mission_UNIT_4_16385_MISSION_FORTIFY_INT_-1_INT_-1_NONE",
+          "CMD_unit_mission_UNIT_4_24578_MISSION_FORTIFY_INT_-1_INT_-1_NONE",
+          "CMD_unit_mission_UNIT_4_81927_MISSION_FORTIFY_INT_-1_INT_-1_NONE"
+        ],
+        "kind": "AI_DECISION",
+        "summary": "Fortify three idle Archers and put the Scout on Sentry duty to maintain the security of the American archipelago while our Galley continues production.",
+        "turn": 31
+      }
+    ],
+    "command_results": [],
+    "diplomacy_events": [],
+    "memory_summary": "Fortify three idle Archers and put the Scout on Sentry duty to maintain the security of the American archipelago while our Galley continues production.",
+    "public_events": [],
+    "thought_memory": [
+      {
+        "situation": "**Strategic Assessment and Command Generation**",
+        "strategy": "Alright, turn 10 as FDR. Let's see what we have. Washington has a population of 2 and is building a worker. I'm researching Agriculture, a solid starting tech.\n\nI'm looking for actionable commands. The list is rather... limited. I can change city production and focus, but unit movement and improvement seem absent.\n\nMy scout is at `31_6`. Its primary mission is exploration, but I don't see any explicit move commands. The two Archers are garrisoned in the city at `26_10`, and keeping them fortified seems prudent for now. This capital needs to be protected, so I won't move them. I need to get the worker doing something productive. It's at `24_9`, idle, and that's not good. I should improve the land around Washington if it can.\n\nNow, looking more closely at the legal commands for units, I see the possibilities are restrictive. It looks like the legal list *is* the command list. I can only issue posture commands: `MISSION_SKIP`, `MISSION_FORTIFY`, and `MISSION_SENTRY`. I can't build or move units.\n\nThe unit list, after some ID cross-referencing, is as follows:\n- Archer at `26_10` (x2)\n- Scout at `31_6`\n- Worker at `24_9`\n\nI'm getting an \"owned units need orders\" alert. So the worker *is* present in the legal commands.\n\nTherefore, the actions are:\n1.  **Archer**: `CMD_unit_mission_UNIT_4_16385_MISSION_FORTIFY_INT_-1_INT_-1_NONE` (keeping it fortified)\n2.  **Archer**: `CMD_unit_mission_UNIT_4_24578_MISSION_FORTIFY_INT_-1_INT_-1_NONE` (also fortified)\n3.  **Scout**: `CMD_unit_mission_UNIT_4_32771_MISSION_SENTRY_INT_-1_INT_-1_NONE` (Sentry)\n4.  **Washington**: Set to food growth to increase population `CMD_set_city_role_CITY_4_8192_ROLE_EMPHASIZE_FOOD`.\n\nThe city will continue to build a worker. I can change this later if need be. The scout can *Sentry* the east and keep watch. The archers will stay fortified. These are my New Deal commands. Let's see what happens.",
+        "turn": 10
+      },
+      {
+        "situation": "**My Immediate Strategic Assessment**",
+        "strategy": "Alright, let's take stock. Turn 17, and I'm looking at Washington. We're building an Archer, but honestly, we need a Worker far more right now. Infrastructure is key, especially on an archipelago map like this. Archers are fortified, which is good; they're in a defensive posture. Research is on Sailing, which makes sense given the terrain. We need to maintain this focus on Sailing since it helps tremendously with island navigation and expansion.\n\nSo, the play here is clear: **I need to switch production back to that Worker in Washington.** No need to overcomplicate things; we will keep those Archers fortified where they are. Maintaining the focus on food growth in Washington is the primary directive.\n\nHang on, let me just check the legal list to ensure I can make these moves directly. Aha! Looks like the code allows `CMD_set_city_production_CITY_4_8192_TRAIN_UNIT_WORKER`, which is exactly what I needed. Additionally, I see that I can definitively direct the Archers to remain fortified. Excellent! No need to overthink it; this seems straightforward. Let\u2019s get that Worker cranking!",
+        "turn": 17
+      },
+      {
+        "situation": "**Turn 18: FDR's Strategic Assessment**",
+        "strategy": "Okay, here's the situation. Still playing as FDR, and we're on turn 18. Washington has a population of 3. We're researching Sailing, and we're 18/53 progress away from completing it. Production is set to a Worker, which is exactly what I want. We have two Archers sitting at PLOT_26_10 that need orders. And... we've got Kublai Khan (PLAYER_6) detected as a rival.\n\nMy strategy here is pretty straightforward. First, I need to get those Archers fortified. Defense is key, especially early on. Second, keep that Worker cranking out. Infrastructure is going to be crucial for long-term growth. Given that Kublai Khan is nearby, I should consider early diplomacy. We're playing as a diplomat, so I'll establish a trade posture with the neighbor. Finally, Washington needs to emphasize food. I *think* I set that already, but I'll double-check to be sure. It's just smart practice.\n\nSo, here's what I'm going to do:\n\n*   Issue fortify orders to both Archers with the commands: `CMD_unit_mission_UNIT_4_16385_MISSION_FORTIFY_INT_-1_INT_-1_NONE` and `CMD_unit_mission_UNIT_4_24578_MISSION_FORTIFY_INT_-1_INT_-1_NONE`.\n*   Establish a trade posture with Kublai Khan using: `CMD_set_diplomacy_posture_PLAYER_6_POSTURE_TRADE`.\n*   And finally, just to be absolutely certain, I'll set Washington's city role to emphasize food again with: `CMD_set_city_role_CITY_4_8192_ROLE_EMPHASIZE_FOOD`.\n\nThis seems like a solid plan. Now, let's execute.",
+        "turn": 18
+      },
+      {
+        "situation": "**My Turn as FDR: A Strategic Assessment**",
+        "strategy": "Alright, let's see what's on the docket for Turn 19. First things first, gotta keep that research humming along \u2013 sailing is at 32/53, so we'll keep that focus. Washington, my capital, is building a worker; we need to grow our infrastructure to support the burgeoning American spirit. It's a population of 3 and we need more!\n\nI have a couple of archers needing attention near 26_10 and a scout exploring at 20_9. The ever-present Kublai Khan, that old rival, is still out there. I've already set my diplomatic posture with him, but that \"units need orders\" alert is bugging me. I suspect the archers are the source of this \u2013 they're just sitting there, not doing anything. Looks like the game wants me to acknowledge them.\n\nMy strategy? Fortify those archers! Keep the home defense strong. The worker production in Washington is already set, so we can keep building that important workforce. The scout is doing its job; no need to micromanage it right now. Though it seems like my unit commands are quite limited this time. I only see posture options like fortify, sentry and skip; no moving units. Makes the choice clear though: I will just repeat the fortify commands to clear the alert. Washington will continue with worker production. The city's role is set to emphasize food, so we will remain focused on growth. The trade posture with Kublai Khan is set, so no need to adjust that at this time.\n\nThe plan is this: fortify Archer 1 and Archer 2. \"The strength of America lies in her people and her preparation. We remain ready for anything, but committed to building a better future.\" Confidence, growth, diplomacy \u2013 that's the FDR way! This plan is in line with my overall strategy, and the commands are legal. Let's get these orders executed and keep America moving forward.",
+        "turn": 19
+      },
+      {
+        "situation": "**FDR's Turn 24: A Strategic Review**",
+        "strategy": "Alright, let's get down to brass tacks. The user wants me to channel FDR in this Civilization IV scenario.  I've got the lay of the land, the current game state, and a clear understanding of the legal commands at my disposal. This is turn 24, and the situation demands decisive action.\n\nFirst, the facts: Archipelago map, which means expansion is going to be a naval affair. I'm leading the USA, holding Washington (`CITY_4_8192`), population 5, currently cranking out a `UNIT_SETTLER` \u2013 excellent, that's precisely what we need! I have a decent workforce (four `UNIT_WORKER`s) scattered about, but three military units are sitting idle, screaming for orders. I\u2019m also up against Kublai Khan (`PLAYER_6`), so security is paramount. Tech-wise, we're researching Construction.\n\nMy strategy? Simple: expansion and defense. This archipelago setting screams for naval dominance, so that Settler is crucial. Those idle units need to be addressed immediately. I can't afford to leave our borders vulnerable.  I've got a lot of archers at my disposal, which is good.\n\nSo, let's break it down into actionable commands:\n\n1.  **Prioritize Defense:**  I need to secure the capital. I'll fortify my `UNIT_ARCHER`s at `PLOT_26_10` (x2) and the `UNIT_ARCHER` at `PLOT_27_8`. This is non-negotiable.\n\n2.  **Order the Units:** I've identified the three units that are flagging as needing orders. Based on the legal commands I have, I am confident in fortifying these units. That will make me feel a lot better.\n\n3.  **Command Execution:**  I've confirmed my commands, ensuring that I am working within the bounds of the provided data.\n    *   Command 1: `CMD_unit_mission_UNIT_4_16385_MISSION_FORTIFY_INT_-1_INT_-1_NONE` (Fortifies one archer, assuming `UNIT_4_16385`)\n    *   Command 2: `CMD_unit_mission_UNIT_4_24578_MISSION_FORTIFY_INT_-1_INT_-1_NONE` (Fortifies another archer, assuming `UNIT_4_24578`)\n    *   Command 3: `CMD_unit_mission_UNIT_4_65541_MISSION_SKIP_INT_-1_INT_-1_NONE` (Skips the idle alert on the third unit. `UNIT_4_65541`)\n\n4. **Communicate the Plan**:  I must convey to the user that I have a clear plan. My message is: \"The path forward is clear: we build, we expand, and we protect our sovereignty. Prosperity requires order.\"\n\nThis turn is about laying the groundwork. I'm focusing on securing the homeland and preparing for the inevitable clash of civilizations. Fortification and expansion are the name of the game. I think I've got a pretty good handle on things here. Let's get to it!",
+        "turn": 24
+      },
+      {
+        "situation": "**My Strategy for Turn 25: Building a Strong America**",
+        "strategy": "Alright, here's the situation. It's Turn 25 in this\u2026 game, and I'm playing as FDR, steering America through this early stage. Washington is diligently working on that essential Settler, the foundation for our future expansion. The archipelago map presents a unique challenge and opportunity for us to become a global leader, building a strong \"New Deal\" style domestic strength.\n\nI have eight units at my disposal, a decent starting force. Four are workers, tirelessly building our nation. The other four are military units, primarily archers and scouts to protect the home front. Currently, three of those units are idle, awaiting my orders. That won't do! A strong nation is a *defended* nation.\n\nMy primary focus remains expansion \u2013 that Settler is crucial for securing new territories. But, a wise leader never neglects defense, even as he builds. I need to solidify our home base. Thus, I need to focus on securing what we already have.\n\nLooking at the options, my next move is clear. I will fortify those three idle units immediately. I see the legal commands: `CMD_unit_mission_UNIT_4_16385_MISSION_FORTIFY_INT_-1_INT_-1_NONE`, `CMD_unit_mission_UNIT_4_24578_MISSION_FORTIFY_INT_-1_INT_-1_NONE`, and `CMD_unit_mission_UNIT_4_65541_MISSION_SKIP_INT_-1_INT_-1_NONE` (or SLEEP, but SKIP/FORTIFY is safer). I need to ensure the defense of Washington, and by extension, the security of the nation.\n\nThese units will be secure and ready to respond. This is an era where we can achieve the best things in a global community.\n\nThe previous turn's summary was correct: \"Continue production of the Settler to expand our influence across these islands, while solidifying our defensive posture by fortifying idle units to safeguard the growth of Washington.\" And I'm going to make it happen. I will command these units to fortify their positions, guarding our precious Washington and its growth.\n\nSo, in summary:\n\n*   **Production:** Continue building that Settler; expansion is key to our future.\n*   **Defense:** Fortify those idle units. A strong America is a secure America!\n\nAnd I, your leader, FDR, have full confidence in our ability to build a strong nation, on a solid foundation, for the good of all Americans.",
+        "turn": 25
+      },
+      {
+        "situation": "**FDR's Archipelago Turn 26: A Naval Pivot**",
+        "strategy": "Alright, let's assess the situation. I'm playing as FDR on this archipelago map in Civilization IV, aiming for a win while staying true to my persona: diplomatic, New Deal-focused, but ready for defense.\n\nI see that Washington, my capital, has unexpectedly switched production from a Settler to a Barracks. A Barracks! While I'm always open to strengthening our defenses, expansion is key in this game, especially with an island focus. *Wait, this change wasn't deliberate, I didn't order this change to production*.\n\nI have to check the constraints. The legal commands list doesn't show a Settler as an available option to build! It appears I can't just build a new Settler right now, no matter what my previous plan was. Hmm, adaptation is the name of the game. Since I'm on an archipelago map, a Galley is the best bet to begin naval expansion and exploration; this is a perfectly FDR-esque decision. I'll switch production to a Galley right away, essential for exploring these islands, which is really on-brand for me.\n\nLooking at my units, I have five needing orders. I have Archers, Workers, and a Settler. The Settler's at plot 26_10... so it's not idle, it's just *there*! I'll hold it in place for now, since it can't move until I have a Galley.\n\nResearch is on Writing, good. And Kublai Khan, that mischievous character, is proving to be a rival.\n\n**Here's the plan:**\n\n1.  **City Production:** The most important thing, I'll switch Washington's production from Barracks to a Galley. This will kickstart naval expansion and exploration.\n2.  **Unit Orders:** I have three Archers. I'll fortify those Archers to keep our capital secure. The Workers are likely automated, or just idling. I'll skip their actions for now. I'll assign orders as needed in the future, if possible. I will fortify all units that need it, assuming the legal moves are correct (and, it looks like they are).\n\nI need to confirm the IDs on these units. Aha! I can see the legal mission commands. I'm going to quickly get those Archers in place, fortifying them at `26_10` to defend Washington. No point in risking anything. The idle units can't take on action until the Galley is ready, so I'll skip those as well.\n\nI had intended to continue the Settler production, but the game has made it clear that I can't! Adapt! So I'll just get the Galleys going!",
+        "turn": 26
+      },
+      {
+        "situation": "**FDR's Archipelago Strategy: Turn 27**",
+        "strategy": "Alright, let's take stock. Playing as FDR on this Archipelago map in Civilization IV, it's turn 27. Washington is churning out a Galley, good. First, I need to address these alerts; looks like a few units need attention. Five, to be exact. Let's see... the Archer at 4_16385 and another at 4_24578 can both fortify, which is sensible given our current position. The Scout, unit 4_90120, can MOVE_TO several plots, and the Settler, 4_73734, can Skip or Sleep.\n\nMy strategic goals remain: get that Settler onto the sea eventually, but for now, it's safer near the capital. We're a nation that grows; the \"New Deal\" is about domestic prosperity. This scout at 30_16... yes, let's have it continue exploring. I'll direct it toward 28_14. I need to know this archipelago. The Archers at 26_10 and 26_11 need to keep things secure or stay near the Settler. We're not going to be intimidated; we'll fortify our positions.\n\nNow, let's solidify this. I'll fortify those two Archers. The Scout will move toward 28_14. And the Settler, it needs to stay put for now.\n\nWait, let's double-check the unit IDs to ensure I'm not giving a Scout a Fortify order. Okay, unit.WORKER.plot = PLOT_26_10, unit.ARCHER.plot = PLOT_26_10, unit.ARCHER.plot = PLOT_26_10, unit.SCOUT.plot = PLOT_30_16, unit.WORKER.plot = PLOT_26_10, unit.WORKER.plot = PLOT_26_10, unit.WORKER.plot = PLOT_26_10, unit.ARCHER.plot = PLOT_26_11, unit.SETTLER.plot = PLOT_26_11, and unit.SCOUT.plot = PLOT_29_13. That confirms my thoughts.\n\nSo, the plan is locked: Fortify the archers and move the scout, keep the Settler in reserve. This aligns with our overall expansion strategy: we fortify our defenses to ensure our domestic growth isn't jeopardized. We scout the surroundings, making informed decisions on where to go next. Galley production continues to ensure our maritime dominance.\n\nLet's summarize this: \"We are expanding our horizons, one discovery at a time. The sea beckons, and we shall answer with purpose.\" And, \"A secure nation is a prosperous nation. We fortify our positions to guard the promise of our future.\"\n\nOkay, let's get those commands in: `CMD_unit_mission_UNIT_4_16385_MISSION_FORTIFY_INT_-1_INT_-1_NONE` (Archer), `CMD_unit_mission_UNIT_4_24578_MISSION_FORTIFY_INT_-1_INT_-1_NONE` (Archer), and `CMD_unit_mission_UNIT_4_90120_MISSION_MOVE_TO_INT_28_INT_14_PLOT_28_14` (Scout). I'll double-check that command to ensure it's still legal. Yes, `CMD_unit_mission_UNIT_4_90120_MISSION_MOVE_TO_INT_28_INT_14_PLOT_28_14` is legal, excellent. The alert says 5 units need orders so I will fortify those two archers and move the scout. I'll skip the Settler and sleep the workers, as they may be stuck, and skipping/sleeping means they'll be safe.\n\nFinal Orders:\n1.  Fortify Archer (4_16385)\n2.  Fortify Archer (4_24578)\n3.  Move Scout (4_90120) to 28_14\n4.  Skip Settler (4_73734)",
+        "turn": 27
+      },
+      {
+        "situation": "**Initial Assessment and Problem Definition**",
+        "strategy": "Okay, so the user wants to jump into a game of Civilization IV as FDR, which is a fun choice. My task is to act as their strategic decision-maker, and I have access to the game state to do so. The immediate issue, as I understand it, is that I'm on Turn 29, but it appears to be a *very* early game in terms of calendar year (-2600!). That's a bit jarring. Further complicating matters, and presenting the first concrete decision I need to address, is that I see a military alert: \"3 owned units need orders\". This immediately takes priority. I have to figure out what those units are and get them moving.",
+        "turn": 29
+      },
+      {
+        "situation": "**Civilization IV Turn 29: Immediate Actions**",
+        "strategy": "Okay, here's the situation. I'm playing as FDR in Civilization IV, and it's turn 29. My economy is *slightly* in the red, running at -2 gold per turn, which is manageable but definitely needs attention. I've got four units that need orders, which is what's prompting this review.\n\nLooking at the unit list, there are two archers at 26_10, another at 24_13, and a scout at 27_16. The game alerted me to four units needing orders, and the unit list verifies that. My available commands center around fortifying these specific units.\n\nStrategically, I'm thinking of fortifying those archers to shore up defense. The scout is best employed as a sentry, expanding my vision. I also have a Galley in production; naval exploration is a priority.\n\nNow, that negative income is a concern. Research is at 100%, and I don't want to mess with that *yet*. I have about 40 gold left, so I'm not in crisis mode, but definitely need to keep an eye on it. The command list looks correct.\n\nTherefore, I'll execute the orders, which is my immediate priority. The commands are: Fortify each Archer: Archer 4_16385, Archer 4_24578, Archer 4_81927. The Scout (4_106506) will be set to Sentry.\n\nThe commands are legal, so I'll execute them and see what develops next. I had considered setting a diplomatic posture with Kublai Khan, but I don't see the specific command to do that this turn, so I'll stick to unit orders and keep an eye on the diplomatic screen next turn.",
+        "turn": 31
+      }
+    ]
+  },
+  "known_map": {
+    "areas": [
+      {
+        "area_id": "AREA_1998848",
+        "revealed_plot_count": 0,
+        "water": true
+      },
+      {
+        "area_id": "AREA_2048006",
+        "revealed_plot_count": 0,
+        "water": false
+      },
+      {
+        "area_id": "AREA_2064392",
+        "revealed_plot_count": 0,
+        "water": false
+      }
+    ],
+    "format": "plot-grid-v1",
+    "frontiers": [
+      {
+        "adjacent_area_ids": [
+          "AREA_1998848"
+        ],
+        "frontier_id": "FRONTIER_AREA_1998848",
+        "plot_ids": []
+      }
+    ],
+    "image": {
+      "archive_path": "C:\\Users\\dmitc\\OneDrive\\Documents\\My Games\\beyond the sword\\civ4ai-autotest\\map_images\\seed-045cdccc-045cdccc\\PLAYER_4_turn_000032.map.png",
+      "attached": true,
+      "format": "png-grid-v1",
+      "height": 56,
+      "known_plot_tiles": 13,
+      "label_ids": [
+        "CITY_4_8192",
+        "CITY_4_16385"
+      ],
+      "legend": [
+        {
+          "meaning": "unrevealed fog",
+          "symbol": "?"
+        },
+        {
+          "meaning": "your city",
+          "symbol": "yellow"
+        },
+        {
+          "meaning": "your unit",
+          "symbol": "cyan"
+        },
+        {
+          "meaning": "foreign unit",
+          "symbol": "red"
+        },
+        {
+          "meaning": "unit stack",
+          "symbol": "green"
+        }
+      ],
+      "png_bytes": 637,
+      "sha256": "22b2203cf376605d1ad51fcf0d95b9d83ddf19dc490f75c775abc36553736c45",
+      "width": 78
+    },
+    "plots": [
+      {
+        "area_id": "AREA_0",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_24_9",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 24,
+        "y": 9,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_24_10",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 24,
+        "y": 10,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_24_11",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 24,
+        "y": 11,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": "CITY_4_16385",
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_24_13",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 24,
+        "y": 13,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_25_9",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 25,
+        "y": 9,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_25_13",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 25,
+        "y": 13,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_26_9",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 26,
+        "y": 9,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": "CITY_4_8192",
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_26_10",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 26,
+        "y": 10,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_27_10",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 27,
+        "y": 10,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_27_16",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 27,
+        "y": 16,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_28_11",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 28,
+        "y": 11,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_29_12",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 29,
+        "y": 12,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      },
+      {
+        "area_id": "AREA_0",
+        "city_id": null,
+        "defense_percent": 0,
+        "feature_id": null,
+        "fresh_water": false,
+        "hills": false,
+        "improvement_id": null,
+        "knowledge": "visible",
+        "last_seen_turn": 32,
+        "peak": false,
+        "plot_id": "PLOT_29_13",
+        "resource_id": null,
+        "revealed_owner_id": null,
+        "river_edges": [],
+        "route_id": null,
+        "terrain_id": "TERRAIN_GRASS",
+        "visible_stack_ids": [],
+        "water": false,
+        "worked_by_city_id": null,
+        "x": 29,
+        "y": 13,
+        "yields": {
+          "commerce": 0,
+          "food": 0,
+          "production": 0
+        }
+      }
+    ],
+    "visibility_mode": "player_visible",
+    "visible_stacks": [
+      {
+        "average_health_percent": 100,
+        "movement_ready": true,
+        "owner_player_id": "PLAYER_4",
+        "plot_id": "PLOT_24_13",
+        "stack_id": "STACK_24_13_4",
+        "type_mix_ids": [
+          "UNIT_ARCHER"
+        ],
+        "unit_count": 1,
+        "visible_strength": 2
+      },
+      {
+        "average_health_percent": 100,
+        "movement_ready": false,
+        "owner_player_id": "PLAYER_4",
+        "plot_id": "PLOT_25_9",
+        "stack_id": "STACK_25_9_4",
+        "type_mix_ids": [
+          "UNIT_WORKER"
+        ],
+        "unit_count": 1,
+        "visible_strength": 0
+      },
+      {
+        "average_health_percent": 100,
+        "movement_ready": true,
+        "owner_player_id": "PLAYER_4",
+        "plot_id": "PLOT_26_10",
+        "stack_id": "STACK_26_10_4",
+        "type_mix_ids": [
+          "UNIT_ARCHER"
+        ],
+        "unit_count": 3,
+        "visible_strength": 6
+      },
+      {
+        "average_health_percent": 100,
+        "movement_ready": false,
+        "owner_player_id": "PLAYER_4",
+        "plot_id": "PLOT_26_9",
+        "stack_id": "STACK_26_9_4",
+        "type_mix_ids": [
+          "UNIT_WORKER"
+        ],
+        "unit_count": 3,
+        "visible_strength": 0
+      },
+      {
+        "average_health_percent": 100,
+        "movement_ready": false,
+        "owner_player_id": "PLAYER_4",
+        "plot_id": "PLOT_27_16",
+        "stack_id": "STACK_27_16_4",
+        "type_mix_ids": [
+          "UNIT_SCOUT"
+        ],
+        "unit_count": 1,
+        "visible_strength": 1
+      },
+      {
+        "average_health_percent": 100,
+        "movement_ready": false,
+        "owner_player_id": "PLAYER_4",
+        "plot_id": "PLOT_29_12",
+        "stack_id": "STACK_29_12_4",
+        "type_mix_ids": [
+          "UNIT_GALLEY"
+        ],
+        "unit_count": 1,
+        "visible_strength": 2
+      },
+      {
+        "average_health_percent": 100,
+        "movement_ready": false,
+        "owner_player_id": "PLAYER_4",
+        "plot_id": "PLOT_29_13",
+        "stack_id": "STACK_29_13_4",
+        "type_mix_ids": [
+          "UNIT_SCOUT"
+        ],
+        "unit_count": 1,
+        "visible_strength": 1
+      }
+    ]
+  },
+  "known_other_cities": [
+    {
+      "area_id": "AREA_2064392",
+      "city_id": "CITY_4_8192",
+      "is_capital": true,
+      "knowledge": "visible",
+      "last_seen_turn": 32,
+      "name": "CITY_4_8192",
+      "owner_player_id": "PLAYER_4",
+      "plot_id": "PLOT_26_10",
+      "population": 7,
+      "visible_defense": null
+    },
+    {
+      "area_id": "AREA_2064392",
+      "city_id": "CITY_4_16385",
+      "is_capital": false,
+      "knowledge": "visible",
+      "last_seen_turn": 32,
+      "name": "CITY_4_16385",
+      "owner_player_id": "PLAYER_4",
+      "plot_id": "PLOT_24_13",
+      "population": 1,
+      "visible_defense": null
+    }
+  ],
+  "known_players": [
+    {
+      "civilization_id": "CIVILIZATION_MONGOL",
+      "known_capital_city_id": null,
+      "known_civic_ids": [],
+      "known_religion_id": null,
+      "known_tech_ids": [],
+      "land": 35,
+      "leader_id": "LEADER_KUBLAI_KHAN",
+      "player_id": "PLAYER_6",
+      "population": 8,
+      "power": 41,
+      "relation": {
+        "at_war": false,
+        "attitude_id": "ATTITUDE_4",
+        "attitude_value": 0,
+        "defensive_pact": false,
+        "met": true,
+        "open_borders": false,
+        "vassal": false
+      },
+      "score": 162,
+      "team_id": "TEAM_6"
+    }
+  ],
+  "legal_commands": [
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_0",
+        "TASK_CLEAR_ORDERS"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CLEAR_ORDERS_INT_0_INT_0",
+      "description": "Host-approved clear_queue",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CLEAR_ORDERS"
+      },
+      "kind": "clear_queue",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_0",
+        "INT_1",
+        "TASK_SET_AUTOMATED_CITIZENS"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_SET_AUTOMATED_CITIZENS_INT_0_INT_1",
+      "description": "Host-approved set_citizen_automation",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_1",
+        "task_id": "TASK_SET_AUTOMATED_CITIZENS"
+      },
+      "kind": "set_citizen_automation",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_0",
+        "INT_1",
+        "TASK_SET_AUTOMATED_PRODUCTION"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_SET_AUTOMATED_PRODUCTION_INT_0_INT_1",
+      "description": "Host-approved set_production_automation",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_1",
+        "task_id": "TASK_SET_AUTOMATED_PRODUCTION"
+      },
+      "kind": "set_production_automation",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_0",
+        "TASK_CLEAR_RALLY_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CLEAR_RALLY_PLOT_INT_0_INT_0",
+      "description": "Host-approved clear_rally_point",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CLEAR_RALLY_PLOT"
+      },
+      "kind": "clear_rally_point",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_0",
+        "INT_1",
+        "TASK_CHANGE_SPECIALIST"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_SPECIALIST_INT_0_INT_1",
+      "description": "Host-approved change_specialist",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_1",
+        "task_id": "TASK_CHANGE_SPECIALIST"
+      },
+      "kind": "change_specialist",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_0_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_1",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_1_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_1",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_2",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_2_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_2",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_3",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_3_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_3",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_4",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_4_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_4",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_5",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_5_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_5",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_6",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_6_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_6",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_7",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_7_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_7",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_8",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_8_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_8",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_9",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_9_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_9",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_10",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_10_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_10",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_11",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_11_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_11",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_12",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_12_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_12",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_13",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_13_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_13",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_14",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_14_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_14",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_15",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_15_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_15",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_16",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_16_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_16",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_17",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_17_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_17",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_18",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_18_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_18",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_19",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_CHANGE_WORKING_PLOT_INT_19_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_19",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "INT_0",
+        "TASK_DISBAND"
+      ],
+      "command_id": "CMD_city_task_CITY_4_8192_TASK_DISBAND_INT_0_INT_0",
+      "description": "Host-approved disband_city",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_DISBAND"
+      },
+      "kind": "disband_city",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_0",
+        "TASK_CLEAR_ORDERS"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CLEAR_ORDERS_INT_0_INT_0",
+      "description": "Host-approved clear_queue",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CLEAR_ORDERS"
+      },
+      "kind": "clear_queue",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_0",
+        "INT_1",
+        "TASK_SET_AUTOMATED_CITIZENS"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_SET_AUTOMATED_CITIZENS_INT_0_INT_1",
+      "description": "Host-approved set_citizen_automation",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_0",
+        "data2_id": "INT_1",
+        "task_id": "TASK_SET_AUTOMATED_CITIZENS"
+      },
+      "kind": "set_citizen_automation",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_0",
+        "INT_1",
+        "TASK_SET_AUTOMATED_PRODUCTION"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_SET_AUTOMATED_PRODUCTION_INT_0_INT_1",
+      "description": "Host-approved set_production_automation",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_0",
+        "data2_id": "INT_1",
+        "task_id": "TASK_SET_AUTOMATED_PRODUCTION"
+      },
+      "kind": "set_production_automation",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_0",
+        "TASK_CLEAR_RALLY_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CLEAR_RALLY_PLOT_INT_0_INT_0",
+      "description": "Host-approved clear_rally_point",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CLEAR_RALLY_PLOT"
+      },
+      "kind": "clear_rally_point",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_0",
+        "INT_1",
+        "TASK_CHANGE_SPECIALIST"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CHANGE_SPECIALIST_INT_0_INT_1",
+      "description": "Host-approved change_specialist",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_0",
+        "data2_id": "INT_1",
+        "task_id": "TASK_CHANGE_SPECIALIST"
+      },
+      "kind": "change_specialist",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CHANGE_WORKING_PLOT_INT_0_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_1",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CHANGE_WORKING_PLOT_INT_1_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_1",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_2",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CHANGE_WORKING_PLOT_INT_2_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_2",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_3",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CHANGE_WORKING_PLOT_INT_3_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_3",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_5",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CHANGE_WORKING_PLOT_INT_5_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_5",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_6",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CHANGE_WORKING_PLOT_INT_6_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_6",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_7",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CHANGE_WORKING_PLOT_INT_7_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_7",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_8",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CHANGE_WORKING_PLOT_INT_8_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_8",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_16",
+        "INT_0",
+        "TASK_CHANGE_WORKING_PLOT"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_CHANGE_WORKING_PLOT_INT_16_INT_0",
+      "description": "Host-approved change_worked_plot",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_16",
+        "data2_id": "INT_0",
+        "task_id": "TASK_CHANGE_WORKING_PLOT"
+      },
+      "kind": "change_worked_plot",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_0",
+        "TASK_RAZE"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_RAZE_INT_0_INT_0",
+      "description": "Host-approved raze_city",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_RAZE"
+      },
+      "kind": "raze_city",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "INT_0",
+        "TASK_DISBAND"
+      ],
+      "command_id": "CMD_city_task_CITY_4_16385_TASK_DISBAND_INT_0_INT_0",
+      "description": "Host-approved disband_city",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "data1_id": "INT_0",
+        "data2_id": "INT_0",
+        "task_id": "TASK_DISBAND"
+      },
+      "kind": "disband_city",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "PROPOSAL_OPEN_BORDERS_6",
+        "PLAYER_6"
+      ],
+      "command_id": "CMD_propose_diplomacy_PLAYER_6_PROPOSAL_OPEN_BORDERS_6",
+      "description": "Host-approved propose_deal",
+      "fixed_arguments": {
+        "proposal_id": "PROPOSAL_OPEN_BORDERS_6",
+        "target_player_id": "PLAYER_6"
+      },
+      "kind": "propose_deal",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_WORKER",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_TRAIN_UNIT_WORKER",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_WORKER",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_SPY",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_TRAIN_UNIT_SPY",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_SPY",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_LONGBOWMAN",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_TRAIN_UNIT_LONGBOWMAN",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_LONGBOWMAN",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_WORKBOAT",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_TRAIN_UNIT_WORKBOAT",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_WORKBOAT",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_GALLEY",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_TRAIN_UNIT_GALLEY",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_GALLEY",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_WALLS",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_CONSTRUCT_BUILDING_WALLS",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_WALLS",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_BARRACKS",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_CONSTRUCT_BUILDING_BARRACKS",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_BARRACKS",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_GRANARY",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_CONSTRUCT_BUILDING_GRANARY",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_GRANARY",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_LIGHTHOUSE",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_CONSTRUCT_BUILDING_LIGHTHOUSE",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_LIGHTHOUSE",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_MONUMENT",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_CONSTRUCT_BUILDING_MONUMENT",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_MONUMENT",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_LIBRARY",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_CONSTRUCT_BUILDING_LIBRARY",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_LIBRARY",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_COLOSSEUM",
+        "CITY_4_8192"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_8192_CONSTRUCT_BUILDING_COLOSSEUM",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_COLOSSEUM",
+        "city_id": "CITY_4_8192"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_WORKER",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_TRAIN_UNIT_WORKER",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_WORKER",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_SPY",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_TRAIN_UNIT_SPY",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_SPY",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_LONGBOWMAN",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_TRAIN_UNIT_LONGBOWMAN",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_LONGBOWMAN",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_WORKBOAT",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_TRAIN_UNIT_WORKBOAT",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_WORKBOAT",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TRAIN:UNIT_GALLEY",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_TRAIN_UNIT_GALLEY",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "TRAIN:UNIT_GALLEY",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_WALLS",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_CONSTRUCT_BUILDING_WALLS",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_WALLS",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_BARRACKS",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_CONSTRUCT_BUILDING_BARRACKS",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_BARRACKS",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_GRANARY",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_CONSTRUCT_BUILDING_GRANARY",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_GRANARY",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_HARBOR",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_CONSTRUCT_BUILDING_HARBOR",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_HARBOR",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_MONUMENT",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_CONSTRUCT_BUILDING_MONUMENT",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_MONUMENT",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_LIBRARY",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_CONSTRUCT_BUILDING_LIBRARY",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_LIBRARY",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CONSTRUCT:BUILDING_COLOSSEUM",
+        "CITY_4_16385"
+      ],
+      "command_id": "CMD_set_city_production_CITY_4_16385_CONSTRUCT_BUILDING_COLOSSEUM",
+      "description": "Host-approved queue_production",
+      "fixed_arguments": {
+        "build_id": "CONSTRUCT:BUILDING_COLOSSEUM",
+        "city_id": "CITY_4_16385"
+      },
+      "kind": "queue_production",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "ROLE:EMPHASIZE_FOOD"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_8192_ROLE_EMPHASIZE_FOOD",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "role_id": "ROLE:EMPHASIZE_FOOD"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "ROLE:EMPHASIZE_PRODUCTION"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_8192_ROLE_EMPHASIZE_PRODUCTION",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "role_id": "ROLE:EMPHASIZE_PRODUCTION"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "ROLE:EMPHASIZE_COMMERCE"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_8192_ROLE_EMPHASIZE_COMMERCE",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "role_id": "ROLE:EMPHASIZE_COMMERCE"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "ROLE:EMPHASIZE_RESEARCH"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_8192_ROLE_EMPHASIZE_RESEARCH",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "role_id": "ROLE:EMPHASIZE_RESEARCH"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "ROLE:EMPHASIZE_GREAT_PEOPLE"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_8192_ROLE_EMPHASIZE_GREAT_PEOPLE",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "role_id": "ROLE:EMPHASIZE_GREAT_PEOPLE"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_8192",
+        "ROLE:EMPHASIZE_AVOID_GROWTH"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_8192_ROLE_EMPHASIZE_AVOID_GROWTH",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_8192",
+        "role_id": "ROLE:EMPHASIZE_AVOID_GROWTH"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "ROLE:EMPHASIZE_FOOD"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_16385_ROLE_EMPHASIZE_FOOD",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "role_id": "ROLE:EMPHASIZE_FOOD"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "ROLE:EMPHASIZE_PRODUCTION"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_16385_ROLE_EMPHASIZE_PRODUCTION",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "role_id": "ROLE:EMPHASIZE_PRODUCTION"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "ROLE:EMPHASIZE_COMMERCE"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_16385_ROLE_EMPHASIZE_COMMERCE",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "role_id": "ROLE:EMPHASIZE_COMMERCE"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "ROLE:EMPHASIZE_RESEARCH"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_16385_ROLE_EMPHASIZE_RESEARCH",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "role_id": "ROLE:EMPHASIZE_RESEARCH"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "ROLE:EMPHASIZE_GREAT_PEOPLE"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_16385_ROLE_EMPHASIZE_GREAT_PEOPLE",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "role_id": "ROLE:EMPHASIZE_GREAT_PEOPLE"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CITY_4_16385",
+        "ROLE:EMPHASIZE_AVOID_GROWTH"
+      ],
+      "command_id": "CMD_set_city_role_CITY_4_16385_ROLE_EMPHASIZE_AVOID_GROWTH",
+      "description": "Host-approved set_city_emphasis",
+      "fixed_arguments": {
+        "city_id": "CITY_4_16385",
+        "role_id": "ROLE:EMPHASIZE_AVOID_GROWTH"
+      },
+      "kind": "set_city_emphasis",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "CIVIC_SLAVERY",
+        "CIVICOPTION_LABOR"
+      ],
+      "command_id": "CMD_set_civic_CIVICOPTION_LABOR_CIVIC_SLAVERY",
+      "description": "Host-approved adopt_civics",
+      "fixed_arguments": {
+        "civic_id": "CIVIC_SLAVERY",
+        "civic_option_id": "CIVICOPTION_LABOR"
+      },
+      "kind": "adopt_civics",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "COMMERCE_GOLD",
+        "PERCENT_0"
+      ],
+      "command_id": "CMD_set_commerce_COMMERCE_GOLD_PERCENT_0",
+      "description": "Host-approved change_commerce",
+      "fixed_arguments": {
+        "commerce_id": "COMMERCE_GOLD",
+        "percent_id": "PERCENT_0"
+      },
+      "kind": "change_commerce",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "COMMERCE_RESEARCH",
+        "PERCENT_100"
+      ],
+      "command_id": "CMD_set_commerce_COMMERCE_RESEARCH_PERCENT_100",
+      "description": "Host-approved change_commerce",
+      "fixed_arguments": {
+        "commerce_id": "COMMERCE_RESEARCH",
+        "percent_id": "PERCENT_100"
+      },
+      "kind": "change_commerce",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "PLAYER_6",
+        "POSTURE_TRADE"
+      ],
+      "command_id": "CMD_set_diplomacy_posture_PLAYER_6_POSTURE_TRADE",
+      "description": "Host-approved set_diplomacy_posture",
+      "fixed_arguments": {
+        "other_player_id": "PLAYER_6",
+        "posture_id": "POSTURE_TRADE"
+      },
+      "kind": "set_diplomacy_posture",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TEAM_6",
+        "WEIGHT_0"
+      ],
+      "command_id": "CMD_set_espionage_weight_TEAM_6_WEIGHT_0",
+      "description": "Host-approved change_espionage_weight",
+      "fixed_arguments": {
+        "team_id": "TEAM_6",
+        "weight_id": "WEIGHT_0"
+      },
+      "kind": "change_espionage_weight",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TEAM_6",
+        "WEIGHT_50"
+      ],
+      "command_id": "CMD_set_espionage_weight_TEAM_6_WEIGHT_50",
+      "description": "Host-approved change_espionage_weight",
+      "fixed_arguments": {
+        "team_id": "TEAM_6",
+        "weight_id": "WEIGHT_50"
+      },
+      "kind": "change_espionage_weight",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "TEAM_6",
+        "WEIGHT_100"
+      ],
+      "command_id": "CMD_set_espionage_weight_TEAM_6_WEIGHT_100",
+      "description": "Host-approved change_espionage_weight",
+      "fixed_arguments": {
+        "team_id": "TEAM_6",
+        "weight_id": "WEIGHT_100"
+      },
+      "kind": "change_espionage_weight",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "PRIORITY_SETTLE",
+        "AREA_2064392"
+      ],
+      "command_id": "CMD_set_expansion_priority_PRIORITY_SETTLE_AREA_2064392",
+      "description": "Host-approved set_target_city_or_area",
+      "fixed_arguments": {
+        "priority_id": "PRIORITY_SETTLE",
+        "target_area_id": "AREA_2064392"
+      },
+      "kind": "set_target_city_or_area",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "PRIORITY_BALANCED",
+        "AREA_2064392"
+      ],
+      "command_id": "CMD_set_expansion_priority_PRIORITY_BALANCED_AREA_2064392",
+      "description": "Host-approved set_target_city_or_area",
+      "fixed_arguments": {
+        "priority_id": "PRIORITY_BALANCED",
+        "target_area_id": "AREA_2064392"
+      },
+      "kind": "set_target_city_or_area",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "PRIORITY_DEFEND",
+        "AREA_2064392"
+      ],
+      "command_id": "CMD_set_expansion_priority_PRIORITY_DEFEND_AREA_2064392",
+      "description": "Host-approved set_target_city_or_area",
+      "fixed_arguments": {
+        "priority_id": "PRIORITY_DEFEND",
+        "target_area_id": "AREA_2064392"
+      },
+      "kind": "set_target_city_or_area",
+      "parameter_domains": {},
+      "runtime_status": "implemented_untested"
+    },
+    {
+      "affected_ids": [
+        "POLICY_BALANCED",
+        "UNITCLASS_LION"
+      ],
+      "command_id": "CMD_set_upgrade_policy_UNITCLASS_LION_POLICY_BALANCED",
+      "description": "Host-approved set_upgrade_reserve",
+      "fixed_arguments": {
+        "policy_id": "POLICY_BALANCED",
+        "unit_class_id": "UNITCLASS_LION"
+      },
+      "kind": "set_upgrade_reserve",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "POLICY_BALANCED",
+        "UNITCLASS_BEAR"
+      ],
+      "command_id": "CMD_set_upgrade_policy_UNITCLASS_BEAR_POLICY_BALANCED",
+      "description": "Host-approved set_upgrade_reserve",
+      "fixed_arguments": {
+        "policy_id": "POLICY_BALANCED",
+        "unit_class_id": "UNITCLASS_BEAR"
+      },
+      "kind": "set_upgrade_reserve",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "POLICY_BALANCED",
+        "UNITCLASS_PANTHER"
+      ],
+      "command_id": "CMD_set_upgrade_policy_UNITCLASS_PANTHER_POLICY_BALANCED",
+      "description": "Host-approved set_upgrade_reserve",
+      "fixed_arguments": {
+        "policy_id": "POLICY_BALANCED",
+        "unit_class_id": "UNITCLASS_PANTHER"
+      },
+      "kind": "set_upgrade_reserve",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SKIP",
+        "NONE",
+        "UNIT_4_16385"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_4_16385_MISSION_SKIP_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SKIP",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_4_16385"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_FORTIFY",
+        "NONE",
+        "UNIT_4_16385"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_4_16385_MISSION_FORTIFY_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_FORTIFY",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_4_16385"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SENTRY",
+        "NONE",
+        "UNIT_4_16385"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_4_16385_MISSION_SENTRY_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SENTRY",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_4_16385"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SKIP",
+        "NONE",
+        "UNIT_4_24578"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_4_24578_MISSION_SKIP_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SKIP",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_4_24578"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_FORTIFY",
+        "NONE",
+        "UNIT_4_24578"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_4_24578_MISSION_FORTIFY_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_FORTIFY",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_4_24578"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SENTRY",
+        "NONE",
+        "UNIT_4_24578"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_4_24578_MISSION_SENTRY_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SENTRY",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_4_24578"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SKIP",
+        "NONE",
+        "UNIT_4_81927"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_4_81927_MISSION_SKIP_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SKIP",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_4_81927"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_FORTIFY",
+        "NONE",
+        "UNIT_4_81927"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_4_81927_MISSION_FORTIFY_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_FORTIFY",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_4_81927"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SENTRY",
+        "NONE",
+        "UNIT_4_81927"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_4_81927_MISSION_SENTRY_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SENTRY",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_4_81927"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SKIP",
+        "NONE",
+        "UNIT_4_106506"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_4_106506_MISSION_SKIP_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SKIP",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_4_106506"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    },
+    {
+      "affected_ids": [
+        "INT_-1",
+        "MISSION_SLEEP",
+        "NONE",
+        "UNIT_4_106506"
+      ],
+      "command_id": "CMD_unit_mission_UNIT_4_106506_MISSION_SLEEP_INT_-1_INT_-1_NONE",
+      "description": "Host-approved unit_posture_mission",
+      "fixed_arguments": {
+        "data1_id": "INT_-1",
+        "data2_id": "INT_-1",
+        "mission_id": "MISSION_SLEEP",
+        "target_plot_id": "NONE",
+        "unit_id": "UNIT_4_106506"
+      },
+      "kind": "unit_posture_mission",
+      "parameter_domains": {},
+      "runtime_status": "tested"
+    }
+  ],
+  "personality": {
+    "civilization_id": "CIVILIZATION_AMERICA",
+    "identity": "LEADER_FRANKLIN_ROOSEVELT-4",
+    "leader_id": "LEADER_FRANKLIN_ROOSEVELT",
+    "leader_name": "LEADER_FRANKLIN_ROOSEVELT"
+  },
+  "schema_version": "civ4ai-input/2",
+  "strategic_summary": {
+    "city_alerts": [
+      {
+        "affected_ids": [
+          "CITY_4_8192"
+        ],
+        "kind": "CITY_UNHAPPY",
+        "severity": "critical",
+        "text": "City happiness is negative"
+      },
+      {
+        "affected_ids": [
+          "CITY_4_8192"
+        ],
+        "kind": "CITY_UNHEALTHY",
+        "severity": "warning",
+        "text": "City health is negative"
+      }
+    ],
+    "diplomacy_alerts": [],
+    "economy_alerts": [
+      {
+        "affected_ids": [],
+        "kind": "INCOME_NEGATIVE",
+        "severity": "warning",
+        "text": "Net income is negative"
+      }
+    ],
+    "military_alerts": [
+      {
+        "affected_ids": [],
+        "kind": "IDLE_UNITS",
+        "severity": "warning",
+        "text": "4 owned units need orders"
+      }
+    ],
+    "ratios": [
+      {
+        "basis": "military units per owned city",
+        "denominator": 2,
+        "kind": "MILITARY_PER_CITY",
+        "numerator": 7
+      },
+      {
+        "basis": "owned units needing orders",
+        "denominator": 11,
+        "kind": "UNITS_NEEDING_ORDERS",
+        "numerator": 4
+      }
+    ],
+    "resource_alerts": []
+  },
+  "visible_other_units": [],
+  "your_cities": [
+    {
+      "area_id": "AREA_2064392",
+      "automation": {
+        "citizens": true,
+        "production": false
+      },
+      "buildings": [
+        "BUILDING_PALACE",
+        "BUILDING_HARBOR"
+      ],
+      "city_id": "CITY_4_8192",
+      "commerce": {
+        "culture": {
+          "percent": 0,
+          "rate": 2
+        },
+        "espionage": {
+          "percent": 0,
+          "rate": 4
+        },
+        "gold": {
+          "percent": 0,
+          "rate": 0
+        },
+        "research": {
+          "percent": 0,
+          "rate": 22
+        }
+      },
+      "corporations": [],
+      "culture": {
+        "change_per_turn": 0,
+        "current": 58,
+        "maximum": 0
+      },
+      "defense": {
+        "bombard_damage": 0,
+        "percent": 40
+      },
+      "food": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 0
+      },
+      "garrison_unit_ids": [],
+      "great_people": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 0
+      },
+      "happiness": {
+        "negative": 7,
+        "net": -1,
+        "positive": 6
+      },
+      "health": {
+        "negative": 7,
+        "net": -1,
+        "positive": 6
+      },
+      "is_capital": true,
+      "is_coastal": true,
+      "maintenance": 0,
+      "name": "CITY_4_8192",
+      "occupation_turns": 0,
+      "plot_id": "PLOT_26_10",
+      "population": 7,
+      "production": {
+        "cost": 52,
+        "estimated_turns_remaining": 5,
+        "item_id": "UNIT_SETTLER",
+        "production_per_turn": 15,
+        "progress": 0
+      },
+      "production_queue": [
+        {
+          "cost": 52,
+          "item_id": "UNIT_SETTLER",
+          "kind": "unit",
+          "order_index": 0,
+          "progress": 0
+        }
+      ],
+      "religions": [],
+      "specialists": [],
+      "trade_routes": [],
+      "worked_plot_ids": [
+        "PLOT_26_10",
+        "PLOT_27_10",
+        "PLOT_25_9",
+        "PLOT_28_11",
+        "PLOT_24_9",
+        "PLOT_24_10",
+        "PLOT_24_11"
+      ],
+      "yields": {
+        "commerce": 22,
+        "food": 20,
+        "production": 2
+      }
+    },
+    {
+      "area_id": "AREA_2064392",
+      "automation": {
+        "citizens": true,
+        "production": false
+      },
+      "buildings": [],
+      "city_id": "CITY_4_16385",
+      "commerce": {
+        "culture": {
+          "percent": 0,
+          "rate": 0
+        },
+        "espionage": {
+          "percent": 0,
+          "rate": 0
+        },
+        "gold": {
+          "percent": 0,
+          "rate": 0
+        },
+        "research": {
+          "percent": 0,
+          "rate": 2
+        }
+      },
+      "corporations": [],
+      "culture": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 0
+      },
+      "defense": {
+        "bombard_damage": 0,
+        "percent": 0
+      },
+      "food": {
+        "change_per_turn": 2,
+        "current": 2,
+        "maximum": 0
+      },
+      "garrison_unit_ids": [],
+      "great_people": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 0
+      },
+      "happiness": {
+        "negative": 1,
+        "net": 4,
+        "positive": 5
+      },
+      "health": {
+        "negative": 1,
+        "net": 6,
+        "positive": 7
+      },
+      "is_capital": false,
+      "is_coastal": true,
+      "maintenance": 0,
+      "name": "CITY_4_16385",
+      "occupation_turns": 0,
+      "plot_id": "PLOT_24_13",
+      "population": 1,
+      "production": {
+        "cost": 23,
+        "estimated_turns_remaining": 7,
+        "item_id": "UNIT_LONGBOWMAN",
+        "production_per_turn": 3,
+        "progress": 3
+      },
+      "production_queue": [
+        {
+          "cost": 23,
+          "item_id": "UNIT_LONGBOWMAN",
+          "kind": "unit",
+          "order_index": 0,
+          "progress": 3
+        }
+      ],
+      "religions": [],
+      "specialists": [],
+      "trade_routes": [],
+      "worked_plot_ids": [
+        "PLOT_24_13",
+        "PLOT_25_13"
+      ],
+      "yields": {
+        "commerce": 2,
+        "food": 4,
+        "production": 3
+      }
+    }
+  ],
+  "your_empire": {
+    "anarchy_turns": 0,
+    "civics": [
+      {
+        "id": "CIVIC_DESPOTISM",
+        "key": "CIVICOPTION_GOVERNMENT"
+      },
+      {
+        "id": "CIVIC_BARBARISM",
+        "key": "CIVICOPTION_LEGAL"
+      },
+      {
+        "id": "CIVIC_TRIBALISM",
+        "key": "CIVICOPTION_LABOR"
+      },
+      {
+        "id": "CIVIC_DECENTRALIZATION",
+        "key": "CIVICOPTION_ECONOMY"
+      },
+      {
+        "id": "CIVIC_PREHISTORIC_RELIGION",
+        "key": "CIVICOPTION_RELIGION"
+      }
+    ],
+    "commerce": {
+      "culture": {
+        "percent": 0,
+        "rate": 2
+      },
+      "espionage": {
+        "percent": 0,
+        "rate": 4
+      },
+      "gold": {
+        "percent": 0,
+        "rate": 0
+      },
+      "research": {
+        "percent": 100,
+        "rate": 25
+      }
+    },
+    "costs": {
+      "city_maintenance": 1,
+      "civic_upkeep": 1,
+      "inflation": 0,
+      "unit_cost": 0,
+      "unit_supply": 0
+    },
+    "gold": 38,
+    "gold_per_turn": -2,
+    "golden_age_turns": 0,
+    "religion": {
+      "conversion_timer": 0,
+      "convertible_religion_ids": [],
+      "state_religion_id": null
+    },
+    "research": {
+      "cost": 21,
+      "estimated_turns_remaining": null,
+      "known_tech_ids": [
+        "TECH_MYSTICISM",
+        "TECH_FISHING",
+        "TECH_AGRICULTURE",
+        "TECH_POTTERY",
+        "TECH_SEAFARING",
+        "TECH_WRITING",
+        "TECH_CALENDAR",
+        "TECH_HUNTING",
+        "TECH_MASONRY",
+        "TECH_ANIMAL_HUSBANDRY",
+        "TECH_CONSTRUCTION",
+        "TECH_SAILING"
+      ],
+      "progress": 0,
+      "queue": [
+        "TECH_MINING"
+      ],
+      "research_per_turn": 25,
+      "tech_id": "TECH_MINING"
+    },
+    "resources": [
+      {
+        "available": 1,
+        "exported": 0,
+        "imported": 0,
+        "resource_id": "BONUS_MOLLUSCS",
+        "surplus": 0
+      },
+      {
+        "available": 1,
+        "exported": 0,
+        "imported": 0,
+        "resource_id": "BONUS_CATTLE",
+        "surplus": 0
+      }
+    ],
+    "score": 162,
+    "team_id": "TEAM_4",
+    "unit_counts": {
+      "great_people": 0,
+      "idle": 4,
+      "military": 7,
+      "missionaries": 0,
+      "settlers": 0,
+      "spies": 0,
+      "total": 11,
+      "upgradeable": 3,
+      "workers": 4
+    },
+    "victory_progress": [],
+    "war_weariness": 0
+  },
+  "your_units": [
+    {
+      "activity_id": "ACTIVITY_MISSION",
+      "can_act": false,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_LAND",
+      "experience": 0,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [
+        {
+          "mission_id": "MISSION_MOVE_TO",
+          "target_plot_id": "PLOT_23_11"
+        },
+        {
+          "mission_id": "MISSION_BUILD",
+          "target_plot_id": null
+        }
+      ],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 120
+      },
+      "needs_orders": false,
+      "plot_id": "PLOT_25_9",
+      "promotion_ids": [],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_WORKER",
+      "unit_class_id": "UNITCLASS_WORKER",
+      "unit_id": "UNIT_4_40960",
+      "unit_type_id": "UNIT_WORKER",
+      "upgrade_options": []
+    },
+    {
+      "activity_id": "ACTIVITY_HOLD",
+      "can_act": true,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_LAND",
+      "experience": 0,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 60,
+        "maximum": 60
+      },
+      "needs_orders": true,
+      "plot_id": "PLOT_26_10",
+      "promotion_ids": [
+        "PROMOTION_RETREAT1"
+      ],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 2,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_CITY_DEFENSE",
+      "unit_class_id": "UNITCLASS_ARCHER",
+      "unit_id": "UNIT_4_16385",
+      "unit_type_id": "UNIT_ARCHER",
+      "upgrade_options": []
+    },
+    {
+      "activity_id": "ACTIVITY_HOLD",
+      "can_act": true,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_LAND",
+      "experience": 0,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 60,
+        "maximum": 60
+      },
+      "needs_orders": true,
+      "plot_id": "PLOT_26_10",
+      "promotion_ids": [
+        "PROMOTION_RETREAT1"
+      ],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 2,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_CITY_DEFENSE",
+      "unit_class_id": "UNITCLASS_ARCHER",
+      "unit_id": "UNIT_4_24578",
+      "unit_type_id": "UNIT_ARCHER",
+      "upgrade_options": []
+    },
+    {
+      "activity_id": "ACTIVITY_AWAKE",
+      "can_act": false,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_LAND",
+      "experience": 1,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 120
+      },
+      "needs_orders": false,
+      "plot_id": "PLOT_29_13",
+      "promotion_ids": [
+        "PROMOTION_WOODSMAN1",
+        "PROMOTION_RETREAT1"
+      ],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 1,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_EXPLORE",
+      "unit_class_id": "UNITCLASS_SCOUT",
+      "unit_id": "UNIT_4_32771",
+      "unit_type_id": "UNIT_SCOUT",
+      "upgrade_options": []
+    },
+    {
+      "activity_id": "ACTIVITY_MISSION",
+      "can_act": false,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_LAND",
+      "experience": 0,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [
+        {
+          "mission_id": "MISSION_MOVE_TO",
+          "target_plot_id": "PLOT_25_13"
+        },
+        {
+          "mission_id": "MISSION_BUILD",
+          "target_plot_id": null
+        }
+      ],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 120
+      },
+      "needs_orders": false,
+      "plot_id": "PLOT_26_9",
+      "promotion_ids": [],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_WORKER",
+      "unit_class_id": "UNITCLASS_WORKER",
+      "unit_id": "UNIT_4_49156",
+      "unit_type_id": "UNIT_WORKER",
+      "upgrade_options": []
+    },
+    {
+      "activity_id": "ACTIVITY_MISSION",
+      "can_act": false,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_LAND",
+      "experience": 0,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [
+        {
+          "mission_id": "MISSION_ROUTE_TO",
+          "target_plot_id": "PLOT_24_12"
+        },
+        {
+          "mission_id": "MISSION_BUILD",
+          "target_plot_id": null
+        }
+      ],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 120
+      },
+      "needs_orders": false,
+      "plot_id": "PLOT_26_9",
+      "promotion_ids": [],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_WORKER",
+      "unit_class_id": "UNITCLASS_WORKER",
+      "unit_id": "UNIT_4_65541",
+      "unit_type_id": "UNIT_WORKER",
+      "upgrade_options": []
+    },
+    {
+      "activity_id": "ACTIVITY_MISSION",
+      "can_act": false,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_LAND",
+      "experience": 0,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [
+        {
+          "mission_id": "MISSION_ROUTE_TO",
+          "target_plot_id": "PLOT_23_12"
+        },
+        {
+          "mission_id": "MISSION_BUILD",
+          "target_plot_id": null
+        }
+      ],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 120
+      },
+      "needs_orders": false,
+      "plot_id": "PLOT_26_9",
+      "promotion_ids": [],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_WORKER",
+      "unit_class_id": "UNITCLASS_WORKER",
+      "unit_id": "UNIT_4_73734",
+      "unit_type_id": "UNIT_WORKER",
+      "upgrade_options": []
+    },
+    {
+      "activity_id": "ACTIVITY_HOLD",
+      "can_act": true,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_LAND",
+      "experience": 0,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 60,
+        "maximum": 60
+      },
+      "needs_orders": true,
+      "plot_id": "PLOT_24_13",
+      "promotion_ids": [
+        "PROMOTION_RETREAT1"
+      ],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 2,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_ATTACK",
+      "unit_class_id": "UNITCLASS_ARCHER",
+      "unit_id": "UNIT_4_81927",
+      "unit_type_id": "UNIT_ARCHER",
+      "upgrade_options": []
+    },
+    {
+      "activity_id": "ACTIVITY_MISSION",
+      "can_act": false,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_SEA",
+      "experience": 0,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [
+        {
+          "mission_id": "MISSION_MOVE_TO",
+          "target_plot_id": "PLOT_31_12"
+        }
+      ],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 180
+      },
+      "needs_orders": false,
+      "plot_id": "PLOT_29_12",
+      "promotion_ids": [],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 2,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_EXPLORE_SEA",
+      "unit_class_id": "UNITCLASS_GALLEY",
+      "unit_id": "UNIT_4_114696",
+      "unit_type_id": "UNIT_GALLEY",
+      "upgrade_options": []
+    },
+    {
+      "activity_id": "ACTIVITY_AWAKE",
+      "can_act": false,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_LAND",
+      "experience": 3,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 2,
+      "mission_queue": [],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 0,
+        "maximum": 120
+      },
+      "needs_orders": false,
+      "plot_id": "PLOT_27_16",
+      "promotion_ids": [
+        "PROMOTION_WOODSMAN1",
+        "PROMOTION_WOODSMAN2",
+        "PROMOTION_RETREAT1"
+      ],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 1,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_EXPLORE",
+      "unit_class_id": "UNITCLASS_SCOUT",
+      "unit_id": "UNIT_4_98313",
+      "unit_type_id": "UNIT_SCOUT",
+      "upgrade_options": []
+    },
+    {
+      "activity_id": "ACTIVITY_HOLD",
+      "can_act": true,
+      "cargo_unit_ids": [],
+      "domain_id": "DOMAIN_SEA",
+      "experience": 0,
+      "health": {
+        "change_per_turn": 0,
+        "current": 100,
+        "maximum": 100
+      },
+      "level": 1,
+      "mission_queue": [],
+      "movement": {
+        "change_per_turn": 0,
+        "current": 180,
+        "maximum": 180
+      },
+      "needs_orders": true,
+      "plot_id": "PLOT_26_10",
+      "promotion_ids": [],
+      "strength": {
+        "change_per_turn": 0,
+        "current": 2,
+        "maximum": 0
+      },
+      "unit_ai_role": "UNITAI_ASSAULT_SEA",
+      "unit_class_id": "UNITCLASS_GALLEY",
+      "unit_id": "UNIT_4_106506",
+      "unit_type_id": "UNIT_GALLEY",
+      "upgrade_options": []
+    }
+  ]
+}
