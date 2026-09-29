@@ -266,6 +266,7 @@ def refresh_window(win: WindowInfo) -> WindowInfo:
 
 
 def _game_launcher():
+    """Optional civ6-mcp helpers (OCR menu clicks). Missing package is non-fatal."""
     import sys
     from pathlib import Path
 
@@ -276,6 +277,16 @@ def _game_launcher():
     from civ_mcp import game_launcher
 
     return game_launcher
+
+
+def _click_win32(screen_x: int, screen_y: int) -> None:
+    """SendInput-style left click at screen coords without civ6-mcp."""
+    user32 = ctypes.windll.user32
+    user32.SetCursorPos(int(screen_x), int(screen_y))
+    time.sleep(0.05)
+    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    time.sleep(0.04)
+    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
 
 
 def focus_game(hwnd: int) -> bool:
@@ -351,12 +362,11 @@ def _post_client_click(hwnd: int, client_x: int, client_y: int, taps: int = 1) -
 
 
 def _send_mouse_click_screen(screen_x: int, screen_y: int, taps: int = 1) -> None:
-    """Click via civ6-mcp SendInput after the game is already foreground."""
-    gl = _game_launcher()
+    """Click via local mouse_event after the game is already foreground."""
     ctypes.windll.user32.SetCursorPos(int(screen_x), int(screen_y))
     time.sleep(0.08)
     for _ in range(max(1, taps)):
-        gl._click_win32(screen_x, screen_y)
+        _click_win32(screen_x, screen_y)
         time.sleep(0.12)
 
 
@@ -547,7 +557,9 @@ def inject_inbox_lines(lines: list[str]) -> bool:
         if not paste_text(win, line, refocus=False):
             log.warning("inbox inject: paste failed for line len=%d", len(line))
             return False
-        time.sleep(0.35)
+        time.sleep(0.12)
+        press_enter_sendinput(win, refocus=False)
+        time.sleep(0.22)
     log.info("inbox inject: sent %d lines", len(lines))
     return True
 
@@ -1458,7 +1470,11 @@ def dismiss_aspyr_launcher(win: WindowInfo, timeout: float = 15.0) -> bool:
     while time.monotonic() < deadline:
         if detect_menu(win) in ("main", "single_player", "advanced_setup", "ingame"):
             return True
-        gl = _game_launcher()
+        try:
+            gl = _game_launcher()
+        except Exception as error:
+            log.warning("civ_mcp unavailable for Aspyr dismiss: %s", error)
+            return False
         if gl._click_text("PLAY", timeout=2, exact=True, post_delay=0.5):
             return True
         time.sleep(0.4)

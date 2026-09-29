@@ -6,6 +6,8 @@ include("Civ6Ai_Config.lua")
 include("Civ6Ai_Snapshot.lua")
 include("Civ6Ai_Production.lua")
 include("Civ6Ai_Apply.lua")
+include("Civ6Ai_OrderChannel.lua")
+include("Civ6Ai_MpTest.lua")
 include("Civ6Ai_MpSync.lua")
 include("Civ6Ai_Bridge.lua")
 include("Civ6Ai_SeatExperiment.lua")
@@ -14,6 +16,10 @@ include("Civ6Ai_HostChannel.lua")
 include("Civ6Ai_Chat.lua")
 
 function Civ6Ai_OnLocalPlayerTurnBegin()
+  if Civ6Ai_InGame._mpHoldSeats ~= nil and Civ6Ai_OrderChannel ~= nil
+      and not (Civ6Ai_MpTest ~= nil and Civ6Ai_MpTest._holdsReleased) then
+    Civ6Ai_OrderChannel.EnsureHolds(Civ6Ai_InGame._mpHoldSeats)
+  end
   -- STABLE: autotest first-turn pulse entry (do not change when fixing apply/inject).
   if not Civ6Ai_Config.IsAutotest() then
     return
@@ -28,12 +34,68 @@ function Civ6Ai_OnLocalPlayerTurnBegin()
   if not Civ6Ai_Config.IsManagedSeat(playerID) then
     return
   end
-  Civ6Ai_Util.Log("autotest|local_turn_begin|player=" .. tostring(playerID))
-  Civ6Ai_Bridge.RunTurnPulse(playerID)
+  local turn = Game.GetCurrentGameTurn()
+  -- LocalPlayerTurnBegin can fire repeatedly within one turn; log it once per turn.
+  Civ6Ai_Bridge._LogOnce(
+    "local_turn_begin|" .. tostring(playerID) .. "|" .. tostring(turn),
+    "autotest|local_turn_begin|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
+  )
+  Civ6Ai_InGame.PulseAfterTurnStart(playerID, turn)
+end
+
+-- LocalPlayerTurnBegin fires before the game restores the seat's movement
+-- (GameCore PlayerTurnStartComplete comes later). Snapshotting then showed every
+-- unit that moved last turn with 0 moves and no legal orders, so P0's units only
+-- acted every other turn. Wait for the GameCore mark; a loaded save may never
+-- send it for the current turn, so pulse anyway after a few seconds.
+Civ6Ai_InGame.TURN_START_WAIT_SECONDS = 8
+
+function Civ6Ai_InGame._TurnStartDone(playerID, turn)
+  local marks = ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil and ExposedMembers.Civ6Ai.TurnStartComplete or nil
+  if marks == nil then
+    return true
+  end
+  return marks[playerID] ~= nil and marks[playerID] >= turn
+end
+
+function Civ6Ai_InGame.PulseAfterTurnStart(playerID, turn)
+  if Civ6Ai_InGame._TurnStartDone(playerID, turn) then
+    Civ6Ai_Bridge.RunTurnPulse(playerID)
+    return
+  end
+  Civ6Ai_InGame._waitingTurnStart = Civ6Ai_InGame._waitingTurnStart or {}
+  local key = tostring(playerID) .. "|" .. tostring(turn)
+  if Civ6Ai_InGame._waitingTurnStart[key] then
+    return
+  end
+  Civ6Ai_InGame._waitingTurnStart[key] = true
+  local started = Civ6Ai_Bridge._WallClock()
+  local ticks = 0
+  Civ6Ai_Util.ScheduleTick(function()
+    ticks = ticks + 1
+    local done = Civ6Ai_InGame._TurnStartDone(playerID, turn)
+    local now = Civ6Ai_Bridge._WallClock()
+    local elapsed = (started ~= nil and now ~= nil) and (now - started) or (ticks / 30)
+    if done or elapsed >= Civ6Ai_InGame.TURN_START_WAIT_SECONDS or ticks >= 5000 then
+      Civ6Ai_InGame._waitingTurnStart[key] = nil
+      Civ6Ai_Util.Log("bridge|local_pulse_after_turn_start|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
+        .. "|complete=" .. tostring(done) .. "|ticks=" .. tostring(ticks))
+      if Game.GetCurrentGameTurn() == turn then
+        Civ6Ai_Bridge.RunTurnPulse(playerID)
+      end
+      return false
+    end
+    return true
+  end)
+end
+
+-- Autotest: the local (human) seat pulses from LocalPlayerTurnBegin; AI seats still pulse here.
+function Civ6Ai_Autotest_IsLocalSeat(playerID)
+  return Civ6Ai_Config.IsAutotest() and playerID == Game.GetLocalPlayer()
 end
 
 function Civ6Ai_OnPlayerTurnStartComplete(playerID)
-  if Civ6Ai_Config.IsAutotest() then
+  if Civ6Ai_Autotest_IsLocalSeat(playerID) then
     return
   end
   Civ6Ai_Bridge.RunTurnPulse(playerID)
@@ -41,7 +103,13 @@ end
 
 function Civ6Ai_OnPlayerTurnActivated(playerID, isFirstTime)
   Civ6Ai_SeatExperiment.OnPlayerTurnActivated(playerID)
-  if Civ6Ai_Config.IsAutotest() then
+  if Civ6Ai_Autotest_IsLocalSeat(playerID) then
+    return
+  end
+  -- Outside autotest the local seat pulses from here, which can also run before
+  -- GameCore restores its movement; give it the same wait as LocalPlayerTurnBegin.
+  if Game.GetLocalPlayer ~= nil and playerID == Game.GetLocalPlayer() then
+    Civ6Ai_InGame.PulseAfterTurnStart(playerID, Game.GetCurrentGameTurn())
     return
   end
   Civ6Ai_Bridge.RunTurnPulse(playerID)
@@ -54,6 +122,17 @@ function Civ6Ai_OnLoadScreenClose()
     Civ6Ai_Autotest._DisableBoostPopups()
   end
   Civ6Ai_Util.Log("autotest|load_screen_closed")
+  -- A loaded save sends LocalPlayerTurnBegin while the load screen is still up,
+  -- when the handler above ignores it, so nothing pulsed the current turn and a
+  -- reloaded game sat idle. Re-run it now that the screen is closed.
+  if Civ6Ai_Config ~= nil and Civ6Ai_Config.IsAutotest() and Game.GetLocalPlayer ~= nil then
+    local localId = Game.GetLocalPlayer()
+    local localPlayer = localId ~= nil and localId >= 0 and Players[localId] or nil
+    if localPlayer ~= nil and localPlayer.IsTurnActive ~= nil and localPlayer:IsTurnActive() then
+      Civ6Ai_Util.Log("autotest|load_resume_turn|player=" .. tostring(localId) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))
+      Civ6Ai_OnLocalPlayerTurnBegin()
+    end
+  end
 end
 
 function Civ6Ai_InitializeInGame()
@@ -70,9 +149,46 @@ function Civ6Ai_InitializeInGame()
     Civ6Ai_MpSync.Initialize()
   end
   Civ6Ai_Util.InitializeTickPump()
+  if Civ6Ai_OrderChannel ~= nil then
+    Civ6Ai_OrderChannel.Initialize()
+  end
   ExposedMembers.Civ6Ai = ExposedMembers.Civ6Ai or {}
   ExposedMembers.Civ6Ai.RunTurnPulse = Civ6Ai_Bridge.RunTurnPulse
   ExposedMembers.Civ6Ai.RunChatPulse = Civ6Ai_Bridge.RunChatPulse
+  -- Model-driven AI seats: GameCore holds their units at turn start so the
+  -- Firaxis AI does not spend the moves before the model's orders arrive.
+  local hold = {}
+  if Civ6Ai_Config.IsSidecarLive() then
+    for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
+      if seat ~= Game.GetLocalPlayer() then
+        hold[seat] = true
+      end
+    end
+  end
+  ExposedMembers.Civ6Ai.HoldAiSeatUnits = hold
+  -- Network game: the freeze has to be synced game state, so the host asks for
+  -- it through the order channel (GameCore ignores HoldAiSeatUnits there).
+  if Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive() and Civ6Ai_Config.IsHostPc() then
+    local seats = {}
+    for seat in pairs(hold) do
+      seats[#seats + 1] = seat
+    end
+    -- Test mode without the model running: use the game's AI majors.
+    if #seats == 0 and Civ6Ai_Config.IsMpTest() then
+      for i = 0, 63 do
+        local p = Players[i]
+        if p ~= nil and p:IsAlive() and p:IsMajor() and not p:IsHuman() then
+          seats[#seats + 1] = i
+        end
+      end
+    end
+    table.sort(seats)
+    Civ6Ai_InGame._mpHoldSeats = seats
+    Civ6Ai_OrderChannel.EnsureHolds(seats)
+  end
+  if Civ6Ai_MpTest ~= nil then
+    Civ6Ai_MpTest.Initialize()
+  end
   if not Civ6Ai_InGame._hooks then
     LuaEvents.Civ6Ai_PlayerTurnStartComplete.Add(Civ6Ai_OnPlayerTurnStartComplete)
     Events.PlayerTurnActivated.Add(Civ6Ai_OnPlayerTurnActivated)

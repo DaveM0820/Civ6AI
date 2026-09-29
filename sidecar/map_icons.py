@@ -45,7 +45,7 @@ def prefer_civ5_render() -> bool:
 def _use_civ6_icons() -> bool:
     if prefer_civ5_render():
         return False
-    return civ6_assets.assets_available()
+    return civ6_assets.assets_available() or civ6_assets.cached_assets_available()
 
 
 def _use_civ5_icons() -> bool:

@@ -21,6 +21,11 @@ function Civ6Ai_MpSync._IsNetworkMultiplayer()
 end
 
 function Civ6Ai_MpSync.IsEnabled()
+  -- Retired: chat-carried moves ran only where the chat line was seen and
+  -- desynced. Civ6Ai_OrderChannel (synced player operations) replaces it.
+  if Civ6Ai_OrderChannel ~= nil then
+    return false
+  end
   if Civ6Ai_Config ~= nil and Civ6Ai_Config.IsMpMoveSync ~= nil then
     return Civ6Ai_Config.IsMpMoveSync()
   end

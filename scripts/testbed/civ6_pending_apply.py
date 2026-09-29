@@ -1,6 +1,7 @@
 """Publish LLM apply payloads for Civ6Ai via the hidden InGame inbox."""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
@@ -24,15 +25,25 @@ def peek_pending_apply(session_id: str, player: int, turn: int) -> str | None:
     return _PENDING_APPLY.get(_pending_apply_key(session_id, player, turn))
 
 
-def publish_pending_apply(payload: str, session_id: str, player: int, turn: int) -> bool:
-    """Store apply JSON, write mod pending-apply Lua, and try hidden inbox inject."""
+_EMPTY_PAYLOAD = '{"commands":[],"chat_messages":[]}'
+
+
+def publish_pending_apply(payload: str, session_id: str, player: int, turn: int, *, kind: str = "turn") -> bool:
+    """Store apply JSON and write it into the mod PendingApply module (per player).
+
+    Success means the module was written; that is the channel Lua reads. The
+    keystroke inbox inject is optional (CIV6AI_INBOX_INJECT=1) and never decides
+    the result, so a missing UI-automation dependency cannot cause republish loops.
+    """
     if not payload:
         return False
     remember_pending_apply(session_id, player, turn, payload)
-    from civ6_host_channel import inject_apply_payload, write_pending_apply_lua
+    from civ6_host_channel import inbox_inject_enabled, inject_apply_payload, write_pending_apply_lua
 
-    write_pending_apply_lua(payload, session_id, turn)
-    return inject_apply_payload(payload, session_id, player, turn)
+    written = write_pending_apply_lua(payload, session_id, player, turn, kind=kind)
+    if inbox_inject_enabled() and kind == "turn":
+        inject_apply_payload(payload, session_id, player, turn)
+    return bool(written)
 
 
 def _apply_ready_marker(player: int, turn: int) -> str:
@@ -112,29 +123,62 @@ def load_chat_apply_payload(player_dir: Path) -> str | None:
     return json.dumps({"commands": [], "chat_messages": chat_messages}, separators=(",", ":"), ensure_ascii=False)
 
 
-def load_apply_payload(player_dir: Path) -> str | None:
-    apply_path = player_dir / "apply_commands.json"
-    if not apply_path.is_file():
-        return None
+def _read_json(path: Path) -> Any:
     try:
-        apply_data = json.loads(apply_path.read_text(encoding="utf-8-sig"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as error:
-        log.warning("apply_commands unreadable %s: %s", apply_path, error)
+        log.warning("unreadable %s: %s", path, error)
         return None
-    commands = apply_data.get("commands") if isinstance(apply_data, dict) else None
+
+
+def decision_turn(player_dir: Path) -> int | None:
+    """Turn of the snapshot the turn decision (decision.json) answered, if recorded."""
+    path = player_dir / "decision.json"
+    if not path.is_file():
+        return None
+    decision = _read_json(path)
+    metrics = decision.get("metrics") if isinstance(decision, dict) else None
+    try:
+        return int(metrics["turn"]) if isinstance(metrics, dict) and metrics.get("turn") is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def load_apply_payload(player_dir: Path, *, expected_turn: int | None = None, allow_empty: bool = False) -> str | None:
+    """Turn apply payload for player_dir.
+
+    Commands come from decision.json (the turn decision) when it lists them, else
+    from apply_commands.json. When expected_turn is given and decision.json records
+    a different turn, the files belong to an earlier snapshot and None is returned,
+    so an old answer is never re-tagged with the current turn.
+    """
+    decision_path = player_dir / "decision.json"
+    decision = _read_json(decision_path) if decision_path.is_file() else None
+    if expected_turn is not None and isinstance(decision, dict):
+        answered = decision_turn(player_dir)
+        if answered is not None and answered != int(expected_turn):
+            return None
+    commands: Any = None
+    if isinstance(decision, dict) and isinstance(decision.get("commands"), list):
+        commands = [
+            {"kind": c.get("kind"), "command_id": c.get("command_id"), "arguments": c.get("arguments", {})}
+            for c in decision["commands"]
+            if isinstance(c, dict)
+        ]
+    if commands is None:
+        apply_path = player_dir / "apply_commands.json"
+        if apply_path.is_file():
+            apply_data = _read_json(apply_path)
+            commands = apply_data.get("commands") if isinstance(apply_data, dict) else None
     if not isinstance(commands, list):
         commands = []
+        if decision is None and not allow_empty:
+            return None
     chat_messages: list[Any] = []
-    decision_path = player_dir / "decision.json"
-    if decision_path.is_file():
-        try:
-            decision = json.loads(decision_path.read_text(encoding="utf-8-sig"))
-            validated = decision.get("validated") if isinstance(decision, dict) else None
-            if isinstance(validated, dict) and isinstance(validated.get("chat_messages"), list):
-                chat_messages = validated["chat_messages"]
-        except (OSError, json.JSONDecodeError):
-            pass
-    if not commands and not chat_messages:
+    validated = decision.get("validated") if isinstance(decision, dict) else None
+    if isinstance(validated, dict) and isinstance(validated.get("chat_messages"), list):
+        chat_messages = validated["chat_messages"]
+    if not commands and not chat_messages and not allow_empty:
         return None
     payload = {"commands": commands, "chat_messages": chat_messages}
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
@@ -161,13 +205,43 @@ def _player_context(player_dir: Path) -> tuple[str, int, int] | None:
     return session_id, player, turn
 
 
+def _marker_path(player_dir: Path, turn: int, kind: str, payload: str) -> Path:
+    if kind == "chat":
+        digest = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:10]
+        return player_dir / f"apply_chat_{turn}_{digest}.done"
+    return player_dir / f"apply_turn_{turn}.done"
+
+
 def publish_apply_payload(
     player_dir: Path,
     session_id: str,
     player: int,
     turn: int,
     payload: str,
+    *,
+    kind: str = "turn",
+    confirm_seconds: float = 0.0,
 ) -> bool:
+    """Publish one answer once. The marker records the published apply id.
+
+    The same answer (same apply id) is never republished, so host loops that call
+    this every cycle do not rewrite the module or block. Lua applies it when the
+    seat-timing rule allows (local seat: its current turn; AI seats: their next
+    activation), which can be a whole turn later, so by default this does not wait.
+    With confirm_seconds > 0 it waits for the Lua confirmation line and returns
+    False when none appears (the marker still prevents a republish loop).
+    """
+    from civ6_host_channel import pending_apply_id
+
+    apply_id = pending_apply_id(payload, session_id, player, turn, kind)
+    marker = _marker_path(player_dir, turn, kind, payload)
+    if marker.is_file():
+        try:
+            recorded = marker.read_text(encoding="utf-8")
+        except OSError:
+            recorded = ""
+        if f"id={apply_id}" in recorded or "id=" not in recorded:
+            return True
     lua_log: Path | None = None
     try:
         from civ6_lua_log_bridge import default_lua_log
@@ -175,15 +249,6 @@ def publish_apply_payload(
         lua_log = default_lua_log()
     except Exception:
         pass
-    marker = player_dir / f"apply_turn_{turn}.done"
-    if marker.is_file():
-        if apply_confirmed(lua_log, player, turn):
-            log.info("Apply already confirmed for player=%s turn=%s", player, turn)
-            return True
-        try:
-            marker.unlink()
-        except OSError as error:
-            log.warning("Apply marker unlink failed: %s", error)
     try:
         from civ6_startup_log import log_event
 
@@ -192,10 +257,14 @@ def publish_apply_payload(
     except Exception:
         pass
     confirm_offset = lua_log.stat().st_size if lua_log is not None and lua_log.is_file() else None
-    if not publish_pending_apply(payload, session_id, player, turn):
+    if not publish_pending_apply(payload, session_id, player, turn, kind=kind):
         return False
-    wait_seconds = 60.0 if session_id.startswith("autotest-") else 20.0
-    log.info("Inbox apply publish player=%s turn=%s wait=%.0fs", player, turn, wait_seconds)
+    marker.write_text(
+        f"published_at={time.strftime('%Y-%m-%dT%H:%M:%S')} id={apply_id} kind={kind}\n", encoding="utf-8"
+    )
+    log.info("Pending apply published player=%s turn=%s kind=%s id=%s", player, turn, kind, apply_id)
+    if confirm_seconds <= 0:
+        return True
     if lua_log is None or not lua_log.is_file():
         log.warning("Lua.log unavailable for apply confirmation player=%s turn=%s", player, turn)
         return False
@@ -203,22 +272,13 @@ def publish_apply_payload(
         lua_log,
         player,
         turn,
-        timeout_seconds=wait_seconds,
+        timeout_seconds=confirm_seconds,
         start_offset=confirm_offset,
     )
     if not confirmed:
-        log.warning("Inbox apply not confirmed in Lua.log player=%s turn=%s", player, turn)
-        if session_id.startswith("autotest-"):
-            try:
-                from civ6_startup_log import log_event
-
-                civ6ai_root = player_dir.parent.parent.parent
-                log_event(civ6ai_root, "inbox_apply_timeout", player=player, turn=turn)
-            except Exception:
-                pass
+        log.warning("Pending apply not confirmed in Lua.log player=%s turn=%s", player, turn)
         return False
-    marker.write_text(f"applied_at={time.strftime('%Y-%m-%dT%H:%M:%S')}\n", encoding="utf-8")
-    log.info("Inbox apply confirmed player=%s turn=%s", player, turn)
+    log.info("Pending apply confirmed player=%s turn=%s", player, turn)
     try:
         from civ6_startup_log import log_event
 
@@ -229,7 +289,7 @@ def publish_apply_payload(
     return True
 
 
-def publish_from_player_dir(player_dir: Path, *, chat: bool = False) -> bool:
+def publish_from_player_dir(player_dir: Path, *, chat: bool = False, confirm_seconds: float = 0.0) -> bool:
     context = _player_context(player_dir)
     if context is None:
         return False
@@ -248,8 +308,24 @@ def publish_from_player_dir(player_dir: Path, *, chat: bool = False) -> bool:
             except (OSError, json.JSONDecodeError, TypeError, ValueError):
                 continue
         payload = load_chat_apply_payload(player_dir)
-    else:
-        payload = load_apply_payload(player_dir)
+        if payload is None:
+            return False
+        return publish_apply_payload(player_dir, session_id, player, turn, payload, kind="chat",
+                                     confirm_seconds=confirm_seconds)
+    # Turn answer: only for the current snapshot's turn; an answered-but-empty turn
+    # is still published (empty payload) so Lua knows the seat's answer arrived.
+    answered = decision_turn(player_dir)
+    payload = load_apply_payload(player_dir, expected_turn=turn, allow_empty=answered == turn)
     if payload is None:
         return False
-    return publish_apply_payload(player_dir, session_id, player, turn, payload)
+    return publish_apply_payload(player_dir, session_id, player, turn, payload, confirm_seconds=confirm_seconds)
+
+
+def publish_empty_for_turn(player_dir: Path) -> bool:
+    """The sidecar failed for this snapshot: tell Lua the seat has no orders this turn."""
+    context = _player_context(player_dir)
+    if context is None:
+        return False
+    session_id, player, turn = context
+    log.info("Publishing empty apply (no model answer) player=%s turn=%s", player, turn)
+    return publish_apply_payload(player_dir, session_id, player, turn, _EMPTY_PAYLOAD)

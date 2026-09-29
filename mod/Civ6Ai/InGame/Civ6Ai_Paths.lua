@@ -3,8 +3,10 @@ Civ6Ai_Paths = {
   Python = "python",
   Repo = "",
   Civ6AiRoot = "",
-  SidecarTimeoutSeconds = 45,
+  SidecarTimeoutSeconds = 180,
   SidecarScript = "sidecar/run_civ6.py",
   -- Set to 1 to enable M2 all-client move sync in network MP (see docs/MP_SYNC_TRANSPORT.md).
   MpMoveSync = 0,
+  -- 1 = host runs the scripted two-PC multiplayer test.
+  MpTest = 0,
 }

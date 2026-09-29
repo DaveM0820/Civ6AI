@@ -16,6 +16,7 @@ from civ6_pending_apply import (
     load_chat_apply_payload,
     publish_apply_payload,
     publish_from_player_dir,
+    publish_empty_for_turn,
     publish_pending_apply,
     wait_for_apply_confirmation,
 )
@@ -90,69 +91,83 @@ class Civ6PendingApplyTests(unittest.TestCase):
             self.assertFalse(apply_confirmed(lua_log, 0, 1))
             self.assertTrue(apply_confirmed(lua_log, 0, 17))
 
-    def test_publish_apply_payload_waits_for_confirmation(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            player_dir = Path(tmp) / "sessions" / "autotest-1" / "PLAYER_0"
-            player_dir.mkdir(parents=True)
-            (player_dir / "apply_commands.json").write_text(
-                json.dumps({"commands": [{"kind": "move_unit", "command_id": "CMD_1", "arguments": {}}]}),
-                encoding="utf-8",
-            )
-            lua_log = Path(tmp) / "Lua.log"
-            lua_log.write_text("", encoding="utf-8")
-            with mock.patch("civ6_lua_log_bridge.default_lua_log", return_value=lua_log):
-                with mock.patch("civ6_pending_apply.publish_pending_apply", return_value=True) as publish:
-                    with mock.patch("civ6_pending_apply.wait_for_apply_confirmation", return_value=True) as wait:
-                        with mock.patch("civ6_startup_log.log_event"):
-                            ok = publish_from_player_dir(player_dir)
-            self.assertTrue(ok)
-            publish.assert_called_once()
-            wait.assert_called_once()
+    def _player_dir(self, tmp, turn=3, decision_turn=None, commands=None):
+        player_dir = Path(tmp) / "sessions" / "autotest-1" / "PLAYER_2"
+        player_dir.mkdir(parents=True)
+        (player_dir / "snapshot.json").write_text(json.dumps({"decision": {"turn": turn}}), encoding="utf-8")
+        decision = {
+            "metrics": {"turn": turn if decision_turn is None else decision_turn},
+            "commands": commands if commands is not None else [
+                {"kind": "move_unit", "command_id": "CMD_1", "arguments": {}}
+            ],
+            "validated": {"chat_messages": []},
+        }
+        (player_dir / "decision.json").write_text(json.dumps(decision), encoding="utf-8")
+        return player_dir
 
-    def test_publish_apply_payload_returns_false_without_confirmation(self):
+    def test_publish_does_not_wait_and_publishes_once(self):
         with tempfile.TemporaryDirectory() as tmp:
-            player_dir = Path(tmp) / "sessions" / "autotest-1" / "PLAYER_0"
-            player_dir.mkdir(parents=True)
-            (player_dir / "apply_commands.json").write_text(
-                json.dumps({"commands": [{"kind": "move_unit", "command_id": "CMD_1", "arguments": {}}]}),
-                encoding="utf-8",
-            )
+            player_dir = self._player_dir(tmp)
+            with mock.patch("civ6_lua_log_bridge.default_lua_log", return_value=None):
+                with mock.patch("civ6_pending_apply.publish_pending_apply", return_value=True) as publish:
+                    with mock.patch("civ6_pending_apply.wait_for_apply_confirmation") as wait:
+                        with mock.patch("civ6_startup_log.log_event"):
+                            self.assertTrue(publish_from_player_dir(player_dir))
+                            self.assertTrue(publish_from_player_dir(player_dir))
+            publish.assert_called_once()
+            self.assertEqual((2, 3), publish.call_args.args[2:4])
+            wait.assert_not_called()
+            self.assertIn("id=", (player_dir / "apply_turn_3.done").read_text(encoding="utf-8"))
+
+    def test_publish_waits_when_confirmation_requested(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            player_dir = self._player_dir(tmp)
             lua_log = Path(tmp) / "Lua.log"
             lua_log.write_text("", encoding="utf-8")
             with mock.patch("civ6_lua_log_bridge.default_lua_log", return_value=lua_log):
                 with mock.patch("civ6_pending_apply.publish_pending_apply", return_value=True):
                     with mock.patch("civ6_pending_apply.wait_for_apply_confirmation", return_value=False):
                         with mock.patch("civ6_startup_log.log_event"):
-                            ok = publish_from_player_dir(player_dir)
+                            ok = publish_from_player_dir(player_dir, confirm_seconds=1)
             self.assertFalse(ok)
 
-    def test_publish_apply_payload_skips_when_confirmed(self):
+    def test_stale_decision_turn_is_not_republished(self):
         with tempfile.TemporaryDirectory() as tmp:
-            player_dir = Path(tmp) / "sessions" / "autotest-1" / "PLAYER_0"
-            player_dir.mkdir(parents=True)
-            marker = player_dir / "apply_turn_0.done"
-            marker.write_text("done\n", encoding="utf-8")
-            lua_log = Path(tmp) / "Lua.log"
-            with mock.patch("civ6_lua_log_bridge.default_lua_log", return_value=lua_log):
-                with mock.patch("civ6_pending_apply.apply_confirmed", return_value=True):
-                    with mock.patch("civ6_pending_apply.wait_for_apply_confirmation") as wait:
-                        ok = publish_apply_payload(
-                            player_dir,
-                            "autotest-1",
-                            0,
-                            0,
-                            '{"commands":[]}',
-                        )
-            self.assertTrue(ok)
-            wait.assert_not_called()
+            player_dir = self._player_dir(tmp, turn=1, decision_turn=11)
+            with mock.patch("civ6_pending_apply.publish_pending_apply", return_value=True) as publish:
+                self.assertFalse(publish_from_player_dir(player_dir))
+            publish.assert_not_called()
 
-    def test_publish_pending_apply_delegates_to_inbox(self):
-        with mock.patch("civ6_host_channel.inject_apply_payload", return_value=True) as inject:
-            with mock.patch("civ6_host_channel.write_pending_apply_lua") as write_lua:
-                ok = publish_pending_apply('{"commands":[]}', "sess", 0, 2)
+    def test_empty_answer_for_current_turn_publishes_empty_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            player_dir = self._player_dir(tmp, commands=[])
+            with mock.patch("civ6_lua_log_bridge.default_lua_log", return_value=None):
+                with mock.patch("civ6_pending_apply.publish_pending_apply", return_value=True) as publish:
+                    with mock.patch("civ6_startup_log.log_event"):
+                        self.assertTrue(publish_from_player_dir(player_dir))
+            self.assertEqual({"commands": [], "chat_messages": []}, json.loads(publish.call_args.args[0]))
+
+    def test_publish_empty_for_turn(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            player_dir = self._player_dir(tmp)
+            with mock.patch("civ6_lua_log_bridge.default_lua_log", return_value=None):
+                with mock.patch("civ6_pending_apply.publish_pending_apply", return_value=True) as publish:
+                    with mock.patch("civ6_startup_log.log_event"):
+                        self.assertTrue(publish_empty_for_turn(player_dir))
+            self.assertEqual(3, publish.call_args.args[3])
+
+    def test_publish_pending_apply_succeeds_without_inject(self):
+        with mock.patch("civ6_host_channel.inject_apply_payload", return_value=False) as inject:
+            with mock.patch("civ6_host_channel.write_pending_apply_lua", return_value=2) as write_lua:
+                with mock.patch.dict("os.environ", {}, clear=True):
+                    ok = publish_pending_apply('{"commands":[]}', "sess", 1, 2)
         self.assertTrue(ok)
-        write_lua.assert_called_once_with('{"commands":[]}', "sess", 2)
-        inject.assert_called_once_with('{"commands":[]}', "sess", 0, 2)
+        write_lua.assert_called_once_with('{"commands":[]}', "sess", 1, 2, kind="turn")
+        inject.assert_not_called()
+
+    def test_publish_pending_apply_fails_when_nothing_written(self):
+        with mock.patch("civ6_host_channel.write_pending_apply_lua", return_value=0):
+            self.assertFalse(publish_pending_apply('{"commands":[]}', "sess", 1, 2))
 
 
 if __name__ == "__main__":

@@ -53,6 +53,28 @@ def lmstudio_chat_reasoning_fields(model: str | None, reasoning: str) -> dict[st
     return {"reasoning": "on" if level == "on" else "off"}
 
 
+def openrouter_reasoning_fields(reasoning: str) -> dict[str, Any]:
+    """OpenRouter unified reasoning control: low effort when on, disabled when off."""
+    if normalize_reasoning(reasoning) == "off":
+        return {"reasoning": {"enabled": False}}
+    return {"reasoning": {"effort": "low", "exclude": False}}
+
+
+def provider_label(cfg: Civ6AiLocalConfig) -> str:
+    return "openrouter" if cfg.provider == "openrouter" else "lmstudio"
+
+
+def request_headers(cfg: Civ6AiLocalConfig) -> dict[str, str]:
+    headers = {
+        "Authorization": f"Bearer {cfg.api_key}",
+        "Content-Type": "application/json",
+    }
+    if cfg.provider == "openrouter":
+        headers["HTTP-Referer"] = "https://github.com/DaveM0820/Civ6AI"
+        headers["X-Title"] = "Civ6Ai"
+    return headers
+
+
 def build_chat_user_content(
     wire_text: str,
     image_data_url: str | list[dict[str, str]] | list[str] | None,
@@ -95,7 +117,15 @@ def build_chat_completions_body(
         ],
         "max_tokens": 4096,
     }
-    body.update(lmstudio_chat_reasoning_fields(cfg.model, cfg.reasoning))
+    if cfg.provider == "openrouter":
+        body.update(openrouter_reasoning_fields(cfg.reasoning))
+        body["usage"] = {"include": True}
+        # Reasoning tokens count against max_tokens on OpenRouter; leave room
+        # for the thinking pass on top of the ~2-4k token JSON answer.
+        if body["reasoning"].get("enabled", True):
+            body["max_tokens"] = 16384
+    else:
+        body.update(lmstudio_chat_reasoning_fields(cfg.model, cfg.reasoning))
     # Guard: never allow a bare reasoning_effort=on through.
     if body.get("reasoning_effort") in {"on", "off", "true", "false"}:
         body.pop("reasoning_effort", None)
@@ -110,6 +140,12 @@ def _is_model_unloaded_error(status: int, detail: str) -> bool:
 
 
 def _chat_message_text(payload: dict[str, Any]) -> str:
+    error = payload.get("error")
+    if isinstance(error, dict) and not payload.get("choices"):
+        raise pipeline.BoundaryError(
+            "api_error",
+            f"model API error {error.get('code')}: {str(error.get('message'))[:400]}",
+        )
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
         raise pipeline.BoundaryError("api_output", "LM Studio returned no choices")
@@ -149,11 +185,11 @@ def list_loaded_models(
 ) -> list[dict[str, Any]]:
     cfg = cfg or load_local_config()
     url = cfg.models_url
-    request = urllib.request.Request(url, method="GET", headers={"Authorization": f"Bearer {cfg.api_key}"})
+    request = urllib.request.Request(url, method="GET", headers=request_headers(cfg))
     open_request = opener or urllib.request.urlopen
     try:
         with open_request(request, timeout=timeout_seconds) as response:
-            raw = response.read(2_000_000)
+            raw = response.read(40_000_000)
             payload = json.loads(raw.decode("utf-8"))
     except Exception as error:
         raise pipeline.BoundaryError("transport", f"LM Studio /models failed: {error}") from error
@@ -173,6 +209,12 @@ def call_lmstudio_chat(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """POST chat.completions to LM Studio with retries and shared-model queueing."""
     cfg = cfg or load_local_config()
+    label = provider_label(cfg)
+    if label == "openrouter" and not cfg.api_key:
+        raise pipeline.BoundaryError(
+            "missing_key",
+            "OpenRouter needs OPENROUTER_API_KEY (env, host.env, or config/civ6ai.local.json api_key)",
+        )
     body = build_chat_completions_body(
         snapshot=snapshot,
         cfg=cfg,
@@ -184,10 +226,7 @@ def call_lmstudio_chat(
         url,
         data=pipeline.canonical_json(body).encode("utf-8"),
         method="POST",
-        headers={
-            "Authorization": f"Bearer {cfg.api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=request_headers(cfg),
     )
     open_request = opener or urllib.request.urlopen
     started = time.monotonic()
@@ -207,7 +246,7 @@ def call_lmstudio_chat(
                     usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
                     metadata = {
                         "status": getattr(response, "status", 200),
-                        "provider": "lmstudio",
+                        "provider": label,
                         "model": payload.get("model") or cfg.model,
                         "response_id": payload.get("id"),
                         "usage": usage,
@@ -224,7 +263,7 @@ def call_lmstudio_chat(
                     detail = error.read(4000).decode("utf-8", errors="replace")
                 except Exception:
                     pass
-                if _is_model_unloaded_error(error.code, detail):
+                if label == "lmstudio" and _is_model_unloaded_error(error.code, detail):
                     raise pipeline.BoundaryError(
                         "model_unloaded",
                         "LM Studio has no model loaded (HTTP "
@@ -239,14 +278,14 @@ def call_lmstudio_chat(
                     pipeline._http_error_category(error.code)
                     if hasattr(pipeline, "_http_error_category")
                     else "api_error",
-                    f"LM Studio HTTP {error.code}: {detail[:500]}",
+                    f"{label} HTTP {error.code}: {detail[:500]}",
                 ) from error
             except (urllib.error.URLError, TimeoutError, ConnectionResetError, OSError) as error:
                 last_error = error
                 if attempt >= cfg.max_retries - 1:
                     raise pipeline.BoundaryError(
                         "transport",
-                        f"LM Studio transport failed after {cfg.max_retries} attempts: {error}",
+                        f"{label} transport failed after {cfg.max_retries} attempts: {error}",
                     ) from error
                 time.sleep(2 * (attempt + 1))
         raise pipeline.BoundaryError(

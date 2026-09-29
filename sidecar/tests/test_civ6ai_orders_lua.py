@@ -1,0 +1,634 @@
+"""Offline checks for the synced MP order channel (Gameplay/Civ6Ai_Orders.lua,
+InGame/Civ6Ai_OrderChannel.lua) and the synced seat hold in Civ6Ai_GameCore."""
+import pathlib
+import unittest
+
+try:
+    import lupa
+except ImportError:  # pragma: no cover
+    lupa = None
+
+MOD = pathlib.Path(__file__).resolve().parents[2] / "mod" / "Civ6Ai"
+
+FAKE_ENV = r"""
+local function event() local e = {fns={}}; function e.Add(f) table.insert(e.fns, f) end; return e end
+GameEvents = setmetatable({}, {__index=function(t,k) local e=event(); rawset(t,k,e); return e end})
+ExposedMembers = {}
+local props = {}
+local turn = 5
+Game = {}
+function Game.GetCurrentGameTurn() return turn end
+function Game:SetProperty(k,v) props[k]=v end
+function Game:GetProperty(k) return props[k] end
+function SetTurn(t) turn = t end
+function GetProp(k) return props[k] end
+logs = {}
+print = function(s) table.insert(logs, s) end
+Map = {GetPlotDistance=function(a,b,c,d) return math.max(math.abs(a-c), math.abs(b-d)) end}
+function Map.GetPlot(x,y) return {x=x,y=y} end
+local function mkUnit(owner,id,x,y,typ)
+  local u = {owner=owner,id=id,x=x,y=y,moves=2,typ=typ,dmg=0}
+  function u:GetID() return self.id end
+  function u:GetOwner() return self.owner end
+  function u:GetX() return self.x end
+  function u:GetY() return self.y end
+  function u:GetType() return self.typ end
+  function u:GetMovesRemaining() return self.moves end
+  function u:GetDamage() return self.dmg end
+  function u:GetMaxDamage() return 100 end
+  function u:ChangeDamage(n) self.dmg = self.dmg + n end
+  function u:GetComponentID() return self end
+  function u:GetAttacksRemaining() return 1 end
+  function u:GetRange() return (GameInfo.Units[self.typ].Range or 0) end
+  function u:GetExperience() local me=self; return {ChangeExperience=function(_, n) me.xp=(me.xp or 0)+n end} end
+  return u
+end
+MkUnit = mkUnit
+local function mkPlayer(id,human,units)
+  local p = {id=id,human=human,units=units}
+  function p:IsAlive() return true end
+  function p:IsHuman() return self.human end
+  function p:GetUnits()
+    local me=self
+    return {Members=function() local i=0; return function() i=i+1; if me.units[i] then return i, me.units[i] end end end,
+            FindID=function(_, id) for _,u in ipairs(me.units) do if u.id==id then return u end end end}
+  end
+  function p:GetCities() return {Members=function() return function() return nil end end} end
+  function p:GetTreasury() return {GetGoldBalance=function() return 10 end} end
+  function p:IsBarbarian() return self.barb == true end
+  function p:GetDiplomacy() local me=self; return {IsAtWarWith=function(_, o) return (me.war or {})[o] == true end} end
+  return p
+end
+GameInfo = {Units={[0]={Combat=20},[1]={Combat=15,RangedCombat=25,Range=2}}}
+Players = {[0]=mkPlayer(0,true,{mkUnit(0,1,5,5,0)}), [1]=mkPlayer(1,true,{mkUnit(1,2,6,6,0)}),
+           [2]=mkPlayer(2,false,{mkUnit(2,7,10,10,0), mkUnit(2,8,11,10,0), mkUnit(2,9,12,10,1)})}
+Units = {GetUnitsInPlot=function(plot)
+  local out = {}
+  for id=0,63 do local p=Players[id]; if p then for _,u in ipairs(p.units) do
+    if u.x==plot.x and u.y==plot.y then out[#out+1]=u end end end end
+  return out end}
+CombatTypes = {MELEE=0, RANGED=1, BOMBARD=2}
+CombatResultParameters = {ATTACKER="A", DEFENDER="D", DAMAGE_TO="dmg"}
+CombatManager = {SimulateAttackVersus=function(a, d, ctype)
+  if ctype == CombatTypes.MELEE then return {A={dmg=20}, D={dmg=35}} end
+  return {A={dmg=0}, D={dmg=30}} end}
+UnitManager = {
+  Kill=function(u) u.dead=true; local p=Players[u.owner]; for i,x in ipairs(p.units) do if x==u then table.remove(p.units,i) break end end end,
+  MoveUnit=function(u,x,y) u.x=x; u.y=y; u.moves=u.moves-1 end,
+  FinishMoves=function(u) u.moves=0 end,
+  RestoreMovement=function(u) u.moves=2 end,
+}
+-- GameCore routes: a move fails with plot_occupied while a seat unit sits there.
+ExposedMembers.Civ6Ai = {
+  MoveUnitForPlayer=function(p,uid,x,y)
+    for _,u in ipairs(Players[p].units) do if u.x==x and u.y==y then return false, "plot_occupied" end end
+    for _,u in ipairs(Players[p].units) do if u.id==uid then u.x=x; u.y=y; u.moves=0; return true, "moved" end end
+    return false, "unit_not_found" end,
+  SetResearchForPlayer=function(p,i) Players[p].tech=i; return true, "tech="..i end,
+  FinishMovesForPlayer=function(p,uid) return true, "finished" end,
+}
+"""
+
+
+def _vals(t):
+    return list(t.values()) if t is not None else []
+
+
+@unittest.skipIf(lupa is None, "lupa not installed")
+class OrdersGameplayTests(unittest.TestCase):
+    def setUp(self):
+        self.rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+        self.rt.execute(FAKE_ENV)
+        self.rt.execute((MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text())
+
+    def order(self, sender, **params):
+        params.setdefault("T", 5)
+        self.rt.globals().Civ6Ai_Orders.OnOrder(sender, self.rt.table_from(params))
+
+    def results(self):
+        return [dict(r.items()) for r in _vals(self.rt.eval("ExposedMembers.Civ6Ai.OrderResults"))]
+
+    def last(self):
+        return self.results()[-1]
+
+    def test_registers_event_handler(self):
+        self.assertEqual(len(_vals(self.rt.eval("GameEvents.Civ6AiOrder.fns"))), 1)
+        self.assertEqual(len(_vals(self.rt.eval("GameEvents.OnGameTurnStarted.fns"))), 1)
+
+    def test_first_hold_claims_controller_and_blocks_others(self):
+        self.order(0, K=20, P=2, V=1, S=1)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_CONTROLLER')"), 0)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_HOLD_2')"), 1)
+        self.order(1, K=1, P=2, U=7, X=10, Y=11, S=2)
+        self.assertEqual(self.last()["reason"], "not_controller")
+        self.assertEqual(self.rt.eval("Players[2].units[1].y"), 10)
+
+    def test_hold_refuses_human_seat(self):
+        self.order(0, K=20, P=1, V=1, S=1)
+        self.assertEqual(self.last()["reason"], "hold_needs_ai_seat")
+
+    def test_human_cannot_order_other_humans_units(self):
+        self.order(1, K=1, P=0, U=1, X=5, Y=6, S=3)
+        self.assertEqual(self.last()["reason"], "not_owner")
+
+    def test_stale_turn_recorded_not_applied(self):
+        self.order(0, K=1, P=2, U=7, X=10, Y=11, S=4, T=4)
+        self.assertTrue(self.last()["reason"].startswith("stale_turn"))
+        self.assertEqual(self.rt.eval("Players[2].units[1].y"), 10)
+
+    def test_batch_waits_for_last_order_and_retries_occupied(self):
+        # Unit 7 moves onto unit 8's tile; unit 8 moves away second. Pass 1
+        # fails 7 (occupied), moves 8; pass 2 moves 7.
+        self.order(0, K=1, P=2, U=7, X=11, Y=10, S=5, B=9, J=1, N=2)
+        self.assertIsNone(self.rt.eval("ExposedMembers.Civ6Ai.OrderResults"))
+        self.order(0, K=1, P=2, U=8, X=11, Y=11, S=6, B=9, J=2, N=2)
+        res = self.results()
+        self.assertEqual([r["seq"] for r in res], [6, 5])
+        self.assertTrue(all(r["ok"] for r in res))
+        self.assertEqual(self.rt.eval("Players[2].units[1].x"), 11)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_LAST_SEQ_0')"), 6)
+
+    def test_new_batch_flushes_incomplete_old_one(self):
+        self.order(0, K=2, P=2, I=3, S=7, B=1, J=1, N=2)
+        self.order(0, K=2, P=2, I=4, S=8, B=2, J=1, N=1)
+        reasons = [r["reason"] for r in self.results()]
+        self.assertIn("batch_order_missing:2", reasons)
+        self.assertEqual(self.rt.eval("Players[2].tech"), 4)
+
+    def test_resolve_skips_ordered_units(self):
+        self.order(0, K=1, P=2, U=7, X=10, Y=11, S=9, B=3, J=1, N=1)
+        self.rt.execute("Players[2].units[1].moves = 1")
+        self.order(0, K=8, P=2, S=10)
+        self.assertEqual(self.last()["reason"], "resolved=2")
+        self.assertEqual(self.rt.eval("Players[2].units[1].moves"), 1)
+        self.assertEqual(self.rt.eval("Players[2].units[2].moves"), 0)
+
+    def test_ranged_attack_uses_engine_forecast(self):
+        self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,4,13,10,0))")
+        self.order(0, K=7, P=2, U=9, X=13, Y=10, S=11, B=4, J=1, N=1)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertTrue(self.last()["reason"].startswith("ranged:def_dmg=0>30:att_dmg=0>0"))
+        self.assertEqual(self.rt.eval("Players[2].units[3].moves"), 0)
+
+    def test_ranged_attack_respects_range(self):
+        self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,4,15,10,0))")
+        self.order(0, K=7, P=2, U=9, X=15, Y=10, S=11, B=4, J=1, N=1)
+        self.assertEqual(self.last()["reason"], "out_of_range:3")
+
+    def test_melee_attack_needs_enemy_adjacency_and_war(self):
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=12, B=5, J=1, N=1)
+        self.assertEqual(self.last()["reason"], "no_enemy_on_plot")
+        self.rt.execute("table.insert(Players[1].units, MkUnit(1,3,10,11,0))")
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=13, B=6, J=1, N=1)
+        self.assertEqual(self.last()["reason"], "not_at_war")
+        self.rt.execute("Players[2].war = {[1]=true}")
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=14, B=7, J=1, N=1)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[2].units[1].dmg"), 20)
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
+
+    def test_melee_kill_advances_into_plot(self):
+        self.rt.execute("Players[2].war = {[1]=true}; local e = MkUnit(1,3,10,11,0); e.dmg = 80;"
+                        " table.insert(Players[1].units, e)")
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=13, B=6, J=1, N=1)
+        self.assertIn("killed=true", self.last()["reason"])
+        self.assertEqual(self.rt.eval("#Players[1].units"), 1)
+        self.assertEqual(self.rt.eval("Players[2].units[1].y"), 11)
+
+    def test_far_move_uses_path_route(self):
+        self.rt.execute("ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = function(p,u,x,y) path_called = {p,u,x,y}; return true, 'path' end")
+        self.order(0, K=1, P=2, U=7, X=13, Y=13, S=20, B=8, J=1, N=1)
+        self.assertEqual(self.last()["reason"], "path")
+        self.assertEqual(self.rt.eval("path_called[3]"), 13)
+
+    def test_test_ops_need_test_mode(self):
+        self.order(0, K=56, P=2, U=7, S=14)
+        self.assertEqual(self.last()["reason"], "test_mode_off")
+        self.order(0, K=49, V=1, S=15)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_MPTEST')"), 1)
+
+    def test_introspect_keeps_note_out_of_result(self):
+        self.order(0, K=49, V=1, S=16)
+        self.order(0, K=50, P=2, S=17, Note="hello")
+        self.assertEqual(self.last()["reason"], "logged")
+        self.assertTrue(any("note=hello" in l for l in _vals(self.rt.eval("logs"))))
+
+    def test_api_survey_logs_and_survives_missing_objects(self):
+        self.order(0, K=49, V=1, S=18)
+        self.order(0, K=61, P=2, S=19)
+        self.assertIn("objects=", self.last()["reason"])
+        logs = _vals(self.rt.eval("logs"))
+        self.assertTrue(any("survey|City=" in l for l in logs))
+
+    def test_production_steer_apply_read_and_undo(self):
+        self.rt.execute(r"""
+          local function mkCity(owner, id, cur)
+            local c = {owner=owner, id=id, cur=cur, placed={}, favored={}}
+            function c:GetID() return self.id end
+            function c:GetX() return 1 end
+            function c:GetY() return 1 end
+            local me = c
+            local bq = {}
+            function bq:CurrentlyBuilding() return me.cur end
+            function bq:CanProduce(h) return h == 777 end
+            function bq:HasDistrictBeenPlaced(i) return me.placed[i] == true end
+            function bq:CreateIncompleteDistrict(i, plotIndex, pct) me.placed[i] = true; me.cur = "DISTRICT_CAMPUS" end
+            function c:GetBuildQueue() return bq end
+            function c:GetCitizens() return {SetFavoredYield=function(_, y, on) me.favored[y] = on end,
+                                             IsYieldFavored=function(_, y) return me.favored[y] == true end} end
+            function c:GetDistricts() return {HasDistrict=function() return false end} end
+            local plot = {x=2, y=3}
+            function plot:GetIndex() return 42 end
+            function plot:GetX() return 2 end
+            function plot:GetY() return 3 end
+            function plot:CanHaveDistrict() return true end
+            function c:GetOwnedPlots() return {plot} end
+            return c
+          end
+          local function cities(list)
+            return {Members=function() local i=0; return function() i=i+1; if list[i] then return i, list[i] end end end,
+                    FindID=function(_, id) for _,c in ipairs(list) do if c.id==id then return c end end end}
+          end
+          local c2, c3 = mkCity(2, 11, "UNIT_WARRIOR"), mkCity(3, 21, "BUILDING_MONUMENT")
+          local p2 = Players[2]
+          local p3 = setmetatable({}, {__index=p2})
+          Players[3] = p3
+          function p2:GetCities() return cities({c2}) end
+          function p3:GetCities() return cities({c3}) end
+          local allow = true
+          function p2:GetAi_Military() return {AllowUnitConstruction=function(_, on) allow = on end,
+                                                       CanConstructUnits=function() return allow end} end
+          local districts = {{Index=0, Hash=1, DistrictType="DISTRICT_CITY_CENTER"}, {Index=3, Hash=777, DistrictType="DISTRICT_CAMPUS", PrereqTech="TECH_WRITING"}}
+          GameInfo.Districts = function() local i=0; return function() i=i+1; return districts[i] end end
+          GameInfo.Yields = {YIELD_PRODUCTION={Index=1}}
+          SteerCity3 = c3
+          local writing = false
+          GameInfo.Technologies = {TECH_WRITING={Index=9}}
+          function p3:GetTechs() return {SetTech=function(_, i, on) writing = (i == 9 and on) end,
+                                         HasTech=function(_, i) return i == 9 and writing end} end
+        """)
+        self.order(0, K=49, V=1, S=39)
+        self.order(0, K=62, P=2, U=3, I=3, S=38)
+        self.assertEqual(self.last()["reason"],
+                         "writing=true;district=DISTRICT_CAMPUS@2,3(CanHaveDistrict):tries=true:placed=true:now=DISTRICT_CAMPUS")
+        self.order(0, K=49, V=1, S=40)
+        self.order(0, K=62, P=2, U=3, X=2, I=0, S=41)
+        r = self.last()["reason"]
+        self.assertTrue(self.last()["ok"])
+        self.assertIn("allow_units_off=true:can=true>false", r)
+        self.assertIn("p_cities=11=UNIT_WARRIOR(unit)", r)
+        self.assertIn("focus_production=true:favored=true", r)
+        self.assertIn("district=already", r)
+        self.order(0, K=62, P=2, U=3, I=1, S=42)
+        r = self.last()["reason"]
+        self.assertIn("can_units=false", r)
+        self.assertIn("focus=true", r)
+        self.assertIn("district=DISTRICT_CAMPUS:placed=true", r)
+        self.assertIn("control_cities=11=UNIT_WARRIOR(unit)", r)
+        self.order(0, K=62, P=2, U=3, I=2, S=43)
+        self.assertIn("allow_units_on=true:can=true", self.last()["reason"])
+
+    def test_force_build_setup_conditions_read_and_off(self):
+        self.rt.execute(r"""
+          local techs = {}
+          GameInfo.Technologies = {TECH_ARCHERY={Index=1}, TECH_POTTERY={Index=2}, TECH_WRITING={Index=3}}
+          GameInfo.Units.UNIT_ARCHER = {Index=1}
+          GameInfo.Buildings = {BUILDING_GRANARY={Index=5}}
+          GameInfo.Districts = {DISTRICT_CAMPUS={Index=3}}
+          for _, id in ipairs({3, 4, 5}) do
+            Players[id] = setmetatable({units={}}, {__index=Players[2]})
+          end
+          for id = 2, 5 do
+            local p = Players[id]
+            techs[id] = {}
+            function p:GetTechs() return {SetTech=function(_, i, on) techs[id][i] = on end,
+                                          HasTech=function(_, i) return techs[id][i] == true end} end
+          end
+        """)
+        self.order(0, K=49, V=1, S=50)
+        self.order(0, K=63, P=2, U=3, X=4, Y=5, I=3, S=51)
+        r = self.last()["reason"]
+        self.assertTrue(self.last()["ok"])
+        self.assertIn("seat5[TECH_ARCHERY=true,TECH_POTTERY=true,TECH_WRITING=true]", r)
+        self.assertIn("seat2[force=1],UNIT_ARCHER:have=1", r)  # the fake seat 2 owns one ranged unit (type 1)
+        self.assertIn("seat5[force=0]", r)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_FORCE_3')"), 2)
+        fire = lambda fn, p: self.rt.eval("GameEvents.%s.fns[1](%d, 0)" % (fn, p))
+        self.assertTrue(fire("Civ6AiForceArcher", 2))
+        self.assertFalse(fire("Civ6AiForceGranary", 2))
+        self.assertTrue(fire("Civ6AiForceGranary", 3))
+        self.assertTrue(fire("Civ6AiForceCampus", 4))
+        self.assertFalse(fire("Civ6AiForceCampus", 5))
+        self.assertFalse(fire("Civ6AiForceArcher", 5))
+        logs = _vals(self.rt.eval("logs"))
+        self.assertTrue(any("strategy_call|turn=5|player=2|fn=Civ6AiForceArcher|active=true" in l for l in logs))
+        self.assertFalse(any("player=5" in l and "strategy_call" in l for l in logs))
+        self.order(0, K=63, P=2, U=3, X=4, Y=5, I=2, S=52)
+        self.assertIn("force_off", self.last()["reason"])
+        self.assertFalse(fire("Civ6AiForceArcher", 2))
+
+    def test_force_build_needs_a_seat(self):
+        self.order(0, K=49, V=1, S=53)
+        self.order(0, K=63, I=1, S=54)
+        self.assertEqual(self.last()["reason"], "no_seat")
+
+    def test_checksum_report_match_and_mismatch(self):
+        rt = self.rt
+        rt.globals().Civ6Ai_Orders.OnGameTurnStarted(5)
+        mine = dict(rt.eval("ExposedMembers.Civ6Ai.Checksums[5]").items())
+        self.order(1, K=30, T=5, H=mine["sum"], R=mine["orders"], Q=mine["count"], S=18)
+        self.assertEqual(rt.eval("ExposedMembers.Civ6Ai.SyncReports[1].verdict"), "match")
+        self.order(1, K=30, T=5, H=mine["sum"] + 1, R=mine["orders"], Q=mine["count"], S=19)
+        self.assertTrue(rt.eval("ExposedMembers.Civ6Ai.SyncReports[1].verdict").startswith("MISMATCH:sum=false"))
+
+    def test_checksum_tracks_units_and_damage(self):
+        before = self.rt.eval("Civ6Ai_Orders.Checksum()")
+        self.rt.execute("Players[2].units[1].dmg = 10")
+        self.assertNotEqual(before, self.rt.eval("Civ6Ai_Orders.Checksum()"))
+
+    def test_handler_is_deterministic_across_pcs(self):
+        # Two PCs fed the same orders end with the same order hash.
+        def run():
+            rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+            rt.execute(FAKE_ENV)
+            rt.execute((MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text())
+            for p in ({"K": 20, "P": 2, "V": 1, "S": 1}, {"K": 1, "P": 2, "U": 7, "X": 11, "Y": 10, "S": 2, "B": 1, "J": 1, "N": 2},
+                      {"K": 1, "P": 2, "U": 8, "X": 11, "Y": 11, "S": 3, "B": 1, "J": 2, "N": 2}, {"K": 8, "P": 2, "S": 4}):
+                p["T"] = 5
+                rt.globals().Civ6Ai_Orders.OnOrder(0, rt.table_from(p))
+            return rt.eval("ExposedMembers.Civ6Ai.OrderHash"), rt.eval("Civ6Ai_Orders.Checksum()")
+        self.assertEqual(run(), run())
+
+
+CHANNEL_ENV = r"""
+logs = {}
+sent = {}
+Civ6Ai_Util = {Log=function(s) table.insert(logs, s) end, ScheduleTick=function(fn) table.insert(ticks, fn) end}
+ticks = {}
+recorded = {}
+Civ6Ai_Apply = {
+  _RecordResult=function(pid, cmd, ok, reason) table.insert(recorded, {pid=pid, kind=cmd.kind, ok=ok, reason=reason}) end,
+  _ParseUnitNumericId=function(id) return tonumber(tostring(id):match("(%d+)$")) end,
+  _ResolveTargetCoords=function(a) return a.x, a.y end,
+}
+ExposedMembers = {Civ6Ai = {}}
+GameConfiguration = {IsNetworkMultiplayer=function() return true end}
+PlayerOperations = {EXECUTE_SCRIPT = 99}
+UI = {RequestPlayerOperation=function(me, op, params) table.insert(sent, params) end}
+now = 0
+Automation = {GetTime=function() return now end}
+Game = {GetLocalPlayer=function() return 0 end, GetCurrentGameTurn=function() return 5 end,
+        GetProperty=function(_, k) return nil end}
+GameInfo = {Technologies={TECH_MINING={Index=3}}, Civics={}}
+Players = {[2]={IsHuman=function() return false end}}
+"""
+
+
+@unittest.skipIf(lupa is None, "lupa not installed")
+class OrderChannelTests(unittest.TestCase):
+    def setUp(self):
+        self.rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+        self.rt.execute(CHANNEL_ENV)
+        self.rt.execute((MOD / "InGame" / "Civ6Ai_OrderChannel.lua").read_text())
+
+    def decision(self, cmds):
+        lua = "return {commands={" + ",".join(cmds) + "}}"
+        return self.rt.execute(lua)
+
+    def test_decision_becomes_one_batch_and_results_flow_back(self):
+        rt = self.rt
+        d = self.decision([
+            '{kind="move_unit", arguments={unit_id="UNIT_2_7", x=10, y=11}}',
+            '{kind="set_research_tech", arguments={tech_id="TECH_MINING"}}',
+            '{kind="queue_production", arguments={city_id="C1"}}',
+        ])
+        self.assertEqual(rt.globals().Civ6Ai_OrderChannel.SendDecision(2, d), 2)
+        sent = [dict(p.items()) for p in _vals(rt.eval("sent"))]
+        self.assertEqual([p["K"] for p in sent], [1, 2])
+        self.assertEqual({p["OnStart"] for p in sent}, {"Civ6AiOrder"})
+        self.assertEqual([(p["J"], p["N"]) for p in sent], [(1, 2), (2, 2)])
+        self.assertEqual(sent[0]["U"], 7)
+        self.assertEqual(sent[1]["I"], 3)
+        rec = [dict(r.items()) for r in _vals(rt.eval("recorded"))]
+        self.assertEqual(rec[0]["reason"], "production_no_mp_route")
+        # Gameplay reports both results; the channel records them.
+        rt.execute("ExposedMembers.Civ6Ai.OrderResults = {"
+                   "{sender=0, seq=%d, ok=true, reason='moved'}, {sender=0, seq=%d, ok=false, reason='x'}}"
+                   % (sent[0]["S"], sent[1]["S"]))
+        self.assertEqual(rt.globals().Civ6Ai_OrderChannel.DrainResults(), 0)
+        rec = [dict(r.items()) for r in _vals(rt.eval("recorded"))]
+        self.assertEqual([(r["kind"], r["ok"]) for r in rec[1:]], [("move_unit", True), ("set_research_tech", False)])
+
+    def test_missing_result_times_out(self):
+        rt = self.rt
+        d = self.decision(['{kind="unit_skip", arguments={unit_id="UNIT_2_8"}}'])
+        rt.globals().Civ6Ai_OrderChannel.SendDecision(2, d)
+        rt.execute("now = 100")
+        rt.globals().Civ6Ai_OrderChannel.DrainResults()
+        self.assertEqual(rt.eval("recorded[1].reason"), "no_result_from_gameplay")
+
+    def test_hold_sent_once_per_turn(self):
+        rt = self.rt
+        rt.execute("Civ6Ai_OrderChannel.EnsureHolds({2}); Civ6Ai_OrderChannel.EnsureHolds({2})")
+        sent = [dict(p.items()) for p in _vals(rt.eval("sent"))]
+        self.assertEqual([(p["K"], p["P"], p["V"]) for p in sent], [(20, 2, 1)])
+
+    def test_report_uses_local_checksum(self):
+        rt = self.rt
+        rt.execute("ExposedMembers.Civ6Ai.Checksums = {[5]={sum=11, orders=22, count=3}}")
+        self.assertTrue(rt.globals().Civ6Ai_OrderChannel.SendReport(5))
+        p = dict(rt.eval("sent[1]").items())
+        self.assertEqual((p["K"], p["T"], p["H"], p["R"], p["Q"]), (30, 5, 11, 22, 3))
+
+
+GAMECORE_ENV = r"""
+local props = {}
+Game = {GetProperty=function(_, k) return props[k] end}
+function SetProp(k, v) props[k] = v end
+ExposedMembers = {Civ6Ai = {HoldAiSeatUnits = {[3] = true}}}
+net = false
+GameConfiguration = {IsNetworkMultiplayer=function() return net end}
+"""
+
+
+@unittest.skipIf(lupa is None, "lupa not installed")
+class SyncedHoldTests(unittest.TestCase):
+    def test_is_seat_held_prefers_synced_property(self):
+        src = (MOD / "Gameplay" / "Civ6Ai_GameCore.lua").read_text()
+        start = src.index("function Civ6Ai_GameCore._IsNetworkGame")
+        end_ = src.index("\nend\n", src.index("function Civ6Ai_GameCore.IsSeatHeld")) + 5
+        rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+        rt.execute(GAMECORE_ENV + "\nCiv6Ai_GameCore = {}\n" + src[start:end_])
+        held = rt.eval("function(p) return Civ6Ai_GameCore.IsSeatHeld(p) end")
+        self.assertTrue(held(3))       # single player: local table
+        rt.execute("net = true")
+        self.assertFalse(held(3))      # network: local table ignored
+        rt.execute("SetProp('CIV6AI_HOLD_3', 1)")
+        self.assertTrue(held(3))       # network: synced property
+        rt.execute("SetProp('CIV6AI_HOLD_3', 0); net = false")
+        self.assertFalse(held(3))      # synced "off" wins everywhere
+
+
+PATH_ENV = r"""
+Civ6Ai_GameCore = {}
+unit = {x=0, y=0, moves=2}
+function unit:GetX() return self.x end
+function unit:GetY() return self.y end
+function unit:GetMovesRemaining() return self.moves end
+function unit:GetID() return 7 end
+function Civ6Ai_GameCore._FindUnit(p, id) return nil, unit, "" end
+function Civ6Ai_GameCore._Call(o, n) return o[n](o) end
+function Civ6Ai_GameCore._ReleaseHeld() return false end
+restored = 0
+function Civ6Ai_GameCore._RestoreMoves() restored = restored + 1 end
+-- a step costs 1 move; a step is refused when no moves are left
+function Civ6Ai_GameCore.CanMoveUnitToForPlayer(p, id, x, y)
+  if unit.moves <= 0 then return false, "no_moves_left" end
+  return true, ""
+end
+Map = {}
+function Map.GetPlot(x, y) return {GetIndex=function() return y * 100 + x end} end
+function Map.GetPlotByIndex(i) return {GetX=function() return i % 100 end, GetY=function() return math.floor(i / 100) end} end
+UnitManager = {
+  GetMoveToPath=function(u, idx) return {0, 1, 2, 3} end,
+  MoveUnit=function(u, x, y) u.x = x; u.y = y; u.moves = u.moves - 1 end,
+}
+"""
+
+
+@unittest.skipIf(lupa is None, "lupa not installed")
+class PathMoveTests(unittest.TestCase):
+    def test_sender_and_gameplay_kind_tables_match(self):
+        import re
+        def kinds(path, table):
+            src = (MOD / path).read_text()
+            body = src[src.index(table + " = {"):]
+            body = body[:body.index("}")]
+            return dict(re.findall(r"([A-Z_]+)\s*=\s*(\d+)", body))
+        self.assertEqual(kinds("InGame/Civ6Ai_OrderChannel.lua", "Civ6Ai_OrderChannel.K"),
+                         kinds("Gameplay/Civ6Ai_Orders.lua", "Civ6Ai_Orders.K"))
+
+    def run_path(self, moves):
+        src = (MOD / "Gameplay" / "Civ6Ai_GameCore.lua").read_text()
+        start = src.index("function Civ6Ai_GameCore.MoveUnitAlongPathForPlayer")
+        end_ = src.index("\nend\n", start) + 5
+        rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+        rt.execute(PATH_ENV + "\n" + src[start:end_])
+        rt.execute("unit.moves = %d" % moves)
+        return rt, rt.eval("Civ6Ai_GameCore.MoveUnitAlongPathForPlayer(1, 7, 3, 0)")
+
+    def test_walks_whole_path_when_moves_allow(self):
+        rt, (ok, reason) = self.run_path(3)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "path:0,0>3,0:steps=3:len=4:stop=arrived")
+
+    def test_stops_partway_when_moves_run_out(self):
+        rt, (ok, reason) = self.run_path(2)
+        self.assertTrue(ok)
+        self.assertEqual(reason, "partial_path:0,0>2,0:steps=2:len=4:stop=no_moves_left")
+        self.assertEqual(rt.eval("unit.x"), 2)
+
+
+class MpTestModuleTests(unittest.TestCase):
+    @unittest.skipIf(lupa is None, "lupa not installed")
+    def test_mp_test_script_parses(self):
+        rt = lupa.LuaRuntime()
+        rt.execute("return function() " + (MOD / "InGame" / "Civ6Ai_MpTest.lua").read_text() + " end")
+
+    def test_report_summarizes_sync_and_checks(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "mp_test_report", pathlib.Path(__file__).resolve().parents[2] / "scripts" / "mp_test_report.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        log = "\n".join([
+            "[1] CIV6AI|orders|result|turn=5|from=0|seq=1|kind=57|player=2|unit=7|ok=true|reason=far:1,1>3,1|hash=9",
+            "[2] CIV6AI|orders|result|turn=5|from=0|seq=2|kind=40|player=nil|unit=nil|ok=false|reason=stale_turn:4|hash=9",
+            "[3] CIV6AI|orders|sync|turn=5|from=1|their_sum=3|my_sum=3|verdict=match",
+            "[4] CIV6AI|orders|sync|turn=6|from=1|their_sum=3|my_sum=4|verdict=MISMATCH:sum=false:orders=true",
+        ])
+        text = mod.summarize(log)
+        self.assertIn("OUT OF SYNC", text)
+        self.assertIn("turn 6", text)
+        self.assertIn("multi-tile move: 1/1 worked", text)
+        self.assertIn("stale orders refused: 1", text)
+
+
+@unittest.skipIf(lupa is None, "lupa not installed")
+class PriorityOrderTests(unittest.TestCase):
+    def setUp(self):
+        self.rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+        self.rt.execute(FAKE_ENV)
+        self.rt.execute((MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text())
+        self.O = self.rt.globals().Civ6Ai_Orders
+
+    def order(self, sender, **params):
+        params.setdefault("T", 5)
+        self.O.OnOrder(sender, self.rt.table_from(params))
+        return [dict(r.items()) for r in _vals(self.rt.eval("ExposedMembers.Civ6Ai.OrderResults"))][-1]
+
+    def level(self, owner, cid):
+        return self.O.PriorityLevel(owner, cid)
+
+    def cond(self, cid, level, owner):
+        fns = _vals(self.rt.eval("GameEvents['Civ6AiPrio_%d_%d'].fns" % (cid, level)))
+        self.assertEqual(len(fns), 1)
+        return fns[0](owner, 0)
+
+    def test_every_category_and_level_registered(self):
+        ids = _vals(self.O.PRIORITY_IDS)
+        self.assertEqual(len(ids), 24)
+        for cat in ids:
+            for level in (1, 2, 3):
+                self.assertEqual(len(_vals(self.rt.eval("GameEvents['Civ6AiPrio_%d_%d'].fns" % (cat.id, level)))), 1)
+
+    def test_set_turns_on_exactly_that_level(self):
+        r = self.order(0, K=9, P=2, I=8, X=3, S=1)
+        self.assertTrue(r["ok"], r["reason"])
+        self.assertEqual(self.level(2, 8), 3)
+        self.assertTrue(self.cond(8, 3, 2))
+        self.assertFalse(self.cond(8, 2, 2))
+        self.assertFalse(self.cond(8, 3, 1))
+        self.assertTrue(any("prio_call" in str(s) and "science_victory" in str(s) for s in _vals(self.rt.eval("logs"))))
+
+    def test_one_posture_replaces_another(self):
+        self.order(0, K=9, P=2, I=2, X=1, S=1)
+        r = self.order(0, K=9, P=2, I=3, X=3, S=2)
+        self.assertTrue(r["ok"])
+        self.assertEqual(self.level(2, 2), 0)
+        self.assertEqual(self.level(2, 3), 3)
+        self.assertIn("now=total_war:3", r["reason"])
+
+    def test_focus_limit_and_releveling(self):
+        for s, (cid, lv) in enumerate([(8, 3), (17, 2), (14, 1)], 1):
+            self.assertTrue(self.order(0, K=9, P=2, I=cid, X=lv, S=s)["ok"])
+        r = self.order(0, K=9, P=2, I=15, X=1, S=9)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["reason"], "too_many_focus")
+        self.assertTrue(self.order(0, K=9, P=2, I=14, X=3, S=10)["ok"])  # re-level an active focus
+        self.assertTrue(self.order(0, K=9, P=2, I=2, X=2, S=11)["ok"])  # posture is not a focus
+        self.assertEqual(self.level(2, 14), 3)
+
+    def test_clear_all(self):
+        self.order(0, K=9, P=2, I=8, X=3, S=1)
+        self.order(0, K=9, P=2, I=3, X=2, S=2)
+        r = self.order(0, K=9, P=2, I=0, X=0, S=3)
+        self.assertTrue(r["ok"])
+        self.assertEqual(len(_vals(self.O.PriorityLevels(2))), 0)
+
+    def test_rejects_bad_input_and_foreign_sender(self):
+        self.assertEqual(self.order(0, K=9, P=2, I=99, X=1, S=1)["reason"], "bad_priority")
+        self.assertEqual(self.order(0, K=9, P=2, I=8, X=4, S=2)["reason"], "bad_level")
+        self.order(0, K=20, P=2, V=1, S=3)  # sender 0 becomes controller
+        self.assertEqual(self.order(1, K=9, P=2, I=8, X=1, S=4)["reason"], "not_controller")
+        self.assertEqual(self.order(1, K=9, P=0, I=8, X=1, S=5)["reason"], "not_owner")
+        self.assertTrue(self.order(1, K=9, P=1, I=8, X=1, S=6)["ok"])  # a human sets their own
+
+    def test_order_changes_checksum_state_on_every_pc(self):
+        before = self.rt.eval("ExposedMembers.Civ6Ai.OrderHash")
+        self.order(0, K=9, P=2, I=5, X=3, S=1)
+        self.assertNotEqual(self.rt.eval("ExposedMembers.Civ6Ai.OrderHash"), before)
+
+
+if __name__ == "__main__":
+    unittest.main()

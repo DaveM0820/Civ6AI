@@ -24,6 +24,10 @@ LMSTUDIO_BASE_DEFAULT = "http://localhost:1234/v1"
 LMSTUDIO_MODEL_DEFAULT = "qwen/qwen3-vl-8b"
 LMSTUDIO_API_KEY_DEFAULT = "lm-studio"
 LMSTUDIO_TIMEOUT_DEFAULT = 600
+OPENROUTER_BASE_DEFAULT = "https://openrouter.ai/api/v1"
+OPENROUTER_MODEL_DEFAULT = "qwen/qwen3.7-flash"
+OPENROUTER_TIMEOUT_DEFAULT = 180
+OPENROUTER_PARALLEL_DEFAULT = 8
 
 
 @dataclass
@@ -40,6 +44,19 @@ class Civ6AiLocalConfig:
     context_budget: bool = True
     queue_shared_model: bool = True
     mp_move_sync: bool = False
+    # How many seat jobs may call the model at once. 0 = auto (1 for LM Studio,
+    # OPENROUTER_PARALLEL_DEFAULT for OpenRouter, where seats run side by side).
+    parallel_seats: int = 0
+
+    @property
+    def is_openrouter(self) -> bool:
+        return self.provider == "openrouter"
+
+    @property
+    def effective_parallel_seats(self) -> int:
+        if self.parallel_seats and self.parallel_seats > 0:
+            return int(self.parallel_seats)
+        return OPENROUTER_PARALLEL_DEFAULT if self.is_openrouter else 1
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -127,6 +144,7 @@ def load_local_config(
     cfg.provider = str(cfg.provider or "lmstudio").strip().lower()
 
     if not apply_env:
+        _apply_provider_defaults(cfg)
         return cfg
 
     provider = _env_first("CIV6AI_MODEL_PROVIDER", "CIV4AI_MODEL_PROVIDER", default=cfg.provider)
@@ -167,7 +185,28 @@ def load_local_config(
     )
     cfg.timeout_seconds = max(30, int(cfg.timeout_seconds))
     cfg.max_retries = max(1, int(cfg.max_retries))
+    cfg.parallel_seats = _env_int("CIV6AI_PARALLEL_SEATS", default=cfg.parallel_seats)
+    _apply_provider_defaults(cfg)
     return cfg
+
+
+def _apply_provider_defaults(cfg: Civ6AiLocalConfig) -> None:
+    """OpenRouter: hosted endpoint, real key, no shared lock, shorter timeout."""
+    if not cfg.is_openrouter:
+        return
+    if not cfg.endpoint or "localhost" in cfg.endpoint or "127.0.0.1" in cfg.endpoint:
+        cfg.endpoint = OPENROUTER_BASE_DEFAULT
+    cfg.endpoint = _env_first("OPENROUTER_BASE_URL", default=cfg.endpoint).rstrip("/")
+    if not cfg.model or cfg.model == LMSTUDIO_MODEL_DEFAULT:
+        cfg.model = OPENROUTER_MODEL_DEFAULT
+    cfg.model = _env_first("OPENROUTER_MODEL", "CIV6AI_OPENROUTER_MODEL", default=cfg.model)
+    if not cfg.api_key or cfg.api_key == LMSTUDIO_API_KEY_DEFAULT:
+        cfg.api_key = ""
+    cfg.api_key = _env_first("OPENROUTER_API_KEY", "CIV6AI_OPENROUTER_API_KEY", default=cfg.api_key)
+    # Hosted calls never share one GPU, so seats must not queue behind a lock.
+    cfg.queue_shared_model = False
+    if cfg.timeout_seconds >= LMSTUDIO_TIMEOUT_DEFAULT:
+        cfg.timeout_seconds = OPENROUTER_TIMEOUT_DEFAULT
 
 
 def apply_config_to_environ(cfg: Civ6AiLocalConfig) -> None:
@@ -189,6 +228,12 @@ def apply_config_to_environ(cfg: Civ6AiLocalConfig) -> None:
     os.environ["CIV4AI_LMSTUDIO_REASONING_EFFORT"] = cfg.reasoning
     os.environ["CIV6AI_CONTEXT_BUDGET"] = "1" if cfg.context_budget else "0"
     os.environ["CIV6AI_QUEUE_SHARED_MODEL"] = "1" if cfg.queue_shared_model else "0"
+    os.environ["CIV6AI_PARALLEL_SEATS"] = str(cfg.effective_parallel_seats)
+    if cfg.is_openrouter:
+        os.environ["OPENROUTER_MODEL"] = cfg.model
+        os.environ["OPENAI_BASE_URL"] = cfg.endpoint
+        if cfg.api_key and "OPENROUTER_API_KEY" not in os.environ:
+            os.environ["OPENROUTER_API_KEY"] = cfg.api_key
     if cfg.mp_move_sync:
         os.environ["CIV6AI_MP_MOVE_SYNC"] = "1"
     elif "CIV6AI_MP_MOVE_SYNC" not in os.environ:

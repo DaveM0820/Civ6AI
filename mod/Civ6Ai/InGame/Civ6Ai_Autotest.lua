@@ -22,6 +22,9 @@ function Civ6Ai_Autotest.Initialize()
     if Events.LoadScreenClose ~= nil then
       Events.LoadScreenClose.Add(Civ6Ai_Autotest._DisableBoostPopups)
     end
+    if Events.DiplomacyStatement ~= nil then
+      Events.DiplomacyStatement.Add(Civ6Ai_Autotest._OnDiplomacyStatement)
+    end
   end
   Civ6Ai_Autotest._DisableBoostPopups()
 end
@@ -95,12 +98,90 @@ function Civ6Ai_Autotest.AfterPulse(playerID)
   Civ6Ai_Autotest._DisableBoostPopups()
   Civ6Ai_Autotest._CloseQueuedPopups()
   Civ6Ai_Autotest._DismissBlockers(playerID)
-  Civ6Ai_Autotest._EndManagedTurn(playerID)
+  -- Only the human/local seat needs an explicit end turn; AI seats end their own turns.
+  local p = Players[playerID]
+  if p ~= nil and p:IsHuman() then
+    Civ6Ai_Autotest._EndTurnAfterSeats(playerID)
+  end
   if turn >= Civ6Ai_Autotest.StopTurn() then
     Civ6Ai_Autotest._WriteSessionSummary()
     Civ6Ai_Autotest._stopped = true
     Civ6Ai_Autotest._LogLine("stop|turn=" .. tostring(turn))
   end
+end
+
+-- Seat-timing barrier (docs/REAL_TEST.md "Seat timing").
+-- Single player plays the local seat's turn N first; the AI seats play their turn
+-- N after it ends (same game turn number) and each dumps a snapshot then. The host
+-- asks the model for one seat at a time, so the AI answers for turn N arrive while
+-- the local seat plays turn N+1, and each is applied at that seat's own turn N+1
+-- activation (Civ6Ai_Bridge._ApplyPreviousTurnForSeat). The local seat therefore
+-- holds its end-turn until every AI seat that dumped a turn N snapshot has had its
+-- answer delivered to the pending-apply module; otherwise the AI turn N+1 would
+-- start before the orders exist and they would be dropped as stale. Bounded by a
+-- wall-clock deadline of sidecar timeout x (pending seats + 1).
+function Civ6Ai_Autotest._PendingSeats(localPlayer)
+  local pending = {}
+  local previousTurn = Game.GetCurrentGameTurn() - 1
+  for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
+    if seat ~= localPlayer and Civ6Ai_Config.ShouldRunBridge(seat)
+        and not Civ6Ai_Bridge.SeatDecisionDelivered(seat, previousTurn) then
+      table.insert(pending, seat)
+    end
+  end
+  return pending
+end
+
+function Civ6Ai_Autotest._EndTurnAfterSeats(playerID)
+  local turn = Game.GetCurrentGameTurn()
+  local key = tostring(playerID) .. "|" .. tostring(turn)
+  Civ6Ai_Autotest._barrierKeys = Civ6Ai_Autotest._barrierKeys or {}
+  if Civ6Ai_Autotest._barrierKeys[key] then
+    return
+  end
+  Civ6Ai_Autotest._barrierKeys[key] = true
+  local pending = Civ6Ai_Autotest._PendingSeats(playerID)
+  if #pending == 0 then
+    Civ6Ai_Autotest._EndManagedTurn(playerID)
+    return
+  end
+  local started = Civ6Ai_Bridge._WallClock()
+  local waitSeconds = Civ6Ai_Config.SidecarTimeout() * (#pending + 1)
+  local deadline = started ~= nil and (started + waitSeconds) or nil
+  local line = "seat_barrier_wait|turn=" .. tostring(turn) .. "|player=" .. tostring(playerID)
+    .. "|pending=" .. table.concat(pending, ",") .. "|max_wait=" .. tostring(waitSeconds)
+  Civ6Ai_Util.Log("autotest|" .. line)
+  Civ6Ai_Autotest._LogLine(line)
+  local attempts = 0
+  local lastCheck = nil
+  Civ6Ai_Util.ScheduleTick(function()
+    attempts = attempts + 1
+    if Game.GetCurrentGameTurn() ~= turn then
+      Civ6Ai_Util.Log("autotest|seat_barrier_abandoned|turn=" .. tostring(turn) .. "|reason=turn_advanced")
+      return false
+    end
+    local now = Civ6Ai_Bridge._WallClock()
+    if now ~= nil then
+      if now == lastCheck then
+        return true
+      end
+      lastCheck = now
+    elseif attempts % 30 ~= 0 then
+      return true
+    end
+    local still = Civ6Ai_Autotest._PendingSeats(playerID)
+    local expired = (deadline ~= nil and now ~= nil and now >= deadline) or (deadline == nil and attempts >= 60000)
+    if #still == 0 or expired then
+      local done = "seat_barrier_done|turn=" .. tostring(turn)
+        .. "|waited=" .. tostring((now ~= nil and started ~= nil) and (now - started) or attempts)
+        .. "|timed_out=" .. tostring(#still > 0) .. "|pending=" .. table.concat(still, ",")
+      Civ6Ai_Util.Log("autotest|" .. done)
+      Civ6Ai_Autotest._LogLine(done)
+      Civ6Ai_Autotest._EndManagedTurn(playerID)
+      return false
+    end
+    return true
+  end)
 end
 
 function Civ6Ai_Autotest._DisableBoostPopups()
@@ -122,6 +203,14 @@ function Civ6Ai_Autotest._CloseQueuedPopups()
     "InGamePopup",
     "GenericPopup",
     "PopupDialog",
+    -- Expansion popups; HistoricMoments held P0's end turn for 25+ min on turn 10.
+    "HistoricMoments",
+    "EraReviewPopup",
+    "EraCompletePopup",
+    "DedicationPopup",
+    "WorldCrisisPopup",
+    "NaturalWonderPopup",
+    "WonderBuiltPopup",
   }
   local closed = 0
   for _, name in ipairs(names) do
@@ -144,6 +233,48 @@ function Civ6Ai_Autotest._CloseQueuedPopups()
     Civ6Ai_Autotest._LogLine("popups_closed|count=" .. tostring(closed))
     Civ6Ai_Util.Log("autotest|popups_closed|count=" .. tostring(closed))
   end
+end
+
+-- Leader screens (first meeting, greetings, warnings, denouncements, war
+-- declarations) wait for a click and ignore posted Enter keys, so autotest
+-- answers them through DiplomacyManager, the same calls the screen's buttons
+-- make. Deal proposals are left to the deal flow.
+Civ6Ai_Autotest.DIPLO_KEEP = { MAKE_DEAL = true }
+
+function Civ6Ai_Autotest._OnDiplomacyStatement(fromPlayer, toPlayer, kVariants)
+  if not Civ6Ai_Config.IsAutotest() or DiplomacyManager == nil or kVariants == nil then
+    return
+  end
+  local localPlayer = Game.GetLocalPlayer()
+  if toPlayer ~= localPlayer or fromPlayer == localPlayer then
+    return
+  end
+  local sessionID = kVariants.SessionID
+  local typeName = ""
+  pcall(function() typeName = DiplomacyManager.GetKeyName(kVariants.StatementType) or "" end)
+  if Civ6Ai_Autotest.DIPLO_KEEP[typeName] then
+    Civ6Ai_Util.Log("autotest|diplo_left_open|type=" .. tostring(typeName) .. "|from=" .. tostring(fromPlayer))
+    return
+  end
+  local ticks = 0
+  Civ6Ai_Util.ScheduleTick(function()
+    ticks = ticks + 1
+    -- Let the leader screen open first so it sees the close and tears down cleanly.
+    if ticks < 15 then
+      return true
+    end
+    local okResp = pcall(function() DiplomacyManager.AddResponse(sessionID, localPlayer, "POSITIVE") end)
+    local stillOpen = true
+    if DiplomacyManager.FindOpenSessionID ~= nil then
+      pcall(function() stillOpen = DiplomacyManager.FindOpenSessionID(fromPlayer, localPlayer) == sessionID end)
+    end
+    if stillOpen then
+      pcall(function() DiplomacyManager.CloseSession(sessionID) end)
+    end
+    Civ6Ai_Util.Log("autotest|diplo_auto_answer|type=" .. tostring(typeName) .. "|from=" .. tostring(fromPlayer)
+      .. "|response=" .. tostring(okResp) .. "|closed=" .. tostring(stillOpen))
+    return false
+  end)
 end
 
 function Civ6Ai_Autotest._OnBoostTriggered()
@@ -283,7 +414,22 @@ function Civ6Ai_Autotest._RequestEndTurn()
   return true, ""
 end
 
+-- True while playerID still has its turn. After an accepted end turn this goes
+-- false; an Enter tap sent then lands in the next turn, where Enter is the
+-- Next Turn hotkey and ends that turn before the model has answered.
+function Civ6Ai_Autotest._TurnStillActive(playerID)
+  local p = Players ~= nil and Players[playerID] or nil
+  if p == nil or p.IsTurnActive == nil then
+    return true
+  end
+  local ok, active = pcall(function() return p:IsTurnActive() end)
+  return not ok or active == true
+end
+
 function Civ6Ai_Autotest._NudgeEnter(playerID)
+  if playerID ~= Game.GetLocalPlayer() or not Civ6Ai_Autotest._TurnStillActive(playerID) then
+    return
+  end
   local text = "nudge_enter|player=" .. tostring(playerID)
   Civ6Ai_Util.Log("autotest|" .. text)
   Civ6Ai_Autotest._LogLine(text)
@@ -360,7 +506,7 @@ function Civ6Ai_Autotest._SchedulePopupDrain(playerID)
     attempts = attempts + 1
     Civ6Ai_Autotest._CloseQueuedPopups()
     Civ6Ai_Autotest._DismissBlockers(playerID)
-    if Game.GetCurrentGameTurn() ~= startTurn then
+    if Game.GetCurrentGameTurn() ~= startTurn or not Civ6Ai_Autotest._TurnStillActive(playerID) then
       Civ6Ai_Autotest._draining = false
       return false
     end

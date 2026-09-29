@@ -14,7 +14,10 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sidecar import civ6_adapter
+from sidecar import civ6_apply_results
+from sidecar import civ6_priorities
 from sidecar import civ6_wire
+from sidecar import civ6_economy
 from sidecar import context_budget
 from sidecar import map_situational
 from sidecar.map_render_civ6 import render_civ6_map_for_model
@@ -227,6 +230,13 @@ def _persist_thought_memory(
             thought_memory,
             int(snapshot["decision"]["turn"]),
             opinions,
+        )
+    remembered = normalized_response.get("remember", [])
+    if isinstance(remembered, list) and remembered:
+        thought_memory = pipeline.append_remembered(
+            thought_memory,
+            int(snapshot["decision"]["turn"]),
+            remembered,
         )
     histories = normalized_response.get("player_histories", {})
     if isinstance(histories, dict) and histories:
@@ -482,7 +492,10 @@ def _write_decision_outputs(session_dir: Path | None, record: dict, output_path:
             "command_id": command.get("command_id"),
             "arguments": command.get("arguments", {}),
         })
-    apply_path = target_dir / "apply_commands.json"
+    # decision.json -> apply_commands.json; decision_chat.json -> apply_commands_chat.json.
+    # A chat reply must never overwrite the turn's apply_commands.json.
+    suffix = decision_path.stem[len("decision"):] if decision_path.stem.startswith("decision") else "_" + decision_path.stem
+    apply_path = target_dir / f"apply_commands{suffix}.json"
     apply_path.write_text(pipeline.canonical_json({"commands": apply_commands}) + "\n", encoding="utf-8")
 
 
@@ -500,6 +513,11 @@ def main() -> None:
     parser.add_argument("--live", action="store_true", help="Call live model APIs")
     parser.add_argument("--personality", type=Path)
     parser.add_argument("--previous-response-id")
+    parser.add_argument(
+        "--no-circuit-breaker",
+        action="store_true",
+        help="Do not read, enforce, or update circuit_breaker.json (used by start_live.py --dry-run)",
+    )
     args = parser.parse_args()
 
     state_path = args.snapshot or args.state or (args.session_dir / "snapshot.json" if args.session_dir else DEFAULT_SNAPSHOT)
@@ -518,7 +536,12 @@ def main() -> None:
     raw = _read(state_path)
     snapshot = civ6_adapter.upgrade_runtime_snapshot(raw) if args.from_game else raw
     civ6_adapter.normalize_civ6_snapshot(snapshot)
+    civ6_priorities.inject_legal_commands(snapshot)
     _apply_personality(snapshot, args.personality)
+    try:
+        civ6_apply_results.inject_command_results(snapshot, args.session_dir)
+    except Exception as error:  # never block a seat-turn on feedback rows
+        print(f"apply-results feedback skipped: {error}", file=sys.stderr)
 
     game_uuid = args.session_id or "civ6-runtime"
     if isinstance(snapshot.get("civ6"), dict) and snapshot["civ6"].get("session_id"):
@@ -529,6 +552,10 @@ def main() -> None:
     thought_path = _thought_memory_path(civ6ai_root, game_uuid, player_id)
     thought_memory = pipeline.load_thought_memory(thought_path, session_key, snapshot)
     pipeline.inject_thought_history(snapshot, thought_memory)
+    try:  # idle-unit streaks + notification first-seen turns (prompt economy panel)
+        civ6_economy.update_tracking(snapshot, args.session_dir)
+    except Exception:
+        pass
 
     attach_maps = pipeline.map_image_attach_turn(snapshot)
     limit_info = context_budget.resolve_model_context_limit()
@@ -555,9 +582,14 @@ def main() -> None:
         return
 
     breaker_path = metrics_dir / "circuit_breaker.json"
-    breaker = _load_circuit_breaker(breaker_path)
-    if breaker.open(player_id):
-        raise pipeline.BoundaryError("circuit_breaker", "Helper circuit breaker is open for " + player_id)
+    if args.no_circuit_breaker:
+        # Diagnostic runs (dry-run) must not be blocked by, or add to, the
+        # persisted failure count; keep an in-memory breaker that is never saved.
+        breaker = CircuitBreaker(failures={})
+    else:
+        breaker = _load_circuit_breaker(breaker_path)
+        if breaker.open(player_id):
+            raise pipeline.BoundaryError("circuit_breaker", "Helper circuit breaker is open for " + player_id)
 
     private = {
         "game_uuid": game_uuid,
@@ -589,8 +621,12 @@ def main() -> None:
         omit_focus=True,
     )
     advciv = snapshot.setdefault("advciv", {})
-    if isinstance(advciv, dict) and render_meta.get("manifest"):
-        advciv["map_images"] = render_meta["manifest"]
+    if isinstance(advciv, dict):
+        # Record what was really attached so map-read rows match the images
+        # (tacticalmap.read only when the tactical close-up went out).
+        advciv["map_images"] = render_meta.get("manifest") or [
+            {"role": "overview" if image_attachments else "none"}
+        ]
         wire_text = civ6_wire.build_civ6_model_wire_text(snapshot)
 
     actual_sizes: list[int] = []
@@ -715,7 +751,8 @@ def main() -> None:
     }
     pipeline.append_turn_metrics(metrics_dir, metrics)
     record["metrics"] = metrics
-    _save_circuit_breaker(breaker_path, breaker)
+    if not args.no_circuit_breaker:
+        _save_circuit_breaker(breaker_path, breaker)
     pipeline.append_audit(args.journal, record)
     _write_decision_outputs(args.session_dir, record, args.output)
     print(pipeline.canonical_json(record))

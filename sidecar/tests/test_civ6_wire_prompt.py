@@ -25,12 +25,14 @@ class Civ6WirePromptTests(unittest.TestCase):
     def test_sections_present(self):
         snapshot = civ6_adapter.build_classical_golden_snapshot()
         wire = civ6_wire.build_civ6_model_wire_text(snapshot)
-        self.assertIn("=== CURRENT SITUATION ===", wire)
-        self.assertIn("=== MAP ===", wire)
-        self.assertIn("=== LEGAL COMMANDS ===", wire)
-        self.assertIn("=== INSTRUCTIONS ===", wire)
-        self.assertIn("units.nativeControl", wire)
-        self.assertIn("cities.nativeProduction", wire)
+        for section in ("GAME", "EMPIRE", "DIPLOMACY", "OPPONENTS", "ATTENTION", "THOUGHTS", "ADVICE",
+                        "RESPONSE INSTRUCTIONS", "OPTIONAL COMMANDS", "REQUIRED COMMANDS"):
+            self.assertIn(f"=== {section} ===", wire)
+        self.assertIn('"commands.required.count"', wire)
+        self.assertIn('.spearman_1.command": "MoveTo(', wire)
+        # Only engine-supported unit command shapes are advertised.
+        for unsupported in ("Alert", "Heal", "Sleep", "DISTRICT_*@", "legal.trade", "legal.alliance"):
+            self.assertNotIn(unsupported, wire)
 
     def test_chat_lines_in_situation_when_present(self):
         snapshot = civ6_adapter.build_classical_golden_snapshot()
@@ -121,7 +123,24 @@ class Civ6WirePromptTests(unittest.TestCase):
         self.assertNotIn("must include", wire)
         self.assertNotIn("foundCity = apply this turn", wire)
         self.assertNotIn("as soon as a legal tile is available", wire)
-        self.assertIn("foundCity is optional", wire)
+        self.assertIn("FoundCity is optional", wire)
+        self.assertIn("You have no city yet", wire)
+
+    def test_capital_distance_hint_only_without_cities(self):
+        snapshot = civ6_adapter.build_classical_golden_snapshot()
+        snapshot["legal_commands"].append({
+            "command_id": "CMD_found_UNIT_SETTLER_1",
+            "kind": "found_city",
+            "description": "found_city unit_id=UNIT_SETTLER_1",
+            "fixed_arguments": {"unit_id": "UNIT_SETTLER_1"},
+            "parameter_domains": {},
+            "affected_ids": ["UNIT_SETTLER_1"],
+            "runtime_status": "implemented_untested",
+        })
+        self.assertTrue(snapshot["your_cities"])
+        wire = civ6_wire.build_civ6_response_instructions(snapshot)
+        self.assertIn("FoundCity is optional", wire)
+        self.assertNotIn("You have no city yet", wire)
 
 
 if __name__ == "__main__":

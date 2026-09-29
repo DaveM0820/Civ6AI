@@ -98,13 +98,43 @@ def read_dds_rgba(path: Path) -> tuple[bytes, int, int] | None:
     if fourcc == b"\x00\x00\x00\x00":
         bpp = struct.unpack_from("<I", raw, 88)[0]
         if bpp == 32:
+            order = _rgba32_byte_order(raw)
             pixels = bytearray(width * height * 4)
             for index in range(width * height):
-                blue, green, red, alpha = raw[offset + 4 * index: offset + 4 * index + 4]
+                texel = raw[offset + 4 * index: offset + 4 * index + 4]
                 base = index * 4
-                pixels[base: base + 4] = (red, green, blue, alpha)
+                pixels[base: base + 4] = (texel[order[0]], texel[order[1]], texel[order[2]], texel[order[3]])
             return bytes(pixels), width, height
     return None
+
+
+def _mask_byte_index(mask: int) -> int | None:
+    for index in range(4):
+        if mask == 0xFF << (8 * index):
+            return index
+    return None
+
+
+def _rgba32_byte_order(raw: bytes) -> tuple[int, int, int, int]:
+    """Byte index of R, G, B, A inside one 32-bit texel, read from the DDS channel masks.
+
+    Civ6 pantry textures (StrategicView_*, Units50, Resources50) are A8B8G8R8
+    (R mask 0x000000FF). The old reader assumed B8G8R8A8 and swapped red and blue,
+    which painted coast/ocean brown and desert blue on every Civ6 map.
+    """
+    red_mask, green_mask, blue_mask, alpha_mask = struct.unpack_from("<IIII", raw, 92)
+    order = (
+        _mask_byte_index(red_mask),
+        _mask_byte_index(green_mask),
+        _mask_byte_index(blue_mask),
+        _mask_byte_index(alpha_mask),
+    )
+    if None in order[:3] or len(set(order[:3])) != 3:
+        return (2, 1, 0, 3)
+    alpha = order[3]
+    if alpha is None or alpha in order[:3]:
+        alpha = ({0, 1, 2, 3} - set(order[:3])).pop()
+    return (order[0], order[1], order[2], alpha)  # type: ignore[return-value]
 
 
 def _decode_dxt1(data: bytes, width: int, height: int) -> bytes:
@@ -432,7 +462,31 @@ def icon_png_path(icon_name: str, out_size: int = 32) -> Path | None:
         cached = ICON_CACHE_DIR / f"{icon_name}_atlas{atlas_size}.png"
         if cached.is_file():
             return cached
-    return extract_icon(icon_name, out_size=out_size)
+    extracted = extract_icon(icon_name, out_size=out_size)
+    if extracted is not None:
+        return extracted
+    return _cached_atlas_icon(icon_name)
+
+
+def _cached_atlas_icon(icon_name: str) -> Path | None:
+    """Largest cached ``<icon>_atlasNN.png`` when the pantry/XML catalog is unavailable."""
+    name = str(icon_name or "").strip()
+    if not name or not ICON_CACHE_DIR.is_dir():
+        return None
+    best: tuple[int, Path] | None = None
+    for candidate in ICON_CACHE_DIR.glob(f"{name}_atlas*.png"):
+        suffix = candidate.stem[len(name) + len("_atlas"):]
+        if not suffix.isdigit():
+            continue
+        size = int(suffix)
+        if best is None or size > best[0]:
+            best = (size, candidate)
+    return best[1] if best else None
+
+
+def cached_assets_available() -> bool:
+    """True when pre-extracted strategic sprites exist (lets the renderer work without a pantry)."""
+    return STRATEGIC_CACHE_DIR.is_dir() and any(STRATEGIC_CACHE_DIR.glob("*.crop.png"))
 
 
 def civ6_terrain_labels() -> dict[str, str]:

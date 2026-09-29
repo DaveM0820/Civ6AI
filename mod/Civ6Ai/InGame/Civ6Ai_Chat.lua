@@ -42,6 +42,10 @@ function Civ6Ai_Chat._IsHumanSender(fromPlayer)
       return true
     end
   end
+  -- Autotest: a managed local seat is played by the model, not a person.
+  if Civ6Ai_Config ~= nil and Civ6Ai_Config.IsAutotest() and Civ6Ai_Config.IsManagedSeat(fromPlayer) then
+    return false
+  end
   if Game ~= nil and Game.GetLocalPlayer ~= nil then
     local localPlayer = Game.GetLocalPlayer()
     if localPlayer ~= nil and localPlayer >= 0 and fromPlayer == localPlayer then
@@ -104,11 +108,18 @@ function Civ6Ai_Chat._RecordPublicChat(fromPlayer, text, turn)
     from_player_id = senderId,
     text = text,
   })
+  pcall(Civ6Ai_Chat.PanelOnPublic, fromPlayer, text, turn)
 end
 
 function Civ6Ai_Chat._RecordPrivateChat(fromPlayer, toPlayer, text, turn)
   local inbox = Civ6Ai_Chat._privateInbox[toPlayer] or {}
+  -- The snapshot schema requires message_id on every private_inbox record;
+  -- without it the seat's snapshot failed validation and lost its model turn.
+  Civ6Ai_Chat._privateSeq = (Civ6Ai_Chat._privateSeq or 0) + 1
+  local messageId = "MSG_T" .. tostring(turn) .. "_" .. tostring(fromPlayer) .. "_" .. tostring(toPlayer)
+    .. "_" .. tostring(Civ6Ai_Chat._privateSeq)
   local message = {
+    message_id = messageId,
     turn = turn,
     from_player_id = Civ6Ai_Util.PlayerId(fromPlayer),
     text = text,
@@ -118,11 +129,13 @@ function Civ6Ai_Chat._RecordPrivateChat(fromPlayer, toPlayer, text, turn)
   Civ6Ai_Chat._privateInbox[toPlayer] = inbox
   Civ6Ai_Chat._PersistRecord({
     kind = "private",
+    message_id = messageId,
     turn = turn,
     from_player_id = message.from_player_id,
     to_player_id = Civ6Ai_Util.PlayerId(toPlayer),
     text = text,
   })
+  pcall(Civ6Ai_Chat.PanelOnPrivate, fromPlayer, toPlayer, text, turn)
 end
 
 function Civ6Ai_Chat._TriggerAiReplies(recipients)
@@ -146,6 +159,12 @@ function Civ6Ai_Chat._OnHumanChat(fromPlayer, toPlayer, text, eTargetType)
     return
   end
   if string.find(text, "CIV6AI|", 1, true) == 1 then
+    return
+  end
+  -- Model chat goes out through Network.SendChat as the local player, so it comes
+  -- back here as if the human typed it. Never treat our own messages as human chat
+  -- (that echo re-triggered chat pulses for every seat in a loop).
+  if Civ6Ai_Chat._ConsumeSelfSent(text) then
     return
   end
   if not Civ6Ai_Chat._IsHumanSender(fromPlayer) then
@@ -229,6 +248,24 @@ function Civ6Ai_Chat._ResolveTargetPlayerId(message)
   return nil
 end
 
+function Civ6Ai_Chat._MarkSelfSent(text)
+  Civ6Ai_Chat._selfSent = Civ6Ai_Chat._selfSent or {}
+  Civ6Ai_Chat._selfSent[text] = (Civ6Ai_Chat._selfSent[text] or 0) + 1
+end
+
+function Civ6Ai_Chat._ConsumeSelfSent(text)
+  local pending = Civ6Ai_Chat._selfSent and Civ6Ai_Chat._selfSent[text]
+  if pending == nil or pending <= 0 then
+    return false
+  end
+  if pending == 1 then
+    Civ6Ai_Chat._selfSent[text] = nil
+  else
+    Civ6Ai_Chat._selfSent[text] = pending - 1
+  end
+  return true
+end
+
 function Civ6Ai_Chat._SendNetworkChat(text, targetType, targetID)
   if Network == nil or Network.SendChat == nil then
     return false
@@ -238,6 +275,7 @@ function Civ6Ai_Chat._SendNetworkChat(text, targetType, targetID)
   end
   local chatType = targetType or ChatTargetTypes.CHATTARGET_ALL
   local chatId = targetID or -1
+  Civ6Ai_Chat._MarkSelfSent(text)
   Network.SendChat(text, chatType, chatId)
   return true
 end
@@ -250,6 +288,8 @@ function Civ6Ai_Chat.SendMessage(senderPlayerID, message)
   local target = tostring(message.target or "all")
   if target == "all" or target == "public" then
     if Civ6Ai_Chat._SendNetworkChat(text, ChatTargetTypes.CHATTARGET_ALL, -1) then
+      -- Record under the real sender (the network echo would say "local player").
+      Civ6Ai_Chat._RecordPublicChat(senderPlayerID, text, Game.GetCurrentGameTurn())
       Civ6Ai_Util.Log("chat|sent|player=" .. tostring(senderPlayerID) .. "|target=all")
       return true
     end
@@ -259,6 +299,7 @@ function Civ6Ai_Chat.SendMessage(senderPlayerID, message)
   local targetPlayer = Civ6Ai_Chat._ResolveTargetPlayerId(message)
   if targetPlayer ~= nil then
     if Civ6Ai_Chat._SendNetworkChat(text, ChatTargetTypes.CHATTARGET_PLAYER, targetPlayer) then
+      Civ6Ai_Chat._RecordPrivateChat(senderPlayerID, targetPlayer, text, Game.GetCurrentGameTurn())
       Civ6Ai_Util.Log(
         "chat|sent|player=" .. tostring(senderPlayerID) .. "|target_player=" .. tostring(targetPlayer)
       )
@@ -327,7 +368,10 @@ function Civ6Ai_Chat.EnableWorldTrackerChat()
     "../WorldTracker/ChatCheck",
   })
   if chatPanel == nil or chatCheck == nil then
-    Civ6Ai_Util.Log("chat|worldtracker|missing_controls")
+    if not Civ6Ai_Chat._loggedMissingControls then
+      Civ6Ai_Chat._loggedMissingControls = true
+      Civ6Ai_Util.Log("chat|worldtracker|missing_controls")
+    end
     return false
   end
   if chatCheck.SetHide ~= nil then
@@ -379,11 +423,206 @@ function Civ6Ai_Chat._OnLoadGameViewStateDone()
   Civ6Ai_Chat._ScheduleWorldTrackerChatEnable()
 end
 
+-- ---------------------------------------------------------------------------
+-- Chat panel (Civ6Ai_InGame.xml). Shows public AI chat and private messages to
+-- the local player or a human seat; the edit box sends the local player's
+-- message to the AI seats (@LeaderName text = private).
+-- ---------------------------------------------------------------------------
+Civ6Ai_Chat.PANEL_MAX_LINES = 80
+Civ6Ai_Chat.PANEL_PLACEHOLDER = "AI chat will appear here."
+Civ6Ai_Chat._panelLines = Civ6Ai_Chat._panelLines or {}
+
+function Civ6Ai_Chat._PanelControls()
+  if Controls == nil or Controls.Civ6AiChatLog == nil then
+    return nil
+  end
+  return Controls
+end
+
+function Civ6Ai_Chat._PanelName(playerID)
+  local id = tonumber(playerID)
+  if id ~= nil and Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == id
+      and Civ6Ai_Chat._IsHumanSender(id) then
+    return "You"
+  end
+  local name = id ~= nil and Civ6Ai_Chat._LeaderName(id) or nil
+  if name ~= nil and Locale ~= nil and Locale.Lookup ~= nil then
+    local ok, text = pcall(Locale.Lookup, name)
+    if ok and text ~= nil and text ~= "" then
+      name = text
+    end
+  end
+  return name or ("Player " .. tostring(playerID))
+end
+
+function Civ6Ai_Chat._PanelRefresh()
+  local c = Civ6Ai_Chat._PanelControls()
+  if c == nil then
+    return
+  end
+  c.Civ6AiChatLog:SetText(table.concat(Civ6Ai_Chat._panelLines, "[NEWLINE]"))
+  if c.Civ6AiChatScroll ~= nil then
+    pcall(function()
+      c.Civ6AiChatScroll:CalculateInternalSize()
+      c.Civ6AiChatScroll:SetScrollValue(1)
+    end)
+  end
+end
+
+function Civ6Ai_Chat.PanelAdd(line)
+  -- Square brackets would be read as markup ([ICON_...], [COLOR...]).
+  local clean = string.gsub(tostring(line or ""), "[%[%]]", "")
+  if Civ6Ai_Chat._panelLines[1] == Civ6Ai_Chat.PANEL_PLACEHOLDER then
+    table.remove(Civ6Ai_Chat._panelLines, 1)
+  end
+  table.insert(Civ6Ai_Chat._panelLines, clean)
+  while #Civ6Ai_Chat._panelLines > Civ6Ai_Chat.PANEL_MAX_LINES do
+    table.remove(Civ6Ai_Chat._panelLines, 1)
+  end
+  Civ6Ai_Chat._PanelRefresh()
+end
+
+function Civ6Ai_Chat.PanelOnPublic(fromPlayer, text, turn)
+  Civ6Ai_Chat.PanelAdd("T" .. tostring(turn) .. "  " .. Civ6Ai_Chat._PanelName(fromPlayer) .. ": " .. tostring(text))
+end
+
+function Civ6Ai_Chat._PanelShowsPrivate(fromPlayer, toPlayer)
+  local localPlayer = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or -1
+  if toPlayer == localPlayer or fromPlayer == localPlayer then
+    return true
+  end
+  return Civ6Ai_Config ~= nil and Civ6Ai_Config.IsHumanSeat ~= nil
+    and (Civ6Ai_Config.IsHumanSeat(toPlayer) or Civ6Ai_Config.IsHumanSeat(fromPlayer))
+end
+
+function Civ6Ai_Chat.PanelOnPrivate(fromPlayer, toPlayer, text, turn)
+  if not Civ6Ai_Chat._PanelShowsPrivate(tonumber(fromPlayer), tonumber(toPlayer)) then
+    return
+  end
+  Civ6Ai_Chat.PanelAdd("T" .. tostring(turn) .. "  " .. Civ6Ai_Chat._PanelName(fromPlayer) .. " to "
+    .. Civ6Ai_Chat._PanelName(toPlayer) .. " (private): " .. tostring(text))
+end
+
+-- "@Name rest" -> player id of that leader/player name (prefix match), rest.
+function Civ6Ai_Chat._PanelTarget(text)
+  local name, rest = string.match(text, "^@(%S+)%s+(.+)$")
+  if name == nil or PlayerConfigurations == nil then
+    return nil, text
+  end
+  local want = string.lower(name)
+  for playerID = 0, 63 do
+    local config = PlayerConfigurations[playerID]
+    if config ~= nil then
+      local leader = Civ6Ai_Chat._PanelName(playerID)
+      if string.lower(string.sub(leader, 1, string.len(want))) == want then
+        return playerID, rest
+      end
+    end
+  end
+  return nil, text
+end
+
+function Civ6Ai_Chat.OnPanelInput(text)
+  text = tostring(text or "")
+  text = string.gsub(text, "^%s+", "")
+  text = string.gsub(text, "%s+$", "")
+  local c = Civ6Ai_Chat._PanelControls()
+  if c ~= nil and c.Civ6AiChatInput ~= nil then
+    c.Civ6AiChatInput:SetText("")
+  end
+  if text == "" then
+    return
+  end
+  local me = Game.GetLocalPlayer()
+  local turn = Game.GetCurrentGameTurn()
+  local target, body = Civ6Ai_Chat._PanelTarget(text)
+  local recipients
+  if target ~= nil then
+    Civ6Ai_Chat._RecordPrivateChat(me, target, body, turn)
+    recipients = Civ6Ai_Chat._ManagedRecipients(target)
+  else
+    Civ6Ai_Chat._RecordPublicChat(me, text, turn)
+    recipients = Civ6Ai_Chat._ManagedRecipients(nil)
+  end
+  -- In a network game the others also see it in the normal chat.
+  if GameConfiguration ~= nil and GameConfiguration.IsNetworkMultiplayer ~= nil
+      and GameConfiguration.IsNetworkMultiplayer() and ChatTargetTypes ~= nil then
+    if target ~= nil then
+      Civ6Ai_Chat._SendNetworkChat(body, ChatTargetTypes.CHATTARGET_PLAYER, target)
+    else
+      Civ6Ai_Chat._SendNetworkChat(text, ChatTargetTypes.CHATTARGET_ALL, -1)
+    end
+  end
+  local others = {}
+  for _, seat in ipairs(recipients or {}) do
+    if seat ~= me or target == me then
+      others[#others + 1] = seat
+    end
+  end
+  Civ6Ai_Util.Log("chat|panel_input|to=" .. tostring(target or "all") .. "|len=" .. tostring(string.len(text))
+    .. "|replies=" .. tostring(#others))
+  Civ6Ai_Chat._TriggerAiReplies(others)
+end
+
+function Civ6Ai_Chat._PanelSetShown(shown)
+  local c = Civ6Ai_Chat._PanelControls()
+  if c == nil then
+    return
+  end
+  c.Civ6AiChatRoot:SetHide(not shown)
+  if c.Civ6AiChatShow ~= nil then
+    c.Civ6AiChatShow:SetHide(shown)
+  end
+end
+
+function Civ6Ai_Chat.InitPanel()
+  local c = Civ6Ai_Chat._PanelControls()
+  if c == nil then
+    Civ6Ai_Util.Log("chat|panel|missing_controls")
+    return false
+  end
+  if ContextPtr ~= nil and ContextPtr.SetHide ~= nil then
+    pcall(function() ContextPtr:SetHide(false) end)
+  end
+  if c.Civ6AiChatInput ~= nil and c.Civ6AiChatInput.RegisterCommitCallback ~= nil then
+    c.Civ6AiChatInput:RegisterCommitCallback(function(text) Civ6Ai_Chat.OnPanelInput(text) end)
+  end
+  if c.Civ6AiChatToggle ~= nil and Mouse ~= nil then
+    c.Civ6AiChatToggle:RegisterCallback(Mouse.eLClick, function() Civ6Ai_Chat._PanelSetShown(false) end)
+  end
+  if c.Civ6AiChatShow ~= nil and Mouse ~= nil then
+    c.Civ6AiChatShow:RegisterCallback(Mouse.eLClick, function() Civ6Ai_Chat._PanelSetShown(true) end)
+  end
+  -- Refill from this session's history (a reload keeps the chat log file, not
+  -- the in-memory lists, so this is what the current Lua state has seen).
+  if #Civ6Ai_Chat._panelLines == 0 then
+    for _, e in ipairs(Civ6Ai_Chat._publicEvents) do
+      local sender = e.affected_ids ~= nil and e.affected_ids[1] or nil
+      local id = sender ~= nil and tonumber(string.match(tostring(sender), "(%d+)$")) or nil
+      table.insert(Civ6Ai_Chat._panelLines, "T" .. tostring(e.turn) .. "  " .. Civ6Ai_Chat._PanelName(id) .. ": "
+        .. string.gsub(tostring(e.text), "[%[%]]", ""))
+    end
+  end
+  if #Civ6Ai_Chat._panelLines == 0 then
+    table.insert(Civ6Ai_Chat._panelLines, Civ6Ai_Chat.PANEL_PLACEHOLDER)
+  end
+  Civ6Ai_Chat._PanelSetShown(true)
+  Civ6Ai_Chat._PanelRefresh()
+  local w, h = 0, 0
+  pcall(function() w, h = UIManager:GetScreenSizeVal() end)
+  Civ6Ai_Util.Log("chat|panel|ready|screen=" .. tostring(w) .. "x" .. tostring(h))
+  return true
+end
+
 function Civ6Ai_Chat.Initialize()
   if Civ6Ai_Chat._initialized then
     return
   end
   Civ6Ai_Chat._initialized = true
+  local okPanel, panelErr = pcall(Civ6Ai_Chat.InitPanel)
+  if not okPanel then
+    Civ6Ai_Util.Log("chat|panel|error|" .. tostring(panelErr))
+  end
   if Events ~= nil and Events.LoadGameViewStateDone ~= nil then
     Events.LoadGameViewStateDone.Add(Civ6Ai_Chat._OnLoadGameViewStateDone)
   end

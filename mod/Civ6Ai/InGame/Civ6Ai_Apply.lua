@@ -8,6 +8,38 @@ function Civ6Ai_Apply._IsNetworkMultiplayer()
   return false
 end
 
+-- Non-local seats in single player: UI operations (UnitManager/CityManager/
+-- UI.RequestPlayerOperation) are only honoured for the local player, so these
+-- seats use the GameCore routes exposed as ExposedMembers.Civ6Ai.*ForPlayer.
+-- Commands without a GameCore route fail individually with a *_requires_local_player reason.
+function Civ6Ai_Apply._UseGameCoreRoute(playerID)
+  if Civ6Ai_Apply._IsNetworkMultiplayer() then
+    return false
+  end
+  return Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() ~= playerID
+end
+
+-- pcall an ExposedMembers.Civ6Ai GameCore route. Returns ok(bool), reason(string).
+function Civ6Ai_Apply._GameCore(name, ...)
+  local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+  local fn = routes ~= nil and routes[name] or nil
+  if fn == nil then
+    return false, "gamecore_unavailable:" .. tostring(name)
+  end
+  local args = { ... }
+  local unpackFn = unpack or table.unpack
+  local okCall, ok, reason = pcall(function()
+    return fn(unpackFn(args))
+  end)
+  if not okCall then
+    return false, "gamecore_error:" .. tostring(ok)
+  end
+  if ok then
+    return true, reason or ""
+  end
+  return false, reason or (tostring(name) .. "_rejected")
+end
+
 function Civ6Ai_Apply._ApplyResultsPath(playerID)
   local sessionId = Civ6Ai_Bridge.SessionId()
   local root = Civ6Ai_Config.RootDir()
@@ -38,6 +70,13 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision)
   end
   Civ6Ai_Apply._orderedUnits = Civ6Ai_Apply._orderedUnits or {}
   Civ6Ai_Apply._orderedUnits[playerID] = {}
+  -- Network game: every PC must make the same change, so AI-seat orders go out
+  -- as synced player operations and results are recorded when they come back.
+  if Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive() and playerID ~= Game.GetLocalPlayer() then
+    local sent = Civ6Ai_OrderChannel.SendDecision(playerID, decision)
+    Civ6Ai_Util.Log("apply|order_channel|player=" .. tostring(playerID) .. "|sent=" .. tostring(sent))
+    return
+  end
   local commands = decision.commands
   local maxPasses = 4
   local pending = {}
@@ -52,8 +91,14 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision)
     local progress = false
     for _, command in ipairs(pending) do
       local ok, reason, fixedArgs = Civ6Ai_Apply._ApplyCommand(playerID, command)
-      Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs)
-      if ok then
+      local deferred = reason == Civ6Ai_Apply.DEFERRED
+      if not deferred then
+        Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs)
+      end
+      if deferred then
+        progress = true
+        Civ6Ai_Util.Log("apply|deferred|" .. tostring(command.kind) .. "|" .. tostring(command.command_id))
+      elseif ok then
         progress = true
         local unitId = (command.arguments and command.arguments.unit_id) or (fixedArgs and fixedArgs.unit_id)
         if unitId ~= nil then
@@ -95,14 +140,17 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision)
   end
 end
 
+-- Retry a move/attack in a later pass only when another unit was in the way (it
+-- may move off during this apply). Rejected or impossible orders are not retried:
+-- re-issuing them is what spent P0's movement on turn 25 (operation_rejected ->
+-- retry -> no_moves_left -> plot_occupied_exhausted).
 function Civ6Ai_Apply._IsPlotOccupiedRetryable(kind, reason)
   if kind ~= "move_unit" and kind ~= "attack_target" then
     return false
   end
   local text = tostring(reason or "")
   return text == "plot_occupied"
-    or text == "operation_illegal"
-    or text == "operation_rejected"
+    or string.find(text, "stack_limit", 1, true) ~= nil
     or string.find(text, "occupied", 1, true) ~= nil
 end
 
@@ -121,7 +169,9 @@ function Civ6Ai_Apply._TrySkipUnit(unit)
       return true
     end
   end
-  if UnitManager ~= nil and UnitManager.FinishMoves ~= nil then
+  -- A direct FinishMoves from the interface changes this PC only; in a
+  -- network game that would desync, so only the synced operations count there.
+  if UnitManager ~= nil and UnitManager.FinishMoves ~= nil and not Civ6Ai_Apply._IsNetworkMultiplayer() then
     UnitManager.FinishMoves(unit)
     return true
   end
@@ -129,7 +179,7 @@ function Civ6Ai_Apply._TrySkipUnit(unit)
 end
 
 function Civ6Ai_Apply._WithLocalPlayer(playerID, fn)
-  if Civ6Ai_Apply._IsNetworkMultiplayer() then
+  if Civ6Ai_Apply._IsNetworkMultiplayer() and Game.GetLocalPlayer() ~= playerID then
     return false, "local_player_swap_blocked_mp"
   end
   local origPlayer = Game.GetLocalPlayer()
@@ -172,6 +222,11 @@ function Civ6Ai_Apply._ParseUnitNumericId(unitId)
   if fromPrefix ~= nil then
     return tonumber(fromPrefix)
   end
+  -- The owner-qualified form other players' units use (UNIT_<owner>_<id>).
+  local qualified = string.match(text, "^UNIT_%d+_(%d+)$")
+  if qualified ~= nil then
+    return tonumber(qualified)
+  end
   return tonumber(text)
 end
 
@@ -188,10 +243,17 @@ function Civ6Ai_Apply._FindUnit(playerID, unitId)
 end
 
 function Civ6Ai_Apply._MoveUnitGameCore(playerID, unitNumericId, x, y)
-  if ExposedMembers == nil or ExposedMembers.Civ6Ai == nil or ExposedMembers.Civ6Ai.MoveUnitForPlayer == nil then
-    return false, "gamecore_unavailable"
+  -- A far destination walks the engine's own route (UnitManager.GetMoveToPath)
+  -- until the unit's moves run out; an adjacent one is a single checked step.
+  local route = "MoveUnitForPlayer"
+  local unit = Civ6Ai_Apply._FindUnit(playerID, "UNIT_" .. tostring(unitNumericId))
+  if unit ~= nil and Map ~= nil and Map.GetPlotDistance ~= nil then
+    local okDist, dist = pcall(Map.GetPlotDistance, unit:GetX(), unit:GetY(), x, y)
+    if okDist and type(dist) == "number" and dist > 1 then
+      route = "MoveUnitAlongPathForPlayer"
+    end
   end
-  local ok, reason = ExposedMembers.Civ6Ai.MoveUnitForPlayer(playerID, unitNumericId, x, y)
+  local ok, reason = Civ6Ai_Apply._GameCore(route, playerID, unitNumericId, x, y)
   if ok then
     Civ6Ai_Util.Log(
       "apply|script_move|ok|player="
@@ -202,8 +264,10 @@ function Civ6Ai_Apply._MoveUnitGameCore(playerID, unitNumericId, x, y)
         .. tostring(x)
         .. ","
         .. tostring(y)
+        .. "|note="
+        .. tostring(reason or "")
     )
-    return true, ""
+    return true, reason or ""
   end
   Civ6Ai_Util.Log(
     "apply|script_move|fail|player="
@@ -228,9 +292,16 @@ function Civ6Ai_Apply.ResolveAllUnitOrders(playerID)
     Civ6Ai_Util.Log("apply|resolve_units|player=" .. tostring(playerID) .. "|ok=false|no_player")
     return false
   end
-  if not Civ6Ai_Apply._IsNetworkMultiplayer()
-      and (Game.GetLocalPlayer() == playerID
-        or (PlayerManager ~= nil and PlayerManager.SetLocalPlayerAndObserver ~= nil)) then
+  -- Network game, AI seat: the GameCore fallback below changes state on this
+  -- PC only, so finish the seat's turn through the synced channel instead.
+  if Civ6Ai_Apply._IsNetworkMultiplayer() and Game.GetLocalPlayer() ~= playerID then
+    local sent = Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.Resolve(playerID) or false
+    Civ6Ai_Util.Log("apply|resolve_units|player=" .. tostring(playerID) .. "|order_channel=" .. tostring(sent))
+    return sent
+  end
+  if Game.GetLocalPlayer() == playerID
+      or (not Civ6Ai_Apply._IsNetworkMultiplayer()
+        and PlayerManager ~= nil and PlayerManager.SetLocalPlayerAndObserver ~= nil) then
     local ok, reason = Civ6Ai_Apply._WithLocalPlayer(playerID, function()
       local units = player:GetUnits()
       if units == nil then
@@ -253,6 +324,10 @@ function Civ6Ai_Apply.ResolveAllUnitOrders(playerID)
       end
       return true
     end
+  end
+  if Civ6Ai_Apply._IsNetworkMultiplayer() then
+    Civ6Ai_Util.Log("apply|resolve_units|player=" .. tostring(playerID) .. "|ok=false|mp_local_skip_failed")
+    return false
   end
   local gcOk, gcCount = Civ6Ai_Apply._ResolveUnitsGameCore(playerID)
   if gcOk and gcCount > 0 then
@@ -294,6 +369,9 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
   if command.kind == "attack_target" then
     return Civ6Ai_Apply._AttackTarget(playerID, args)
   end
+  if Civ6Ai_Apply.GOV_KINDS ~= nil and Civ6Ai_Apply.GOV_KINDS[command.kind] then
+    return Civ6Ai_Apply._Governance(playerID, command, args)
+  end
   return false, "unsupported_kind", args
 end
 
@@ -315,6 +393,14 @@ function Civ6Ai_Apply._SetResearchTech(playerID, args)
   local hash = GameInfo.Technologies[techId]
   if hash == nil then
     return false, "invalid_tech", args
+  end
+  if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
+    local gcOk, gcReason = Civ6Ai_Apply._GameCore("SetResearchForPlayer", playerID, hash.Index)
+    if gcOk then
+      Civ6Ai_Util.Log("apply|research|gamecore|player=" .. tostring(playerID) .. "|tech=" .. tostring(techId))
+      return true, "", args
+    end
+    return false, gcReason or "research_rejected", args
   end
   local params = {}
   if PlayerOperationTypes ~= nil then
@@ -342,21 +428,38 @@ function Civ6Ai_Apply._SetResearchCivic(playerID, args)
   if hash == nil then
     return false, "invalid_civic", args
   end
+  if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
+    local gcOk, gcReason = Civ6Ai_Apply._GameCore("SetCivicForPlayer", playerID, hash.Index)
+    if gcOk then
+      Civ6Ai_Util.Log("apply|civic|gamecore|player=" .. tostring(playerID) .. "|civic=" .. tostring(civicId))
+      return true, "", args
+    end
+    return false, gcReason or "civic_rejected", args
+  end
   local params = {}
   if PlayerOperationTypes ~= nil then
     params[PlayerOperationTypes.PARAM_CIVIC_TYPE] = hash.Index
-    local ok, reason = Civ6Ai_Apply._RequestPlayerOperation(playerID, PlayerOperationTypes.PROGRESS_CIVIC, params)
+    local ok = Civ6Ai_Apply._RequestPlayerOperation(playerID, PlayerOperationTypes.PROGRESS_CIVIC, params)
     if ok then
       return true, "", args
     end
-    return false, reason or "civic_rejected", args
   end
-  return false, "player_ops_unavailable", args
+  -- The local seat has no PlayerOperationTypes in this UI context
+  -- (player_ops_unavailable); set the civic through GameCore like research does.
+  local gcOk, gcReason = Civ6Ai_Apply._GameCore("SetCivicForPlayer", playerID, hash.Index)
+  if gcOk then
+    Civ6Ai_Util.Log("apply|civic|gamecore|player=" .. tostring(playerID) .. "|civic=" .. tostring(civicId))
+    return true, "", args
+  end
+  return false, gcReason or "civic_rejected", args
 end
 
 function Civ6Ai_Apply._ResolveTargetCoords(args)
   local x = args.target_x
   local y = args.target_y
+  if x == nil or y == nil then
+    x, y = args.x, args.y
+  end
   if x ~= nil and y ~= nil then
     return tonumber(x), tonumber(y)
   end
@@ -453,42 +556,59 @@ function Civ6Ai_Apply._MoveUnit(playerID, args)
     end
     return false, syncReason or "mp_sync_rejected", args
   end
-  local params = {}
-  if UnitOperationTypes ~= nil then
-    params[UnitOperationTypes.PARAM_X] = x
-    params[UnitOperationTypes.PARAM_Y] = y
+  if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
+    if numericId == nil then
+      return false, "missing_unit_numeric_id", args
+    end
+    local gcOk, gcReason = Civ6Ai_Apply._MoveUnitGameCore(playerID, numericId, x, y)
+    if gcOk then
+      return true, gcReason or "", args
+    end
+    return false, gcReason or "script_move_rejected", args
   end
-  local moveOp = UnitOperationTypes ~= nil and UnitOperationTypes.MOVE_TO or nil
-  local plot = nil
-  if Map ~= nil and Map.GetPlot ~= nil then
-    plot = Map.GetPlot(x, y)
-  end
-  local ok, reason = Civ6Ai_Apply._RequestUnitOperation(unit, moveOp, params, "move", plot)
-  if ok then
-    return true, "", args
-  end
+  -- Local seat. One route per order: the GameCore script move is synchronous and
+  -- its result is checked (plot changed, movement restored on failure). The old
+  -- ladder fired UnitManager.RequestOperation(MOVE_TO) three times (it returns
+  -- nothing, which read as "rejected"), then the script move, then the UI order
+  -- again: several competing orders for one unit, and a step it could not take
+  -- this turn left it in place with 0 moves.
   if numericId ~= nil then
     local scriptOk, scriptReason = Civ6Ai_Apply._MoveUnitGameCore(playerID, numericId, x, y)
     if scriptOk then
-      return true, "", args
+      return true, scriptReason or "", args
     end
-    reason = scriptReason or reason
-  end
-  if not Civ6Ai_Apply._IsNetworkMultiplayer() then
-    local fallbackOk, fallbackReason = Civ6Ai_Apply._WithLocalPlayer(playerID, function()
-      local localUnit = Civ6Ai_Apply._FindUnit(playerID, unitId)
-      if localUnit == nil then
-        return false, "unit_not_found"
-      end
-      return Civ6Ai_Apply._RequestUnitOperation(localUnit, moveOp, params, nil, plot)
-    end)
-    if fallbackOk then
-      Civ6Ai_Util.Log("apply|move|sp_local_player_fallback|player=" .. tostring(playerID))
-      return true, "", args
+    if string.find(tostring(scriptReason or ""), "gamecore_unavailable", 1, true) == nil then
+      return false, scriptReason or "script_move_rejected", args
     end
-    reason = fallbackReason or reason
   end
-  return false, reason or "move_rejected", args
+  return Civ6Ai_Apply._RequestMoveUi(unit, x, y, args)
+end
+
+-- UI MOVE_TO for the local seat when the GameCore route is missing. Issued once.
+-- UnitManager.RequestOperation returns nothing and runs asynchronously, so the
+-- result is "ui_move_requested" unless the unit is already on the target.
+function Civ6Ai_Apply._RequestMoveUi(unit, x, y, args)
+  if UnitManager == nil or UnitManager.RequestOperation == nil or UnitOperationTypes == nil then
+    return false, "move_unavailable", args
+  end
+  local params = {}
+  params[UnitOperationTypes.PARAM_X] = x
+  params[UnitOperationTypes.PARAM_Y] = y
+  local moveOp = UnitOperationTypes.MOVE_TO
+  if UnitManager.CanStartOperation ~= nil and not UnitManager.CanStartOperation(unit, moveOp, nil, params) then
+    Civ6Ai_Util.Log("apply|probe|move|fail|illegal")
+    return false, "operation_illegal", args
+  end
+  local ok, result = pcall(UnitManager.RequestOperation, unit, moveOp, params)
+  if not ok or result == false then
+    Civ6Ai_Util.Log("apply|probe|move|fail|rejected")
+    return false, "operation_rejected", args
+  end
+  if unit:GetX() == x and unit:GetY() == y then
+    return true, "", args
+  end
+  Civ6Ai_Util.Log("apply|probe|move|requested")
+  return true, "ui_move_requested", args
 end
 
 function Civ6Ai_Apply._UnitSkip(playerID, args)
@@ -499,6 +619,10 @@ function Civ6Ai_Apply._UnitSkip(playerID, args)
   local unit = Civ6Ai_Apply._FindUnit(playerID, unitId)
   if unit == nil then
     return false, "unit_not_found", args
+  end
+  if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
+    local gcOk, gcReason = Civ6Ai_Apply._GameCore("FinishMovesForPlayer", playerID, unit:GetID())
+    return gcOk, gcReason or "", args
   end
   Civ6Ai_Apply._TrySkipUnit(unit)
   return true, "", args
@@ -539,6 +663,15 @@ function Civ6Ai_Apply._FoundCity(playerID, args)
   local unit = Civ6Ai_Apply._FindUnit(playerID, unitId)
   if unit == nil then
     return false, "unit_not_found", args
+  end
+  if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
+    local gcOk, gcReason = Civ6Ai_Apply._GameCore("FoundCityForPlayer", playerID, unit:GetID())
+    if gcOk then
+      Civ6Ai_Apply._ScheduleFoundCityFollowup(playerID)
+      Civ6Ai_Util.Log("apply|found_city|gamecore|player=" .. tostring(playerID))
+      return true, "", args
+    end
+    return false, gcReason or "found_city_rejected", args
   end
   local op = Civ6Ai_Apply._FoundCityOperation(unit)
   if op == nil then
@@ -588,14 +721,33 @@ function Civ6Ai_Apply._AttackTarget(playerID, args)
   if unit == nil then
     return false, "unit_not_found", args
   end
+  if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
+    -- GameCore UnitManager.MoveUnit cannot attack; attacks need the UI operation.
+    return false, "attack_requires_local_player", args
+  end
   local params = {}
   if UnitOperationTypes ~= nil then
     params[UnitOperationTypes.PARAM_X] = x
     params[UnitOperationTypes.PARAM_Y] = y
   end
   local attackOp = nil
+  local isRanged = args.ranged
+  if isRanged == nil and GameInfo ~= nil and GameInfo.Units ~= nil then
+    local okRow, row = pcall(function() return GameInfo.Units[unit:GetType()] end)
+    if okRow and row ~= nil then
+      isRanged = (tonumber(row.RangedCombat) or 0) > 0 and (tonumber(row.Range) or 0) > 0
+    end
+  end
   if UnitOperationTypes ~= nil then
-    attackOp = UnitOperationTypes.RANGE_ATTACK or UnitOperationTypes.ATTACK
+    if isRanged == false then
+      -- Civ6 melee attacks are MOVE_TO onto the enemy with the ATTACK move modifier.
+      attackOp = UnitOperationTypes.MOVE_TO
+      if UnitOperationMoveModifiers ~= nil and UnitOperationMoveModifiers.ATTACK ~= nil then
+        params[UnitOperationTypes.PARAM_MODIFIERS] = UnitOperationMoveModifiers.ATTACK
+      end
+    else
+      attackOp = UnitOperationTypes.RANGE_ATTACK
+    end
   end
   if attackOp == nil and GameInfo ~= nil and GameInfo.UnitOperations ~= nil then
     local row = GameInfo.UnitOperations["UNITOPERATION_RANGE_ATTACK"]
@@ -635,6 +787,13 @@ function Civ6Ai_Apply._UnitFortify(playerID, args)
   if unit == nil then
     return false, "unit_not_found", args
   end
+  if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
+    local gcOk, gcReason = Civ6Ai_Apply._GameCore("FinishMovesForPlayer", playerID, unit:GetID())
+    if gcOk then
+      return true, "finish_moves_gamecore", args
+    end
+    return false, gcReason or "fortify_rejected", args
+  end
   if UnitOperationTypes ~= nil and UnitOperationTypes.FORTIFY ~= nil then
     if UnitManager.RequestOperation(unit, UnitOperationTypes.FORTIFY) then
       return true, "", args
@@ -648,6 +807,11 @@ function Civ6Ai_Apply._QueueProduction(playerID, args)
   if Civ6Ai_Production == nil then
     return false, "production_module_missing", args
   end
+  if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
+    -- CityManager.RequestOperation is UI-only (local player) and GameCore has no
+    -- reliable "set current production" call; report it instead of faking success.
+    return false, "production_requires_local_player", args
+  end
   local ok, reason = Civ6Ai_Production.QueueProduction(playerID, args)
   return ok, reason or "", args
 end
@@ -659,4 +823,496 @@ function Civ6Ai_Apply._ParsePlotId(plotId)
     return nil, nil
   end
   return tonumber(x), tonumber(y)
+end
+
+-- ---------------------------------------------------------------------------
+-- Governance commands: government, policy cards, pantheon, religion, great
+-- people, governors. The local seat uses the game's own screen requests
+-- (UI.RequestPlayerOperation / PlayerCulture:Request*), checked a moment later
+-- because the engine applies them on a later frame; other seats in a single
+-- player game use the gameplay routes in Civ6Ai_Orders.Gov (and, for policy
+-- cards and governors, which no gameplay script can set, the screen request
+-- made as that seat). A network game sends them on the synced order channel
+-- (Civ6Ai_OrderChannel) before reaching this code.
+-- ---------------------------------------------------------------------------
+Civ6Ai_Apply.DEFERRED = "__deferred__"
+Civ6Ai_Apply.GOV_KINDS = {
+  change_government = true, set_policies = true, found_pantheon = true, found_religion = true,
+  recruit_great_person = true, patronize_great_person = true,
+  appoint_governor = true, assign_governor = true, promote_governor = true,
+}
+Civ6Ai_Apply.VERIFY_TICKS = 90
+
+local function gcall(obj, name, ...)
+  if obj == nil or obj[name] == nil then
+    return nil
+  end
+  local ok, v, w = pcall(obj[name], obj, ...)
+  if ok then
+    return v, w
+  end
+  return nil
+end
+
+function Civ6Ai_Apply._GovRoute(name, ...)
+  local gov = ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil and ExposedMembers.Civ6Ai.Gov or nil
+  local fn = gov ~= nil and gov[name] or nil
+  if fn == nil then
+    return false, "the gameplay route " .. tostring(name) .. " is not loaded (reload the game)"
+  end
+  local args = { ... }
+  local unpackFn = unpack or table.unpack
+  local okCall, ok, reason = pcall(function() return fn(unpackFn(args)) end)
+  if not okCall then
+    return false, "gameplay error: " .. tostring(ok)
+  end
+  return ok == true, reason or ""
+end
+
+-- Record the result once check() passes, or a failure after VERIFY_TICKS.
+-- retry(), when given, is sent once halfway (e.g. the other id form).
+function Civ6Ai_Apply._Defer(playerID, command, args, label, check, retry)
+  local ticks, retried = 0, false
+  Civ6Ai_Util.ScheduleTick(function()
+    ticks = ticks + 1
+    local okC, ok, reason = pcall(check)
+    if okC and ok then
+      Civ6Ai_Apply._RecordResult(playerID, command, true, reason or "", args)
+      Civ6Ai_Util.Log("apply|gov_verified|player=" .. tostring(playerID) .. "|" .. label .. "|" .. tostring(reason))
+      return false
+    end
+    if retry ~= nil and not retried and ticks >= Civ6Ai_Apply.VERIFY_TICKS / 2 then
+      retried = true
+      pcall(retry)
+    end
+    if ticks >= Civ6Ai_Apply.VERIFY_TICKS then
+      local why = okC and tostring(reason or "no change seen") or ("check error: " .. tostring(ok))
+      Civ6Ai_Apply._RecordResult(playerID, command, false, "the game did not apply it: " .. why, args)
+      Civ6Ai_Util.Log("apply|gov_not_applied|player=" .. tostring(playerID) .. "|" .. label .. "|" .. why)
+      return false
+    end
+    return true
+  end)
+  return false, Civ6Ai_Apply.DEFERRED, args
+end
+
+-- Run a screen request as playerID (swapping the local player in single
+-- player when it is another seat).
+function Civ6Ai_Apply._AsSeat(playerID, fn)
+  if Game.GetLocalPlayer() == playerID then
+    local ok, a, b = pcall(fn)
+    if not ok then
+      return false, tostring(a)
+    end
+    return a ~= false, b
+  end
+  return Civ6Ai_Apply._WithLocalPlayer(playerID, fn)
+end
+
+function Civ6Ai_Apply._PlayerOp(playerID, opName, params)
+  if PlayerOperations == nil or PlayerOperations[opName] == nil then
+    return false, "this screen request is not available (" .. tostring(opName) .. ")"
+  end
+  local ok, err = pcall(UI.RequestPlayerOperation, playerID, PlayerOperations[opName], params)
+  if not ok then
+    return false, tostring(err)
+  end
+  return true, ""
+end
+
+local function isLocal(playerID)
+  return Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID
+end
+
+-- --- Government ---------------------------------------------------------
+function Civ6Ai_Apply._ChangeGovernment(playerID, command, args)
+  local row = args.government_id ~= nil and GameInfo.Governments[args.government_id] or nil
+  if row == nil then
+    return false, "unknown government " .. tostring(args.government_id), args
+  end
+  if not isLocal(playerID) then
+    local ok, reason = Civ6Ai_Apply._GovRoute("ChangeGovernment", playerID, row.Index)
+    return ok, reason, args
+  end
+  local culture = Players[playerID]:GetCulture()
+  local current = gcall(culture, "GetCurrentGovernment")
+  if current == row.Index then
+    return false, "you already have " .. row.GovernmentType, args
+  end
+  if gcall(culture, "IsGovernmentUnlocked", row.Hash) ~= true and gcall(culture, "IsGovernmentUnlocked", row.Index) ~= true then
+    return false, row.GovernmentType .. " is not unlocked yet (research the civic that unlocks it first)", args
+  end
+  if gcall(culture, "GovernmentChangeMade") == true then
+    return false, "government was already changed this turn", args
+  end
+  if current ~= nil and current >= 0 and gcall(culture, "CivicCompletedThisTurn") ~= true then
+    return false, "a government can only be changed on a turn when a civic completed", args
+  end
+  local okR = gcall(culture, "RequestChangeGovernment", row.Hash)
+  if okR == false then
+    return false, "the game refused the government change", args
+  end
+  return Civ6Ai_Apply._Defer(playerID, command, args, "government=" .. row.GovernmentType, function()
+    local now = gcall(culture, "GetCurrentGovernment")
+    if now == row.Index then
+      return true, "government=" .. row.GovernmentType
+    end
+    if gcall(culture, "IsInAnarchy") == true then
+      return true, "government=" .. row.GovernmentType .. ":anarchy"
+    end
+    return false, "government is still " .. tostring(now and GameInfo.Governments[now] and GameInfo.Governments[now].GovernmentType)
+  end)
+end
+
+-- --- Policy cards -------------------------------------------------------
+-- args.slots = "0=POLICY_A;1=POLICY_B;2=NONE" (slot index = policy or NONE).
+function Civ6Ai_Apply._ParsePolicySlots(text)
+  local out = {}
+  for part in string.gmatch(tostring(text or ""), "[^;,]+") do
+    local slot, policy = string.match(part, "^%s*(%d+)%s*[=:]%s*([%w_]+)%s*$")
+    if slot == nil then
+      return nil, "could not read policy slot entry '" .. part .. "'"
+    end
+    out[#out + 1] = { slot = tonumber(slot), policy = policy }
+  end
+  if #out == 0 then
+    return nil, "no policy slots given"
+  end
+  return out
+end
+
+local function slotFits(slotType, policyRow)
+  local cardType = policyRow.GovernmentSlotType
+  if slotType == cardType or slotType == "SLOT_WILDCARD" then
+    return true
+  end
+  return false
+end
+
+function Civ6Ai_Apply._SetPolicies(playerID, command, args)
+  local plan, why = Civ6Ai_Apply._ParsePolicySlots(args.slots)
+  if plan == nil then
+    return false, why, args
+  end
+  local culture = Players[playerID]:GetCulture()
+  local n = gcall(culture, "GetNumPolicySlots") or 0
+  if gcall(culture, "PolicyChangeMade") == true then
+    return false, "policy cards were already changed this turn", args
+  end
+  if gcall(culture, "CivicCompletedThisTurn") ~= true and (gcall(culture, "GetNumPolicySlotsOpen") or 0) <= 0 then
+    return false, "policy cards can only be changed on a turn when a civic completed", args
+  end
+  local clearList, addList, want, used = {}, {}, {}, {}
+  for _, e in ipairs(plan) do
+    if e.slot < 0 or e.slot >= n then
+      return false, "there is no policy slot " .. e.slot .. " (you have " .. n .. ")", args
+    end
+    local st = gcall(culture, "GetSlotType", e.slot)
+    local srow = st ~= nil and GameInfo.GovernmentSlots[st] or nil
+    local slotType = srow ~= nil and srow.GovernmentSlotType or "?"
+    table.insert(clearList, e.slot)
+    if string.upper(e.policy) ~= "NONE" then
+      local prow = GameInfo.Policies[e.policy] or GameInfo.Policies["POLICY_" .. e.policy]
+      if prow == nil then
+        return false, "unknown policy card " .. e.policy, args
+      end
+      if gcall(culture, "IsPolicyUnlocked", prow.Hash) ~= true and gcall(culture, "IsPolicyUnlocked", prow.Index) ~= true then
+        return false, e.policy .. " is not unlocked yet", args
+      end
+      if not slotFits(slotType, prow) then
+        return false, e.policy .. " is a " .. tostring(prow.GovernmentSlotType) .. " card and slot " .. e.slot
+          .. " is " .. slotType, args
+      end
+      if used[prow.PolicyType] then
+        return false, e.policy .. " can only be slotted once", args
+      end
+      used[prow.PolicyType] = true
+      addList[e.slot] = prow.Hash
+      want[e.slot] = prow.Index
+    else
+      want[e.slot] = -1
+    end
+  end
+  local okReq, reqWhy = Civ6Ai_Apply._AsSeat(playerID, function()
+    return culture:RequestPolicyChanges(clearList, addList)
+  end)
+  if not okReq and reqWhy ~= nil and reqWhy ~= "" then
+    Civ6Ai_Util.Log("apply|policies|request|player=" .. tostring(playerID) .. "|" .. tostring(reqWhy))
+  end
+  local label = tostring(args.slots)
+  return Civ6Ai_Apply._Defer(playerID, command, args, "policies=" .. label, function()
+    local parts, missing = {}, {}
+    for slot, idx in pairs(want) do
+      local now = gcall(culture, "GetSlotPolicy", slot)
+      if (idx < 0 and (now == nil or now < 0)) or now == idx then
+        parts[#parts + 1] = slot .. "=" .. (idx >= 0 and GameInfo.Policies[idx].PolicyType or "NONE")
+      else
+        missing[#missing + 1] = "slot " .. slot .. " still holds "
+          .. tostring(now ~= nil and now >= 0 and GameInfo.Policies[now] and GameInfo.Policies[now].PolicyType or "nothing")
+      end
+    end
+    if #missing == 0 then
+      table.sort(parts)
+      return true, "policies=" .. table.concat(parts, ";")
+    end
+    local seatNote = isLocal(playerID) and "" or " (policy cards for a seat that is not the local player can only be "
+      .. "set through the game's screen, which ignored the request; the game's own AI keeps choosing this seat's cards)"
+    return false, table.concat(missing, ", ") .. seatNote
+  end)
+end
+
+-- --- Religion -----------------------------------------------------------
+function Civ6Ai_Apply._FoundPantheon(playerID, command, args)
+  local row = args.belief_id ~= nil and GameInfo.Beliefs[args.belief_id] or nil
+  if row == nil then
+    return false, "unknown belief " .. tostring(args.belief_id), args
+  end
+  if not isLocal(playerID) then
+    local ok, reason = Civ6Ai_Apply._GovRoute("FoundPantheon", playerID, row.Index)
+    return ok, reason, args
+  end
+  local rel = Players[playerID]:GetReligion()
+  local have = gcall(rel, "GetPantheon")
+  if have ~= nil and have >= 0 then
+    return false, "you already have a pantheon", args
+  end
+  if row.BeliefClassType ~= "BELIEF_CLASS_PANTHEON" then
+    return false, row.BeliefType .. " is not a pantheon belief", args
+  end
+  if gcall(rel, "CanCreatePantheon") == false then
+    return false, "not enough faith for a pantheon yet", args
+  end
+  local params = {}
+  params[PlayerOperations.PARAM_BELIEF_TYPE] = row.Hash
+  params[PlayerOperations.PARAM_INSERT_MODE] = PlayerOperations.VALUE_EXCLUSIVE
+  local okOp, opWhy = Civ6Ai_Apply._PlayerOp(playerID, "FOUND_PANTHEON", params)
+  if not okOp then
+    return false, opWhy, args
+  end
+  return Civ6Ai_Apply._Defer(playerID, command, args, "pantheon=" .. row.BeliefType, function()
+    local now = gcall(rel, "GetPantheon")
+    if now == row.Index then
+      return true, "pantheon=" .. row.BeliefType .. ":faith_left=" .. tostring(math.floor(gcall(rel, "GetFaithBalance") or 0))
+    end
+    return false, "no pantheon yet"
+  end)
+end
+
+function Civ6Ai_Apply._FoundReligion(playerID, command, args)
+  local row = args.religion_id ~= nil and GameInfo.Religions[args.religion_id] or nil
+  if row == nil then
+    return false, "unknown religion " .. tostring(args.religion_id), args
+  end
+  local unitNum = Civ6Ai_Apply._ParseUnitNumericId(args.unit_id)
+  local beliefs = {}
+  for b in string.gmatch(tostring(args.belief_ids or ""), "[%w_]+") do
+    local brow = GameInfo.Beliefs[b]
+    if brow == nil then
+      return false, "unknown belief " .. b, args
+    end
+    beliefs[#beliefs + 1] = brow.Index
+  end
+  local ok, reason = Civ6Ai_Apply._GovRoute("FoundReligion", playerID, row.Index, unitNum or -1, beliefs[1] or -1, beliefs[2] or -1)
+  return ok, reason, args
+end
+
+-- --- Great people -------------------------------------------------------
+local function unclaimed(individual)
+  local gp = Game.GetGreatPeople()
+  local okT, list = pcall(function() return gp:GetTimeline() end)
+  if okT and type(list) == "table" then
+    for _, e in ipairs(list) do
+      if e.Individual == individual then
+        return e
+      end
+    end
+  end
+  return nil
+end
+
+function Civ6Ai_Apply._GreatPerson(playerID, command, args, patronize)
+  local row = args.individual_id ~= nil and GameInfo.GreatPersonIndividuals[args.individual_id] or nil
+  if row == nil then
+    return false, "unknown great person " .. tostring(args.individual_id), args
+  end
+  local useFaith = string.lower(tostring(args.yield or "gold")) == "faith"
+  if not isLocal(playerID) then
+    local ok, reason
+    if patronize then
+      ok, reason = Civ6Ai_Apply._GovRoute("PatronizeGreatPerson", playerID, row.Index, useFaith)
+    else
+      ok, reason = Civ6Ai_Apply._GovRoute("RecruitGreatPerson", playerID, row.Index)
+    end
+    return ok, reason, args
+  end
+  local gp = Game.GetGreatPeople()
+  local entry = unclaimed(row.Index)
+  if entry == nil or entry.Claimant ~= nil then
+    return false, row.GreatPersonIndividualType .. " is not available right now", args
+  end
+  local params = {}
+  params[PlayerOperations.PARAM_GREAT_PERSON_INDIVIDUAL_TYPE] = row.Index
+  local op = "RECRUIT_GREAT_PERSON"
+  if patronize then
+    local y = GameInfo.Yields[useFaith and "YIELD_FAITH" or "YIELD_GOLD"].Index
+    if gcall(gp, "CanPatronizePerson", playerID, row.Index, y) ~= true then
+      return false, "cannot patronize " .. row.GreatPersonIndividualType .. " with " .. (useFaith and "faith" or "gold")
+        .. " (costs " .. tostring(gcall(gp, "GetPatronizeCost", playerID, row.Index, y)) .. ")", args
+    end
+    params[PlayerOperations.PARAM_YIELD_TYPE] = y
+    op = "PATRONIZE_GREAT_PERSON"
+  elseif gcall(gp, "CanRecruitPerson", playerID, row.Index) ~= true then
+    return false, "not enough great person points to recruit " .. row.GreatPersonIndividualType
+      .. " (needs " .. tostring(entry.Cost) .. ")", args
+  end
+  local okOp, opWhy = Civ6Ai_Apply._PlayerOp(playerID, op, params)
+  if not okOp then
+    return false, opWhy, args
+  end
+  return Civ6Ai_Apply._Defer(playerID, command, args, string.lower(op) .. "=" .. row.GreatPersonIndividualType, function()
+    local e = unclaimed(row.Index)
+    if e == nil or e.Claimant == playerID then
+      return true, (patronize and "patronized=" or "recruited=") .. row.GreatPersonIndividualType
+    end
+    return false, "still unclaimed"
+  end)
+end
+
+-- --- Governors ----------------------------------------------------------
+local function governorObj(playerID, grow)
+  local govs = Players[playerID]:GetGovernors()
+  return govs, gcall(govs, "GetGovernor", grow.Hash)
+end
+
+function Civ6Ai_Apply._Governor(playerID, command, args)
+  if GameInfo.Governors == nil then
+    return false, "this game has no governors (Rise and Fall rules are off)", args
+  end
+  local grow = args.governor_id ~= nil and GameInfo.Governors[args.governor_id] or nil
+  if grow == nil then
+    return false, "unknown governor " .. tostring(args.governor_id), args
+  end
+  local govs, g = governorObj(playerID, grow)
+  if govs == nil then
+    return false, "no governor data for this player", args
+  end
+  local kind = command.kind
+  local params = {}
+  local check, label, retryParams
+  if kind == "appoint_governor" then
+    if g ~= nil then
+      return false, grow.GovernorType .. " is already appointed", args
+    end
+    if gcall(govs, "CanAppoint") ~= true then
+      return false, "no governor title available to appoint a new governor", args
+    end
+    params[PlayerOperations.PARAM_GOVERNOR_TYPE] = grow.Index
+    label = "appoint=" .. grow.GovernorType
+    check = function()
+      local _, now = governorObj(playerID, grow)
+      return now ~= nil, now ~= nil and ("appointed=" .. grow.GovernorType) or "not appointed"
+    end
+  elseif kind == "assign_governor" then
+    if g == nil then
+      return false, grow.GovernorType .. " is not appointed yet (appoint first)", args
+    end
+    if (gcall(g, "GetNeutralizedTurns") or 0) > 0 then
+      return false, grow.GovernorType .. " is neutralized for now", args
+    end
+    local cityNum = tonumber(string.match(tostring(args.city_id or ""), "(%d+)$"))
+    local city = cityNum ~= nil and CityManager ~= nil and CityManager.GetCity(playerID, cityNum) or nil
+    if city == nil then
+      local cities = Players[playerID]:GetCities()
+      city = cityNum ~= nil and cities ~= nil and gcall(cities, "FindID", cityNum) or nil
+    end
+    if city == nil then
+      return false, "you have no city " .. tostring(args.city_id), args
+    end
+    if gcall(govs, "CanAssignGovernor", grow.Hash, city) == false then
+      return false, "the game does not allow " .. grow.GovernorType .. " in " .. Locale.Lookup(city:GetName()) .. " now", args
+    end
+    params[PlayerOperations.PARAM_GOVERNOR_TYPE] = grow.Index
+    params[PlayerOperations.PARAM_PLAYER_ONE] = playerID
+    params[PlayerOperations.PARAM_CITY_DEST] = cityNum
+    label = "assign=" .. grow.GovernorType .. "@" .. tostring(cityNum)
+    check = function()
+      local _, now = governorObj(playerID, grow)
+      local c = now ~= nil and gcall(now, "GetAssignedCity") or nil
+      if c ~= nil and c:GetID() == cityNum then
+        return true, "assigned=" .. grow.GovernorType .. ":city=" .. Locale.Lookup(c:GetName())
+      end
+      return false, "not assigned there"
+    end
+  else
+    if g == nil then
+      return false, grow.GovernorType .. " is not appointed yet (appoint first)", args
+    end
+    local prow = args.promotion_id ~= nil and GameInfo.GovernorPromotions ~= nil
+      and GameInfo.GovernorPromotions[args.promotion_id] or nil
+    if prow == nil then
+      return false, "unknown governor promotion " .. tostring(args.promotion_id), args
+    end
+    if gcall(g, "HasPromotion", prow.Hash) == true then
+      return false, grow.GovernorType .. " already has " .. prow.GovernorPromotionType, args
+    end
+    if gcall(govs, "CanPromoteGovernor", grow.Hash) == false then
+      return false, "no governor title available to promote " .. grow.GovernorType, args
+    end
+    params[PlayerOperations.PARAM_GOVERNOR_TYPE] = grow.Index
+    params[PlayerOperations.PARAM_GOVERNOR_PROMOTION_TYPE] = prow.Index
+    retryParams = {}
+    retryParams[PlayerOperations.PARAM_GOVERNOR_TYPE] = grow.Hash
+    retryParams[PlayerOperations.PARAM_GOVERNOR_PROMOTION_TYPE] = prow.Hash
+    label = "promote=" .. grow.GovernorType .. ":" .. prow.GovernorPromotionType
+    check = function()
+      local _, now = governorObj(playerID, grow)
+      if now ~= nil and gcall(now, "HasPromotion", prow.Hash) == true then
+        return true, "promoted=" .. grow.GovernorType .. ":" .. prow.GovernorPromotionType
+      end
+      return false, "promotion not applied"
+    end
+  end
+  if retryParams == nil then
+    retryParams = {}
+    for k, v in pairs(params) do
+      retryParams[k] = v
+    end
+    retryParams[PlayerOperations.PARAM_GOVERNOR_TYPE] = grow.Hash
+  end
+  local opName = kind == "appoint_governor" and "APPOINT_GOVERNOR" or (kind == "assign_governor" and "ASSIGN_GOVERNOR" or "PROMOTE_GOVERNOR")
+  local okOp, opWhy = Civ6Ai_Apply._AsSeat(playerID, function()
+    return Civ6Ai_Apply._PlayerOp(playerID, opName, params)
+  end)
+  if not okOp then
+    return false, tostring(opWhy), args
+  end
+  local wrapped = function()
+    local ok, reason = check()
+    if not ok and not isLocal(playerID) then
+      reason = tostring(reason) .. " (governors for a seat that is not the local player can only be set through the "
+        .. "game's screen, which ignored the request; the game's own AI manages this seat's governors)"
+    end
+    return ok, reason
+  end
+  return Civ6Ai_Apply._Defer(playerID, command, args, label, wrapped, function()
+    Civ6Ai_Apply._AsSeat(playerID, function() return Civ6Ai_Apply._PlayerOp(playerID, opName, retryParams) end)
+  end)
+end
+
+function Civ6Ai_Apply._Governance(playerID, command, args)
+  local kind = command.kind
+  if kind == "change_government" then
+    return Civ6Ai_Apply._ChangeGovernment(playerID, command, args)
+  elseif kind == "set_policies" then
+    return Civ6Ai_Apply._SetPolicies(playerID, command, args)
+  elseif kind == "found_pantheon" then
+    return Civ6Ai_Apply._FoundPantheon(playerID, command, args)
+  elseif kind == "found_religion" then
+    return Civ6Ai_Apply._FoundReligion(playerID, command, args)
+  elseif kind == "recruit_great_person" then
+    return Civ6Ai_Apply._GreatPerson(playerID, command, args, false)
+  elseif kind == "patronize_great_person" then
+    return Civ6Ai_Apply._GreatPerson(playerID, command, args, true)
+  end
+  return Civ6Ai_Apply._Governor(playerID, command, args)
 end

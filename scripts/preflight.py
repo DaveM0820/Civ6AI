@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
+import circuit_breaker_state  # noqa: E402
 from civ6_paths import (  # noqa: E402
     find_civ6_install,
     installed_mod_dirs,
@@ -92,6 +93,8 @@ def _check_config() -> tuple[Check, object]:
 
 
 def _check_lmstudio_reachable(cfg) -> Check:
+    if getattr(cfg, "provider", "") == "openrouter":
+        return _check_openrouter_ready(cfg)
     check = Check("LM Studio reachable (/v1/models)")
     try:
         models = lmstudio_client.list_loaded_models(cfg, timeout_seconds=8.0)
@@ -106,6 +109,28 @@ def _check_lmstudio_reachable(cfg) -> Check:
         return check
     ids = [str(m.get("id") or m.get("name") or "?") for m in models[:5]]
     check.pass_(f"{len(models)} model(s): {', '.join(ids)}")
+    return check
+
+
+def _check_openrouter_ready(cfg) -> Check:
+    check = Check("OpenRouter key + model")
+    if not cfg.api_key:
+        check.fail("no OpenRouter key: set OPENROUTER_API_KEY or api_key in config/civ6ai.local.json")
+        return check
+    try:
+        models = lmstudio_client.list_loaded_models(cfg, timeout_seconds=20.0)
+    except Exception as error:
+        check.fail(f"{type(error).__name__}: {error}")
+        return check
+    row = next((m for m in models if str(m.get("id")) == cfg.model), None)
+    if row is None:
+        check.fail(f"model {cfg.model} not in OpenRouter's model list")
+        return check
+    mods = (row.get("architecture") or {}).get("input_modalities") or []
+    if cfg.vision and "image" not in mods:
+        check.fail(f"{cfg.model} does not accept images; set vision=false or pick a vision model")
+        return check
+    check.pass_(f"{cfg.model} listed, inputs={','.join(mods)}, parallel seats={cfg.effective_parallel_seats}")
     return check
 
 
@@ -213,6 +238,115 @@ def _check_mod_installed() -> Check:
     return check
 
 
+def _norm_path(value: str) -> str:
+    return str(value or "").replace("\\", "/").rstrip("/").lower()
+
+
+def read_paths_lua(path: Path) -> dict[str, str]:
+    """Parse simple `Key = "value"` / `Key = 123` lines of an installed Civ6Ai_Paths.lua."""
+    import re
+
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for line in path.read_text(encoding="utf-8-sig", errors="replace").splitlines():
+        match = re.match(r'\s*([A-Za-z_]+)\s*=\s*(?:"((?:[^"\\]|\\.)*)"|(-?\d+))\s*,?', line)
+        if match:
+            values[match.group(1)] = match.group(2) if match.group(2) is not None else match.group(3)
+    return values
+
+
+def _check_live_config(mod_dirs: list[Path] | None = None, civ6ai_root: Path | None = None) -> Check:
+    """Installed mod must point at this repo with live sidecar on, matching runtime.json."""
+    check = Check("Live config (installed Civ6Ai_Paths.lua + runtime.json)")
+    mod_dirs = installed_mod_dirs() if mod_dirs is None else mod_dirs
+    if civ6ai_root is None:
+        roots = my_games_roots()
+        civ6ai_root = roots[0] / "civ6ai" if roots else None
+    fix = " -- run: python scripts/install_mod.py"
+    if not mod_dirs:
+        check.fail("mod not installed" + fix)
+        return check
+    repo = _norm_path(str(ROOT))
+    problems: list[str] = []
+    sessions: set[str] = set()
+    detail = ""
+    for mod_dir in mod_dirs:
+        values = read_paths_lua(mod_dir / "InGame" / "Civ6Ai_Paths.lua")
+        where = str(mod_dir)
+        if _norm_path(values.get("Repo", "")) != repo:
+            problems.append(f"{where}: Repo={values.get('Repo', '')!r} (expected this repo)")
+        if values.get("SidecarLive") != "1":
+            problems.append(f"{where}: SidecarLive is not 1")
+        if not values.get("ManagedSeats"):
+            problems.append(f"{where}: ManagedSeats empty")
+        sessions.add(values.get("SessionId", ""))
+        detail = (
+            f"managed_seats={values.get('ManagedSeats', '')} session={values.get('SessionId', '')} "
+            f"sidecar_timeout={values.get('SidecarTimeoutSeconds', '')}s"
+        )
+    runtime: dict = {}
+    runtime_path = civ6ai_root / "runtime.json" if civ6ai_root else None
+    if runtime_path is None or not runtime_path.is_file():
+        problems.append("runtime.json missing")
+    else:
+        try:
+            runtime = json.loads(runtime_path.read_text(encoding="utf-8-sig"))
+        except ValueError:
+            problems.append(f"{runtime_path}: unreadable")
+        if runtime and _norm_path(runtime.get("repo", "")) != repo:
+            problems.append(f"runtime.json repo={runtime.get('repo')!r} (expected this repo)")
+        if runtime and str(runtime.get("sidecar_live", "0")) not in ("1", "true", "True"):
+            problems.append("runtime.json sidecar_live is not 1")
+        if runtime and len(sessions) == 1 and runtime.get("session_id") not in sessions:
+            problems.append(f"runtime.json session_id={runtime.get('session_id')!r} does not match Civ6Ai_Paths.lua")
+    if len(sessions) > 1:
+        problems.append("installed mod copies have different SessionId values")
+    if problems:
+        check.fail("; ".join(problems) + fix)
+    else:
+        check.pass_(detail)
+    return check
+
+
+def _check_circuit_breakers() -> Check:
+    """Report sidecar circuit-breaker counts (informational; never fails preflight).
+
+    Live seats are refused once their count reaches the threshold; dry runs
+    ignore the breaker. To reset, set the file contents to {} (or delete it).
+    """
+    check = Check("Sidecar circuit breaker state")
+    dry_run_path = ROOT / "runtime" / "logs" / "circuit_breaker.json"
+    lines = [
+        circuit_breaker_state.describe(dry_run_path)
+        + " (legacy dry-run file; ignored by start_live.py --dry-run, not used by live seats)"
+    ]
+    roots = [game / "civ6ai" for game in my_games_roots()] + [logs / "civ6ai" for logs in logs_dirs()]
+    live_paths = circuit_breaker_state.live_breaker_files(roots)
+    if not live_paths:
+        lines.append("live sessions: no circuit_breaker.json found")
+    opened: list[str] = []
+    clear = 0
+    for path in live_paths:
+        failures, error = circuit_breaker_state.read_failures(path)
+        if not error and not any(count > 0 for count in (failures or {}).values()):
+            clear += 1  # summarized below; old sessions would otherwise flood the output
+            continue
+        lines.append(circuit_breaker_state.describe(path))
+        for player in circuit_breaker_state.open_players(failures):
+            opened.append(f"{player} in {path}")
+    if live_paths:
+        lines.append(f"live sessions: {len(live_paths)} breaker file(s), {clear} clear")
+    detail = "\n       ".join(lines)
+    if opened:
+        detail += (
+            "\n       WARNING: breaker OPEN for " + "; ".join(opened)
+            + " -- live sidecar calls for that seat are refused until reset (set the file to {})"
+        )
+    check.pass_(detail)
+    return check
+
+
 def _check_example_config_present() -> Check:
     check = Check("Documented config example present")
     if EXAMPLE_CONFIG.is_file():
@@ -244,6 +378,8 @@ def main() -> int:
     checks.append(_check_civ6_install())
     checks.append(_check_runtime_folders())
     checks.append(_check_mod_installed())
+    checks.append(_check_live_config())
+    checks.append(_check_circuit_breakers())
 
     failed = 0
     for check in checks:

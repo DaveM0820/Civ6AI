@@ -1,7 +1,7 @@
 """Civ6 soft coaching / REQUIRED COMMANDS helpers ported from Civ5 wire patterns.
 
-Prompt guidance stays coaching (never hard rules). Map axes follow Civ6 hex convention:
-Y increases south (unlike Civ5's north-up flipped renderer).
+Prompt guidance stays coaching (never hard rules). Map-axis text follows the renderer's
+orientation (``map_render_civ6.civ6_map_north_up``) so image and prompt always agree.
 """
 from __future__ import annotations
 
@@ -33,25 +33,24 @@ CIV6_UNIT_STACKING_GUIDANCE = (
 
 
 def _civ6_tactical_map_attached(snapshot: dict[str, Any] | None) -> bool:
+    """True when the tactical close-up is (or, before rendering, will be) attached.
+
+    After rendering, run_civ6 stores the real manifest in advciv.map_images; only a
+    "viewport" entry means the tactical image went out. Before rendering, the
+    context-budget plan says whether the tactical image will be omitted.
+    """
     if not isinstance(snapshot, dict):
         return False
-    try:
-        from sidecar.map_situational import tactical_map_attached
-
-        return bool(tactical_map_attached(snapshot))
-    except Exception:
-        images = snapshot.get("advciv", {})
-        if isinstance(images, dict):
-            manifest = images.get("map_images")
-            if isinstance(manifest, list):
-                for row in manifest:
-                    if isinstance(row, dict) and str(row.get("role") or "").lower() in {
-                        "tactical",
-                        "viewport",
-                        "focus",
-                    }:
-                        return True
+    advciv = snapshot.get("advciv")
+    if not isinstance(advciv, dict):
+        return True
+    manifest = advciv.get("map_images")
+    if isinstance(manifest, list) and manifest:
+        return any(isinstance(row, dict) and row.get("role") == "viewport" for row in manifest)
+    budget = advciv.get("context_budget")
+    if isinstance(budget, dict) and (budget.get("omit_tactical") is True or budget.get("tactical_image_size") == 0):
         return False
+    return True
 
 
 def _civ6_attach_map_images(snapshot: dict[str, Any] | None) -> bool:
@@ -109,8 +108,17 @@ def civ6_optional_commands_preamble_lines(required_count: int | None = None) -> 
     return lines
 
 
+def civ6_y_axis_phrase(snapshot: dict[str, Any] | None = None) -> str:
+    """How plot y maps onto the attached images (same switch the renderer uses)."""
+    from sidecar.map_render_civ6 import civ6_map_north_up
+
+    if civ6_map_north_up(snapshot):
+        return "game-plot y increases north (up on the map image; north at top)"
+    return "game-plot y increases south (down on the map image)"
+
+
 def civ6_map_axes_wrap_guidance(snapshot: dict[str, Any] | None = None) -> str:
-    """Standing map-axis / X-wrap coaching for Civ6 (Y increases south)."""
+    """Standing map-axis / X-wrap coaching for Civ6 (orientation matches the images)."""
     width = None
     wrap_x = True
     if isinstance(snapshot, dict):
@@ -144,7 +152,7 @@ def civ6_map_axes_wrap_guidance(snapshot: dict[str, Any] | None = None) -> str:
     )
     return (
         "Map axes on the strategic/tactical images: game-plot x increases east (right on the image); "
-        "game-plot y increases south (down on the image) — Civ6 hex grid. "
+        f"{civ6_y_axis_phrase(snapshot)} — Civ6 hex grid, odd rows shifted half a hex east. "
         f"{wrap_clause}"
     )
 

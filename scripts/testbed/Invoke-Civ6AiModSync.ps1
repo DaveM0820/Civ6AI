@@ -3,7 +3,7 @@ param(
     [string]$Civ6ModsRoot = "",
     [string]$Python = "",
     [string]$RepoRoot = "",
-    [int]$SidecarTimeout = 120,
+    [int]$SidecarTimeout = 180,
     [switch]$SeatExperiment,
     [switch]$Autotest,
     [int]$AutotestStopTurn = 20,

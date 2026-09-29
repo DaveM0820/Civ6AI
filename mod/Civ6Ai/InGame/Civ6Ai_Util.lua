@@ -175,74 +175,72 @@ function Civ6Ai_Util.AppendTextLine(path, line)
   return false
 end
 
+-- Base64 via 3-byte arithmetic and table.concat. The old bit-string version
+-- concatenated one growing string per byte (O(n^2)); a 27 KB snapshot made
+-- gigabytes of garbage per seat and froze Civ6 at 30 GB by turn 3.
+local _B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local _B64Chars = {}
+local _B64Lookup = {}
+for i = 1, 64 do
+  local ch = string.sub(_B64, i, i)
+  _B64Chars[i - 1] = ch
+  _B64Lookup[ch] = i - 1
+end
+
 function Civ6Ai_Util.Base64Encode(data)
-  local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-  local function tobits(byte)
-    local bits = ""
-    for i = 7, 0, -1 do
-      local bit = math.floor(byte / (2 ^ i)) % 2
-      bits = bits .. tostring(bit)
-    end
-    return bits
+  if data == nil then
+    return ""
   end
-  local bitstr = ""
-  for i = 1, #data do
-    bitstr = bitstr .. tobits(string.byte(data, i))
+  local out = {}
+  local n = #data
+  local i = 1
+  while i <= n do
+    local b1 = string.byte(data, i)
+    local b2 = (i + 1 <= n) and string.byte(data, i + 1) or 0
+    local b3 = (i + 2 <= n) and string.byte(data, i + 2) or 0
+    local v = b1 * 65536 + b2 * 256 + b3
+    local c1 = math.floor(v / 262144) % 64
+    local c2 = math.floor(v / 4096) % 64
+    local c3 = math.floor(v / 64) % 64
+    local c4 = v % 64
+    out[#out + 1] = _B64Chars[c1] .. _B64Chars[c2]
+      .. ((i + 1 <= n) and _B64Chars[c3] or "=")
+      .. ((i + 2 <= n) and _B64Chars[c4] or "=")
+    i = i + 3
   end
-  local pad = (3 - (#data % 3)) % 3
-  bitstr = bitstr .. string.rep("0", pad * 2)
-  local encoded = ""
-  for i = 1, #bitstr, 6 do
-    local slice = string.sub(bitstr, i, i + 5)
-    if #slice == 6 then
-      local n = 0
-      for j = 1, 6 do
-        n = n * 2 + tonumber(string.sub(slice, j, j))
-      end
-      encoded = encoded .. string.sub(alphabet, n + 1, n + 1)
-    end
-  end
-  return encoded .. string.rep("=", pad)
+  return table.concat(out)
 end
 
 function Civ6Ai_Util.Base64Decode(encoded)
   if encoded == nil or encoded == "" then
     return nil
   end
-  local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-  local lookup = {}
-  for i = 1, #alphabet do
-    lookup[string.sub(alphabet, i, i)] = i - 1
-  end
-  local bitstr = ""
+  local out = {}
+  local vals = {}
   for i = 1, #encoded do
     local ch = string.sub(encoded, i, i)
     if ch == "=" then
       break
     end
-    local value = lookup[ch]
+    local value = _B64Lookup[ch]
     if value == nil then
       return nil
     end
-    local bits = ""
-    for j = 5, 0, -1 do
-      local bit = math.floor(value / (2 ^ j)) % 2
-      bits = bits .. tostring(bit)
-    end
-    bitstr = bitstr .. bits
-  end
-  local out = {}
-  for i = 1, #bitstr, 8 do
-    local slice = string.sub(bitstr, i, i + 7)
-    if #slice == 8 then
-      local byte = 0
-      for j = 1, 8 do
-        byte = byte * 2 + tonumber(string.sub(slice, j, j))
-      end
-      table.insert(out, string.char(byte))
+    vals[#vals + 1] = value
+    if #vals == 4 then
+      local v = vals[1] * 262144 + vals[2] * 4096 + vals[3] * 64 + vals[4]
+      out[#out + 1] = string.char(math.floor(v / 65536) % 256, math.floor(v / 256) % 256, v % 256)
+      vals = {}
     end
   end
-  return table.concat(out, "")
+  if #vals == 2 then
+    local v = vals[1] * 262144 + vals[2] * 4096
+    out[#out + 1] = string.char(math.floor(v / 65536) % 256)
+  elseif #vals == 3 then
+    local v = vals[1] * 262144 + vals[2] * 4096 + vals[3] * 64
+    out[#out + 1] = string.char(math.floor(v / 65536) % 256, math.floor(v / 256) % 256)
+  end
+  return table.concat(out)
 end
 
 function Civ6Ai_Util.DumpBlob(kind, meta, content)
@@ -404,6 +402,12 @@ function Civ6Ai_Util._EnsureTickPump()
 end
 
 function Civ6Ai_Util._OnSystemUpdate()
+  -- Civ6 hot-reloads a changed InGame Lua file; the old context's event handler
+  -- keeps firing with its globals gone (Civ6Ai_Util nil): 10k+ errors, one per
+  -- frame, until the game was reloaded. Bail quietly instead.
+  if Civ6Ai_Util == nil or Civ6Ai_Util._ticks == nil then
+    return
+  end
   if #Civ6Ai_Util._ticks == 0 then
     return
   end

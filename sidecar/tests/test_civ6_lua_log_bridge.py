@@ -63,5 +63,54 @@ class Civ6LuaLogBridgeTests(unittest.TestCase):
             self.assertTrue(mirror.is_file())
 
 
+
+class BlobSplitAcrossReadsTests(unittest.TestCase):
+    """A read ending mid-blob used to advance past the begin line and drop the snapshot."""
+
+    def _run(self, lua_log, civ6ai, ran_jobs):
+        def fake_run(job, repo):
+            ran_jobs.append(job)
+            player_dir = Path(job["args"][2])
+            (player_dir / "decision.json").write_text('{"commands":[]}\n', encoding="utf-8")
+            (player_dir / "apply_commands.json").write_text('{"commands":[]}\n', encoding="utf-8")
+
+        with mock.patch("civ6_lua_log_bridge._run_job", side_effect=fake_run), \
+                mock.patch("civ6_lua_log_bridge.time.sleep"), \
+                mock.patch("civ6_pending_apply.publish_from_player_dir", create=True):
+            return process_lua_log_blobs(lua_log, civ6ai, ROOT, python="python")
+
+    def test_split_blob_is_processed_once_complete(self):
+        import civ6_lua_log_bridge as bridge
+
+        bridge._PROCESSED_BLOBS.clear()
+        first = _frame('{"p":4}', session="sess", player=4, turn=26)
+        second = _frame('{"p":0,"x":"' + "a" * 2000 + '"}', session="sess", player=0, turn=27)
+        cut = len(second) // 2
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lua_log = root / "Lua.log"
+            civ6ai = root / "civ6ai"
+            civ6ai.mkdir()
+            lua_log.write_text(first + second[:cut], encoding="utf-8")
+            jobs = []
+            self.assertEqual(1, self._run(lua_log, civ6ai, jobs))
+            with lua_log.open("a", encoding="utf-8") as handle:
+                handle.write(second[cut:] + "Civ6Ai_InGame: CIV6AI|bridge|inbox_wait|player=0\n")
+            self.assertEqual(1, self._run(lua_log, civ6ai, jobs))
+            snap = civ6ai / "sessions" / "sess" / "PLAYER_0" / "snapshot.json"
+            self.assertIn('"p":0', snap.read_text(encoding="utf-8"))
+            # Nothing new: no re-run of either blob.
+            self.assertEqual(0, self._run(lua_log, civ6ai, jobs))
+            self.assertEqual(2, len(jobs))
+
+    def test_incomplete_blob_offset(self):
+        from civ6_lua_log_bridge import incomplete_blob_offset
+
+        whole = _frame("{}", session="s").encode()
+        self.assertIsNone(incomplete_blob_offset(whole))
+        partial = b"noise line\n" + whole[: len(whole) - 30]
+        self.assertEqual(len(b"noise line\n"), incomplete_blob_offset(partial))
+        self.assertEqual(3, incomplete_blob_offset(b"ab\ncd"))
+
 if __name__ == "__main__":
     unittest.main()

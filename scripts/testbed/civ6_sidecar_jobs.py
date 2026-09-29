@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -68,8 +71,11 @@ def _run_job(job: dict[str, Any], repo: Path) -> None:
             timeout = 600
     kwargs: dict[str, Any] = {
         "cwd": str(repo),
-        "check": True,
         "timeout": timeout,
+        "capture_output": True,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
     }
     scripts_dir = Path(__file__).resolve().parents[1]
     if str(scripts_dir) not in sys.path:
@@ -80,70 +86,187 @@ def _run_job(job: dict[str, Any], repo: Path) -> None:
         kwargs.update(hidden_popen_kwargs())
     except Exception:
         pass
-    subprocess.run(cmd, **kwargs)
+    result = subprocess.run(cmd, **kwargs)
+    if result.returncode != 0:
+        # Keep the reason: a bare "exit status 1" hid a schema rejection that turned
+        # every seat's turn into an empty apply.
+        tail = (result.stderr or "").strip()[-2000:]
+        session_dir = None
+        if "--session-dir" in args:
+            index = args.index("--session-dir")
+            if index + 1 < len(args):
+                session_dir = Path(str(args[index + 1]))
+        if session_dir is not None and session_dir.is_dir():
+            try:
+                (session_dir / "sidecar_stderr.txt").write_text(tail + "\n", encoding="utf-8")
+            except OSError:
+                pass
+        last = tail.splitlines()[-1] if tail else ""
+        raise subprocess.CalledProcessError(result.returncode, cmd, output=None, stderr=last or tail)
 
 
-def process_sidecar_jobs(civ6ai_roots: list[Path] | Path) -> int:
-    """Run pending sidecar_job.json files. Accepts one root or a list of roots."""
-    if isinstance(civ6ai_roots, Path):
-        roots = [civ6ai_roots]
-    else:
-        roots = list(civ6ai_roots)
-    ran = 0
-    seen_jobs: set[str] = set()
+CLAIM_NAME = "sidecar_job.claim"
+_POOL_LOCK = threading.Lock()
+_POOL: ThreadPoolExecutor | None = None
+_POOL_SIZE = 0
+_IN_FLIGHT: set[str] = set()
+
+
+def parallel_seat_limit() -> int:
+    """Seats that may call the model at once (OpenRouter runs them side by side)."""
+    raw = os.environ.get("CIV6AI_PARALLEL_SEATS", "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    try:
+        from sidecar.civ6_config import load_local_config
+
+        return max(1, load_local_config().effective_parallel_seats)
+    except Exception:
+        return 1
+
+
+def _claim_stale_seconds() -> float:
+    try:
+        from sidecar.civ6_config import load_local_config
+
+        return float(load_local_config().timeout_seconds) + 120.0
+    except Exception:
+        return 720.0
+
+
+def _try_claim(player_dir: Path) -> Path | None:
+    """Cross-process claim so the poller and the Lua bridge never run one job twice."""
+    claim = player_dir / CLAIM_NAME
+    try:
+        if claim.is_file() and time.time() - claim.stat().st_mtime > _claim_stale_seconds():
+            claim.unlink(missing_ok=True)
+    except OSError:
+        pass
+    try:
+        fd = os.open(str(claim), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return None
+    except OSError:
+        return None
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(f"{os.getpid()} {time.time():.0f}\n")
+    return claim
+
+
+def _pending_jobs(roots: list[Path]) -> list[Path]:
+    jobs: list[Path] = []
+    seen: set[str] = set()
     for civ6ai_root in roots:
         sessions = civ6ai_root / "sessions"
         if not sessions.is_dir():
             continue
         for job_path in sorted(sessions.rglob("sidecar_job.json")):
             key = str(job_path.resolve())
-            if key in seen_jobs:
+            if key in seen:
                 continue
-            seen_jobs.add(key)
-            if not job_path.is_file():
-                continue
-            try:
-                job = json.loads(job_path.read_text(encoding="utf-8-sig"))
-            except (OSError, json.JSONDecodeError) as error:
-                log.warning("Invalid sidecar job %s: %s", job_path, error)
-                continue
-            if not isinstance(job, dict):
-                continue
-            player_dir = job_path.parent
-            args = job.get("args")
-            if not isinstance(args, list):
-                args = []
-            output_path = None
-            for index, arg in enumerate(args):
-                if arg == "--output" and index + 1 < len(args):
-                    output_path = Path(str(args[index + 1]))
-                    break
-            is_chat_job = output_path is not None and output_path.name == "decision_chat.json"
-            decision_path = output_path if is_chat_job else player_dir / "decision.json"
-            if not is_chat_job and decision_suppresses_sidecar(player_dir):
-                job_path.unlink(missing_ok=True)
-                continue
-            repo = Path(str(job.get("repo") or ""))
-            if not repo.is_dir():
-                log.warning("Sidecar job missing repo: %s", job_path)
-                continue
-            try:
-                _run_job(job, repo)
-                ran += 1
-            except Exception as error:
-                log.warning("Sidecar job failed %s: %s", job_path, error)
-                continue
-            finally:
-                if decision_path.is_file() and decision_path.stat().st_size > 0:
-                    job_path.unlink(missing_ok=True)
-            try:
-                from civ6_pending_apply import publish_from_player_dir
+            seen.add(key)
+            if job_path.is_file():
+                jobs.append(job_path)
+    return jobs
 
-                time.sleep(1.0)
-                publish_from_player_dir(player_dir, chat=is_chat_job)
-            except Exception as error:
-                log.warning("Pending apply publish failed %s: %s", player_dir, error)
+
+def _process_one(job_path: Path) -> bool:
+    """Run one seat job end to end. Returns True when the model job ran."""
+    try:
+        job = json.loads(job_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as error:
+        log.warning("Invalid sidecar job %s: %s", job_path, error)
+        return False
+    if not isinstance(job, dict):
+        return False
+    player_dir = job_path.parent
+    args = job.get("args")
+    if not isinstance(args, list):
+        args = []
+    output_path = None
+    for index, arg in enumerate(args):
+        if arg == "--output" and index + 1 < len(args):
+            output_path = Path(str(args[index + 1]))
+            break
+    is_chat_job = output_path is not None and output_path.name == "decision_chat.json"
+    decision_path = output_path if is_chat_job else player_dir / "decision.json"
+    if not is_chat_job and decision_suppresses_sidecar(player_dir):
+        job_path.unlink(missing_ok=True)
+        return False
+    repo = Path(str(job.get("repo") or ""))
+    if not repo.is_dir():
+        log.warning("Sidecar job missing repo: %s", job_path)
+        return False
+    ran = False
+    try:
+        _run_job(job, repo)
+        ran = True
+    except Exception as error:
+        log.warning("Sidecar job failed %s: %s", job_path, error)
+        return False
+    finally:
+        if decision_path.is_file() and decision_path.stat().st_size > 0:
+            job_path.unlink(missing_ok=True)
+    try:
+        from civ6_pending_apply import publish_from_player_dir
+
+        time.sleep(1.0)
+        publish_from_player_dir(player_dir, chat=is_chat_job)
+    except Exception as error:
+        log.warning("Pending apply publish failed %s: %s", player_dir, error)
     return ran
+
+
+def _claimed_run(job_path: Path, claim: Path) -> bool:
+    try:
+        return _process_one(job_path)
+    finally:
+        claim.unlink(missing_ok=True)
+        with _POOL_LOCK:
+            _IN_FLIGHT.discard(str(job_path.resolve()))
+
+
+def _pool(size: int) -> ThreadPoolExecutor:
+    global _POOL, _POOL_SIZE
+    if _POOL is None or _POOL_SIZE != size:
+        _POOL = ThreadPoolExecutor(max_workers=size, thread_name_prefix="civ6ai-seat")
+        _POOL_SIZE = size
+    return _POOL
+
+
+def process_sidecar_jobs(civ6ai_roots: list[Path] | Path, *, parallel: int | None = None) -> int:
+    """Run pending sidecar_job.json files. Accepts one root or a list of roots.
+
+    With one seat at a time (LM Studio) jobs run in order and this call blocks.
+    With parallel seats (OpenRouter) each job starts on a worker thread as soon as
+    it appears and this call returns the number of jobs it started.
+    """
+    roots = [civ6ai_roots] if isinstance(civ6ai_roots, Path) else list(civ6ai_roots)
+    limit = parallel if parallel is not None else parallel_seat_limit()
+    started = 0
+    for job_path in _pending_jobs(roots):
+        key = str(job_path.resolve())
+        with _POOL_LOCK:
+            if key in _IN_FLIGHT:
+                continue
+        claim = _try_claim(job_path.parent)
+        if claim is None:
+            continue
+        if limit <= 1:
+            try:
+                if _process_one(job_path):
+                    started += 1
+            finally:
+                claim.unlink(missing_ok=True)
+            continue
+        with _POOL_LOCK:
+            _IN_FLIGHT.add(key)
+        _pool(limit).submit(_claimed_run, job_path, claim)
+        started += 1
+    return started
 
 
 def discover_civ6ai_roots(primary: Path) -> list[Path]:

@@ -1,6 +1,21 @@
 -- Civ6Ai fog snapshot + legal_commands probe (InGame host).
 Civ6Ai_Snapshot = Civ6Ai_Snapshot or {}
 
+-- Active build priorities (synced game properties set by Civ6Ai_Orders).
+function Civ6Ai_Snapshot._Priorities(playerID)
+  local out = Civ6Ai_Util.JsonArrayList()
+  for id = 1, 24 do
+    local ok, value = pcall(function()
+      return Game:GetProperty("CIV6AI_PRIO_" .. tostring(playerID) .. "_" .. tostring(id))
+    end)
+    local level = ok and tonumber(value) or nil
+    if level ~= nil and level >= 1 and level <= 3 then
+      out[#out + 1] = { id = id, level = math.floor(level) }
+    end
+  end
+  return out
+end
+
 function Civ6Ai_Snapshot._Int(value)
   local n = tonumber(value)
   if n == nil then
@@ -90,11 +105,31 @@ function Civ6Ai_Snapshot._Favor(playerID)
   if player == nil then
     return 0
   end
+  -- Gathering Storm keeps diplomatic favor on the player (pPlayer:GetFavor());
+  -- the diplomacy object has no such call, which left favor at 0.
+  if player.GetFavor ~= nil then
+    local ok, v = pcall(player.GetFavor, player)
+    if ok and v ~= nil then
+      return Civ6Ai_Snapshot._Int(v)
+    end
+  end
   local diplomacy = player:GetDiplomacy()
   if diplomacy ~= nil and diplomacy.GetFavor ~= nil then
     return Civ6Ai_Snapshot._Int(diplomacy:GetFavor())
   end
   return 0
+end
+
+function Civ6Ai_Snapshot._FavorPerTurn(playerID)
+  local player = Players[playerID]
+  if player == nil or player.GetFavorPerTurn == nil then
+    return nil
+  end
+  local ok, v = pcall(player.GetFavorPerTurn, player)
+  if ok and v ~= nil then
+    return Civ6Ai_Snapshot._Int(v)
+  end
+  return nil
 end
 
 function Civ6Ai_Snapshot._CurrentTech(playerID)
@@ -112,6 +147,29 @@ function Civ6Ai_Snapshot._CurrentTech(playerID)
     end
   end
   return nil
+end
+
+function Civ6Ai_Snapshot._CurrentCivic(playerID)
+  local result = {}
+  local ok = pcall(function()
+    local culture = Players[playerID]:GetCulture()
+    local idx = culture:GetProgressingCivic()
+    if idx == nil or idx < 0 then return end
+    local row = GameInfo.Civics[idx]
+    if row == nil then return end
+    result.civic_id = row.CivicType
+    local progress = culture:GetCulturalProgress(idx) or 0
+    local cost = culture:GetCultureCost(idx) or 0
+    result.progress = math.floor(progress)
+    local rate = Players[playerID]:GetCulture():GetCultureYield() or 0
+    if rate > 0 and cost > progress then
+      result.turns_left = math.ceil((cost - progress) / rate)
+    end
+  end)
+  if not ok then
+    return {}
+  end
+  return result
 end
 
 function Civ6Ai_Snapshot._UnitTypeName(unit)
@@ -264,19 +322,43 @@ function Civ6Ai_Snapshot._CollectMapAnchors(playerID, yourUnits, yourCities)
   return anchors
 end
 
-function Civ6Ai_Snapshot._RiverEdgeNeighbor(plot, direction)
-  if plot == nil or direction == nil or Map == nil or Map.PlotDirection == nil then
+-- Civ6 has Map.GetAdjacentPlot (Map.PlotDirection is Civ5-only; the old code always
+-- fell back to {dx=0, dy=-1}). dx is normalised across the X-wrap seam.
+function Civ6Ai_Snapshot._AdjacentPlot(x, y, direction)
+  if Map == nil or direction == nil then
+    return nil
+  end
+  local fn = Map.GetAdjacentPlot or Map.PlotDirection
+  if fn == nil then
+    return nil
+  end
+  local ok, neighbor = pcall(function() return fn(x, y, direction) end)
+  if ok then
+    return neighbor
+  end
+  return nil
+end
+
+function Civ6Ai_Snapshot._RiverEdgeNeighbor(plot, direction, edgeId)
+  if plot == nil or direction == nil then
     return nil
   end
   local x = plot:GetX()
   local y = plot:GetY()
-  local neighbor = Map.PlotDirection(x, y, direction)
+  local neighbor = Civ6Ai_Snapshot._AdjacentPlot(x, y, direction)
   if neighbor == nil then
     return nil
   end
+  local dx = neighbor:GetX() - x
+  if dx > 1 then
+    dx = -1
+  elseif dx < -1 then
+    dx = 1
+  end
   return {
-    dx = neighbor:GetX() - x,
+    dx = dx,
     dy = neighbor:GetY() - y,
+    edge_id = edgeId,
   }
 end
 
@@ -285,32 +367,153 @@ function Civ6Ai_Snapshot._RiverEdges(plot)
   if plot == nil then
     return edges
   end
+  -- IsWOfRiver: river on this tile's EAST edge; IsNWOfRiver: SOUTHEAST edge;
+  -- IsNEOfRiver: SOUTHWEST edge. Record the neighbour across that edge.
   local checks = {}
   if DirectionTypes ~= nil then
-  if DirectionTypes.DIRECTION_NORTHEAST ~= nil and plot.IsNEOfRiver ~= nil then
-    table.insert(checks, {plot.IsNEOfRiver, DirectionTypes.DIRECTION_NORTHEAST})
-  end
-  if DirectionTypes.DIRECTION_WEST ~= nil and plot.IsWOfRiver ~= nil then
-    table.insert(checks, {plot.IsWOfRiver, DirectionTypes.DIRECTION_WEST})
-  end
-  if DirectionTypes.DIRECTION_NORTHWEST ~= nil and plot.IsNWOfRiver ~= nil then
-    table.insert(checks, {plot.IsNWOfRiver, DirectionTypes.DIRECTION_NORTHWEST})
-  end
+    if DirectionTypes.DIRECTION_EAST ~= nil and plot.IsWOfRiver ~= nil then
+      table.insert(checks, {plot.IsWOfRiver, DirectionTypes.DIRECTION_EAST, "E"})
+    end
+    if DirectionTypes.DIRECTION_SOUTHEAST ~= nil and plot.IsNWOfRiver ~= nil then
+      table.insert(checks, {plot.IsNWOfRiver, DirectionTypes.DIRECTION_SOUTHEAST, "SE"})
+    end
+    if DirectionTypes.DIRECTION_SOUTHWEST ~= nil and plot.IsNEOfRiver ~= nil then
+      table.insert(checks, {plot.IsNEOfRiver, DirectionTypes.DIRECTION_SOUTHWEST, "SW"})
+    end
   end
   for _, entry in ipairs(checks) do
     local isRiverFn = entry[1]
-    local direction = entry[2]
-    if isRiverFn ~= nil and direction ~= nil and isRiverFn(plot) then
-      local neighbor = Civ6Ai_Snapshot._RiverEdgeNeighbor(plot, direction)
+    local okRiver, onRiver = pcall(function() return isRiverFn(plot) end)
+    if okRiver and onRiver then
+      local neighbor = Civ6Ai_Snapshot._RiverEdgeNeighbor(plot, entry[2], entry[3])
       if neighbor ~= nil then
         table.insert(edges, neighbor)
       end
     end
   end
-  if #edges == 0 and plot.IsRiver ~= nil and plot:IsRiver() then
-    table.insert(edges, {dx = 0, dy = -1})
-  end
+  -- Other three edges are stored on the neighbours (their E/SE/SW), so an empty list
+  -- here does not mean "no river"; the renderer unions both sides.
   return edges
+end
+
+-- dy of the north-east neighbour of a mid-map plot: +1 means y grows northward.
+function Civ6Ai_Snapshot._NorthDy(mapWidth, mapHeight)
+  if DirectionTypes == nil or DirectionTypes.DIRECTION_NORTHEAST == nil then
+    return 0
+  end
+  local x = math.floor((mapWidth or 2) / 2)
+  local y = math.floor((mapHeight or 2) / 2)
+  local neighbor = Civ6Ai_Snapshot._AdjacentPlot(x, y, DirectionTypes.DIRECTION_NORTHEAST)
+  if neighbor == nil then
+    return 0
+  end
+  return neighbor:GetY() - y
+end
+
+function Civ6Ai_Snapshot._OtherCityPlayerIds(playerID)
+  local ids = {}
+  for otherID = 0, 63 do
+    if otherID ~= playerID and Players[otherID] ~= nil and Players[otherID]:IsAlive() then
+      table.insert(ids, otherID)
+    end
+  end
+  return ids
+end
+
+-- Foreign cities on tiles this player has revealed (schema known_city fields only).
+function Civ6Ai_Snapshot._BuildKnownOtherCities(playerID, turn)
+  local out = Civ6Ai_Util.JsonArrayList()
+  local vis = PlayersVisibility ~= nil and PlayersVisibility[playerID] or nil
+  if vis == nil then
+    return out
+  end
+  for _, otherID in ipairs(Civ6Ai_Snapshot._OtherCityPlayerIds(playerID)) do
+    local ok, cities = pcall(function() return Players[otherID]:GetCities() end)
+    if ok and cities ~= nil and cities.Members ~= nil then
+      for _, city in cities:Members() do
+        local plot = city ~= nil and Map.GetPlot(city:GetX(), city:GetY()) or nil
+        if plot ~= nil and vis:IsRevealed(plot:GetIndex()) and #out < 40 then
+          local visible = vis:IsVisible(plot:GetIndex())
+          local nameOk, name = pcall(function() return Locale.Lookup(city:GetName()) end)
+          local population = Civ6Ai_Util.JsonNull()
+          if visible and city.GetPopulation ~= nil then
+            population = Civ6Ai_Snapshot._Int(city:GetPopulation())
+          end
+          local isCapital = Civ6Ai_Util.JsonNull()
+          if city.IsCapital ~= nil then
+            local capOk, cap = pcall(function() return city:IsCapital() end)
+            if capOk then isCapital = cap == true end
+          end
+          local areaId = "AREA_UNKNOWN"
+          if plot.GetArea ~= nil then
+            local areaOk, area = pcall(function() return plot:GetArea() end)
+            if areaOk and area ~= nil and area.GetID ~= nil then
+              areaId = "AREA_" .. tostring(area:GetID())
+            end
+          end
+          table.insert(out, {
+            city_id = "CITY_" .. tostring(otherID) .. "_" .. tostring(city:GetID()),
+            owner_player_id = Civ6Ai_Util.PlayerId(otherID),
+            name = (nameOk and name ~= nil and tostring(name) ~= "") and tostring(name) or "City",
+            plot_id = "PLOT_" .. tostring(city:GetX()) .. "_" .. tostring(city:GetY()),
+            area_id = areaId,
+            knowledge = visible and "visible" or "remembered",
+            last_seen_turn = visible and Civ6Ai_Snapshot._Int(turn) or 0,
+            population = population,
+            is_capital = isCapital,
+            visible_defense = Civ6Ai_Util.JsonNull(),
+          })
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- Foreign units standing on tiles this player can currently see.
+function Civ6Ai_Snapshot._BuildVisibleOtherUnits(playerID)
+  local out = Civ6Ai_Util.JsonArrayList()
+  local vis = PlayersVisibility ~= nil and PlayersVisibility[playerID] or nil
+  if vis == nil then
+    return out
+  end
+  for _, otherID in ipairs(Civ6Ai_Snapshot._OtherCityPlayerIds(playerID)) do
+    local ok, units = pcall(function() return Players[otherID]:GetUnits() end)
+    if ok and units ~= nil then
+      for _, unit in ipairs(Civ6Ai_Snapshot._IterateUnits(units)) do
+        local plot = unit ~= nil and Map.GetPlot(unit:GetX(), unit:GetY()) or nil
+        if plot ~= nil and vis:IsVisible(plot:GetIndex()) and #out < 60 then
+          local current, maxHp = Civ6Ai_Snapshot._UnitHealth(unit)
+          local info = Civ6Ai_Snapshot._UnitInfo(unit)
+          local movesOk, moves = pcall(function() return unit:GetMovesRemaining() end)
+          local health = math.floor((current * 100) / maxHp)
+          if health < 0 then health = 0 elseif health > 100 then health = 100 end
+          table.insert(out, {
+            unit_id = "UNIT_" .. tostring(otherID) .. "_" .. tostring(unit:GetID()),
+            owner_player_id = Civ6Ai_Util.PlayerId(otherID),
+            unit_type_id = Civ6Ai_Snapshot._UnitTypeName(unit),
+            plot_id = "PLOT_" .. tostring(unit:GetX()) .. "_" .. tostring(unit:GetY()),
+            health_percent = health,
+            visible_strength = math.max(0, math.floor(tonumber(info.combat) or 0)),
+            movement_ready = movesOk and (tonumber(moves) or 0) > 0 or false,
+          })
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- Never let a foreign-info helper break the whole snapshot.
+function Civ6Ai_Snapshot._SafeList(fn)
+  local ok, value = pcall(fn)
+  if ok and value ~= nil then
+    return value
+  end
+  if not ok then
+    print("[Civ6Ai] snapshot list helper failed: " .. tostring(value))
+  end
+  return Civ6Ai_Util.JsonArrayList()
 end
 
 function Civ6Ai_Snapshot._BuildPlotRecord(plot, playerID, turn, vis)
@@ -586,6 +789,42 @@ function Civ6Ai_Snapshot._BuildYourCities(playerID)
   return out
 end
 
+function Civ6Ai_Snapshot._UnitInfo(unit)
+  local info = {combat = 0, ranged = 0, range = 0, formation = nil, domain = nil}
+  if unit == nil or GameInfo == nil or GameInfo.Units == nil then
+    return info
+  end
+  local okRow, row = pcall(function() return GameInfo.Units[unit:GetType()] end)
+  if okRow and row ~= nil then
+    info.combat = math.floor(tonumber(row.Combat) or 0)
+    info.ranged = tonumber(row.RangedCombat) or 0
+    info.range = tonumber(row.Range) or 0
+    info.formation = row.FormationClass
+    info.domain = row.Domain
+  end
+  if unit.GetCombat ~= nil then
+    local ok, value = pcall(function() return unit:GetCombat() end)
+    if ok and tonumber(value) ~= nil then info.combat = math.floor(tonumber(value)) end
+  end
+  if unit.GetRangedCombat ~= nil then
+    local ok, value = pcall(function() return unit:GetRangedCombat() end)
+    if ok and tonumber(value) ~= nil then info.ranged = tonumber(value) end
+  end
+  if unit.GetRange ~= nil then
+    local ok, value = pcall(function() return unit:GetRange() end)
+    if ok and tonumber(value) ~= nil then info.range = tonumber(value) end
+  end
+  return info
+end
+
+function Civ6Ai_Snapshot._IsMilitaryInfo(info)
+  if info == nil then return false end
+  if info.formation == "FORMATION_CLASS_CIVILIAN" or info.formation == "FORMATION_CLASS_SUPPORT" then
+    return false
+  end
+  return (info.combat or 0) > 0 or (info.ranged or 0) > 0
+end
+
 function Civ6Ai_Snapshot._BuildUnitCounts(playerID)
   local player = Players[playerID]
   local counts = {
@@ -611,12 +850,10 @@ function Civ6Ai_Snapshot._BuildUnitCounts(playerID)
     if typeName == "UNIT_SETTLER" then
       counts.settlers = counts.settlers + 1
     end
-    if typeName ~= nil and (
-      string.find(typeName, "WARRIOR") ~= nil
-      or string.find(typeName, "SPEARMAN") ~= nil
-      or string.find(typeName, "ARCHER") ~= nil
-      or string.find(typeName, "HORSEMAN") ~= nil
-    ) then
+    if typeName == "UNIT_BUILDER" then
+      counts.workers = counts.workers + 1
+    end
+    if Civ6Ai_Snapshot._IsMilitaryInfo(Civ6Ai_Snapshot._UnitInfo(unit)) then
       counts.military = counts.military + 1
     end
   end
@@ -701,6 +938,502 @@ function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
   }
 end
 
+-- ===========================================================================
+-- civ6.economy (Civ5-parity economy/empire panel). Everything here reads the
+-- same engine APIs the base-game UI uses (ToolTipHelper_PlayerYields.lua,
+-- CitySupport.lua, ProductionPanel.lua, NotificationPanel.lua) and is pcall'd
+-- piecewise: a missing API costs one field, never the snapshot.
+-- Fractional values travel as "%.1f" strings (EncodeJsonValue rounds numbers).
+-- ===========================================================================
+Civ6Ai_Snapshot.ECON_NOTIFICATION_CAP = 15
+
+function Civ6Ai_Snapshot._EconCall(obj, name, ...)
+  if obj == nil then return nil end
+  local okGet, fn = pcall(function() return obj[name] end)
+  if not okGet or type(fn) ~= "function" then return nil end
+  local args = {...}
+  local unpackFn = table.unpack or unpack
+  local ok, value = pcall(function() return fn(obj, unpackFn(args)) end)
+  if ok then return value end
+  return nil
+end
+
+function Civ6Ai_Snapshot._EconNum(value)
+  local n = tonumber(value)
+  if n == nil then return nil end
+  return string.format("%.1f", n)
+end
+
+function Civ6Ai_Snapshot._EconInt(value)
+  local n = tonumber(value)
+  if n == nil then return nil end
+  if n >= 0 then return math.floor(n + 0.5) end
+  return math.ceil(n - 0.5)
+end
+
+function Civ6Ai_Snapshot._EconTreasury(player)
+  local out = {}
+  local treasury = Civ6Ai_Snapshot._EconCall(player, "GetTreasury")
+  if treasury == nil then return out end
+  local call = function(name) return Civ6Ai_Snapshot._EconCall(treasury, name) end
+  out.treasury = Civ6Ai_Snapshot._EconNum(call("GetGoldBalance"))
+  local gross = tonumber(call("GetGoldYield"))
+  local total = tonumber(call("GetTotalMaintenance"))
+  out.gross_income = Civ6Ai_Snapshot._EconNum(gross)
+  out.maintenance_total = Civ6Ai_Snapshot._EconNum(total)
+  out.maintenance_buildings = Civ6Ai_Snapshot._EconNum(call("GetBuildingMaintenance"))
+  out.maintenance_districts = Civ6Ai_Snapshot._EconNum(call("GetDistrictMaintenance"))
+  out.maintenance_units = Civ6Ai_Snapshot._EconNum(call("GetUnitMaintenance"))
+  out.maintenance_wmd = Civ6Ai_Snapshot._EconNum(call("GetWMDMaintenance"))
+  out.unit_maint_discount = Civ6Ai_Snapshot._EconNum(call("GetMaintDiscountPerUnit"))
+  if gross ~= nil and total ~= nil then
+    out.net = Civ6Ai_Snapshot._EconNum(gross - total)
+  end
+  local incomeTip = call("GetGoldYieldToolTip")
+  if type(incomeTip) == "string" and incomeTip ~= "" then
+    out.income_tooltip = string.sub(incomeTip, 1, 800)
+  end
+  local expenseTip = call("GetTotalMaintenanceToolTip")
+  if type(expenseTip) == "string" and expenseTip ~= "" then
+    out.expense_tooltip = string.sub(expenseTip, 1, 800)
+  end
+  return out
+end
+
+function Civ6Ai_Snapshot._EconCity(player, city)
+  local row = {
+    city_id = Civ6Ai_Production._WireCityId(city),
+    name = Locale.Lookup(city:GetName()),
+    population = Civ6Ai_Snapshot._EconInt(Civ6Ai_Snapshot._EconCall(city, "GetPopulation")),
+  }
+  if YieldTypes ~= nil then
+    for key, yieldType in pairs({food = YieldTypes.FOOD, production = YieldTypes.PRODUCTION,
+        gold = YieldTypes.GOLD, science = YieldTypes.SCIENCE, culture = YieldTypes.CULTURE,
+        faith = YieldTypes.FAITH}) do
+      if yieldType ~= nil then
+        row[key] = Civ6Ai_Snapshot._EconNum(Civ6Ai_Snapshot._EconCall(city, "GetYield", yieldType))
+      end
+    end
+  end
+  local growth = Civ6Ai_Snapshot._EconCall(city, "GetGrowth")
+  if growth ~= nil then
+    local g = function(name) return Civ6Ai_Snapshot._EconCall(growth, name) end
+    local turnsGrow = tonumber(g("GetTurnsUntilGrowth"))
+    local turnsStarve = tonumber(g("GetTurnsUntilStarvation"))
+    if turnsGrow ~= nil and turnsGrow ~= -1 then
+      row.turns_to_growth = Civ6Ai_Snapshot._EconInt(turnsGrow)
+    elseif turnsStarve ~= nil and turnsStarve ~= -1 then
+      row.turns_to_starve = Civ6Ai_Snapshot._EconInt(turnsStarve)
+    end
+    row.food_surplus = Civ6Ai_Snapshot._EconNum(g("GetFoodSurplus"))
+    row.housing = Civ6Ai_Snapshot._EconNum(g("GetHousing"))
+    row.housing_growth_mult = Civ6Ai_Snapshot._EconNum(g("GetHousingGrowthModifier"))
+    row.amenities = Civ6Ai_Snapshot._EconInt(g("GetAmenities"))
+    row.amenities_needed = Civ6Ai_Snapshot._EconInt(g("GetAmenitiesNeeded"))
+    row.amenities_lost_bankruptcy = Civ6Ai_Snapshot._EconInt(g("GetAmenitiesLostFromBankruptcy"))
+    row.amenities_lost_war_weariness = Civ6Ai_Snapshot._EconInt(g("GetAmenitiesLostFromWarWeariness"))
+    row.amenities_from_luxuries = Civ6Ai_Snapshot._EconInt(g("GetAmenitiesFromLuxuries"))
+    row.happiness_growth_pct = Civ6Ai_Snapshot._EconInt(g("GetHappinessGrowthModifier"))
+    row.happiness_yield_pct = Civ6Ai_Snapshot._EconInt(g("GetHappinessNonFoodYieldModifier"))
+    local happiness = g("GetHappiness")
+    if happiness ~= nil and GameInfo.Happinesses ~= nil then
+      local okH, hRow = pcall(function() return GameInfo.Happinesses[happiness] end)
+      if okH and hRow ~= nil then
+        row.happiness = hRow.HappinessType
+      end
+    end
+  end
+  local okProd, itemId, _, _, _, turns = pcall(Civ6Ai_Production._GetCityProductionState, city)
+  if okProd then
+    row.production_item = itemId
+    row.production_turns = Civ6Ai_Snapshot._EconInt(turns)
+  end
+  local buildings = Civ6Ai_Util.JsonArrayList()
+  local pBuildings = Civ6Ai_Snapshot._EconCall(city, "GetBuildings")
+  if pBuildings ~= nil and GameInfo.Buildings ~= nil then
+    for bRow in GameInfo.Buildings() do
+      if Civ6Ai_Snapshot._EconCall(pBuildings, "HasBuilding", bRow.Index) == true then
+        local label = bRow.BuildingType
+        if Civ6Ai_Snapshot._EconCall(pBuildings, "IsPillaged", bRow.Index) == true then
+          label = label .. " (pillaged)"
+        end
+        table.insert(buildings, label)
+      end
+    end
+  end
+  row.built_buildings = buildings
+  local districts = Civ6Ai_Util.JsonArrayList()
+  local pDistricts = Civ6Ai_Snapshot._EconCall(city, "GetDistricts")
+  if pDistricts ~= nil and GameInfo.Districts ~= nil then
+    local okD = pcall(function()
+      for _, district in pDistricts:Members() do
+        local dRow = GameInfo.Districts[district:GetType()]
+        if dRow ~= nil and dRow.DistrictType ~= "DISTRICT_CITY_CENTER" then
+          local label = dRow.DistrictType
+          if Civ6Ai_Snapshot._EconCall(pDistricts, "HasDistrict", dRow.Index, true) ~= true then
+            label = label .. " (under construction)"
+          elseif Civ6Ai_Snapshot._EconCall(district, "IsPillaged") == true then
+            label = label .. " (pillaged)"
+          end
+          table.insert(districts, label)
+        end
+      end
+    end)
+    if not okD then
+      Civ6Ai_Util.Log("snapshot|economy_districts_failed")
+    end
+  end
+  row.built_districts = districts
+  return row
+end
+
+function Civ6Ai_Snapshot._EconNotifications(playerID)
+  local out = Civ6Ai_Util.JsonArrayList()
+  if NotificationManager == nil or NotificationManager.GetList == nil then return out end
+  local okList, list = pcall(NotificationManager.GetList, playerID)
+  if not okList or type(list) ~= "table" then return out end
+  local ids = {}
+  for _, nid in ipairs(list) do table.insert(ids, nid) end
+  table.sort(ids, function(a, b) return (tonumber(a) or 0) > (tonumber(b) or 0) end)
+  for _, nid in ipairs(ids) do
+    if #out >= Civ6Ai_Snapshot.ECON_NOTIFICATION_CAP then break end
+    local okFind, entry = pcall(NotificationManager.Find, playerID, nid)
+    if okFind and entry ~= nil and Civ6Ai_Snapshot._EconCall(entry, "IsDismissed") ~= true then
+      local message = Civ6Ai_Snapshot._EconCall(entry, "GetMessage")
+      local summary = Civ6Ai_Snapshot._EconCall(entry, "GetSummary")
+      local okM, m = pcall(function() return message and Locale.Lookup(message) or "" end)
+      local okS, s = pcall(function() return summary and Locale.Lookup(summary) or "" end)
+      local typeName = Civ6Ai_Snapshot._EconCall(entry, "GetTypeName")
+      if typeName == nil then
+        typeName = Civ6Ai_Snapshot._NotificationTypeName(entry)
+      end
+      table.insert(out, {
+        id = tonumber(nid) or 0,
+        type = tostring(typeName or "NOTIFICATION_UNKNOWN"),
+        message = string.sub(okM and tostring(m or "") or "", 1, 160),
+        summary = string.sub(okS and tostring(s or "") or "", 1, 240),
+        blocking = (tonumber(Civ6Ai_Snapshot._EconCall(entry, "GetEndTurnBlocking")) or 0) ~= 0,
+      })
+    end
+  end
+  return out
+end
+
+-- Stats for every build id this seat was offered (legal queue_production rows),
+-- plus per-city turns. Unit upkeep = UnitManager.GetUnitMaintenance minus the
+-- treasury per-unit discount (ReportScreen.lua does the same).
+function Civ6Ai_Snapshot._EconCatalog(player, legal)
+  local catalog = {}
+  local turnsByCity = {}
+  local offered = {}
+  for _, command in ipairs(legal or {}) do
+    if type(command) == "table" and command.kind == "queue_production" then
+      local fixed = command.fixed_arguments or {}
+      if fixed.city_id ~= nil and fixed.build_id ~= nil then
+        offered[fixed.city_id] = offered[fixed.city_id] or {}
+        table.insert(offered[fixed.city_id], fixed.build_id)
+      end
+    end
+  end
+  local discount = 0
+  local treasury = Civ6Ai_Snapshot._EconCall(player, "GetTreasury")
+  if treasury ~= nil then
+    discount = tonumber(Civ6Ai_Snapshot._EconCall(treasury, "GetMaintDiscountPerUnit")) or 0
+  end
+  local yieldsByBuilding = nil
+  local function buildingYields(buildingType)
+    if yieldsByBuilding == nil then
+      yieldsByBuilding = {}
+      pcall(function()
+        for yRow in GameInfo.Building_YieldChanges() do
+          local list = yieldsByBuilding[yRow.BuildingType] or {}
+          table.insert(list, "+" .. tostring(yRow.YieldChange) .. " "
+            .. string.lower(string.gsub(tostring(yRow.YieldType), "^YIELD_", "")))
+          yieldsByBuilding[yRow.BuildingType] = list
+        end
+      end)
+    end
+    return yieldsByBuilding[buildingType]
+  end
+  local cities = Civ6Ai_Snapshot._EconCall(player, "GetCities")
+  if cities == nil then return catalog, turnsByCity end
+  for _, city in cities:Members() do
+    local cityId = Civ6Ai_Production._WireCityId(city)
+    local builds = offered[cityId]
+    if builds ~= nil then
+      local bq = Civ6Ai_Snapshot._EconCall(city, "GetBuildQueue")
+      local turns = {}
+      for _, buildId in ipairs(builds) do
+        local uRow = GameInfo.Units ~= nil and GameInfo.Units[buildId] or nil
+        local bRow = (uRow == nil and GameInfo.Buildings ~= nil) and GameInfo.Buildings[buildId] or nil
+        local pRow = (uRow == nil and bRow == nil and GameInfo.Projects ~= nil) and GameInfo.Projects[buildId] or nil
+        local row = uRow or bRow or pRow
+        if row ~= nil then
+          local t = Civ6Ai_Snapshot._EconCall(bq, "GetTurnsLeft", row.Hash)
+          if t == nil or tonumber(t) == nil or tonumber(t) < 0 then
+            t = Civ6Ai_Snapshot._EconCall(bq, "GetTurnsLeft", buildId)
+          end
+          if tonumber(t) ~= nil and tonumber(t) >= 0 then
+            turns[buildId] = Civ6Ai_Snapshot._EconInt(t)
+          end
+          if catalog[buildId] == nil then
+            local item = {}
+            if uRow ~= nil then
+              item.category = "unit"
+              item.cost = Civ6Ai_Snapshot._EconInt(Civ6Ai_Snapshot._EconCall(bq, "GetUnitCost", uRow.Index))
+              item.combat = tonumber(uRow.Combat) or 0
+              item.ranged = tonumber(uRow.RangedCombat) or 0
+              item.range = tonumber(uRow.Range) or 0
+              item.moves = tonumber(uRow.BaseMoves) or 0
+              item.domain = uRow.Domain
+              local maint = tonumber(uRow.Maintenance) or 0
+              if UnitManager ~= nil and UnitManager.GetUnitMaintenance ~= nil then
+                local okM, m = pcall(UnitManager.GetUnitMaintenance, uRow.Hash)
+                if okM and tonumber(m) ~= nil then maint = tonumber(m) end
+              end
+              if maint > 0 then maint = math.max(0, maint - discount) end
+              item.upkeep = maint
+            elseif bRow ~= nil then
+              item.category = "building"
+              item.cost = Civ6Ai_Snapshot._EconInt(Civ6Ai_Snapshot._EconCall(bq, "GetBuildingCost", bRow.Index))
+              item.maintenance = tonumber(bRow.Maintenance) or 0
+              item.housing = tonumber(bRow.Housing) or 0
+              item.amenities = tonumber(bRow.Entertainment) or 0
+              item.district = bRow.PrereqDistrict
+              local ys = buildingYields(bRow.BuildingType)
+              if ys ~= nil then item.yields = table.concat(ys, ", ") end
+            else
+              item.category = "project"
+              item.cost = Civ6Ai_Snapshot._EconInt(Civ6Ai_Snapshot._EconCall(bq, "GetProjectCost", pRow.Index))
+            end
+            catalog[buildId] = item
+          end
+        end
+      end
+      turnsByCity[cityId] = turns
+    end
+  end
+  return catalog, turnsByCity
+end
+
+function Civ6Ai_Snapshot._BuildEconomy(playerID, legal)
+  local player = Players[playerID]
+  if player == nil then return nil end
+  local economy = {}
+  local okT, treasury = pcall(Civ6Ai_Snapshot._EconTreasury, player)
+  if okT and type(treasury) == "table" then
+    economy.gold = treasury
+  else
+    Civ6Ai_Util.Log("snapshot|economy_treasury_failed|" .. tostring(treasury))
+  end
+  local cityRows = Civ6Ai_Util.JsonArrayList()
+  local cities = Civ6Ai_Snapshot._EconCall(player, "GetCities")
+  if cities ~= nil then
+    for _, city in cities:Members() do
+      local okC, row = pcall(Civ6Ai_Snapshot._EconCity, player, city)
+      if okC and type(row) == "table" then
+        table.insert(cityRows, row)
+      else
+        Civ6Ai_Util.Log("snapshot|economy_city_failed|" .. tostring(row))
+      end
+    end
+  end
+  economy.cities = cityRows
+  local levels = Civ6Ai_Util.JsonArrayList()
+  local okH = pcall(function()
+    for hRow in GameInfo.Happinesses() do
+      table.insert(levels, {
+        type = hRow.HappinessType,
+        min_amenity = hRow.MinimumAmenityScore,
+        max_amenity = hRow.MaximumAmenityScore,
+        growth_pct = hRow.GrowthModifier,
+        yield_pct = hRow.NonFoodYieldModifier,
+        rebellion = hRow.RebellionPoints,
+      })
+    end
+  end)
+  if okH then
+    economy.happiness_levels = levels
+  end
+  local okN, notes = pcall(Civ6Ai_Snapshot._EconNotifications, playerID)
+  if okN then
+    economy.notifications = notes
+  else
+    Civ6Ai_Util.Log("snapshot|economy_notifications_failed|" .. tostring(notes))
+  end
+  local okCat, catalog, turns = pcall(Civ6Ai_Snapshot._EconCatalog, player, legal)
+  if okCat then
+    economy.build_catalog = catalog
+    economy.build_turns = turns
+  else
+    Civ6Ai_Util.Log("snapshot|economy_catalog_failed|" .. tostring(catalog))
+  end
+  return economy
+end
+
+-- Diplomacy (Civ5-style relations). Every engine call is pcall'd through
+-- _Try/_Method: several of these exist only in one Lua context or only in some
+-- rulesets, and a missing one must cost a field, never the snapshot.
+function Civ6Ai_Snapshot._Try(fn, ...)
+  local ok, value = pcall(fn, ...)
+  if ok then
+    return value
+  end
+  return nil
+end
+
+function Civ6Ai_Snapshot._Method(obj, name, ...)
+  if obj == nil then
+    return nil
+  end
+  local okGet, fn = pcall(function() return obj[name] end)
+  if not okGet or type(fn) ~= "function" then
+    return nil
+  end
+  local args = { ... }
+  local unpackFn = unpack or table.unpack
+  local ok, value = pcall(function() return fn(obj, unpackFn(args)) end)
+  if ok then
+    return value
+  end
+  return nil
+end
+
+function Civ6Ai_Snapshot._Arr()
+  if Civ6Ai_Util ~= nil and Civ6Ai_Util.JsonArrayList ~= nil then
+    return Civ6Ai_Util.JsonArrayList()
+  end
+  return {}
+end
+
+function Civ6Ai_Snapshot._PlayerLabel(playerID)
+  if Civ6Ai_Util ~= nil and Civ6Ai_Util.PlayerId ~= nil then
+    return Civ6Ai_Util.PlayerId(playerID)
+  end
+  return "PLAYER_" .. tostring(playerID)
+end
+
+-- "major" | "city_state" | "barbarian" | "free_cities" | nil (dead / absent).
+function Civ6Ai_Snapshot._PlayerKind(otherID)
+  local other = Players[otherID]
+  if other == nil or Civ6Ai_Snapshot._Method(other, "IsAlive") ~= true then
+    return nil
+  end
+  if Civ6Ai_Snapshot._Method(other, "IsBarbarian") == true then
+    return "barbarian"
+  end
+  local leader = tostring(Civ6Ai_Snapshot._Try(Civ6Ai_Snapshot._LeaderId, otherID) or "")
+  local civ = tostring(Civ6Ai_Snapshot._Try(Civ6Ai_Snapshot._CivId, otherID) or "")
+  if civ == "CIVILIZATION_FREE_CITIES" or leader == "LEADER_FREE_CITIES" then
+    return "free_cities"
+  end
+  if leader:find("^LEADER_MINOR_CIV_") ~= nil then
+    return "city_state"
+  end
+  local major = Civ6Ai_Snapshot._Method(other, "IsMajor")
+  if major == false then
+    return "city_state"
+  end
+  return "major"
+end
+
+-- GameInfo.DiplomaticStates StateType of other's stance toward playerID
+-- (DIPLO_STATE_ALLIED, _DECLARED_FRIEND, _FRIENDLY, _NEUTRAL, _UNFRIENDLY,
+-- _DENOUNCED, _WAR), or nil when the engine will not say (humans, city-states).
+function Civ6Ai_Snapshot._DiploState(fromID, towardID)
+  local ai = Civ6Ai_Snapshot._Method(Players[fromID], "GetDiplomaticAI")
+  local index = Civ6Ai_Snapshot._Method(ai, "GetDiplomaticStateIndex", towardID)
+  if type(index) ~= "number" or index < 0 or GameInfo == nil or GameInfo.DiplomaticStates == nil then
+    return nil
+  end
+  local row = Civ6Ai_Snapshot._Try(function() return GameInfo.DiplomaticStates[index] end)
+  if row == nil or row.StateType == nil then
+    return nil
+  end
+  return tostring(row.StateType)
+end
+
+Civ6Ai_Snapshot.DIPLO_RELATIONSHIP = {
+  DIPLO_STATE_ALLIED = "alliance",
+  DIPLO_STATE_DECLARED_FRIEND = "declared_friendship",
+  DIPLO_STATE_FRIENDLY = "friendly",
+  DIPLO_STATE_NEUTRAL = "neutral",
+  DIPLO_STATE_UNFRIENDLY = "unfriendly",
+  DIPLO_STATE_DENOUNCED = "denounced",
+  DIPLO_STATE_WAR = "war",
+}
+
+-- Top reasons behind the rival's attitude (the "modifiers" list in the leader
+-- screen): { {text, score}, ... } strongest first.
+function Civ6Ai_Snapshot._AttitudeReasons(fromID, towardID, limit)
+  local out = Civ6Ai_Snapshot._Arr()
+  local ai = Civ6Ai_Snapshot._Method(Players[fromID], "GetDiplomaticAI")
+  local mods = Civ6Ai_Snapshot._Method(ai, "GetDiplomaticModifiers", towardID)
+  if type(mods) ~= "table" then
+    return out
+  end
+  local rows = {}
+  for _, mod in pairs(mods) do
+    if type(mod) == "table" then
+      local text = mod.Text or mod.text
+      local score = tonumber(mod.Score or mod.score)
+      if type(text) == "string" and text ~= "" and score ~= nil and score ~= 0 then
+        if Locale ~= nil and Locale.Lookup ~= nil then
+          text = Civ6Ai_Snapshot._Try(Locale.Lookup, text) or text
+        end
+        text = text:gsub("%[[^%]]*%]", ""):gsub("%s+", " ")
+        table.insert(rows, { text = text:sub(1, 80), score = math.floor(score + 0.5) })
+      end
+    end
+  end
+  table.sort(rows, function(a, b) return math.abs(a.score) > math.abs(b.score) end)
+  for i = 1, math.min(#rows, limit or 3) do
+    table.insert(out, rows[i])
+  end
+  return out
+end
+
+function Civ6Ai_Snapshot._RelationFacts(playerID, otherID)
+  local me = Players[playerID]
+  local myDiplo = Civ6Ai_Snapshot._Method(me, "GetDiplomacy")
+  local theirDiplo = Civ6Ai_Snapshot._Method(Players[otherID], "GetDiplomacy")
+  local facts = {}
+  facts.at_war = Civ6Ai_Snapshot._Method(myDiplo, "IsAtWarWith", otherID) == true
+  facts.state = Civ6Ai_Snapshot._DiploState(otherID, playerID)
+  local ai = Civ6Ai_Snapshot._Method(Players[otherID], "GetDiplomaticAI")
+  local score = Civ6Ai_Snapshot._Method(ai, "GetDiplomaticScore", playerID)
+  facts.score = type(score) == "number" and math.floor(score + 0.5) or nil
+  facts.open_borders_to_us = Civ6Ai_Snapshot._Method(theirDiplo, "HasOpenBordersFrom", playerID) == true
+    or Civ6Ai_Snapshot._Method(myDiplo, "HasOpenBordersFrom", otherID) == true
+  facts.defensive_pact = Civ6Ai_Snapshot._Method(myDiplo, "HasDefensivePact", otherID) == true
+  facts.declared_friendship = Civ6Ai_Snapshot._Method(myDiplo, "HasDeclaredFriendship", otherID) == true
+    or facts.state == "DIPLO_STATE_DECLARED_FRIEND"
+  facts.alliance = Civ6Ai_Snapshot._Method(myDiplo, "HasAllied", otherID) == true
+    or facts.state == "DIPLO_STATE_ALLIED"
+  local allianceType = Civ6Ai_Snapshot._Method(myDiplo, "GetAllianceType", otherID)
+  if type(allianceType) == "number" and allianceType >= 0 and GameInfo ~= nil and GameInfo.Alliances ~= nil then
+    local row = Civ6Ai_Snapshot._Try(function() return GameInfo.Alliances[allianceType] end)
+    facts.alliance_type = row ~= nil and row.AllianceType or nil
+    facts.alliance = facts.alliance or facts.alliance_type ~= nil
+  end
+  facts.denounced = facts.state == "DIPLO_STATE_DENOUNCED"
+  if facts.at_war then
+    facts.relationship = "war"
+  elseif facts.alliance then
+    facts.relationship = "alliance"
+  elseif facts.state ~= nil then
+    facts.relationship = Civ6Ai_Snapshot.DIPLO_RELATIONSHIP[facts.state] or "neutral"
+  elseif facts.declared_friendship then
+    facts.relationship = "declared_friendship"
+  end
+  return facts
+end
+
+function Civ6Ai_Snapshot._HasMet(playerID, otherID)
+  local diplo = Civ6Ai_Snapshot._Method(Players[playerID], "GetDiplomacy")
+  return Civ6Ai_Snapshot._Method(diplo, "HasMet", otherID) == true
+end
+
 function Civ6Ai_Snapshot._BuildKnownPlayers(playerID)
   local player = Players[playerID]
   if player == nil then
@@ -715,13 +1448,7 @@ function Civ6Ai_Snapshot._BuildKnownPlayers(playerID)
     if otherID ~= playerID and Players[otherID] ~= nil and Players[otherID]:IsAlive() then
       if diplomacy.HasMet ~= nil and diplomacy:HasMet(otherID) then
         local other = Players[otherID]
-        local attitude = "ATTITUDE_NEUTRAL"
-        if diplomacy.GetAttitude ~= nil then
-          local raw = diplomacy:GetAttitude(otherID)
-          if raw ~= nil then
-            attitude = "ATTITUDE_" .. tostring(raw)
-          end
-        end
+        local facts = Civ6Ai_Snapshot._RelationFacts(playerID, otherID)
         table.insert(out, {
           player_id = Civ6Ai_Util.PlayerId(otherID),
           leader_id = Civ6Ai_Snapshot._LeaderId(otherID),
@@ -738,16 +1465,129 @@ function Civ6Ai_Snapshot._BuildKnownPlayers(playerID)
           power = Civ6Ai_Util.JsonNull(),
           relation = {
             met = true,
-            at_war = diplomacy:IsAtWarWith(otherID),
-            open_borders = false,
-            defensive_pact = false,
+            at_war = facts.at_war,
+            open_borders = facts.open_borders_to_us,
+            defensive_pact = facts.defensive_pact,
             vassal = false,
-            attitude_id = attitude,
-            attitude_value = 0,
+            -- The rival's diplomatic state toward us (DIPLO_STATE_*), the Civ6
+            -- counterpart of Civ5's ATTITUDE_*; value is its diplomatic score.
+            attitude_id = facts.state or "ATTITUDE_NEUTRAL",
+            attitude_value = facts.score or 0,
           },
         })
       end
     end
+  end
+  return out
+end
+
+Civ6Ai_Snapshot.TRADE_RESOURCE_CAP = 12
+
+-- Luxury / strategic stock of a player: { luxuries = {{resource_id, amount}},
+-- strategics = {...}, gold = n, gold_per_turn = n } (nil fields when unknown).
+function Civ6Ai_Snapshot._TradeInventory(otherID)
+  local other = Players[otherID]
+  local inv = { luxuries = Civ6Ai_Snapshot._Arr(), strategics = Civ6Ai_Snapshot._Arr() }
+  local resources = Civ6Ai_Snapshot._Method(other, "GetResources")
+  if resources ~= nil and GameInfo ~= nil and GameInfo.Resources ~= nil then
+    pcall(function()
+      for row in GameInfo.Resources() do
+        local class = row.ResourceClassType
+        if class == "RESOURCECLASS_LUXURY" or class == "RESOURCECLASS_STRATEGIC" then
+          local amount = Civ6Ai_Snapshot._Method(resources, "GetResourceAmount", row.Index)
+          if type(amount) == "number" and amount > 0 then
+            local list = class == "RESOURCECLASS_LUXURY" and inv.luxuries or inv.strategics
+            if #list < Civ6Ai_Snapshot.TRADE_RESOURCE_CAP then
+              table.insert(list, { resource_id = row.ResourceType, amount = math.floor(amount) })
+            end
+          end
+        end
+      end
+    end)
+  end
+  local treasury = Civ6Ai_Snapshot._Method(other, "GetTreasury")
+  local gold = Civ6Ai_Snapshot._Method(treasury, "GetGoldBalance")
+  if type(gold) == "number" then
+    inv.gold = math.floor(gold)
+  end
+  local yield = Civ6Ai_Snapshot._Method(treasury, "GetGoldYield")
+  local upkeep = Civ6Ai_Snapshot._Method(treasury, "GetTotalMaintenance")
+  if type(yield) == "number" then
+    inv.gold_per_turn = math.floor(yield - (type(upkeep) == "number" and upkeep or 0) + 0.5)
+  end
+  return inv
+end
+
+-- civ6.diplomacy: what the Civ5 prompt showed and Civ6 exposes. Majors met
+-- (state toward us, relationship, wars incl. theirs with other majors, trade
+-- stock), city-states met (suzerain, our envoys), our own trade stock and wars
+-- between majors we know. Optional in the schema; the sidecar copes without it.
+function Civ6Ai_Snapshot._BuildDiplomacy(playerID)
+  local out = {
+    majors = Civ6Ai_Snapshot._Arr(),
+    city_states = Civ6Ai_Snapshot._Arr(),
+    wars = Civ6Ai_Snapshot._Arr(),
+  }
+  local metMajors = {}
+  for otherID = 0, 63 do
+    if otherID ~= playerID then
+      local kind = Civ6Ai_Snapshot._PlayerKind(otherID)
+      if (kind == "major" or kind == "city_state") and Civ6Ai_Snapshot._HasMet(playerID, otherID) then
+        if kind == "major" then
+          table.insert(metMajors, otherID)
+        else
+          local influence = Civ6Ai_Snapshot._Method(Players[otherID], "GetInfluence")
+          local suzerain = Civ6Ai_Snapshot._Method(influence, "GetSuzerain")
+          local envoys = Civ6Ai_Snapshot._Method(influence, "GetTokensReceived", playerID)
+          local leader = tostring(Civ6Ai_Snapshot._Try(Civ6Ai_Snapshot._LeaderId, otherID) or "")
+          local myDiplo = Civ6Ai_Snapshot._Method(Players[playerID], "GetDiplomacy")
+          table.insert(out.city_states, {
+            player_id = Civ6Ai_Snapshot._PlayerLabel(otherID),
+            name = Civ6Ai_Snapshot._Try(Civ6Ai_Snapshot._LeaderName, otherID) or Civ6Ai_Snapshot._PlayerLabel(otherID),
+            city_state_type = leader:match("^LEADER_MINOR_CIV_(.+)$"),
+            suzerain_id = (type(suzerain) == "number" and suzerain >= 0) and Civ6Ai_Snapshot._PlayerLabel(suzerain) or nil,
+            your_envoys = type(envoys) == "number" and math.floor(envoys) or nil,
+            at_war = Civ6Ai_Snapshot._Method(myDiplo, "IsAtWarWith", otherID) == true,
+          })
+        end
+      end
+    end
+  end
+  for _, otherID in ipairs(metMajors) do
+    local facts = Civ6Ai_Snapshot._RelationFacts(playerID, otherID)
+    local theirDiplo = Civ6Ai_Snapshot._Method(Players[otherID], "GetDiplomacy")
+    local atWarWith = Civ6Ai_Snapshot._Arr()
+    for _, thirdID in ipairs(metMajors) do
+      if thirdID ~= otherID and Civ6Ai_Snapshot._Method(theirDiplo, "IsAtWarWith", thirdID) == true then
+        table.insert(atWarWith, Civ6Ai_Snapshot._PlayerLabel(thirdID))
+        if otherID < thirdID then
+          table.insert(out.wars, { Civ6Ai_Snapshot._PlayerLabel(otherID), Civ6Ai_Snapshot._PlayerLabel(thirdID) })
+        end
+      end
+    end
+    local inv = Civ6Ai_Snapshot._TradeInventory(otherID)
+    table.insert(out.majors, {
+      player_id = Civ6Ai_Snapshot._PlayerLabel(otherID),
+      state = facts.state,
+      relationship = facts.relationship,
+      diplomatic_score = facts.score,
+      at_war = facts.at_war,
+      denounced = facts.denounced,
+      declared_friendship = facts.declared_friendship,
+      alliance = facts.alliance,
+      alliance_type = facts.alliance_type,
+      open_borders = facts.open_borders_to_us,
+      defensive_pact = facts.defensive_pact,
+      at_war_with = atWarWith,
+      reasons = Civ6Ai_Snapshot._AttitudeReasons(otherID, playerID, 3),
+      trade = inv,
+    })
+  end
+  out.your_trade = Civ6Ai_Snapshot._TradeInventory(playerID)
+  local myInfluence = Civ6Ai_Snapshot._Method(Players[playerID], "GetInfluence")
+  local tokens = Civ6Ai_Snapshot._Method(myInfluence, "GetTokensToGive")
+  if type(tokens) == "number" then
+    out.envoys_to_give = math.floor(tokens)
   end
   return out
 end
@@ -766,6 +1606,36 @@ function Civ6Ai_Snapshot._IsNetworkMultiplayer()
   return false
 end
 
+function Civ6Ai_Snapshot._SafeLookup(fn)
+  local ok, value = pcall(fn)
+  if ok and type(value) == "string" and value ~= "" then
+    return value
+  end
+  return "UNKNOWN"
+end
+
+function Civ6Ai_Snapshot._CurrentEraId()
+  return Civ6Ai_Snapshot._SafeLookup(function()
+    local idx = Game.GetEras():GetCurrentEra()
+    local row = GameInfo.Eras[idx]
+    return row and row.EraType
+  end)
+end
+
+function Civ6Ai_Snapshot._GameSpeedId()
+  return Civ6Ai_Snapshot._SafeLookup(function()
+    local row = GameInfo.GameSpeeds[GameConfiguration.GetGameSpeedType()]
+    return row and row.GameSpeedType
+  end)
+end
+
+function Civ6Ai_Snapshot._MapSizeId()
+  return Civ6Ai_Snapshot._SafeLookup(function()
+    local row = GameInfo.Maps[Map.GetMapSize()]
+    return row and row.MapSizeType
+  end)
+end
+
 function Civ6Ai_Snapshot._BuildGameBlock()
   local mapWidth, mapHeight = Map.GetGridSize()
   local wrapX, wrapY = Civ6Ai_Snapshot._MapWrap()
@@ -774,10 +1644,10 @@ function Civ6Ai_Snapshot._BuildGameBlock()
     map_height = mapHeight,
     wrap_x = wrapX,
     wrap_y = wrapY,
-    era_id = "ERA_UNKNOWN",
-    game_speed_id = "GAMESPEED_STANDARD",
-    difficulty_id = "HANDICAP_STANDARD",
-    world_size_id = "WORLDSIZE_STANDARD",
+    era_id = Civ6Ai_Snapshot._CurrentEraId(),
+    game_speed_id = Civ6Ai_Snapshot._GameSpeedId(),
+    difficulty_id = "UNKNOWN",
+    world_size_id = Civ6Ai_Snapshot._MapSizeId(),
     calendar_id = "CALENDAR_DEFAULT",
     climate_id = "CLIMATE_TEMPERATE",
     sea_level_id = "SEALEVEL_MEDIUM",
@@ -1017,11 +1887,67 @@ function Civ6Ai_Snapshot._IterateUnits(playerUnits)
   return list
 end
 
+-- Movement the unit has for the model's orders this turn. Prefers the GameCore
+-- view (see Civ6Ai_GameCore.UnitMovesForPlayer): the UI cache reads 0 at turn
+-- start and for held AI-seat units, which hid every move from legal_commands.
+function Civ6Ai_Snapshot._UnitMoves(unit)
+  local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+  if routes ~= nil and routes.UnitMovesForPlayer ~= nil then
+    local ok, moves = pcall(routes.UnitMovesForPlayer, unit:GetOwner(), unit:GetID())
+    if ok and type(moves) == "number" then
+      return moves
+    end
+  end
+  return unit:GetMovesRemaining()
+end
+
+-- found_city legality. The UI test (nil plot, test only) does not check the site:
+-- it offered P0's new settler "found" on the Paris tile itself. The GameCore check
+-- has the site rules, so it decides whenever it is available; the local seat also
+-- needs the UI test (its found order goes through the UI operation).
+function Civ6Ai_Snapshot._CanFoundCity(unit, foundOp)
+  local ui = foundOp ~= nil and UnitManager.CanStartOperation(unit, foundOp.Hash, nil, true)
+  local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+  if routes == nil or routes.CanFoundCityForPlayer == nil then
+    return ui == true
+  end
+  local gameCore = Civ6Ai_Snapshot._GameCoreCanFound(unit)
+  local isLocal = Game ~= nil and Game.GetLocalPlayer ~= nil and unit:GetOwner() == Game.GetLocalPlayer()
+  if isLocal then
+    return gameCore and ui == true
+  end
+  return gameCore
+end
+
+-- Gameplay-side founding check (Civ6Ai_GameCore.CanFoundCityForPlayer) for
+-- settlers the UI check rejects: non-local seats and held units.
+function Civ6Ai_Snapshot._GameCoreCanFound(unit)
+  local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+  if routes == nil or routes.CanFoundCityForPlayer == nil then
+    return false
+  end
+  local ok, can = pcall(routes.CanFoundCityForPlayer, unit:GetOwner(), unit:GetID())
+  return ok and can == true
+end
+
+-- The UI MOVE_TO test accepts every neighbour for every seat, the local one
+-- included (P0's land scout was offered coast 20,24 and its warrior mountain
+-- 14,18; both failed every time), so confirm with
+-- Civ6Ai_GameCore.CanMoveUnitToForPlayer for all seats.
+function Civ6Ai_Snapshot._GameCoreCanMove(unit, x, y)
+  local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+  if routes == nil or routes.CanMoveUnitToForPlayer == nil then
+    return true
+  end
+  local ok, can = pcall(routes.CanMoveUnitToForPlayer, unit:GetOwner(), unit:GetID(), x, y)
+  return not ok or can == true
+end
+
 function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   if unit == nil or unit:GetX() == -9999 then
     return false
   end
-  return unit:GetMovesRemaining() > 0
+  return Civ6Ai_Snapshot._UnitMoves(unit) > 0
 end
 
 function Civ6Ai_Snapshot._UnitHealth(unit)
@@ -1069,20 +1995,21 @@ function Civ6Ai_Snapshot._BuildYourUnits(playerID)
   for _, unit in ipairs(Civ6Ai_Snapshot._IterateUnits(player:GetUnits())) do
     local x = unit:GetX()
     local y = unit:GetY()
-    local moves = unit:GetMovesRemaining()
+    local moves = Civ6Ai_Snapshot._UnitMoves(unit)
     local maxMoves = unit:GetMaxMoves()
     local needsOrders = Civ6Ai_Snapshot._UnitNeedsOrders(unit)
     local curHp, maxHp = Civ6Ai_Snapshot._UnitHealth(unit)
     local promoReady = Civ6Ai_Snapshot._UnitPromotionReady(unit)
+    local info = Civ6Ai_Snapshot._UnitInfo(unit)
     table.insert(units, {
       unit_id = Civ6Ai_Snapshot._UnitWireId(unit),
       unit_type_id = Civ6Ai_Snapshot._UnitTypeName(unit),
-      unit_class_id = "UNITCLASS_UNKNOWN",
-      domain_id = "DOMAIN_LAND",
+      unit_class_id = info.formation or "UNITCLASS_UNKNOWN",
+      domain_id = info.domain or "DOMAIN_LAND",
       plot_id = Civ6Ai_Util.PlotId(x, y),
       health = {current = curHp, maximum = maxHp, change_per_turn = 0},
       health_percent = maxHp > 0 and math.floor(100 * curHp / maxHp) or 100,
-      strength = {current = 0, maximum = 0, change_per_turn = 0},
+      strength = {current = info.combat, maximum = info.combat, change_per_turn = 0},
       movement = {current = moves, maximum = maxMoves, change_per_turn = 0},
       level = 1,
       experience = 0,
@@ -1093,22 +2020,79 @@ function Civ6Ai_Snapshot._BuildYourUnits(playerID)
       unit_ai_role = "UNITAI_UNKNOWN",
       cargo_unit_ids = {},
       can_act = needsOrders,
-      needs_orders = needsOrders or promoReady,
+      needs_orders = needsOrders,
       upgrade_options = {},
     })
   end
   return units
 end
 
+-- Plots the engine says the unit can reach this turn (UI-side
+-- UnitManager.GetReachableMovement, a list of plot indices). nil when the API is
+-- missing or has nothing to say: held AI-seat units read 0 moves here, so their
+-- targets rest on the GameCore step-cost check alone.
+function Civ6Ai_Snapshot._ReachablePlotSet(unit)
+  if UnitManager == nil or UnitManager.GetReachableMovement == nil then
+    return nil
+  end
+  local okMoves, moves = pcall(function() return unit:GetMovesRemaining() end)
+  if not okMoves or type(moves) ~= "number" or moves <= 0 then
+    return nil
+  end
+  local ok, list = pcall(UnitManager.GetReachableMovement, unit)
+  if not ok or type(list) ~= "table" then
+    return nil
+  end
+  local set = {}
+  local any = false
+  for _, plotIndex in pairs(list) do
+    if type(plotIndex) == "number" then
+      set[plotIndex] = true
+      any = true
+    end
+  end
+  if not any then
+    return nil
+  end
+  return set
+end
+
+function Civ6Ai_Snapshot._PlotIndex(plot)
+  if plot == nil or plot.GetIndex == nil then
+    return nil
+  end
+  local ok, index = pcall(function() return plot:GetIndex() end)
+  if ok and type(index) == "number" then
+    return index
+  end
+  return nil
+end
+
+-- Neighbour steps the unit can take this turn. Each target must pass the UI
+-- MOVE_TO test, the GameCore step check (domain, embark, stacking, move cost incl.
+-- rivers: Civ6Ai_GameCore.CanMoveUnitToForPlayer) and, when the engine lists
+-- them, be among the unit's reachable plots. Only neighbours are offered: a
+-- longer order becomes a multi-turn path that ends the unit's turn.
 function Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
   local x = unit:GetX()
   local y = unit:GetY()
+  local reachable = Civ6Ai_Snapshot._ReachablePlotSet(unit)
   for direction = 0, 5 do
     local adjPlot = Map.GetAdjacentPlot(x, y, direction)
     if adjPlot ~= nil then
       local ax = adjPlot:GetX()
       local ay = adjPlot:GetY()
-      if UnitManager.CanStartOperation(unit, UnitOperationTypes.MOVE_TO, adjPlot, true) then
+      local index = reachable ~= nil and Civ6Ai_Snapshot._PlotIndex(adjPlot) or nil
+      local engineOk = reachable == nil or index == nil or reachable[index] == true
+      if not engineOk and Civ6Ai_Snapshot._GameCoreCanMove(unit, ax, ay) then
+        -- Evidence for the first-step rule: the step check allows it, the
+        -- engine's reachable list does not.
+        Civ6Ai_Util.Log("snapshot|reach_excludes|player=" .. tostring(unit:GetOwner()) .. "|unit=" .. tostring(unit:GetID())
+          .. "|plot=" .. tostring(ax) .. "," .. tostring(ay))
+      end
+      if engineOk
+          and UnitManager.CanStartOperation(unit, UnitOperationTypes.MOVE_TO, adjPlot, true)
+          and Civ6Ai_Snapshot._GameCoreCanMove(unit, ax, ay) then
         table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
           command_id = "CMD_move_" .. unitId .. "_" .. tostring(ax) .. "_" .. tostring(ay),
           kind = "move_unit",
@@ -1119,47 +2103,557 @@ function Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
   end
 end
 
+Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP = 24
+
+function Civ6Ai_Snapshot._CanQueueRow(city, row, paramKey)
+  if city == nil or row == nil or paramKey == nil then
+    return false
+  end
+  local ok, result = pcall(function()
+    local bq = city:GetBuildQueue()
+    if bq == nil or not bq:CanProduce(row.Hash, true) then
+      return false
+    end
+    local tCheck = {}
+    tCheck[paramKey] = row.Hash
+    return CityManager.CanStartOperation(city, CityOperationTypes.BUILD, tCheck, true)
+  end)
+  return ok and result == true
+end
+
 function Civ6Ai_Snapshot._AddProductionCommands(commands, playerID)
-  if Civ6Ai_Production == nil or Players[playerID] == nil then
+  if Civ6Ai_Production == nil or Players[playerID] == nil or GameInfo == nil then
     return
   end
   local cities = Players[playerID]:GetCities()
   if cities == nil then
     return
   end
-  local candidates = {
-    "UNIT_SETTLER",
-    "UNIT_BUILDER",
-    "UNIT_SCOUT",
-    "UNIT_SLINGER",
-    "UNIT_WARRIOR",
-    "BUILDING_MONUMENT",
-    "BUILDING_GRANARY",
-  }
   for _, city in cities:Members() do
     local cityId = Civ6Ai_Production._WireCityId(city)
-    for _, buildId in ipairs(candidates) do
-      if Civ6Ai_Production._CanQueueBuild(city, buildId) then
-        table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-          command_id = "CMD_prod_" .. buildId .. "_" .. cityId,
-          kind = "queue_production",
-          fixed_arguments = {city_id = cityId, build_id = buildId},
-        }))
+    local added = 0
+    local function add(buildId)
+      table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+        command_id = "CMD_prod_" .. buildId .. "_" .. cityId,
+        kind = "queue_production",
+        fixed_arguments = {city_id = cityId, build_id = buildId},
+      }))
+      added = added + 1
+    end
+    -- Units first, then regular buildings (districts and wonders need a plot, so they are not offered).
+    if GameInfo.Units ~= nil then
+      for row in GameInfo.Units() do
+        if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP then break end
+        if Civ6Ai_Snapshot._CanQueueRow(city, row, CityOperationTypes.PARAM_UNIT_TYPE) then
+          add(row.UnitType)
+        end
       end
-      if #commands >= 80 then
-        return
+    end
+    if GameInfo.Buildings ~= nil then
+      for row in GameInfo.Buildings() do
+        if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP then break end
+        if not row.IsWonder and Civ6Ai_Snapshot._CanQueueRow(city, row, CityOperationTypes.PARAM_BUILDING_TYPE) then
+          add(row.BuildingType)
+        end
+      end
+    end
+    if GameInfo.Projects ~= nil then
+      for row in GameInfo.Projects() do
+        if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP then break end
+        if Civ6Ai_Snapshot._CanQueueRow(city, row, CityOperationTypes.PARAM_PROJECT_TYPE) then
+          add(row.ProjectType)
+        end
       end
     end
   end
 end
 
+function Civ6Ai_Snapshot._IsEnemyOwner(playerID, ownerID)
+  if ownerID == nil or ownerID < 0 or ownerID == playerID then
+    return false
+  end
+  local owner = Players[ownerID]
+  if owner == nil then
+    return false
+  end
+  if owner.IsBarbarian ~= nil and owner:IsBarbarian() then
+    return true
+  end
+  local ok, atWar = pcall(function()
+    return Players[playerID]:GetDiplomacy():IsAtWarWith(ownerID)
+  end)
+  return ok and atWar == true
+end
+
+function Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot)
+  if plot == nil then
+    return nil
+  end
+  local x, y = plot:GetX(), plot:GetY()
+  local visOk, visible = pcall(function() return PlayersVisibility[playerID]:IsVisible(x, y) end)
+  if visOk and visible == false then
+    return nil
+  end
+  local cityOk, city = pcall(function() return Cities.GetCityInPlot(x, y) end)
+  if cityOk and city ~= nil and Civ6Ai_Snapshot._IsEnemyOwner(playerID, city:GetOwner()) then
+    return "city"
+  end
+  local unitsOk, units = pcall(function() return Units.GetUnitsInPlot(plot) end)
+  if unitsOk and units ~= nil then
+    for _, other in ipairs(units) do
+      if other ~= nil and Civ6Ai_Snapshot._IsEnemyOwner(playerID, other:GetOwner()) then
+        return "unit"
+      end
+    end
+  end
+  return nil
+end
+
+function Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
+  if UnitOperationTypes == nil or UnitManager == nil or UnitManager.CanStartOperation == nil then
+    return
+  end
+  local info = Civ6Ai_Snapshot._UnitInfo(unit)
+  if not Civ6Ai_Snapshot._IsMilitaryInfo(info) then
+    return
+  end
+  local x, y = unit:GetX(), unit:GetY()
+  local ranged = (info.ranged or 0) > 0 and (info.range or 0) > 0
+  local plots = {}
+  if ranged and Map.GetNeighborPlots ~= nil then
+    local ok, list = pcall(function() return Map.GetNeighborPlots(x, y, info.range) end)
+    if ok and list ~= nil then plots = list end
+  else
+    for direction = 0, 5 do
+      local adj = Map.GetAdjacentPlot(x, y, direction)
+      if adj ~= nil then table.insert(plots, adj) end
+    end
+  end
+  for _, plot in ipairs(plots) do
+    local tx, ty = plot:GetX(), plot:GetY()
+    if not (tx == x and ty == y) then
+      local target = Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot)
+      if target ~= nil then
+        local params = {}
+        params[UnitOperationTypes.PARAM_X] = tx
+        params[UnitOperationTypes.PARAM_Y] = ty
+        local op = UnitOperationTypes.MOVE_TO
+        if ranged then
+          op = UnitOperationTypes.RANGE_ATTACK
+        elseif UnitOperationMoveModifiers ~= nil and UnitOperationMoveModifiers.ATTACK ~= nil then
+          params[UnitOperationTypes.PARAM_MODIFIERS] = UnitOperationMoveModifiers.ATTACK
+        end
+        local ok, can = pcall(function()
+          return UnitManager.CanStartOperation(unit, op, nil, params)
+        end)
+        if ok and can then
+          table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+            command_id = "CMD_attack_" .. unitId .. "_" .. tostring(tx) .. "_" .. tostring(ty),
+            kind = "attack_target",
+            fixed_arguments = {
+              unit_id = unitId, target_x = tx, target_y = ty,
+              target_kind = target, ranged = ranged,
+            },
+          }))
+        end
+      end
+    end
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- Combat awareness (civ6.combat): own unit strengths, attack previews and
+-- threats, all from the engine's own CombatManager simulation (the numbers the
+-- unit panel shows on hover). Every engine call is pcall'd: a failure here
+-- costs the combat block, never the snapshot.
+-- ---------------------------------------------------------------------------
+Civ6Ai_Snapshot.COMBAT_PREVIEW_CAP = 40
+Civ6Ai_Snapshot.COMBAT_THREAT_CAP = 40
+Civ6Ai_Snapshot.CITY_STRIKE_RANGE = 2
+
+function Civ6Ai_Snapshot._CombatNum(v)
+  local n = tonumber(v)
+  if n == nil then return nil end
+  return math.floor(n + 0.5)
+end
+
+function Civ6Ai_Snapshot._UnitDisplayName(unit)
+  local ok, name = pcall(function()
+    local row = GameInfo.Units[unit:GetType()]
+    return Locale.Lookup(row.Name)
+  end)
+  if ok and type(name) == "string" and name ~= "" then return name end
+  return Civ6Ai_Snapshot._UnitTypeName(unit)
+end
+
+function Civ6Ai_Snapshot._CombatUnitStats(unit)
+  local info = Civ6Ai_Snapshot._UnitInfo(unit)
+  local cur, maxHp = Civ6Ai_Snapshot._UnitHealth(unit)
+  local bombard = Civ6Ai_Snapshot._Method(unit, "GetBombardCombat") or 0
+  local maxMoves = Civ6Ai_Snapshot._Method(unit, "GetMaxMoves") or 0
+  local ranged = math.max(tonumber(info.ranged) or 0, tonumber(bombard) or 0)
+  return {
+    strength = Civ6Ai_Snapshot._CombatNum(info.combat) or 0,
+    ranged_strength = Civ6Ai_Snapshot._CombatNum(ranged) or 0,
+    bombard = (tonumber(bombard) or 0) > (tonumber(info.ranged) or 0),
+    range = Civ6Ai_Snapshot._CombatNum(info.range) or 0,
+    hp = Civ6Ai_Snapshot._CombatNum(cur) or 0,
+    max_hp = Civ6Ai_Snapshot._CombatNum(maxHp) or 100,
+    max_moves = Civ6Ai_Snapshot._CombatNum(maxMoves) or 0,
+    military = Civ6Ai_Snapshot._IsMilitaryInfo(info),
+    is_ranged = ranged > 0 and (tonumber(info.range) or 0) > 0,
+  }
+end
+
+function Civ6Ai_Snapshot._CombatTypeFor(stats)
+  if CombatTypes == nil or not stats.is_ranged then
+    return nil
+  end
+  if stats.bombard and CombatTypes.BOMBARD ~= nil then
+    return CombatTypes.BOMBARD
+  end
+  return CombatTypes.RANGED
+end
+
+-- Outcome label, same thresholds as the base game's UnitPanel.lua combat preview.
+function Civ6Ai_Snapshot._CombatPrediction(att, def, ranged)
+  local P = CombatResultParameters
+  local dmgDef = tonumber(def[P.DAMAGE_TO]) or 0
+  local defMax = tonumber(def[P.MAX_HIT_POINTS]) or 100
+  local dmgAtt = tonumber(att[P.DAMAGE_TO]) or 0
+  local attMax = tonumber(att[P.MAX_HIT_POINTS]) or 100
+  local defWallMax = tonumber(def[P.MAX_DEFENSE_HIT_POINTS]) or 0
+  local defWallDmg = tonumber(def[P.DEFENSE_DAMAGE_TO]) or 0
+  local defStrength = (tonumber(def[P.COMBAT_STRENGTH]) or 0) + (tonumber(def[P.STRENGTH_MODIFIER]) or 0)
+  if not ranged and (tonumber(att[P.FINAL_DAMAGE_TO]) or 0) >= attMax then
+    return "DECISIVE_DEFEAT"
+  end
+  if dmgDef <= 0 and defWallDmg <= 0 then
+    return defStrength > 0 and "INEFFECTIVE" or "DECISIVE_VICTORY"
+  end
+  if ranged then
+    if defWallMax > 0 and defWallDmg >= dmgDef then
+      if (tonumber(def[P.FINAL_DEFENSE_DAMAGE_TO]) or 0) >= defWallMax then return "TOTAL_WALL_DAMAGE" end
+      return (defWallDmg * 100 / defWallMax) < 25 and "MINOR_WALL_DAMAGE" or "MAJOR_WALL_DAMAGE"
+    end
+    if defWallMax > 0 then
+      if (tonumber(def[P.FINAL_DAMAGE_TO]) or 0) >= defMax then return "TOTAL_CITY_DAMAGE" end
+      return (dmgDef * 100 / defMax) < 25 and "MINOR_CITY_DAMAGE" or "MAJOR_CITY_DAMAGE"
+    end
+    if dmgDef >= defMax or (tonumber(def[P.FINAL_DAMAGE_TO]) or 0) >= defMax then return "DECISIVE_VICTORY" end
+    return (dmgDef * 100 / defMax) < 25 and "MINOR_VICTORY" or "MAJOR_VICTORY"
+  end
+  if dmgDef >= defMax or (defWallMax == 0 and (tonumber(def[P.FINAL_DAMAGE_TO]) or 0) >= defMax) then
+    return "DECISIVE_VICTORY"
+  end
+  local attacking = dmgDef
+  if defWallMax > 0 then attacking = math.max(dmgDef, defWallDmg) end
+  local diff = attacking - dmgAtt
+  if diff > 0 then
+    if diff < 3 then return "STALEMATE" end
+    if diff < 10 then return "MINOR_VICTORY" end
+    return "MAJOR_VICTORY"
+  end
+  if diff > -3 then return "STALEMATE" end
+  if diff > -10 then return "MINOR_DEFEAT" end
+  return "MAJOR_DEFEAT"
+end
+
+-- Flatten a CombatManager result into plain numbers (+ label). nil when the
+-- engine has nothing to say.
+function Civ6Ai_Snapshot._CombatResultRow(res, ranged)
+  if type(res) ~= "table" or CombatResultParameters == nil then
+    return nil
+  end
+  local P = CombatResultParameters
+  local att = res[P.ATTACKER]
+  local def = res[P.DEFENDER]
+  if type(att) ~= "table" or type(def) ~= "table" then
+    return nil
+  end
+  local function hpLeft(side)
+    local maxHp = tonumber(side[P.MAX_HIT_POINTS]) or 0
+    local final = tonumber(side[P.FINAL_DAMAGE_TO]) or 0
+    local dmg = tonumber(side[P.DAMAGE_TO]) or 0
+    return math.max(0, maxHp - (final - dmg)), maxHp
+  end
+  local defHp, defMax = hpLeft(def)
+  local attHp, attMax = hpLeft(att)
+  local row = {
+    attacker_strength = Civ6Ai_Snapshot._CombatNum((tonumber(att[P.COMBAT_STRENGTH]) or 0) + (tonumber(att[P.STRENGTH_MODIFIER]) or 0)),
+    defender_strength = Civ6Ai_Snapshot._CombatNum((tonumber(def[P.COMBAT_STRENGTH]) or 0) + (tonumber(def[P.STRENGTH_MODIFIER]) or 0)),
+    damage_to_defender = Civ6Ai_Snapshot._CombatNum(def[P.DAMAGE_TO]) or 0,
+    damage_to_attacker = ranged and 0 or (Civ6Ai_Snapshot._CombatNum(att[P.DAMAGE_TO]) or 0),
+    defender_hp = Civ6Ai_Snapshot._CombatNum(defHp),
+    defender_max_hp = Civ6Ai_Snapshot._CombatNum(defMax),
+    attacker_hp = Civ6Ai_Snapshot._CombatNum(attHp),
+    attacker_max_hp = Civ6Ai_Snapshot._CombatNum(attMax),
+    prediction = Civ6Ai_Snapshot._CombatPrediction(att, def, ranged),
+  }
+  local wallMax = tonumber(def[P.MAX_DEFENSE_HIT_POINTS]) or 0
+  if wallMax > 0 then
+    local wallFinal = tonumber(def[P.FINAL_DEFENSE_DAMAGE_TO]) or 0
+    local wallDmg = tonumber(def[P.DEFENSE_DAMAGE_TO]) or 0
+    row.defender_wall_hp = Civ6Ai_Snapshot._CombatNum(math.max(0, wallMax - (wallFinal - wallDmg)))
+    row.defender_wall_max_hp = Civ6Ai_Snapshot._CombatNum(wallMax)
+    row.damage_to_walls = Civ6Ai_Snapshot._CombatNum(wallDmg)
+  end
+  return row
+end
+
+function Civ6Ai_Snapshot._SimulateVersus(attackerCid, defenderCid, combatType)
+  if CombatManager == nil or CombatManager.SimulateAttackVersus == nil then return nil end
+  local ok, res = pcall(CombatManager.SimulateAttackVersus, attackerCid, defenderCid, combatType)
+  if ok then return res end
+  return nil
+end
+
+function Civ6Ai_Snapshot._SimulateInto(attackerCid, combatType, x, y)
+  if CombatManager == nil or CombatManager.SimulateAttackInto == nil then return nil end
+  local ok, res = pcall(CombatManager.SimulateAttackInto, attackerCid, combatType, x, y)
+  if ok then return res end
+  return nil
+end
+
+function Civ6Ai_Snapshot._CityCenterDistrict(city)
+  local ok, district = pcall(function()
+    local districtId = city:GetDistrictID()
+    return Players[city:GetOwner()]:GetDistricts():FindID(districtId)
+  end)
+  if ok then return district end
+  return nil
+end
+
+-- Visible hostile units and cities (at war or barbarian) for this player.
+function Civ6Ai_Snapshot._VisibleHostiles(playerID)
+  local vis = PlayersVisibility ~= nil and PlayersVisibility[playerID] or nil
+  local units, cities = {}, {}
+  if vis == nil then return units, cities end
+  for _, otherID in ipairs(Civ6Ai_Snapshot._OtherCityPlayerIds(playerID)) do
+    if Civ6Ai_Snapshot._IsEnemyOwner(playerID, otherID) then
+      local owner = Civ6Ai_Util.PlayerId(otherID)
+      local okU, list = pcall(function() return Players[otherID]:GetUnits() end)
+      if okU and list ~= nil then
+        for _, unit in ipairs(Civ6Ai_Snapshot._IterateUnits(list)) do
+          local okV, visible = pcall(function()
+            return unit:GetX() >= 0 and vis:IsVisible(Map.GetPlot(unit:GetX(), unit:GetY()):GetIndex())
+          end)
+          if okV and visible then
+            local stats = Civ6Ai_Snapshot._CombatUnitStats(unit)
+            stats.unit = unit
+            stats.unit_id = "UNIT_" .. tostring(otherID) .. "_" .. tostring(unit:GetID())
+            stats.owner = owner
+            stats.name = Civ6Ai_Snapshot._UnitDisplayName(unit)
+            stats.unit_type_id = Civ6Ai_Snapshot._UnitTypeName(unit)
+            stats.x, stats.y = unit:GetX(), unit:GetY()
+            table.insert(units, stats)
+          end
+        end
+      end
+      local okC, clist = pcall(function() return Players[otherID]:GetCities() end)
+      if okC and clist ~= nil and clist.Members ~= nil then
+        for _, city in clist:Members() do
+          local okV, visible = pcall(function()
+            return vis:IsVisible(Map.GetPlot(city:GetX(), city:GetY()):GetIndex())
+          end)
+          if okV and visible then
+            local district = Civ6Ai_Snapshot._CityCenterDistrict(city)
+            local row = {
+              city = city, district = district, owner = owner,
+              x = city:GetX(), y = city:GetY(),
+              name = tostring(Civ6Ai_Snapshot._Try(function() return Locale.Lookup(city:GetName()) end) or "City"),
+              strength = Civ6Ai_Snapshot._CombatNum(Civ6Ai_Snapshot._Method(city, "GetStrength")),
+            }
+            if district ~= nil and DefenseTypes ~= nil then
+              local gMax = tonumber(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_GARRISON)) or 0
+              local gDmg = tonumber(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_GARRISON)) or 0
+              local wMax = tonumber(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_OUTER)) or 0
+              local wDmg = tonumber(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_OUTER)) or 0
+              if gMax > 0 then row.hp, row.max_hp = math.max(0, gMax - gDmg), gMax end
+              row.wall_max_hp = wMax
+              if wMax > 0 then row.wall_hp = math.max(0, wMax - wDmg) end
+            end
+            table.insert(cities, row)
+          end
+        end
+      end
+    end
+  end
+  return units, cities
+end
+
+function Civ6Ai_Snapshot._Dist(ax, ay, bx, by)
+  local ok, d = pcall(Map.GetPlotDistance, ax, ay, bx, by)
+  if ok and type(d) == "number" then return d end
+  return 999
+end
+
+function Civ6Ai_Snapshot._BuildCombat(playerID)
+  local player = Players[playerID]
+  local out = {
+    units = Civ6Ai_Util.JsonArrayList(),
+    hostiles = Civ6Ai_Util.JsonArrayList(),
+    hostile_cities = Civ6Ai_Util.JsonArrayList(),
+    previews = Civ6Ai_Util.JsonArrayList(),
+    threats = Civ6Ai_Util.JsonArrayList(),
+  }
+  if player == nil then return out end
+  local own = {}
+  for _, unit in ipairs(Civ6Ai_Snapshot._IterateUnits(player:GetUnits())) do
+    if unit:GetX() >= 0 then
+      local stats = Civ6Ai_Snapshot._CombatUnitStats(unit)
+      stats.unit = unit
+      stats.unit_id = Civ6Ai_Snapshot._UnitWireId(unit)
+      stats.x, stats.y = unit:GetX(), unit:GetY()
+      table.insert(own, stats)
+      table.insert(out.units, {
+        unit_id = stats.unit_id, strength = stats.strength, ranged_strength = stats.ranged_strength,
+        range = stats.range, hp = stats.hp, max_hp = stats.max_hp, max_moves = stats.max_moves,
+        military = stats.military,
+      })
+    end
+  end
+  local hostiles, cities = Civ6Ai_Snapshot._VisibleHostiles(playerID)
+  for _, h in ipairs(hostiles) do
+    table.insert(out.hostiles, {
+      unit_id = h.unit_id, owner_player_id = h.owner, name = h.name, unit_type_id = h.unit_type_id,
+      x = h.x, y = h.y, strength = h.strength, ranged_strength = h.ranged_strength, range = h.range,
+      hp = h.hp, max_hp = h.max_hp, max_moves = h.max_moves,
+    })
+  end
+  for _, c in ipairs(cities) do
+    table.insert(out.hostile_cities, {
+      name = c.name, owner_player_id = c.owner, x = c.x, y = c.y, strength = c.strength,
+      hp = c.hp, max_hp = c.max_hp, wall_hp = c.wall_hp, wall_max_hp = c.wall_max_hp,
+    })
+  end
+  if #hostiles == 0 and #cities == 0 then
+    return out
+  end
+  -- Attack previews: every own military unit vs every visible hostile it could
+  -- hit this turn (now, or after moving). Held AI-seat units read 0 moves, so
+  -- this is distance based, not CanStartOperation based.
+  local function addPreview(u, target, kind)
+    if #out.previews >= Civ6Ai_Snapshot.COMBAT_PREVIEW_CAP then return end
+    local dist = Civ6Ai_Snapshot._Dist(u.x, u.y, target.x, target.y)
+    local ranged = u.is_ranged
+    local reachNow = ranged and u.range or 1
+    local reachMove = ranged and (u.range + math.max(0, u.max_moves - 1)) or math.max(1, u.max_moves)
+    if dist < 1 or dist > reachMove then return end
+    local combatType = Civ6Ai_Snapshot._CombatTypeFor(u)
+    local cid = u.unit:GetComponentID()
+    local res
+    if kind == "unit" then
+      res = Civ6Ai_Snapshot._SimulateVersus(cid, target.unit:GetComponentID(), combatType)
+    end
+    if res == nil then
+      res = Civ6Ai_Snapshot._SimulateInto(cid, combatType, target.x, target.y)
+    end
+    local row = Civ6Ai_Snapshot._CombatResultRow(res, ranged) or {}
+    row.unit_id = u.unit_id
+    row.target_x, row.target_y = target.x, target.y
+    row.target_kind = kind
+    row.target_name = target.name
+    row.target_owner = target.owner
+    row.ranged = ranged
+    row.distance = dist
+    row.needs_move = dist > reachNow
+    if row.attacker_strength == nil then row.attacker_strength = ranged and u.ranged_strength or u.strength end
+    if row.defender_strength == nil then row.defender_strength = target.strength end
+    if row.attacker_hp == nil then row.attacker_hp, row.attacker_max_hp = u.hp, u.max_hp end
+    if row.defender_hp == nil then row.defender_hp, row.defender_max_hp = target.hp, target.max_hp end
+    row.simulated = res ~= nil and row.prediction ~= nil
+    table.insert(out.previews, row)
+  end
+  for _, u in ipairs(own) do
+    if u.military and (u.strength > 0 or u.ranged_strength > 0) then
+      for _, h in ipairs(hostiles) do
+        local ok, err = pcall(addPreview, u, h, "unit")
+        if not ok then Civ6Ai_Util.Log("snapshot|combat_preview_failed|" .. tostring(err)) end
+      end
+      for _, c in ipairs(cities) do
+        local ok, err = pcall(addPreview, u, c, "city")
+        if not ok then Civ6Ai_Util.Log("snapshot|combat_preview_failed|" .. tostring(err)) end
+      end
+    end
+  end
+  -- Threats: own units a visible hostile can hit on its next turn, and units
+  -- inside a walled hostile city's strike range. Damage from the engine
+  -- simulating the enemy attacking us.
+  local function addThreats(u)
+    for _, h in ipairs(hostiles) do
+      if #out.threats >= Civ6Ai_Snapshot.COMBAT_THREAT_CAP then break end
+      if h.strength > 0 or h.ranged_strength > 0 then
+        local dist = Civ6Ai_Snapshot._Dist(u.x, u.y, h.x, h.y)
+        local reach = h.is_ranged and (h.range + math.max(0, h.max_moves - 1)) or math.max(1, h.max_moves)
+        if dist >= 1 and dist <= reach then
+          local row = {}
+          if u.military then
+            local res = Civ6Ai_Snapshot._SimulateVersus(h.unit:GetComponentID(), u.unit:GetComponentID(),
+              Civ6Ai_Snapshot._CombatTypeFor(h))
+            row = Civ6Ai_Snapshot._CombatResultRow(res, h.is_ranged) or {}
+          end
+          row.unit_id = u.unit_id
+          row.source_type = "unit"
+          row.source_name = h.name
+          row.source_owner = h.owner
+          row.source_x, row.source_y = h.x, h.y
+          row.distance = dist
+          row.reach = reach
+          row.ranged = h.is_ranged
+          row.civilian = not u.military
+          row.enemy_strength = h.is_ranged and h.ranged_strength or h.strength
+          row.own_strength = u.strength
+          row.own_hp, row.own_max_hp = u.hp, u.max_hp
+          table.insert(out.threats, row)
+        end
+      end
+    end
+    for _, c in ipairs(cities) do
+      if #out.threats >= Civ6Ai_Snapshot.COMBAT_THREAT_CAP then break end
+      local dist = Civ6Ai_Snapshot._Dist(u.x, u.y, c.x, c.y)
+      if dist >= 1 and dist <= Civ6Ai_Snapshot.CITY_STRIKE_RANGE then
+        local row = {}
+        local canStrike = (c.wall_max_hp or 0) > 0
+        if canStrike and u.military and c.district ~= nil then
+          local res = Civ6Ai_Snapshot._SimulateVersus(c.district:GetComponentID(), u.unit:GetComponentID(), nil)
+          row = Civ6Ai_Snapshot._CombatResultRow(res, true) or {}
+        end
+        row.unit_id = u.unit_id
+        row.source_type = "city"
+        row.source_name = c.name
+        row.source_owner = c.owner
+        row.source_x, row.source_y = c.x, c.y
+        row.distance = dist
+        row.reach = Civ6Ai_Snapshot.CITY_STRIKE_RANGE
+        row.ranged = true
+        row.can_strike = canStrike
+        row.civilian = not u.military
+        row.enemy_strength = c.strength
+        row.own_strength = u.strength
+        row.own_hp, row.own_max_hp = u.hp, u.max_hp
+        table.insert(out.threats, row)
+      end
+    end
+  end
+  for _, u in ipairs(own) do
+    local ok, err = pcall(addThreats, u)
+    if not ok then Civ6Ai_Util.Log("snapshot|combat_threat_failed|" .. tostring(err)) end
+  end
+  return out
+end
+
+Civ6Ai_Snapshot.LEGAL_COMMAND_CAP = 500
+
 function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
+  -- Priority order under the sidecar schema cap (512): unit orders, research/civics, then production.
   local commands = {}
-  Civ6Ai_Snapshot._AddProductionCommands(commands, playerID)
+  local prodCommands = {}
+  Civ6Ai_Snapshot._AddProductionCommands(prodCommands, playerID)
   if Civ6Ai_Config.IsSeatExperiment() then
     local cityId, buildId = Civ6Ai_Production.FindExperimentTarget(playerID)
     if buildId ~= nil and cityId ~= nil then
-      table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+      table.insert(prodCommands, Civ6Ai_Snapshot._EnrichLegalCommand({
         command_id = "CMD_exp_prod_" .. buildId .. "_" .. cityId,
         kind = "queue_production",
         fixed_arguments = {city_id = cityId, build_id = buildId},
@@ -1183,7 +2677,8 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
         }))
         if GameInfo ~= nil and GameInfo.UnitOperations ~= nil then
           local foundOp = GameInfo.UnitOperations["UNITOPERATION_FOUND_CITY"]
-          if foundOp ~= nil and UnitManager.CanStartOperation(unit, foundOp.Hash, nil, true) then
+          local canFound = Civ6Ai_Snapshot._CanFoundCity(unit, foundOp)
+          if canFound then
             table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
               command_id = "CMD_found_" .. unitId,
               kind = "found_city",
@@ -1191,10 +2686,8 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
             }))
           end
         end
+        Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
         Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
-        if #commands >= 48 then
-          break
-        end
       end
     end
   end
@@ -1207,13 +2700,666 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
           kind = "set_research_tech",
           fixed_arguments = {tech_id = row.TechnologyType},
         }))
-        if #commands >= 56 then
-          break
+      end
+    end
+  end
+  local culture = player and player.GetCulture ~= nil and player:GetCulture() or nil
+  if culture ~= nil and GameInfo.Civics ~= nil and culture.CanProgress ~= nil then
+    for row in GameInfo.Civics() do
+      local ok, can = pcall(function()
+        return culture:CanProgress(row.Index) and not culture:HasCivic(row.Index)
+      end)
+      if ok and can then
+        table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+          command_id = "CMD_civic_" .. row.CivicType,
+          kind = "set_research_civic",
+          fixed_arguments = {civic_id = row.CivicType},
+        }))
+      end
+    end
+  end
+  for _, command in ipairs(prodCommands) do
+    table.insert(commands, command)
+  end
+  local capped = {}
+  for index, command in ipairs(commands) do
+    if index > Civ6Ai_Snapshot.LEGAL_COMMAND_CAP then
+      Civ6Ai_Util.Log("snapshot|legal_cap|dropped=" .. tostring(#commands - Civ6Ai_Snapshot.LEGAL_COMMAND_CAP))
+      break
+    end
+    table.insert(capped, command)
+  end
+  return capped
+end
+
+-- ---------------------------------------------------------------------------
+-- civ6.governance: government, policy slots, civics, religion, governors,
+-- great people and great works, read from the engine (interface context, so
+-- the government/governor screens' own calls are available). Options listed
+-- here are what the commands in Civ6Ai_Apply can do; the sidecar turns them
+-- into legal commands and the prompt's GOVERNMENT & CULTURE section.
+-- ---------------------------------------------------------------------------
+Civ6Ai_Snapshot.GOV_TEXT_MAX = 200
+-- Effect text lengths: long enough for a whole card/belief description, cut
+-- at a word boundary beyond that (prompt size).
+Civ6Ai_Snapshot.EFFECT_MAX = 240
+
+local function gcall(obj, name, ...)
+  if obj == nil or obj[name] == nil then
+    return nil
+  end
+  local ok, v, w = pcall(obj[name], obj, ...)
+  if ok then
+    return v, w
+  end
+  return nil
+end
+
+-- Index first, then hash: the engine takes either depending on the call.
+local function gtrue(obj, name, row)
+  if gcall(obj, name, row.Index) == true then
+    return true
+  end
+  return row.Hash ~= nil and gcall(obj, name, row.Hash) == true
+end
+
+function Civ6Ai_Snapshot._GovText(key, maxLen)
+  if key == nil or key == "" then
+    return nil
+  end
+  local ok, text = pcall(function() return Locale.Lookup(key) end)
+  if not ok or type(text) ~= "string" or text == "" then
+    return nil
+  end
+  -- Some engine fields (great people timeline effect text) are already
+  -- localized; only an unresolved LOC_ key counts as missing.
+  if text == key and string.find(key, "^LOC_") ~= nil then
+    return nil
+  end
+  -- Icons become a word only when the text does not already name the yield
+  -- right after the icon ("[ICON_Faith] Faith" -> "Faith").
+  local map = { Gold = "gold", Faith = "faith", Culture = "culture", Science = "science", Production = "production",
+    Food = "food", Housing = "housing", Amenities = "amenities", GreatPerson = "great person points",
+    Envoy = "envoy", Influence = "influence", Governor = "governor title" }
+  text = string.gsub(text, "%[ICON_(%w+)%]( ?)(%a*)", function(icon, sp, word)
+    local w = map[icon]
+    if w == nil or (word ~= "" and string.sub(string.lower(word), 1, 4) == string.sub(w, 1, 4)) then
+      return word
+    end
+    return w .. (word ~= "" and " " or sp) .. word
+  end)
+  text = string.gsub(text, "%[NEWLINE%]", " ")
+  text = string.gsub(text, "%[[^%]]*%]", "")
+  text = string.gsub(text, "%s+", " ")
+  text = string.gsub(text, "%( ", "(")
+  text = string.gsub(text, " ([%),%.;:])", "%1")
+  text = string.gsub(text, "^%s+", "")
+  maxLen = maxLen or Civ6Ai_Snapshot.GOV_TEXT_MAX
+  text = string.gsub(text, "%s+$", "")
+  if string.len(text) > maxLen then
+    local cut = string.sub(text, 1, maxLen - 3)
+    local space = string.find(cut, " [^ ]*$")
+    if space ~= nil and space > maxLen * 0.6 then
+      cut = string.sub(cut, 1, space - 1)
+    end
+    text = cut .. "..."
+  end
+  return text
+end
+
+local function slotShort(slotType)
+  return (string.gsub(tostring(slotType or ""), "^SLOT_", ""))
+end
+
+-- Legacy (accumulated) bonus text; skipped when it only repeats "no bonus".
+function Civ6Ai_Snapshot._GovLegacy(row)
+  local text = Civ6Ai_Snapshot._GovText(row.AccumulatedBonusDesc, Civ6Ai_Snapshot.EFFECT_MAX)
+    or Civ6Ai_Snapshot._GovText(row.AccumulatedBonusShortDesc, Civ6Ai_Snapshot.EFFECT_MAX)
+  local inherent = Civ6Ai_Snapshot._GovText(row.InherentBonusDesc, Civ6Ai_Snapshot.EFFECT_MAX)
+  if text == nil or text == inherent then
+    return nil
+  end
+  return text
+end
+
+function Civ6Ai_Snapshot._GovGovernment(culture)
+  local out = { available = Civ6Ai_Util.JsonArrayList() }
+  local current = gcall(culture, "GetCurrentGovernment")
+  local row = current ~= nil and current >= 0 and GameInfo.Governments[current] or nil
+  out.current = row ~= nil and row.GovernmentType or nil
+  local canAtAll = gcall(culture, "CanChangeGovernmentAtAll")
+  local made = gcall(culture, "GovernmentChangeMade")
+  local fresh = row == nil or gcall(culture, "CivicCompletedThisTurn") == true
+  out.change_allowed = canAtAll ~= false and made ~= true and fresh
+  out.change_rule = "a government can be changed only on a turn when a civic completed"
+  local slotsByGov = {}
+  if GameInfo.Government_SlotCounts ~= nil then
+    for s in GameInfo.Government_SlotCounts() do
+      local list = slotsByGov[s.GovernmentType] or {}
+      list[#list + 1] = slotShort(s.GovernmentSlotType) .. "x" .. tostring(s.NumSlots)
+      slotsByGov[s.GovernmentType] = list
+    end
+  end
+  if row ~= nil then
+    out.current_slots = table.concat(slotsByGov[row.GovernmentType] or {}, " ")
+    out.current_bonus = Civ6Ai_Snapshot._GovText(row.InherentBonusDesc, Civ6Ai_Snapshot.EFFECT_MAX)
+    out.current_legacy = Civ6Ai_Snapshot._GovLegacy(row)
+  end
+  for g in GameInfo.Governments() do
+    if (row == nil or g.Index ~= row.Index) and gtrue(culture, "IsGovernmentUnlocked", g) then
+      out.available[#out.available + 1] = {
+        id = g.GovernmentType,
+        slots = table.concat(slotsByGov[g.GovernmentType] or {}, " "),
+        bonus = Civ6Ai_Snapshot._GovText(g.InherentBonusDesc, Civ6Ai_Snapshot.EFFECT_MAX),
+        legacy = Civ6Ai_Snapshot._GovLegacy(g),
+        anarchy_turns = gcall(culture, "GetAnarchyTurns", g.Index) or 0,
+      }
+    end
+  end
+  return out
+end
+
+function Civ6Ai_Snapshot._GovPolicies(culture)
+  local out = { slots = Civ6Ai_Util.JsonArrayList(), available = Civ6Ai_Util.JsonArrayList() }
+  local n = gcall(culture, "GetNumPolicySlots") or 0
+  local active = {}
+  local empty = 0
+  for i = 0, n - 1 do
+    local st = gcall(culture, "GetSlotType", i)
+    local srow = st ~= nil and GameInfo.GovernmentSlots[st] or nil
+    local pid = gcall(culture, "GetSlotPolicy", i)
+    local prow = pid ~= nil and pid >= 0 and GameInfo.Policies[pid] or nil
+    if prow ~= nil then
+      active[prow.PolicyType] = true
+    else
+      empty = empty + 1
+    end
+    out.slots[#out.slots + 1] = {
+      index = i,
+      slot_type = srow ~= nil and srow.GovernmentSlotType or "SLOT_UNKNOWN",
+      policy = prow ~= nil and prow.PolicyType or nil,
+    }
+  end
+  out.empty_slots = empty
+  local civicDone = gcall(culture, "CivicCompletedThisTurn") == true
+  local open = gcall(culture, "GetNumPolicySlotsOpen") or 0
+  out.change_allowed = (civicDone or open > 0) and gcall(culture, "PolicyChangeMade") ~= true
+  out.change_rule = "policy cards can be changed on a turn when a civic completed (or while a slot is newly open)"
+  for p in GameInfo.Policies() do
+    if gtrue(culture, "IsPolicyUnlocked", p) and not gtrue(culture, "IsPolicyObsolete", p) then
+      out.available[#out.available + 1] = {
+        id = p.PolicyType,
+        slot_type = p.GovernmentSlotType,
+        active = active[p.PolicyType] == true,
+        effect = Civ6Ai_Snapshot._GovText(p.Description, Civ6Ai_Snapshot.EFFECT_MAX),
+      }
+    end
+  end
+  return out
+end
+
+-- What each tech/civic unlocks (same tables the tech/civic tree tooltips
+-- read: TechAndCivicSupport GetUnlockablesForTech/Civic), built once per load.
+Civ6Ai_Snapshot.UNLOCK_TEXT_MAX = 220
+function Civ6Ai_Snapshot._UnlockIndex()
+  if Civ6Ai_Snapshot._unlockIndex ~= nil then
+    return Civ6Ai_Snapshot._unlockIndex
+  end
+  local index = {}
+  local function add(prereq, group, row)
+    if prereq == nil or prereq == "" then
+      return
+    end
+    local entry = index[prereq] or { order = {}, groups = {} }
+    index[prereq] = entry
+    if entry.groups[group] == nil then
+      entry.groups[group] = {}
+      entry.order[#entry.order + 1] = group
+    end
+    local name = row.Name ~= nil and Civ6Ai_Snapshot._GovText(row.Name, 40) or nil
+    table.insert(entry.groups[group], name or tostring(row.Type or "?"))
+  end
+  local function scan(tableName, groupFn)
+    local t = GameInfo[tableName]
+    if t == nil then
+      return
+    end
+    pcall(function()
+      for row in t() do
+        local group = groupFn(row)
+        if group ~= nil then
+          add(row.PrereqTech, group, row)
+          add(row.PrereqCivic, group, row)
+        end
+      end
+    end)
+  end
+  local function traitFree(row)
+    return row.TraitType == nil or row.TraitType == ""
+  end
+  scan("Units", function(r) return traitFree(r) and "units" or nil end)
+  scan("Buildings", function(r)
+    if not traitFree(r) or r.InternalOnly == true then return nil end
+    return r.IsWonder == true and "wonders" or "buildings"
+  end)
+  scan("Districts", function(r) return traitFree(r) and r.InternalOnly ~= true and "districts" or nil end)
+  scan("Improvements", function(r) return traitFree(r) and "improvements" or nil end)
+  scan("Policies", function(r) return "policies" end)
+  scan("Governments", function(r) return "governments" end)
+  scan("Projects", function(r) return "projects" end)
+  Civ6Ai_Snapshot._unlockIndex = index
+  return index
+end
+
+function Civ6Ai_Snapshot._UnlockText(typeId)
+  local entry = Civ6Ai_Snapshot._UnlockIndex()[typeId]
+  if entry == nil then
+    return nil
+  end
+  local parts = {}
+  for _, group in ipairs(entry.order) do
+    parts[#parts + 1] = group .. " " .. table.concat(entry.groups[group], ", ")
+  end
+  local text = table.concat(parts, "; ")
+  local maxLen = Civ6Ai_Snapshot.UNLOCK_TEXT_MAX
+  if string.len(text) > maxLen then
+    text = string.sub(text, 1, maxLen - 3) .. "..."
+  end
+  return text
+end
+
+-- Eureka/inspiration condition for a tech or civic (Boosts.TriggerDescription).
+function Civ6Ai_Snapshot._BoostText(typeId)
+  if Civ6Ai_Snapshot._boostIndex == nil then
+    local idx = {}
+    if GameInfo.Boosts ~= nil then
+      pcall(function()
+        for b in GameInfo.Boosts() do
+          local key = b.TechnologyType or b.CivicType
+          if key ~= nil and idx[key] == nil then
+            idx[key] = Civ6Ai_Snapshot._GovText(b.TriggerDescription, 140)
+          end
+        end
+      end)
+    end
+    Civ6Ai_Snapshot._boostIndex = idx
+  end
+  return Civ6Ai_Snapshot._boostIndex[typeId]
+end
+
+function Civ6Ai_Snapshot._GovCivics(culture, player)
+  local out = { options = Civ6Ai_Util.JsonArrayList() }
+  local cur = gcall(culture, "GetProgressingCivic")
+  local crow = cur ~= nil and cur >= 0 and GameInfo.Civics[cur] or nil
+  out.current = crow ~= nil and crow.CivicType or nil
+  if crow ~= nil then
+    out.turns_left = gcall(culture, "GetTurnsLeft") or gcall(culture, "GetTurnsToProgressCivic", crow.Index)
+    out.current_unlocks = Civ6Ai_Snapshot._UnlockText(crow.CivicType)
+    out.current_boosted = gcall(culture, "HasBoostBeenTriggered", crow.Index) == true
+    out.current_boost = Civ6Ai_Snapshot._BoostText(crow.CivicType)
+  end
+  out.culture_per_turn = gcall(culture, "GetCultureYield")
+  for c in GameInfo.Civics() do
+    if gcall(culture, "CanProgress", c.Index) == true and gcall(culture, "HasCivic", c.Index) ~= true then
+      local unlocks = {}
+      if GameInfo.Governments ~= nil then
+        for g in GameInfo.Governments() do
+          if g.PrereqCivic == c.CivicType then
+            unlocks[#unlocks + 1] = g.GovernmentType
+          end
+        end
+      end
+      out.options[#out.options + 1] = {
+        id = c.CivicType,
+        turns = gcall(culture, "GetTurnsToProgressCivic", c.Index),
+        cost = gcall(culture, "GetCultureCost", c.Index),
+        boosted = gcall(culture, "HasBoostBeenTriggered", c.Index) == true,
+        unlocks_government = #unlocks > 0 and table.concat(unlocks, "/") or nil,
+        unlocks = Civ6Ai_Snapshot._UnlockText(c.CivicType),
+        boost = Civ6Ai_Snapshot._BoostText(c.CivicType),
+      }
+    end
+  end
+  return out
+end
+
+function Civ6Ai_Snapshot._GovTechs(player)
+  local techs = player.GetTechs ~= nil and player:GetTechs() or nil
+  local out = { options = Civ6Ai_Util.JsonArrayList() }
+  if techs == nil then
+    return out
+  end
+  local cur = gcall(techs, "GetResearchingTech")
+  local trow = cur ~= nil and cur >= 0 and GameInfo.Technologies[cur] or nil
+  out.current = trow ~= nil and trow.TechnologyType or nil
+  if trow ~= nil then
+    out.turns_left = gcall(techs, "GetTurnsLeft") or gcall(techs, "GetTurnsToResearch", trow.Index)
+    out.current_unlocks = Civ6Ai_Snapshot._UnlockText(trow.TechnologyType)
+    out.current_boosted = gcall(techs, "HasBoostBeenTriggered", trow.Index) == true
+    out.current_boost = Civ6Ai_Snapshot._BoostText(trow.TechnologyType)
+  end
+  out.science_per_turn = gcall(techs, "GetScienceYield")
+  for t in GameInfo.Technologies() do
+    if gcall(techs, "CanResearch", t.Index) == true and gcall(techs, "HasTech", t.Index) ~= true then
+      out.options[#out.options + 1] = {
+        id = t.TechnologyType,
+        turns = gcall(techs, "GetTurnsToResearch", t.Index),
+        boosted = gcall(techs, "HasBoostBeenTriggered", t.Index) == true,
+        unlocks = Civ6Ai_Snapshot._UnlockText(t.TechnologyType),
+        boost = Civ6Ai_Snapshot._BoostText(t.TechnologyType),
+      }
+    end
+  end
+  return out
+end
+
+local function isHolySite(plot, owner)
+  if plot == nil or gcall(plot, "GetOwner") ~= owner then
+    return false
+  end
+  local d = gcall(plot, "GetDistrictType")
+  local row = d ~= nil and d >= 0 and GameInfo.Districts[d] or nil
+  if row == nil then
+    return false
+  end
+  if row.DistrictType == "DISTRICT_HOLY_SITE" then
+    return true
+  end
+  if GameInfo.DistrictReplaces ~= nil then
+    for r in GameInfo.DistrictReplaces() do
+      if r.CivUniqueDistrictType == row.DistrictType and r.ReplacesDistrictType == "DISTRICT_HOLY_SITE" then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function Civ6Ai_Snapshot._GovReligion(playerID, player)
+  local rel = player:GetReligion()
+  local game = Game.GetReligion ~= nil and Game.GetReligion() or nil
+  local out = {
+    faith = math.floor(gcall(rel, "GetFaithBalance") or 0),
+    faith_per_turn = gcall(rel, "GetFaithYield") or 0,
+    pantheon_beliefs = Civ6Ai_Util.JsonArrayList(),
+    religion_options = Civ6Ai_Util.JsonArrayList(),
+    founder_beliefs = Civ6Ai_Util.JsonArrayList(),
+    follower_beliefs = Civ6Ai_Util.JsonArrayList(),
+    prophets = Civ6Ai_Util.JsonArrayList(),
+    religious_units = {},
+  }
+  local pan = gcall(rel, "GetPantheon")
+  local prow = pan ~= nil and pan >= 0 and GameInfo.Beliefs[pan] or nil
+  out.pantheon = prow ~= nil and prow.BeliefType or nil
+  out.pantheon_cost = gcall(game, "GetMinimumFaithNextPantheon")
+  if out.pantheon_cost == nil then
+    local gp = GameInfo.GlobalParameters ~= nil and GameInfo.GlobalParameters["RELIGION_PANTHEON_MIN_FAITH"] or nil
+    out.pantheon_cost = tonumber(gp and gp.Value) or 25
+  end
+  out.can_found_pantheon = prow == nil and gcall(rel, "CanCreatePantheon") ~= false and out.faith >= out.pantheon_cost
+  local made = gcall(rel, "GetReligionTypeCreated")
+  local rrow = made ~= nil and made >= 0 and GameInfo.Religions[made] or nil
+  out.religion = rrow ~= nil and rrow.ReligionType or nil
+  -- Pantheon choices are listed from a few turns before the faith is there.
+  local soon = out.faith_per_turn > 0 and (out.pantheon_cost - out.faith) / out.faith_per_turn <= 6
+  if prow == nil and (out.can_found_pantheon or soon) then
+    for b in GameInfo.Beliefs() do
+      if b.BeliefClassType == "BELIEF_CLASS_PANTHEON" and not gtrue(game, "IsInSomePantheon", b) then
+        out.pantheon_beliefs[#out.pantheon_beliefs + 1] = { id = b.BeliefType, effect = Civ6Ai_Snapshot._GovText(b.Description, Civ6Ai_Snapshot.EFFECT_MAX) }
+      end
+    end
+  end
+  for _, unit in ipairs(Civ6Ai_Snapshot._IterateUnits(player:GetUnits())) do
+    local urow = GameInfo.Units[unit:GetType()]
+    local t = urow ~= nil and urow.UnitType or ""
+    if t == "UNIT_GREAT_PROPHET" then
+      out.prophets[#out.prophets + 1] = {
+        unit_id = Civ6Ai_Snapshot._UnitWireId(unit), x = unit:GetX(), y = unit:GetY(),
+        on_holy_site = isHolySite(Map.GetPlot(unit:GetX(), unit:GetY()), playerID),
+      }
+    elseif t == "UNIT_MISSIONARY" or t == "UNIT_APOSTLE" or t == "UNIT_INQUISITOR" or t == "UNIT_GURU" then
+      out.religious_units[t] = (out.religious_units[t] or 0) + 1
+    end
+  end
+  if rrow == nil and #out.prophets > 0 then
+    for r in GameInfo.Religions() do
+      if r.Pantheon ~= true and gcall(game, "HasBeenFounded", r.Index) ~= true then
+        out.religion_options[#out.religion_options + 1] = r.ReligionType
+      end
+    end
+    for b in GameInfo.Beliefs() do
+      if not gtrue(game, "IsInSomeReligion", b) then
+        local entry = { id = b.BeliefType, effect = Civ6Ai_Snapshot._GovText(b.Description, Civ6Ai_Snapshot.EFFECT_MAX) }
+        if b.BeliefClassType == "BELIEF_CLASS_FOUNDER" then
+          out.founder_beliefs[#out.founder_beliefs + 1] = entry
+        elseif b.BeliefClassType == "BELIEF_CLASS_FOLLOWER" then
+          out.follower_beliefs[#out.follower_beliefs + 1] = entry
         end
       end
     end
   end
-  return commands
+  return out
+end
+
+function Civ6Ai_Snapshot._GovGovernors(playerID, player)
+  local govs = player.GetGovernors ~= nil and player:GetGovernors() or nil
+  local out = { appointed = Civ6Ai_Util.JsonArrayList(), candidates = Civ6Ai_Util.JsonArrayList(), cities = Civ6Ai_Util.JsonArrayList() }
+  if govs == nil or GameInfo.Governors == nil then
+    out.supported = false
+    return out
+  end
+  out.supported = true
+  out.points = gcall(govs, "GetGovernorPoints") or 0
+  out.spent = gcall(govs, "GetGovernorPointsSpent") or 0
+  out.can_appoint = gcall(govs, "CanAppoint") == true
+  local has = {}
+  local okList, a, b = pcall(govs.GetGovernorList, govs)
+  local list = okList and (type(b) == "table" and b or (type(a) == "table" and a or nil)) or nil
+  local promosBy = {}
+  if GameInfo.GovernorPromotionSets ~= nil then
+    for s in GameInfo.GovernorPromotionSets() do
+      local l = promosBy[s.GovernorType] or {}
+      l[#l + 1] = s.GovernorPromotion
+      promosBy[s.GovernorType] = l
+    end
+  end
+  local prereqs = {}
+  if GameInfo.GovernorPromotionPrereqs ~= nil then
+    for r in GameInfo.GovernorPromotionPrereqs() do
+      local l = prereqs[r.GovernorPromotionType] or {}
+      l[#l + 1] = r.PrereqGovernorPromotion
+      prereqs[r.GovernorPromotionType] = l
+    end
+  end
+  for _, g in ipairs(list or {}) do
+    local grow = GameInfo.Governors[gcall(g, "GetType")]
+    if grow ~= nil then
+      has[grow.GovernorType] = true
+      local city = gcall(g, "GetAssignedCity")
+      local owned, options = {}, Civ6Ai_Util.JsonArrayList()
+      for _, promo in ipairs(promosBy[grow.GovernorType] or {}) do
+        local hash = DB ~= nil and DB.MakeHash ~= nil and DB.MakeHash(promo) or nil
+        if hash ~= nil and gcall(g, "HasPromotion", hash) == true then
+          owned[promo] = true
+        end
+      end
+      local ownedList = {}
+      local ownedEffects = Civ6Ai_Util.JsonArrayList()
+      for _, promo in ipairs(promosBy[grow.GovernorType] or {}) do
+        if owned[promo] then
+          ownedList[#ownedList + 1] = promo
+          local orow = GameInfo.GovernorPromotions ~= nil and GameInfo.GovernorPromotions[promo] or nil
+          ownedEffects[#ownedEffects + 1] = { id = promo,
+            effect = Civ6Ai_Snapshot._GovText(orow and orow.Description, Civ6Ai_Snapshot.EFFECT_MAX) }
+        else
+          local ready = true
+          local reqs = prereqs[promo] or {}
+          if #reqs > 0 then
+            ready = false
+            for _, req in ipairs(reqs) do
+              if owned[req] then
+                ready = true
+              end
+            end
+          end
+          if ready then
+            local prow = GameInfo.GovernorPromotions ~= nil and GameInfo.GovernorPromotions[promo] or nil
+            options[#options + 1] = { id = promo, effect = Civ6Ai_Snapshot._GovText(prow and prow.Description, Civ6Ai_Snapshot.EFFECT_MAX) }
+          end
+        end
+      end
+      out.appointed[#out.appointed + 1] = {
+        id = grow.GovernorType,
+        city = city ~= nil and Locale.Lookup(city:GetName()) or nil,
+        city_id = city ~= nil and ("CITY_" .. tostring(city:GetID())) or nil,
+        established = gcall(g, "IsEstablished") == true,
+        turns_to_establish = gcall(g, "GetTurnsToEstablish"),
+        neutralized_turns = gcall(g, "GetNeutralizedTurns") or 0,
+        can_promote = gcall(govs, "CanPromoteGovernor", grow.Hash) == true,
+        promotions = table.concat(ownedList, "/"),
+        promotion_effects = ownedEffects,
+        promotion_options = options,
+        title = Civ6Ai_Snapshot._GovText(grow.Title, 50),
+      }
+    end
+  end
+  for grow in GameInfo.Governors() do
+    if not has[grow.GovernorType] and gcall(govs, "CanEverAppointGovernor", grow.Hash) ~= false
+        and (grow.TraitType == nil or gcall(govs, "CanEverAppointGovernor", grow.Hash) == true) then
+      out.candidates[#out.candidates + 1] = {
+        id = grow.GovernorType,
+        title = Civ6Ai_Snapshot._GovText(grow.Title, 50),
+        effect = Civ6Ai_Snapshot._GovText(grow.Description, Civ6Ai_Snapshot.EFFECT_MAX),
+      }
+    end
+  end
+  for _, city in ipairs(Civ6Ai_Snapshot._IterateUnits(player:GetCities())) do
+    out.cities[#out.cities + 1] = { city_id = "CITY_" .. tostring(city:GetID()), name = Locale.Lookup(city:GetName()) }
+  end
+  return out
+end
+
+function Civ6Ai_Snapshot._GovGreatPeople(playerID, player)
+  local out = { points = Civ6Ai_Util.JsonArrayList(), available = Civ6Ai_Util.JsonArrayList() }
+  local gpp = player.GetGreatPeoplePoints ~= nil and player:GetGreatPeoplePoints() or nil
+  local gp = Game.GetGreatPeople ~= nil and Game.GetGreatPeople() or nil
+  local byClass = {}
+  if GameInfo.GreatPersonClasses ~= nil then
+    for c in GameInfo.GreatPersonClasses() do
+      local total = gcall(gpp, "GetPointsTotal", c.Index) or 0
+      local rate = gcall(gpp, "GetPointsPerTurn", c.Index) or 0
+      byClass[c.Index] = c.GreatPersonClassType
+      if total > 0 or rate > 0 then
+        out.points[#out.points + 1] = { class = c.GreatPersonClassType, points = math.floor(total), per_turn = rate }
+      end
+    end
+  end
+  local okT, timeline = pcall(function() return gp:GetTimeline() end)
+  if okT and type(timeline) == "table" then
+    local gold = GameInfo.Yields["YIELD_GOLD"]
+    local faith = GameInfo.Yields["YIELD_FAITH"]
+    for _, e in ipairs(timeline) do
+      if e.Individual ~= nil and e.Claimant == nil then
+        local irow = GameInfo.GreatPersonIndividuals[e.Individual]
+        if irow ~= nil then
+          out.available[#out.available + 1] = {
+            id = irow.GreatPersonIndividualType,
+            class = byClass[e.Class] or tostring(e.Class),
+            cost = e.Cost,
+            can_recruit = gcall(gp, "CanRecruitPerson", playerID, e.Individual) == true,
+            gold_cost = gold and gcall(gp, "GetPatronizeCost", playerID, e.Individual, gold.Index) or nil,
+            faith_cost = faith and gcall(gp, "GetPatronizeCost", playerID, e.Individual, faith.Index) or nil,
+            can_patronize_gold = gold ~= nil and gcall(gp, "CanPatronizePerson", playerID, e.Individual, gold.Index) == true,
+            can_patronize_faith = faith ~= nil and gcall(gp, "CanPatronizePerson", playerID, e.Individual, faith.Index) == true,
+            effect = Civ6Ai_Snapshot._GovText(e.ActionEffectText, Civ6Ai_Snapshot.EFFECT_MAX)
+              or Civ6Ai_Snapshot._GovText(irow.ActionEffectTextOverride, Civ6Ai_Snapshot.EFFECT_MAX)
+              or Civ6Ai_Snapshot._GovText(e.PassiveEffectText, Civ6Ai_Snapshot.EFFECT_MAX),
+          }
+        end
+      end
+    end
+  end
+  return out
+end
+
+function Civ6Ai_Snapshot._GovGreatWorks(player)
+  local works = Civ6Ai_Util.JsonArrayList()
+  local emptySlots = {}
+  for _, city in ipairs(Civ6Ai_Snapshot._IterateUnits(player:GetCities())) do
+    local b = city:GetBuildings()
+    for row in GameInfo.Buildings() do
+      local n = b ~= nil and gcall(b, "HasBuilding", row.Index) == true and (gcall(b, "GetNumGreatWorkSlots", row.Index) or 0) or 0
+      for i = 0, n - 1 do
+        local gw = gcall(b, "GetGreatWorkInSlot", row.Index, i)
+        if gw ~= nil and gw >= 0 then
+          local t = gcall(b, "GetGreatWorkTypeFromIndex", gw)
+          local wrow = t ~= nil and GameInfo.GreatWorks[t] or nil
+          works[#works + 1] = {
+            city = Locale.Lookup(city:GetName()), building = row.BuildingType,
+            work = wrow ~= nil and wrow.GreatWorkType or tostring(t),
+            kind = wrow ~= nil and wrow.GreatWorkObjectType or nil,
+          }
+        else
+          local st = gcall(b, "GetGreatWorkSlotType", row.Index, i)
+          local srow = st ~= nil and GameInfo.GreatWorkSlotTypes ~= nil and GameInfo.GreatWorkSlotTypes[st] or nil
+          local key = srow ~= nil and srow.GreatWorkSlotType or "GREATWORKSLOT_ANY"
+          emptySlots[key] = (emptySlots[key] or 0) + 1
+        end
+      end
+    end
+  end
+  return works, emptySlots
+end
+
+function Civ6Ai_Snapshot._BuildGovernance(playerID)
+  local player = Players[playerID]
+  if player == nil then
+    return nil
+  end
+  local culture = player:GetCulture()
+  local out = {}
+  local parts = {
+    { "government", function() return Civ6Ai_Snapshot._GovGovernment(culture) end },
+    { "policies", function() return Civ6Ai_Snapshot._GovPolicies(culture) end },
+    { "civics", function() return Civ6Ai_Snapshot._GovCivics(culture, player) end },
+    { "techs", function() return Civ6Ai_Snapshot._GovTechs(player) end },
+    { "religion", function() return Civ6Ai_Snapshot._GovReligion(playerID, player) end },
+    { "governors", function() return Civ6Ai_Snapshot._GovGovernors(playerID, player) end },
+    { "great_people", function() return Civ6Ai_Snapshot._GovGreatPeople(playerID, player) end },
+  }
+  for _, part in ipairs(parts) do
+    local ok, value = pcall(part[2])
+    if ok and type(value) == "table" then
+      out[part[1]] = value
+    else
+      Civ6Ai_Util.Log("snapshot|governance_failed|" .. part[1] .. "|" .. tostring(value))
+    end
+  end
+  local okW, works, empty = pcall(Civ6Ai_Snapshot._GovGreatWorks, player)
+  if okW then
+    out.great_works = works
+    out.great_work_empty_slots = empty
+  end
+  -- Which commands this seat's route can carry (interface requests exist only
+  -- for the local player; a game script cannot slot cards or run governors).
+  out.routes = Civ6Ai_Snapshot._GovRoutes(playerID)
+  if player.GetFavor ~= nil then
+    out.favor = Civ6Ai_Snapshot._Favor(playerID)
+    out.favor_per_turn = Civ6Ai_Snapshot._FavorPerTurn(playerID)
+  end
+  return out
+end
+
+function Civ6Ai_Snapshot._GovRoutes(playerID)
+  local isLocal = Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID
+  local network = Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive()
+  local uiSwap = not isLocal and not network
+  return {
+    government = true, pantheon = true, religion = true, great_people = true, civic = true,
+    policies = isLocal or uiSwap,
+    governors = isLocal or uiSwap,
+    mode = isLocal and "local_player" or (network and "synced_order" or "single_player_ai_seat"),
+  }
 end
 
 function Civ6Ai_Snapshot.Build(playerID, options)
@@ -1230,12 +3376,14 @@ function Civ6Ai_Snapshot.Build(playerID, options)
   local yourCities = Civ6Ai_Snapshot._BuildYourCities(playerID)
   local legal = Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
   local mapWidth, mapHeight = Map.GetGridSize()
+  local northDy = Civ6Ai_Snapshot._NorthDy(mapWidth, mapHeight)
   local techId = Civ6Ai_Snapshot._CurrentTech(playerID)
   local sessionId = Civ6Ai_Bridge.SessionId()
   local yourEmpire = Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
   local civ6Block = {
     session_id = sessionId,
     research_tech = Civ6Ai_Snapshot._NullableId(techId),
+    research_civic = Civ6Ai_Snapshot._CurrentCivic(playerID),
     government_id = Civ6Ai_Snapshot._GovernmentId(playerID),
     yields = {
       science = yourEmpire.commerce.research.rate,
@@ -1247,9 +3395,49 @@ function Civ6Ai_Snapshot.Build(playerID, options)
       width = mapWidth,
       height = mapHeight,
       hex_layout = "odd-r",
-      coords_note = "grid x,y; Y increases south",
+      -- civ6.map is additionalProperties:false in the schema, so the measured axis and
+      -- river-edge format ride in coords_note (sidecar parses "measured north_dy=N").
+      coords_note = "grid x,y; " .. (northDy > 0 and "Y increases north"
+        or (northDy < 0 and "Y increases south" or "Y direction unknown"))
+        .. " (measured north_dy=" .. tostring(northDy) .. "); river_edges across-v2",
     },
   }
+  local okEconomy, economy = pcall(Civ6Ai_Snapshot._BuildEconomy, playerID, legal)
+  if okEconomy and type(economy) == "table" then
+    civ6Block.economy = economy
+  else
+    Civ6Ai_Util.Log("snapshot|economy_failed|" .. tostring(economy))
+  end
+  -- Build priorities travel only on the synced order channel (AI seats in a
+  -- network game), so only those seats report them; the sidecar offers the
+  -- priorities command only when this list is present.
+  if Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive() and playerID ~= Game.GetLocalPlayer() then
+    civ6Block.priorities = Civ6Ai_Snapshot._Priorities(playerID)
+  end
+  local okDiplo, civ6Diplomacy = pcall(Civ6Ai_Snapshot._BuildDiplomacy, playerID)
+  if okDiplo and type(civ6Diplomacy) == "table" then
+    civ6Block.diplomacy = civ6Diplomacy
+  else
+    Civ6Ai_Util.Log("snapshot|diplomacy_failed|" .. tostring(civ6Diplomacy))
+  end
+  local okCombat, combat = pcall(Civ6Ai_Snapshot._BuildCombat, playerID)
+  if okCombat and type(combat) == "table" then
+    civ6Block.combat = combat
+  else
+    Civ6Ai_Util.Log("snapshot|combat_failed|" .. tostring(combat))
+  end
+  local okRankings, rankings = pcall(Civ6Ai_Snapshot._BuildRankings, playerID)
+  if okRankings and type(rankings) == "table" then
+    civ6Block.rankings = rankings
+  else
+    Civ6Ai_Util.Log("snapshot|rankings_failed|" .. tostring(rankings))
+  end
+  local okGov, governance = pcall(Civ6Ai_Snapshot._BuildGovernance, playerID)
+  if okGov and type(governance) == "table" then
+    civ6Block.governance = governance
+  else
+    Civ6Ai_Util.Log("snapshot|governance_failed|" .. tostring(governance))
+  end
   if Civ6Ai_Config.IsSeatExperiment() then
     local experimentCityId, experimentBuildId = Civ6Ai_Production.FindExperimentTarget(playerID)
     civ6Block.experiment_city_id = Civ6Ai_Snapshot._NullableId(experimentCityId)
@@ -1298,8 +3486,12 @@ function Civ6Ai_Snapshot.Build(playerID, options)
     your_units = yourUnits,
     known_map = Civ6Ai_Snapshot._BuildKnownMap(playerID, turn, yourUnits, yourCities),
     known_players = Civ6Ai_Snapshot._BuildKnownPlayers(playerID),
-    known_other_cities = Civ6Ai_Util.JsonArrayList(),
-    visible_other_units = Civ6Ai_Util.JsonArrayList(),
+    known_other_cities = Civ6Ai_Snapshot._SafeList(function()
+      return Civ6Ai_Snapshot._BuildKnownOtherCities(playerID, turn)
+    end),
+    visible_other_units = Civ6Ai_Snapshot._SafeList(function()
+      return Civ6Ai_Snapshot._BuildVisibleOtherUnits(playerID)
+    end),
     diplomacy = diplomacyBlock,
     strategic_summary = strategicSummary,
     history = {
@@ -1354,5 +3546,291 @@ function Civ6Ai_Snapshot.EmpireTelemetry(playerID)
     science = science,
     cities = cities,
     units_with_moves = unitsWithMoves,
+  }
+end
+
+-- ---------------------------------------------------------------------------
+-- civ6.rankings: the in-game World Rankings screen as data. Same engine calls
+-- as Base/Assets/UI/PartialScreens/WorldRankings.lua (+ Expansion2's
+-- WorldRankings_Expansion2.lua): Game.GetVictoryProgressForTeam for the
+-- overview order, then the screen's tiebreakers (techs/science, tourism/culture,
+-- cities following/faith, military strength, diplomatic victory points).
+-- Every alive major is listed like the screen does; unmet players carry
+-- met=false and no leader/civ identity (the sidecar prints "Unmet Civilization").
+-- Every engine call is pcall-guarded; a missing method just omits that field.
+-- ---------------------------------------------------------------------------
+Civ6Ai_Snapshot.RANKING_VICTORIES = {
+  "VICTORY_TECHNOLOGY", "VICTORY_CULTURE", "VICTORY_CONQUEST",
+  "VICTORY_RELIGIOUS", "VICTORY_DIPLOMATIC", "VICTORY_SCORE",
+}
+Civ6Ai_Snapshot.RANKING_SPACE_PROJECTS = {
+  "PROJECT_LAUNCH_EARTH_SATELLITE", "PROJECT_LAUNCH_MOON_LANDING",
+  "PROJECT_LAUNCH_MARS_BASE", "PROJECT_LAUNCH_MARS_REACTOR",
+  "PROJECT_LAUNCH_MARS_HABITATION", "PROJECT_LAUNCH_MARS_HYDROPONICS",
+  "PROJECT_LAUNCH_EXOPLANET_EXPEDITION",
+}
+
+function Civ6Ai_Snapshot._RankNum(value)
+  if type(value) ~= "number" or value ~= value then
+    return nil
+  end
+  if value == math.floor(value) then
+    return value
+  end
+  return math.floor(value * 10 + 0.5) / 10
+end
+
+function Civ6Ai_Snapshot._RankGameInfoRow(tableName, key)
+  return Civ6Ai_Snapshot._Try(function()
+    local t = GameInfo[tableName]
+    if t == nil then return nil end
+    return t[key]
+  end)
+end
+
+function Civ6Ai_Snapshot._RankRuleset()
+  if Civ6Ai_Snapshot._RankGameInfoRow("Victories", "VICTORY_DIPLOMATIC") ~= nil then
+    return "EXPANSION2"
+  end
+  local hasGovernors = Civ6Ai_Snapshot._Try(function()
+    return GameInfo.Governors ~= nil and GameInfo.Governors["GOVERNOR_THE_EDUCATOR"] ~= nil
+  end)
+  if hasGovernors then
+    return "EXPANSION1"
+  end
+  return "BASE"
+end
+
+function Civ6Ai_Snapshot._RankAliveMajorIDs()
+  local ids = {}
+  local fromManager = Civ6Ai_Snapshot._Try(function()
+    local list = {}
+    for _, p in ipairs(PlayerManager.GetAliveMajors()) do
+      table.insert(list, p:GetID())
+    end
+    return list
+  end)
+  if type(fromManager) == "table" and #fromManager > 0 then
+    ids = fromManager
+  else
+    for otherID = 0, 63 do
+      if Civ6Ai_Snapshot._PlayerKind(otherID) == "major" then
+        table.insert(ids, otherID)
+      end
+    end
+  end
+  table.sort(ids)
+  return ids
+end
+
+function Civ6Ai_Snapshot._RankReligionInfo(religionType)
+  if type(religionType) ~= "number" or religionType < 0 then
+    return nil
+  end
+  local row = Civ6Ai_Snapshot._Try(function() return GameInfo.Religions[religionType] end)
+  local name = Civ6Ai_Snapshot._Try(function() return Game.GetReligion():GetName(religionType) end)
+  if (name == nil or name == "") and row ~= nil and row.Name ~= nil then
+    name = Civ6Ai_Snapshot._Try(Locale.Lookup, row.Name)
+  end
+  return {
+    id = row ~= nil and row.ReligionType or tostring(religionType),
+    name = name ~= nil and tostring(name) or Civ6Ai_Util.JsonNull(),
+  }
+end
+
+function Civ6Ai_Snapshot._RankSpaceProgress(player)
+  local stats = Civ6Ai_Snapshot._Method(player, "GetStats")
+  local done, total = 0, 0
+  for _, projectType in ipairs(Civ6Ai_Snapshot.RANKING_SPACE_PROJECTS) do
+    local info = Civ6Ai_Snapshot._RankGameInfoRow("Projects", projectType)
+    if info ~= nil then
+      total = total + 1
+      local n = Civ6Ai_Snapshot._Method(stats, "GetNumProjectsAdvanced", info.Index)
+      if type(n) == "number" and n > 0 then
+        done = done + 1
+      end
+    end
+  end
+  local hasSpaceport = false
+  local spaceport = Civ6Ai_Snapshot._RankGameInfoRow("Districts", "DISTRICT_SPACEPORT")
+  if spaceport ~= nil then
+    Civ6Ai_Snapshot._Try(function()
+      for _, district in player:GetDistricts():Members() do
+        if district ~= nil and district:IsComplete() and district:GetType() == spaceport.Index then
+          hasSpaceport = true
+          break
+        end
+      end
+    end)
+  end
+  return done, total, hasSpaceport
+end
+
+function Civ6Ai_Snapshot._RankCapitals(player, playerID)
+  local hasOriginal, captured, hasCapital = false, Civ6Ai_Snapshot._Arr(), false
+  Civ6Ai_Snapshot._Try(function()
+    local cities = player:GetCities()
+    hasCapital = cities:GetCapitalCity() ~= nil
+    for _, city in cities:Members() do
+      if city:IsOriginalCapital() then
+        local ownerID = city:GetOriginalOwner()
+        local owner = Players[ownerID]
+        if owner ~= nil and owner:IsMajor() then
+          if ownerID == playerID then
+            hasOriginal = true
+          else
+            table.insert(captured, Civ6Ai_Snapshot._PlayerLabel(ownerID))
+          end
+        end
+      end
+    end
+  end)
+  return hasOriginal, captured, hasCapital
+end
+
+function Civ6Ai_Snapshot._RankPlayerRow(viewerID, otherID, majorIDs, dipNeeded)
+  local p = Players[otherID]
+  local stats = Civ6Ai_Snapshot._Method(p, "GetStats")
+  local culture = Civ6Ai_Snapshot._Method(p, "GetCulture")
+  local techs = Civ6Ai_Snapshot._Method(p, "GetTechs")
+  local religion = Civ6Ai_Snapshot._Method(p, "GetReligion")
+  local diplomacy = Civ6Ai_Snapshot._Method(p, "GetDiplomacy")
+  local N = Civ6Ai_Snapshot._RankNum
+  local met = otherID == viewerID or Civ6Ai_Snapshot._HasMet(viewerID, otherID)
+  local row = {
+    player_id = Civ6Ai_Snapshot._PlayerLabel(otherID),
+    is_you = otherID == viewerID,
+    met = met,
+    team_id = Civ6Ai_Snapshot._Method(p, "GetTeam"),
+    score = N(Civ6Ai_Snapshot._Method(p, "GetScore")),
+    -- science
+    science_yield = N(Civ6Ai_Snapshot._Method(techs, "GetScienceYield")),
+    techs_researched = N(Civ6Ai_Snapshot._Method(stats, "GetNumTechsResearched")),
+    science_vp = N(Civ6Ai_Snapshot._Method(stats, "GetScienceVictoryPoints")),
+    science_vp_needed = N(Civ6Ai_Snapshot._Method(stats, "GetScienceVictoryPointsTotalNeeded")),
+    -- culture
+    culture_yield = N(Civ6Ai_Snapshot._Method(culture, "GetCultureYield")),
+    tourism = N(Civ6Ai_Snapshot._Method(stats, "GetTourism") or Civ6Ai_Snapshot._Method(culture, "GetTourism")),
+    domestic_tourists = N(Civ6Ai_Snapshot._Method(culture, "GetStaycationers")),
+    foreign_tourists = N(Civ6Ai_Snapshot._Method(culture, "GetTouristsTo")),
+    -- domination
+    military_strength = N(Civ6Ai_Snapshot._Method(stats, "GetMilitaryStrengthWithoutTreasury")
+      or Civ6Ai_Snapshot._Method(stats, "GetMilitaryStrength")),
+    -- religion
+    faith_yield = N(Civ6Ai_Snapshot._Method(religion, "GetFaithYield")),
+    cities_following_religion = N(Civ6Ai_Snapshot._Method(stats, "GetNumCitiesFollowingReligion")),
+    -- diplomacy
+    diplomatic_vp = N(Civ6Ai_Snapshot._Method(stats, "GetDiplomaticVictoryPoints")),
+    -- Gathering Storm exposes favor on the player (pPlayer:GetFavor()); keep the
+    -- diplomacy fallback for other rulesets / builds.
+    favor = N(Civ6Ai_Snapshot._Method(p, "GetFavor") or Civ6Ai_Snapshot._Method(diplomacy, "GetFavor")),
+    favor_per_turn = N(Civ6Ai_Snapshot._Method(p, "GetFavorPerTurn")),
+  }
+  if met and otherID ~= viewerID then
+    row.leader_name = Civ6Ai_Snapshot._Try(Civ6Ai_Snapshot._LeaderName, otherID)
+    row.civilization_id = Civ6Ai_Snapshot._Try(Civ6Ai_Snapshot._CivId, otherID)
+  elseif otherID == viewerID then
+    row.leader_name = Civ6Ai_Snapshot._Try(Civ6Ai_Snapshot._LeaderName, otherID)
+    row.civilization_id = Civ6Ai_Snapshot._Try(Civ6Ai_Snapshot._CivId, otherID)
+  end
+  -- Culture victory: foreign tourists must exceed every other civ's domestic tourists.
+  local needed = 0
+  for _, id in ipairs(majorIDs) do
+    if id ~= otherID then
+      local other = Players[id]
+      if Civ6Ai_Snapshot._Method(other, "GetTeam") ~= row.team_id then
+        local stay = Civ6Ai_Snapshot._Method(Civ6Ai_Snapshot._Method(other, "GetCulture"), "GetStaycationers")
+        if type(stay) == "number" and stay >= needed then
+          needed = stay + 1
+        end
+      end
+    end
+  end
+  row.tourists_needed = needed
+  if otherID ~= viewerID then
+    local viewerCulture = Civ6Ai_Snapshot._Method(Players[viewerID], "GetCulture")
+    row.their_tourists_visiting_you = N(Civ6Ai_Snapshot._Method(viewerCulture, "GetTouristsFrom", otherID))
+    row.your_tourists_visiting_them = N(Civ6Ai_Snapshot._Method(culture, "GetTouristsFrom", viewerID))
+    row.you_culturally_dominant = Civ6Ai_Snapshot._Method(viewerCulture, "IsDominantOver", otherID)
+    row.they_culturally_dominant = Civ6Ai_Snapshot._Method(culture, "IsDominantOver", viewerID)
+  end
+  local turnsCV = Civ6Ai_Snapshot._Method(culture, "GetTurnsUntilVictory")
+  if type(turnsCV) == "number" and turnsCV >= 0 then
+    row.turns_until_culture_victory = turnsCV
+  end
+  local spaceDone, spaceTotal, spaceport = Civ6Ai_Snapshot._RankSpaceProgress(p)
+  row.space_projects_done = spaceDone
+  row.space_projects_total = spaceTotal
+  row.has_spaceport = spaceport
+  local hasOriginal, captured, hasCapital = Civ6Ai_Snapshot._RankCapitals(p, otherID)
+  row.has_original_capital = hasOriginal
+  row.has_capital = hasCapital
+  row.captured_capitals = captured
+  -- Religion: founded religion, majority religion, civs converted to theirs.
+  local founded = Civ6Ai_Snapshot._Method(religion, "GetReligionTypeCreated")
+  local foundedInfo = Civ6Ai_Snapshot._RankReligionInfo(founded)
+  if foundedInfo ~= nil then
+    row.religion_founded = foundedInfo
+    local converted = Civ6Ai_Snapshot._Arr()
+    for _, id in ipairs(majorIDs) do
+      local maj = Civ6Ai_Snapshot._Method(Civ6Ai_Snapshot._Method(Players[id], "GetReligion"), "GetReligionInMajorityOfCities")
+      if maj == founded then
+        table.insert(converted, Civ6Ai_Snapshot._PlayerLabel(id))
+      end
+    end
+    row.civs_converted = converted
+  end
+  local majority = Civ6Ai_Snapshot._RankReligionInfo(Civ6Ai_Snapshot._Method(religion, "GetReligionInMajorityOfCities"))
+  if majority ~= nil then
+    row.majority_religion = majority
+  end
+  -- Overview order key: Game.GetVictoryProgressForTeam per enabled victory.
+  local progress = {}
+  if type(row.team_id) == "number" then
+    for _, victoryType in ipairs(Civ6Ai_Snapshot.RANKING_VICTORIES) do
+      local v = Civ6Ai_Snapshot._Try(function() return Game.GetVictoryProgressForTeam(victoryType, row.team_id) end)
+      if type(v) == "number" then
+        progress[victoryType] = N(v)
+      end
+    end
+  end
+  row.victory_progress = progress
+  return row
+end
+
+function Civ6Ai_Snapshot._BuildRankings(playerID)
+  local majorIDs = Civ6Ai_Snapshot._RankAliveMajorIDs()
+  local enabled = {}
+  for _, victoryType in ipairs(Civ6Ai_Snapshot.RANKING_VICTORIES) do
+    local on = Civ6Ai_Snapshot._Try(function() return Game.IsVictoryEnabled(victoryType) end)
+    if type(on) == "boolean" then
+      enabled[victoryType] = on
+    end
+  end
+  local dipNeeded = Civ6Ai_Snapshot._Try(function()
+    return GlobalParameters ~= nil and GlobalParameters.DIPLOMATIC_VICTORY_POINTS_REQUIRED or nil
+  end)
+  local players = Civ6Ai_Snapshot._Arr()
+  local seenYou = false
+  for _, id in ipairs(majorIDs) do
+    if id == playerID then seenYou = true end
+    local ok, row = pcall(Civ6Ai_Snapshot._RankPlayerRow, playerID, id, majorIDs, dipNeeded)
+    if ok and type(row) == "table" then
+      table.insert(players, row)
+    else
+      Civ6Ai_Util.Log("snapshot|rankings_row_failed|" .. tostring(id) .. "|" .. tostring(row))
+    end
+  end
+  if not seenYou and Players[playerID] ~= nil then
+    local ok, row = pcall(Civ6Ai_Snapshot._RankPlayerRow, playerID, playerID, majorIDs, dipNeeded)
+    if ok and type(row) == "table" then table.insert(players, row) end
+  end
+  return {
+    source = "WorldRankings.lua engine calls",
+    ruleset = Civ6Ai_Snapshot._RankRuleset(),
+    victories_enabled = enabled,
+    diplomatic_vp_needed = Civ6Ai_Snapshot._RankNum(dipNeeded),
+    you = Civ6Ai_Snapshot._PlayerLabel(playerID),
+    players = players,
   }
 end

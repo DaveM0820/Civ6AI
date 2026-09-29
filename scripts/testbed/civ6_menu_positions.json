@@ -1,12 +1,12 @@
 {
   "ref_w": 1600,
-  "ref_h": 1024,
+  "ref_h": 1200,
   "items": {
     "main_single_player": {
       "client_x": 748,
-      "client_y": 440,
+      "client_y": 528,
       "pct_x": 0.4675,
-      "pct_y": 0.4297
+      "pct_y": 0.44
     },
     "sp_load_game": {
       "pct_x": 0.54,

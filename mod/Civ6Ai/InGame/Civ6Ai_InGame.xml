@@ -1,4 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Context Name="Civ6AiInGame">
   <EditBox ID="HostChannelInput" Size="1400,24" Offset="0,0" Hidden="1" ConsumeMouse="1" FontSize="10" MaxLength="65536" />
+  <!-- Civ6Ai chat panel: AI public chat and messages to you. The vanilla
+       WorldTracker chat does not exist in single player, so this is our own. -->
+  <Container ID="Civ6AiChatRoot" Anchor="L,C" Offset="12,120" Size="620,380">
+    <Box ID="Civ6AiChatBg" Size="parent,parent" Color="10,30,50,215" ConsumeMouseOver="1">
+      <Image Size="parent,parent" Texture="Controls_Gradient" Color="80,133,177,50"/>
+      <Label ID="Civ6AiChatTitle" Anchor="L,T" Offset="10,6" Style="FontNormal16" Color="255,215,120,255" String="AI chat (type below; @Name text = private)"/>
+      <GridButton ID="Civ6AiChatToggle" Anchor="R,T" Offset="6,4" Size="70,24" Texture="Controls_ButtonControl" SliceCorner="12,12" SliceTextureSize="24,24" StateOffsetIncrement="0,24" String="Hide" Style="FontNormal14"/>
+      <ScrollPanel ID="Civ6AiChatScroll" Anchor="L,T" Offset="10,34" Size="596,300" Vertical="1" AutoScrollBar="1">
+        <ScrollBar Style="Slider_Blue" Anchor="R,T" Offset="-2,0"/>
+        <Label ID="Civ6AiChatLog" Anchor="L,T" Offset="0,0" WrapWidth="570" Style="FontNormal14" Color="235,235,235,255" String=" "/>
+      </ScrollPanel>
+      <Box Anchor="L,B" Offset="10,8" Size="600,28" Color="0,0,0,200">
+        <EditBox ID="Civ6AiChatInput" Anchor="L,C" Offset="6,0" Size="588,24" Style="FontNormal14" MaxLength="400" ConsumeMouse="1"/>
+      </Box>
+    </Box>
+  </Container>
+  <GridButton ID="Civ6AiChatShow" Anchor="L,C" Offset="12,120" Size="110,26" Texture="Controls_ButtonControl" SliceCorner="12,12" SliceTextureSize="24,24" StateOffsetIncrement="0,24" String="AI chat" Style="FontNormal14" Hidden="1"/>
 </Context>

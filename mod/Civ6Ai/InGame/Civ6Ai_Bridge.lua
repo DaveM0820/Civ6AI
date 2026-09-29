@@ -9,6 +9,40 @@ Civ6Ai_Bridge._chatAppliedKeys = {}
 Civ6Ai_Bridge._activeChatPulseKey = {}
 Civ6Ai_Bridge._chatPulseQueue = {}
 Civ6Ai_Bridge._chatPulseSeq = 0
+Civ6Ai_Bridge._logOnceKeys = {}
+Civ6Ai_Bridge._consumedApplyIds = {}
+Civ6Ai_Bridge._dumpedKeys = {}
+
+-- Log a line only the first time `key` is seen. Wait loops run every frame, so
+-- any status line inside them must go through here (or a wall-clock throttle).
+function Civ6Ai_Bridge._LogOnce(key, message)
+  if Civ6Ai_Bridge._logOnceKeys[key] then
+    return false
+  end
+  Civ6Ai_Bridge._logOnceKeys[key] = true
+  Civ6Ai_Util.Log(message)
+  return true
+end
+
+function Civ6Ai_Bridge._WallClock()
+  if os ~= nil and os.time ~= nil then
+    return os.time()
+  end
+  return nil
+end
+
+-- Seats this bridge drives. Players that are not managed (barbarians, city-states,
+-- the human seat outside autotest) never pulse, retry or log. A configured seat
+-- whose Players entry does not exist yet still counts so the readiness retry runs.
+function Civ6Ai_Bridge._IsBridgeSeat(playerID)
+  if Civ6Ai_Config.ShouldRunBridge(playerID) then
+    return true
+  end
+  if Players ~= nil and Players[playerID] == nil and Civ6Ai_Config._managedSeats ~= nil then
+    return Civ6Ai_Config._managedSeats[playerID] == true
+  end
+  return false
+end
 
 function Civ6Ai_Bridge._MarkPulse(playerID)
   local turn = Game.GetCurrentGameTurn()
@@ -49,15 +83,47 @@ function Civ6Ai_Bridge._HasActablePieces(playerID)
   return false
 end
 
+function Civ6Ai_Bridge._IsLocalSeat(playerID)
+  return Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID
+end
+
+-- Whether a payload for playerID can be applied from this InGame context.
+-- Local seat: UI operations. Single player non-local seats: Civ6Ai_Apply routes
+-- each command through the GameCore ExposedMembers.Civ6Ai.*ForPlayer functions
+-- (commands without a GameCore route fail one by one with a clear reason instead
+-- of blocking the whole payload). Network MP keeps the old rule: only the local
+-- seat, or a build that exposes PlayerManager.SetLocalPlayerAndObserver.
 function Civ6Ai_Bridge._CanApplyInGame(playerID)
-  if Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID then
+  if Civ6Ai_Bridge._IsLocalSeat(playerID) then
     return true
   end
-  return PlayerManager ~= nil and PlayerManager.SetLocalPlayerAndObserver ~= nil
+  if PlayerManager ~= nil and PlayerManager.SetLocalPlayerAndObserver ~= nil then
+    return true
+  end
+  if Civ6Ai_Apply ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer() then
+    return Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive()
+  end
+  return Civ6Ai_Bridge._IsGameplayReady(playerID)
 end
 
 function Civ6Ai_Bridge._PollMaxAttempts(waitSeconds)
   return math.max(30, tonumber(waitSeconds) or Civ6Ai_Config.SidecarTimeout()) * 10
+end
+
+-- Wall-clock deadline for decision waits. Tick count alone is frame-rate
+-- dependent (a fast PC pumps ~60+ ticks/s), which timed out 600s waits in ~100s.
+function Civ6Ai_Bridge._WaitDeadline(waitSeconds)
+  if os and os.time then
+    return os.time() + math.max(30, tonumber(waitSeconds) or Civ6Ai_Config.SidecarTimeout())
+  end
+  return nil
+end
+
+function Civ6Ai_Bridge._WaitExpired(deadline, attempts, maxAttempts)
+  if deadline ~= nil then
+    return os.time() >= deadline
+  end
+  return attempts >= maxAttempts
 end
 
 function Civ6Ai_Bridge.MarkLoadScreenClosed()
@@ -160,6 +226,9 @@ function Civ6Ai_Bridge._PreviousJournalResponseId(playerID)
 end
 
 function Civ6Ai_Bridge._SchedulePulseRetry(playerID)
+  if not Civ6Ai_Bridge._IsBridgeSeat(playerID) then
+    return
+  end
   local turn = Game.GetCurrentGameTurn()
   local key = tostring(playerID) .. "|" .. tostring(turn)
   if Civ6Ai_Bridge._retryKeys ~= nil and Civ6Ai_Bridge._retryKeys[key] then
@@ -204,7 +273,12 @@ function Civ6Ai_Bridge._FinishTurnPulse(playerID)
     return
   end
   Civ6Ai_Bridge._finishedKeys[key] = true
-  Civ6Ai_Apply.ResolveAllUnitOrders(playerID)
+  -- Only the local seat has to clear its units before it can end the turn. AI
+  -- seats end their own turns; units the model did not order are left to the
+  -- native AI (the documented fallback) instead of being force-finished.
+  if Civ6Ai_Bridge._IsLocalSeat(playerID) then
+    Civ6Ai_Apply.ResolveAllUnitOrders(playerID)
+  end
   if Civ6Ai_Autotest ~= nil then
     Civ6Ai_Autotest.AfterPulse(playerID)
   end
@@ -269,6 +343,45 @@ function Civ6Ai_Bridge._WasAppliedThisChatPulse(playerID)
   return Civ6Ai_Bridge._chatAppliedKeys[key] == true
 end
 
+-- A sidecar timeout or pipeline error writes status=fallback with no orders.
+-- Applying that file ends the pulse, so a later approved reply (the model takes
+-- ~90s; a 45s wait used to lose T17/T21/T26) never runs. Last turn's approved
+-- file is also still on disk at the next pulse. Only apply this turn's approved
+-- decision.
+function Civ6Ai_Bridge._DecisionStatus(text)
+  if text == nil or text == "" then
+    return nil
+  end
+  if string.find(text, '"status"%s*:%s*"approved"') then
+    return "approved"
+  end
+  if string.find(text, '"status"%s*:%s*"fallback"') then
+    return "fallback"
+  end
+  return "unknown"
+end
+
+function Civ6Ai_Bridge._DecisionTurn(text)
+  if text == nil then
+    return nil
+  end
+  return tonumber(string.match(text, '"turn"%s*:%s*(%d+)'))
+end
+
+function Civ6Ai_Bridge._IsReadyDecision(text, turn, mode)
+  if mode == "chat" then
+    return text ~= nil and text ~= ""
+  end
+  if Civ6Ai_Bridge._DecisionStatus(text) ~= "approved" then
+    return false
+  end
+  local decisionTurn = Civ6Ai_Bridge._DecisionTurn(text)
+  if turn ~= nil and decisionTurn ~= nil and decisionTurn ~= turn then
+    return false
+  end
+  return true
+end
+
 function Civ6Ai_Bridge._ApplyDecisionFiles(playerID, decisionPath, playerDir)
   if Civ6Ai_Bridge._WasAppliedThisPulse(playerID) then
     return true
@@ -276,7 +389,8 @@ function Civ6Ai_Bridge._ApplyDecisionFiles(playerID, decisionPath, playerDir)
   local applyPath = Civ6Ai_Util.JoinPath(playerDir, "apply_commands.json")
   local applyText = Civ6Ai_Util.ReadTextFile(applyPath)
   local decisionText = Civ6Ai_Util.ReadTextFile(decisionPath)
-  if (applyText == nil or applyText == "") and (decisionText == nil or decisionText == "") then
+  local turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or nil
+  if not Civ6Ai_Bridge._IsReadyDecision(decisionText, turn) then
     return false
   end
   Civ6Ai_Bridge.ApplyPayload(playerID, applyText or decisionText)
@@ -311,6 +425,7 @@ function Civ6Ai_Bridge._ScheduleApplyRetry(playerID, decisionPath, playerDir, de
   end
   local attempts = 0
   local maxAttempts = Civ6Ai_Bridge._PollMaxAttempts(Civ6Ai_Config.SidecarTimeout())
+  local waitDeadline = Civ6Ai_Bridge._WaitDeadline(Civ6Ai_Config.SidecarTimeout())
   Civ6Ai_Util.ScheduleTick(function()
     attempts = attempts + 1
     if Civ6Ai_Bridge._CanApplyInGame(playerID) then
@@ -319,7 +434,7 @@ function Civ6Ai_Bridge._ScheduleApplyRetry(playerID, decisionPath, playerDir, de
         return false
       end
     end
-    if attempts >= maxAttempts then
+    if Civ6Ai_Bridge._WaitExpired(waitDeadline, attempts, maxAttempts) then
       Civ6Ai_Util.Log("bridge|apply_timeout|player=" .. tostring(playerID) .. "|mode=" .. mode)
       clearPulse()
       finishPulse(playerID)
@@ -338,40 +453,129 @@ end
 function Civ6Ai_Bridge._ClearPendingApplyMod()
   Civ6Ai_PendingApplyJson = ""
   Civ6Ai_PendingApplyMeta = nil
+  Civ6Ai_PendingApplyQueue = nil
 end
 
-function Civ6Ai_Bridge._ReloadPendingApplyMod()
+-- Re-run the host-written Civ6Ai_PendingApply.lua (the only host->game channel
+-- retail InGame can read). Every waiting seat calls this every frame, so the disk
+-- reload is throttled to once per wall-clock second (or every 30th call without os).
+function Civ6Ai_Bridge._ReloadPendingApplyMod(force)
   if include == nil then
     return
   end
+  local now = Civ6Ai_Bridge._WallClock()
+  if not force then
+    if now ~= nil then
+      if Civ6Ai_Bridge._lastPendingReload == now then
+        return
+      end
+    else
+      Civ6Ai_Bridge._pendingReloadCalls = (Civ6Ai_Bridge._pendingReloadCalls or 0) + 1
+      if Civ6Ai_Bridge._pendingReloadCalls % 30 ~= 1 then
+        return
+      end
+    end
+  end
+  Civ6Ai_Bridge._lastPendingReload = now
   local ok, err = pcall(function()
     include("Civ6Ai_PendingApply.lua")
   end)
   if not ok then
-    Civ6Ai_Util.Log("bridge|pending_apply_reload_failed|" .. tostring(err))
+    Civ6Ai_Bridge._LogOnce("reload_failed|" .. tostring(err), "bridge|pending_apply_reload_failed|" .. tostring(err))
   end
 end
 
-function Civ6Ai_Bridge._PendingApplyIsCurrent(playerID)
-  if Civ6Ai_PendingApplyJson == nil or Civ6Ai_PendingApplyJson == "" then
-    return false
+-- Host entry for (playerID, kind). The host writes one module holding a queue
+-- keyed "<player>:<kind>" (kind = turn | chat), each entry carrying session_id,
+-- player, turn and a content-derived apply_id. A legacy single-payload module is
+-- only honoured when its meta names this player.
+function Civ6Ai_Bridge._PendingApplyEntry(playerID, kind)
+  kind = kind or "turn"
+  local queue = Civ6Ai_PendingApplyQueue
+  if type(queue) == "table" then
+    local entry = queue[tostring(playerID) .. ":" .. kind]
+    if type(entry) == "table" then
+      return entry
+    end
   end
   local meta = Civ6Ai_PendingApplyMeta
-  if meta == nil then
-    Civ6Ai_Util.Log("bridge|pending_apply_missing_meta")
+  if kind == "turn" and type(meta) == "table" and Civ6Ai_PendingApplyJson ~= nil and Civ6Ai_PendingApplyJson ~= "" then
+    if tonumber(meta.player) == playerID and (meta.kind == nil or meta.kind == "turn") then
+      return {
+        session_id = meta.session_id,
+        player = tonumber(meta.player),
+        turn = meta.turn,
+        kind = "turn",
+        apply_id = meta.apply_id,
+        json = Civ6Ai_PendingApplyJson,
+      }
+    end
+  end
+  return nil
+end
+
+-- Turn rule (docs/REAL_TEST.md "Seat timing"). Single player runs the local seat's
+-- turn N first; the AI seats play turn N after it ends (same game turn number).
+--   local seat: payload turn must equal the current game turn (applied in its turn).
+--   AI seats:   the answer for turn N lands while the local seat plays turn N+1 and
+--               is applied at the seat's own turn N+1 activation, so the caller
+--               passes expectedTurn = current - 1.
+-- Anything else is a replay and is dropped (logged once). Chat replies may land
+-- one turn late. Each apply_id is consumed once, so re-including the same module
+-- never re-applies a payload.
+function Civ6Ai_Bridge._PendingApplyIsCurrent(playerID, entry, kind, expectedTurn)
+  if entry == nil or entry.json == nil or entry.json == "" then
     return false
   end
+  kind = kind or "turn"
+  local applyId = tostring(entry.apply_id or "")
+  if applyId ~= "" and Civ6Ai_Bridge._consumedApplyIds[applyId] then
+    return false
+  end
+  local tag = tostring(playerID) .. "|" .. kind .. "|" .. applyId
   local sessionId = Civ6Ai_Bridge.SessionId()
-  if meta.session_id ~= nil and meta.session_id ~= sessionId then
-    Civ6Ai_Util.Log(
-      "bridge|pending_apply_stale_session|expected="
-        .. tostring(sessionId)
-        .. "|got="
-        .. tostring(meta.session_id)
+  if entry.session_id ~= sessionId then
+    Civ6Ai_Bridge._LogOnce(
+      "stale_session|" .. tag,
+      "bridge|pending_apply_stale_session|player=" .. tostring(playerID)
+        .. "|expected=" .. tostring(sessionId) .. "|got=" .. tostring(entry.session_id)
+    )
+    return false
+  end
+  if tonumber(entry.player) ~= playerID then
+    Civ6Ai_Bridge._LogOnce(
+      "player_mismatch|" .. tag,
+      "bridge|pending_apply_player_mismatch|player=" .. tostring(playerID) .. "|got=" .. tostring(entry.player)
+    )
+    return false
+  end
+  local payloadTurn = tonumber(entry.turn)
+  local current = Game.GetCurrentGameTurn()
+  local fresh = false
+  if payloadTurn ~= nil then
+    if kind == "chat" then
+      fresh = payloadTurn <= current and payloadTurn >= current - 1
+    else
+      fresh = payloadTurn == (expectedTurn or current)
+    end
+  end
+  if not fresh then
+    Civ6Ai_Bridge._LogOnce(
+      "stale_turn|" .. tag .. "|" .. tostring(current),
+      "bridge|pending_apply_stale_turn|player=" .. tostring(playerID) .. "|kind=" .. kind
+        .. "|payload_turn=" .. tostring(entry.turn) .. "|game_turn=" .. tostring(current) .. "|id=" .. applyId
     )
     return false
   end
   return true
+end
+
+function Civ6Ai_Bridge._ConsumeApplyId(entry)
+  local applyId = tostring(entry and entry.apply_id or "")
+  if applyId ~= "" then
+    Civ6Ai_Bridge._consumedApplyIds[applyId] = true
+  end
+  return applyId
 end
 
 function Civ6Ai_Bridge._TryPendingApplyFromMod(playerID)
@@ -379,28 +583,122 @@ function Civ6Ai_Bridge._TryPendingApplyFromMod(playerID)
     return true
   end
   Civ6Ai_Bridge._ReloadPendingApplyMod()
-  if not Civ6Ai_Bridge._PendingApplyIsCurrent(playerID) then
+  local entry = Civ6Ai_Bridge._PendingApplyEntry(playerID, "turn")
+  if not Civ6Ai_Bridge._PendingApplyIsCurrent(playerID, entry, "turn") then
+    return false
+  end
+  local turn = Game.GetCurrentGameTurn()
+  if not Civ6Ai_Bridge._CanApplyInGame(playerID) then
+    Civ6Ai_Bridge._LogOnce(
+      "deferred|" .. tostring(playerID) .. "|" .. tostring(turn),
+      "bridge|pending_apply_deferred|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn) .. "|reason=no_apply_route"
+    )
+    return false
+  end
+  local jsonText = entry.json
+  local applyId = Civ6Ai_Bridge._ConsumeApplyId(entry)
+  Civ6Ai_Util.Log(
+    "bridge|pending_apply|player=" .. tostring(playerID)
+      .. "|turn=" .. tostring(turn)
+      .. "|local=" .. tostring(Civ6Ai_Bridge._IsLocalSeat(playerID))
+      .. "|id=" .. applyId
+      .. "|len=" .. tostring(string.len(jsonText or ""))
+  )
+  if Civ6Ai_Bridge.ApplyPayload(playerID, jsonText, { turn = true }) then
+    Civ6Ai_Util.Log(
+      "bridge|pending_apply_ok|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn) .. "|kind=turn|id=" .. applyId
+    )
+    return true
+  end
+  -- Empty or unusable payload: the model answered, there is just nothing to run.
+  -- Finish the pulse so the seat does not wait out the full timeout.
+  Civ6Ai_Util.Log(
+    "bridge|pending_apply_empty|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn) .. "|kind=turn|id=" .. applyId
+  )
+  Civ6Ai_Bridge._MarkApplied(playerID)
+  Civ6Ai_Bridge._CompleteTurnAfterApply(playerID, false)
+  return true
+end
+
+-- AI seat, at its own turn activation: apply the model's answer for the seat's
+-- previous turn (see the turn rule above) through Civ6Ai_Apply, which routes
+-- non-local seats to the GameCore functions. Runs before the new snapshot so the
+-- snapshot reflects the orders. Does not touch the current turn's pulse keys.
+function Civ6Ai_Bridge._ApplyPreviousTurnForSeat(playerID)
+  local current = Game.GetCurrentGameTurn()
+  Civ6Ai_Bridge._ReloadPendingApplyMod(true)
+  local entry = Civ6Ai_Bridge._PendingApplyEntry(playerID, "turn")
+  if entry == nil then
+    if Civ6Ai_Bridge._dumpedKeys[tostring(playerID) .. "|" .. tostring(current - 1)] then
+      Civ6Ai_Util.Log("bridge|seat_apply_missing|player=" .. tostring(playerID) .. "|payload_turn=" .. tostring(current - 1))
+    end
+    return false
+  end
+  if not Civ6Ai_Bridge._PendingApplyIsCurrent(playerID, entry, "turn", current - 1) then
     return false
   end
   if not Civ6Ai_Bridge._CanApplyInGame(playerID) then
-    Civ6Ai_Util.Log("bridge|pending_apply_deferred|player=" .. tostring(playerID))
+    Civ6Ai_Bridge._LogOnce(
+      "deferred|" .. tostring(playerID) .. "|" .. tostring(current),
+      "bridge|pending_apply_deferred|player=" .. tostring(playerID) .. "|turn=" .. tostring(current) .. "|reason=no_apply_route"
+    )
     return false
   end
-  local jsonText = Civ6Ai_PendingApplyJson
+  local applyId = Civ6Ai_Bridge._ConsumeApplyId(entry)
+  local decision = Civ6Ai_Bridge._ParseDecision(entry.json)
+  local chats = Civ6Ai_Bridge._ParseChatMessages(entry.json)
   Civ6Ai_Util.Log(
-    "bridge|pending_apply|player="
-      .. tostring(playerID)
-      .. "|turn="
-      .. tostring(Game.GetCurrentGameTurn())
-      .. "|len="
-      .. tostring(string.len(jsonText or ""))
+    "bridge|pending_apply|player=" .. tostring(playerID) .. "|turn=" .. tostring(entry.turn)
+      .. "|game_turn=" .. tostring(current) .. "|local=false|id=" .. applyId
+      .. "|len=" .. tostring(string.len(entry.json or ""))
   )
-  if Civ6Ai_Bridge.ApplyPayload(playerID, jsonText) then
-    Civ6Ai_Util.Log("bridge|pending_apply_ok|player=" .. tostring(playerID))
-    Civ6Ai_Bridge._ClearPendingApplyMod()
+  if #decision.commands > 0 then
+    Civ6Ai_Apply.ApplyDecision(playerID, decision)
+  end
+  if Civ6Ai_Chat ~= nil and #chats > 0 then
+    Civ6Ai_Chat.SendMessages(playerID, chats)
+  end
+  Civ6Ai_Util.Log(
+    "bridge|apply_payload|player=" .. tostring(playerID) .. "|turn=" .. tostring(entry.turn)
+      .. "|game_turn=" .. tostring(current) .. "|commands=" .. tostring(#decision.commands)
+  )
+  Civ6Ai_Util.Log(
+    "bridge|pending_apply_ok|player=" .. tostring(playerID) .. "|turn=" .. tostring(entry.turn)
+      .. "|kind=turn|id=" .. applyId
+  )
+  return true
+end
+
+-- True when the host has delivered (or the seat already consumed) the model's
+-- answer for the seat's snapshot of `turn`, or when no snapshot of that turn was
+-- dumped (nothing to wait for). Used by the autotest seat barrier.
+function Civ6Ai_Bridge.SeatDecisionDelivered(playerID, turn)
+  if not Civ6Ai_Bridge._dumpedKeys[tostring(playerID) .. "|" .. tostring(turn)] then
     return true
   end
-  return false
+  Civ6Ai_Bridge._ReloadPendingApplyMod()
+  local entry = Civ6Ai_Bridge._PendingApplyEntry(playerID, "turn")
+  if entry == nil or tonumber(entry.turn) ~= turn or entry.session_id ~= Civ6Ai_Bridge.SessionId() then
+    return false
+  end
+  return entry.json ~= nil and entry.json ~= ""
+end
+
+function Civ6Ai_Bridge._TryPendingChatFromMod(playerID)
+  if Civ6Ai_Bridge._WasAppliedThisChatPulse(playerID) then
+    return true
+  end
+  Civ6Ai_Bridge._ReloadPendingApplyMod()
+  local entry = Civ6Ai_Bridge._PendingApplyEntry(playerID, "chat")
+  if not Civ6Ai_Bridge._PendingApplyIsCurrent(playerID, entry, "chat") then
+    return false
+  end
+  local applyId = Civ6Ai_Bridge._ConsumeApplyId(entry)
+  Civ6Ai_Util.Log(
+    "bridge|pending_apply_ok|player=" .. tostring(playerID) .. "|turn=" .. tostring(entry.turn) .. "|kind=chat|id=" .. applyId
+  )
+  Civ6Ai_Bridge.ApplyPayload(playerID, entry.json, { chatOnly = true })
+  return true
 end
 
 
@@ -421,18 +719,27 @@ function Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
     end
     return
   end
+  local waitSeconds = Civ6Ai_Bridge._InboxWaitSeconds()
   if Civ6Ai_HostChannel ~= nil and Civ6Ai_HostChannel.Arm ~= nil then
-    Civ6Ai_HostChannel.Arm(Civ6Ai_Config.SidecarTimeout())
+    Civ6Ai_HostChannel.Arm(waitSeconds)
   end
-  local maxAttempts = Civ6Ai_Bridge._PollMaxAttempts(Civ6Ai_Config.SidecarTimeout())
+  local maxAttempts = Civ6Ai_Bridge._PollMaxAttempts(waitSeconds)
+  local waitDeadline = Civ6Ai_Bridge._WaitDeadline(waitSeconds)
   local playerDir = Civ6Ai_Bridge._PlayerDir(playerID)
   local decisionPath = Civ6Ai_Util.JoinPath(playerDir, "decision.json")
+  local canReadFiles = Civ6Ai_Util.CanReadHostFiles()
+  local waitTurn = Game.GetCurrentGameTurn()
   local attempts = 0
+  local lastWaitLog = nil
   Civ6Ai_Util.ScheduleTick(function()
     attempts = attempts + 1
+    if Game.GetCurrentGameTurn() ~= waitTurn then
+      Civ6Ai_Util.Log("bridge|inbox_wait_abandoned|player=" .. tostring(playerID) .. "|turn=" .. tostring(waitTurn))
+      return false
+    end
     Civ6Ai_Bridge._TryPendingApplyFromMod(playerID)
     Civ6Ai_Bridge._TryInboxApply(playerID)
-    if Civ6Ai_Bridge._CanApplyInGame(playerID) then
+    if canReadFiles and Civ6Ai_Bridge._CanApplyInGame(playerID) then
       Civ6Ai_Bridge._ApplyDecisionFiles(playerID, decisionPath, playerDir)
     end
     if Civ6Ai_Bridge._WasAppliedThisPulse(playerID) then
@@ -442,10 +749,15 @@ function Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
       end
       return false
     end
-    if attempts == 1 or attempts % 50 == 0 then
-      Civ6Ai_Util.Log("bridge|inbox_wait|player=" .. tostring(playerID) .. "|attempts=" .. tostring(attempts))
+    local now = Civ6Ai_Bridge._WallClock()
+    if attempts == 1 or (now ~= nil and lastWaitLog ~= nil and now - lastWaitLog >= 120) then
+      lastWaitLog = now
+      Civ6Ai_Util.Log(
+        "bridge|inbox_wait|player=" .. tostring(playerID) .. "|turn=" .. tostring(waitTurn)
+          .. "|attempts=" .. tostring(attempts) .. "|max_wait=" .. tostring(waitSeconds)
+      )
     end
-    if attempts >= maxAttempts then
+    if Civ6Ai_Bridge._WaitExpired(waitDeadline, attempts, maxAttempts) then
       Civ6Ai_Util.Log("bridge|inbox_apply_timeout|player=" .. tostring(playerID) .. "|attempts=" .. tostring(attempts))
       if not Civ6Ai_Bridge._WasPulseFinished(playerID) then
         Civ6Ai_Bridge._FinishTurnPulse(playerID)
@@ -454,6 +766,16 @@ function Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
     end
     return true
   end)
+end
+
+-- The host asks the model for one seat at a time, so the last managed seat's
+-- answer can arrive up to (managed seats x sidecar timeout) after its pulse.
+function Civ6Ai_Bridge._InboxWaitSeconds()
+  local seats = 1
+  if Civ6Ai_Config.ManagedSeatsList ~= nil then
+    seats = math.max(1, #Civ6Ai_Config.ManagedSeatsList())
+  end
+  return Civ6Ai_Config.SidecarTimeout() * seats
 end
 
 function Civ6Ai_Bridge._WaitForInboxApply(playerID)
@@ -513,7 +835,8 @@ function Civ6Ai_Bridge._ScheduleSidecarPoll(playerID, decisionPath, playerDir, d
     end
   end
   if ContextPtr == nil then
-    local decisionText = Civ6Ai_Bridge._WaitForFile(decisionPath, Civ6Ai_Config.SidecarTimeout())
+    local waitTurn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or nil
+    local decisionText = Civ6Ai_Bridge._WaitForApprovedDecision(decisionPath, Civ6Ai_Config.SidecarTimeout(), waitTurn, mode)
     if decisionText == nil then
       Civ6Ai_Util.Log("bridge|decision_timeout|player=" .. tostring(playerID) .. "|mode=" .. mode)
       clearPulse()
@@ -527,14 +850,24 @@ function Civ6Ai_Bridge._ScheduleSidecarPoll(playerID, decisionPath, playerDir, d
     return
   end
   local attempts = 0
+  local chatKey = Civ6Ai_Bridge._activeChatPulseKey[playerID]
   Civ6Ai_Util.ScheduleTick(function()
     attempts = attempts + 1
+    if mode == "chat" then
+      if Civ6Ai_Bridge._activeChatPulseKey[playerID] ~= chatKey then
+        return false
+      end
+      if Civ6Ai_Bridge._TryPendingChatFromMod(playerID) then
+        return false
+      end
+    end
     local decisionText = Civ6Ai_Util.ReadTextFile(decisionPath)
     if wasApplied(playerID) then
       finishPulse(playerID)
       return false
     end
-    if decisionText ~= nil and decisionText ~= "" then
+    local waitTurn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or nil
+    if Civ6Ai_Bridge._IsReadyDecision(decisionText, waitTurn, mode) then
       if Civ6Ai_Bridge._CanApplyInGame(playerID) then
         applyFn(playerID, decisionPath, playerDir)
         finishPulse(playerID)
@@ -555,6 +888,9 @@ end
 
 function Civ6Ai_Bridge.RunTurnPulse(playerID)
   -- STABLE through snapshot dump + sidecar queue — apply fixes go in HostChannel/Apply, not here.
+  if not Civ6Ai_Bridge._IsBridgeSeat(playerID) then
+    return
+  end
   if not Civ6Ai_Bridge._IsGameplayReady(playerID) then
     Civ6Ai_Util.Log("bridge|not_ready|player=" .. tostring(playerID))
     Civ6Ai_Bridge._SchedulePulseRetry(playerID)
@@ -573,7 +909,8 @@ function Civ6Ai_Bridge.RunTurnPulse(playerID)
     return
   end
   if Civ6Ai_Bridge._AlreadyPulsed(playerID) then
-    Civ6Ai_Util.Log("bridge|already_pulsed|player=" .. tostring(playerID))
+    local key = Civ6Ai_Bridge._PulseKey(playerID)
+    Civ6Ai_Bridge._LogOnce("already_pulsed|" .. key, "bridge|already_pulsed|player=" .. tostring(playerID) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))
     return
   end
   if Civ6Ai_Config.IsAutotest() and Civ6Ai_Config.IsFastEndTurn() then
@@ -591,10 +928,12 @@ function Civ6Ai_Bridge.RunTurnPulse(playerID)
   local breaker = Civ6Ai_Bridge._ReadCircuitBreaker(playerID)
   if breaker == "open" then
     Civ6Ai_Util.Log("bridge|circuit_breaker_open|player=" .. tostring(playerID))
-    if Civ6Ai_Autotest ~= nil then
-      Civ6Ai_Autotest.AfterPulse(playerID)
-    end
+    Civ6Ai_Bridge._FinishTurnPulse(playerID)
     return
+  end
+  local asyncSeat = not Civ6Ai_Bridge._IsLocalSeat(playerID) and not Civ6Ai_Util.CanReadHostFiles()
+  if asyncSeat then
+    Civ6Ai_Bridge._ApplyPreviousTurnForSeat(playerID)
   end
   local snapshotJson, legal = Civ6Ai_Snapshot.Build(playerID)
   if snapshotJson == nil then
@@ -613,7 +952,8 @@ function Civ6Ai_Bridge.RunTurnPulse(playerID)
       live = Civ6Ai_Config.IsSidecarLive() and 1 or 0,
     }, snapshotJson)
     if dumped then
-      Civ6Ai_Util.Log("bridge|snapshot_dumped|player=" .. tostring(playerID))
+      Civ6Ai_Bridge._dumpedKeys[Civ6Ai_Bridge._PulseKey(playerID)] = true
+      Civ6Ai_Util.Log("bridge|snapshot_dumped|player=" .. tostring(playerID) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))
     else
       Civ6Ai_Util.Log("bridge|snapshot_write_failed|player=" .. tostring(playerID))
       Civ6Ai_Bridge._ClearPulse(playerID)
@@ -663,6 +1003,13 @@ function Civ6Ai_Bridge.RunTurnPulse(playerID)
   end
   if Civ6Ai_Util.CanReadHostFiles() then
     Civ6Ai_Bridge._ScheduleSidecarPoll(playerID, decisionPath, playerDir, deadline)
+    return
+  end
+  if asyncSeat then
+    -- The answer for this snapshot arrives during the local seat's next turn and
+    -- is applied at this seat's next activation; nothing to wait for now.
+    Civ6Ai_Util.Log("bridge|seat_async|player=" .. tostring(playerID) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))
+    Civ6Ai_Bridge._FinishTurnPulse(playerID)
     return
   end
   Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
@@ -808,7 +1155,8 @@ function Civ6Ai_Bridge.ApplyPayload(playerID, jsonText, options)
   if jsonText == nil or jsonText == "" then
     return false
   end
-  local chatOnly = options.chatOnly == true or Civ6Ai_Bridge._activeChatPulseKey[playerID] ~= nil
+  local chatOnly = options.chatOnly == true
+    or (options.turn ~= true and Civ6Ai_Bridge._activeChatPulseKey[playerID] ~= nil)
   if chatOnly then
     if Civ6Ai_Bridge._WasAppliedThisChatPulse(playerID) then
       Civ6Ai_Util.Log("bridge|chat_apply_skip_duplicate|player=" .. tostring(playerID))
@@ -863,10 +1211,14 @@ function Civ6Ai_Bridge.ApplyPayload(playerID, jsonText, options)
 end
 
 function Civ6Ai_Bridge._WaitForFile(path, timeoutSec)
+  return Civ6Ai_Bridge._WaitForApprovedDecision(path, timeoutSec, nil, "chat")
+end
+
+function Civ6Ai_Bridge._WaitForApprovedDecision(path, timeoutSec, turn, mode)
   local deadline = (os and os.time and os.time() + timeoutSec) or nil
   while true do
     local text = Civ6Ai_Util.ReadTextFile(path)
-    if text ~= nil and text ~= "" then
+    if Civ6Ai_Bridge._IsReadyDecision(text, turn, mode) then
       return text
     end
     if deadline ~= nil and os.time() >= deadline then
@@ -907,6 +1259,11 @@ function Civ6Ai_Bridge._ExtractJsonObject(text, innerPos)
   return string.sub(text, start, last), last
 end
 
+Civ6Ai_Bridge.GOV_ARG_KEYS = {
+  "government_id", "slots", "belief_id", "belief_ids", "religion_id", "individual_id", "yield",
+  "governor_id", "promotion_id",
+}
+
 function Civ6Ai_Bridge._ParseDecision(text)
   local commands = {}
   local pos = 1
@@ -946,6 +1303,21 @@ function Civ6Ai_Bridge._ParseDecision(text)
     if targetX ~= nil then
       arguments.target_x = tonumber(targetX)
     end
+    local prioId = string.match(slice, '"priority_id"%s*:%s*(%d+)')
+    if prioId ~= nil then
+      arguments.priority_id = tonumber(prioId)
+    end
+    local prioLevel = string.match(slice, '"priority_level"%s*:%s*(%d+)')
+    if prioLevel ~= nil then
+      arguments.priority_level = tonumber(prioLevel)
+    end
+    -- Government & culture commands (Civ6Ai_Apply._Governance): string ids.
+    for _, key in ipairs(Civ6Ai_Bridge.GOV_ARG_KEYS) do
+      local value = string.match(slice, '"' .. key .. '"%s*:%s*"([^"]*)"')
+      if value ~= nil then
+        arguments[key] = value
+      end
+    end
     local targetY = string.match(slice, '"target_y"%s*:%s*(%-?%d+)')
     if targetY ~= nil then
       arguments.target_y = tonumber(targetY)
@@ -957,7 +1329,14 @@ function Civ6Ai_Bridge._ParseDecision(text)
         arguments = arguments,
       })
     end
-    pos = (objEnd or kindEnd) + 1
+    -- Always advance past this "kind" match. Braces inside model text (thought,
+    -- chat) can make _ExtractJsonObject close before kindStart; resetting pos
+    -- backwards looped forever and grew commands until Civ6 ran out of memory.
+    pos = math.max(objEnd or 0, kindEnd) + 1
+    if #commands >= 400 then
+      Civ6Ai_Util.Log("bridge|parse_decision_cap|commands=" .. tostring(#commands))
+      break
+    end
   end
   return { commands = commands }
 end

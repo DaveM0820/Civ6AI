@@ -96,7 +96,7 @@ class Civ6PromptCoachingTests(unittest.TestCase):
             "game": {"map_width": 60, "wrap_x": True},
         }
         text = civ6_wire.build_civ6_response_instructions(snap)
-        self.assertIn("=== REQUIRED COMMANDS THIS TURN ===", text)
+        self.assertIn("=== REQUIRED COMMANDS ===", text)
         self.assertIn("strategicmap.read", text)
         self.assertIn("thought.situation", text)
         self.assertIn("OPTIONAL COMMANDS are encouraged", text)

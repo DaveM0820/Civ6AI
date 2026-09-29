@@ -61,6 +61,8 @@ function Civ6Ai_Config.Initialize()
   elseif runtime and tonumber(runtime.MpMoveSync) == 1 then
     Civ6Ai_Config._mpMoveSync = true
   end
+  Civ6Ai_Config._mpTest = (Civ6Ai_Paths ~= nil and tonumber(Civ6Ai_Paths.MpTest) == 1)
+    or (runtime ~= nil and tonumber(runtime.MpTest) == 1)
   local managed = {}
   for seat, enabled in pairs(Civ6Ai_Config._managedSeats) do
     if enabled then
@@ -76,6 +78,7 @@ function Civ6Ai_Config.Initialize()
       .. "|fast_end_turn=" .. tostring(Civ6Ai_Config.IsFastEndTurn())
       .. "|sp_chat=" .. tostring(Civ6Ai_Config.EnableSinglePlayerChat())
       .. "|mp_move_sync=" .. tostring(Civ6Ai_Config.IsMpMoveSync())
+      .. "|mp_test=" .. tostring(Civ6Ai_Config.IsMpTest())
       .. "|session=" .. tostring(Civ6Ai_Config.SessionId())
   )
 end
@@ -136,6 +139,37 @@ function Civ6Ai_Config.EnableSinglePlayerChat()
   return Civ6Ai_Config._enableSinglePlayerChat == true
 end
 
+-- Host PC setting: run the scripted two-PC multiplayer test (Civ6Ai_MpTest).
+function Civ6Ai_Config.IsMpTest()
+  return Civ6Ai_Config._mpTest == true
+end
+
+-- True on the PC that hosts a network game (and always outside network games).
+-- Civ6 names this Network.IsGameHost() (Civ5's Network.IsSessionHost does not
+-- exist in Civ6, which made every PC think it was a client).
+function Civ6Ai_Config._IsNetworkHost()
+  if Network == nil then
+    return false
+  end
+  for _, name in ipairs({ "IsGameHost", "IsNetSessionHost", "IsSessionHost" }) do
+    local fn = Network[name]
+    if fn ~= nil then
+      local ok, v = pcall(fn)
+      if ok and v ~= nil then
+        return v == true
+      end
+    end
+  end
+  return false
+end
+
+function Civ6Ai_Config.IsHostPc()
+  if GameConfiguration ~= nil and GameConfiguration.IsNetworkMultiplayer ~= nil and GameConfiguration.IsNetworkMultiplayer() then
+    return Civ6Ai_Config._IsNetworkHost()
+  end
+  return true
+end
+
 function Civ6Ai_Config.IsMpMoveSync()
   return Civ6Ai_Config._mpMoveSync == true
 end
@@ -165,10 +199,7 @@ function Civ6Ai_Config.ShouldRunBridge(playerID)
     return false
   end
   if GameConfiguration.IsNetworkMultiplayer() then
-    if Network ~= nil and Network.IsSessionHost ~= nil then
-      return Network.IsSessionHost()
-    end
-    return false
+    return Civ6Ai_Config._IsNetworkHost()
   end
   return true
 end
@@ -187,12 +218,12 @@ end
 function Civ6Ai_Config.SidecarTimeout()
   local runtime = Civ6Ai_Config._Runtime()
   if Civ6Ai_Paths and Civ6Ai_Paths.SidecarTimeoutSeconds then
-    return tonumber(Civ6Ai_Paths.SidecarTimeoutSeconds) or 45
+    return tonumber(Civ6Ai_Paths.SidecarTimeoutSeconds) or 180
   end
   if runtime and runtime.SidecarTimeoutSeconds then
-    return tonumber(runtime.SidecarTimeoutSeconds) or 45
+    return tonumber(runtime.SidecarTimeoutSeconds) or 180
   end
-  return 45
+  return 180
 end
 
 function Civ6Ai_Config.PythonExe()

@@ -7,6 +7,7 @@ terrain, markers, labels, and a legend strip. Dependency-free (SVG only).
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import os
 from pathlib import Path
@@ -1087,6 +1088,19 @@ def _stack_unit_count(stack: dict[str, Any]) -> int:
     return max(1, int(stack.get("unit_count", stack.get("count", 1))))
 
 
+def _unit_health_percent(unit: dict[str, Any]) -> int | None:
+    raw = unit.get("health_percent")
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        return max(0, min(100, raw))
+    health = unit.get("health")
+    if isinstance(health, dict):
+        current = health.get("current")
+        maximum = health.get("maximum")
+        if isinstance(current, int) and isinstance(maximum, int) and maximum > 0:
+            return max(0, min(100, int(current * 100 / maximum)))
+    return None
+
+
 def build_tile_markers(snapshot: dict[str, Any], viewport: dict[str, int]) -> dict[tuple[int, int], list[dict[str, Any]]]:
     """Queue city/unit/stack markers per viewport tile; stacks subsume duplicate unit icons."""
     known_map = snapshot.get("known_map", {})
@@ -1121,17 +1135,38 @@ def build_tile_markers(snapshot: dict[str, Any], viewport: dict[str, int]) -> di
                 count=stack.get("unit_count", stack.get("count", "")),
             )
 
+    queued_city_plots: set[tuple[int, int]] = set()
     for city in snapshot.get("your_cities", []):
         if not isinstance(city, dict):
             continue
         coords = _parse_plot_coords(city.get("plot_id"))
         if coords is None:
             continue
+        queued_city_plots.add(coords)
         _queue_marker(
             coords[0] - x0, coords[1] - y0, "city",
             is_capital=bool(city.get("is_capital")),
             name=str(city.get("name", city.get("city_id", "City")))[:16],
             population=city.get("population"),
+            owner_player_id=player_id,
+            foreign=False,
+        )
+
+    for city in snapshot.get("known_other_cities", []):
+        if not isinstance(city, dict):
+            continue
+        coords = _parse_plot_coords(city.get("plot_id"))
+        if coords is None or coords in queued_city_plots:
+            continue
+        queued_city_plots.add(coords)
+        owner = city.get("owner_player_id")
+        _queue_marker(
+            coords[0] - x0, coords[1] - y0, "city",
+            is_capital=bool(city.get("is_capital")),
+            name=str(city.get("name", city.get("city_id", "City")))[:16],
+            population=city.get("population"),
+            owner_player_id=str(owner) if isinstance(owner, str) else "",
+            foreign=True,
         )
 
     def _stack_suppresses_unit(coords: tuple[int, int]) -> bool:
@@ -1148,6 +1183,8 @@ def build_tile_markers(snapshot: dict[str, Any], viewport: dict[str, int]) -> di
             coords[0] - x0, coords[1] - y0, "unit",
             unit_type_id=str(unit.get("unit_type_id", "UNIT")),
             foreign=False,
+            owner_player_id=player_id,
+            health_percent=_unit_health_percent(unit),
         )
 
     for unit in snapshot.get("visible_other_units", []):
@@ -1156,10 +1193,13 @@ def build_tile_markers(snapshot: dict[str, Any], viewport: dict[str, int]) -> di
         coords = _parse_plot_coords(unit.get("plot_id"))
         if coords is None or _stack_suppresses_unit(coords):
             continue
+        owner = unit.get("owner_player_id")
         _queue_marker(
             coords[0] - x0, coords[1] - y0, "unit",
             unit_type_id=str(unit.get("unit_type_id", "UNIT")),
             foreign=True,
+            owner_player_id=str(owner) if isinstance(owner, str) else "",
+            health_percent=_unit_health_percent(unit),
         )
 
     for coords, stack in stack_by_plot.items():
@@ -1217,6 +1257,32 @@ def _rgb_tuple(hex_color: str) -> tuple[int, int, int]:
     return _hex_to_rgb(hex_color)
 
 
+@functools.lru_cache(maxsize=1024)
+def _load_rgba_resized(path_key: str, mtime_ns: int, width: int, height: int) -> Any:
+    """Decode + convert + LANCZOS-resize a sprite once per (file, size).
+
+    A map render pastes the same few dozen terrain/unit/resource sprites for every
+    plot; decoding and resizing each time dominated render time on the live PC.
+    Callers only paste the result (never mutate it), so sharing is safe.
+    """
+    from PIL import Image
+
+    with Image.open(path_key) as source:
+        icon = source.convert("RGBA")
+    if icon.size != (width, height):
+        icon = icon.resize((width, height), Image.Resampling.LANCZOS)
+    return icon
+
+
+def _cached_rgba(image_path: Path, width: int, height: int) -> Any:
+    path_key = str(image_path)
+    try:
+        mtime_ns = os.stat(path_key).st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    return _load_rgba_resized(path_key, mtime_ns, max(1, int(width)), max(1, int(height)))
+
+
 def _paste_image_raster(
     canvas: Any,
     image_path: Path,
@@ -1224,11 +1290,7 @@ def _paste_image_raster(
     y: int,
     size: int,
 ) -> None:
-    from PIL import Image
-
-    icon = Image.open(image_path).convert("RGBA")
-    if icon.size != (size, size):
-        icon = icon.resize((size, size), Image.Resampling.LANCZOS)
+    icon = _cached_rgba(image_path, size, size)
     canvas.paste(icon, (x, y), icon)
 
 
@@ -1240,12 +1302,8 @@ def _paste_image_raster_fit(
     width: int,
     height: int,
 ) -> None:
-    from PIL import Image
-
-    icon = Image.open(image_path).convert("RGBA")
     target = (max(1, width), max(1, height))
-    if icon.size != target:
-        icon = icon.resize(target, Image.Resampling.LANCZOS)
+    icon = _cached_rgba(image_path, target[0], target[1])
     x = int(cx - target[0] / 2)
     y = int(cy - target[1] / 2)
     canvas.paste(icon, (x, y), icon)

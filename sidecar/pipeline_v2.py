@@ -713,7 +713,7 @@ def model_provider() -> str:
         "CIV6AI_MODEL_PROVIDER",
         os.environ.get("CIV4AI_MODEL_PROVIDER", "gemini"),
     ).strip().lower()
-    if raw in {"gemini", "openai", "lmstudio"}:
+    if raw in {"gemini", "openai", "lmstudio", "openrouter"}:
         return raw
     return "gemini"
 
@@ -2110,6 +2110,7 @@ def _command_matches_city_property(command: dict[str, Any], city_id: str, proper
     return False
 
 
+_WIRE_LIST_PREFIX_RE = re.compile(r"^\d+\.\s*(?=\D)")
 _WIRE_ROLE_PREFIX_RE = re.compile(r"^(?:Unit|City|Empire|Stack)\s*:\s*", re.IGNORECASE)
 
 
@@ -2117,7 +2118,8 @@ def normalize_wire_property_key(key: str) -> str:
     """Strip copied prompt labels such as 'Unit: warrior_1.moveTo'."""
     if not isinstance(key, str):
         return key
-    return _WIRE_ROLE_PREFIX_RE.sub("", key.strip())
+    text = _WIRE_LIST_PREFIX_RE.sub("", key.strip())
+    return _WIRE_ROLE_PREFIX_RE.sub("", text)
 
 
 def _normalize_wire_property_keys(flat: dict[str, Any]) -> dict[str, Any]:
@@ -2308,12 +2310,16 @@ def load_thought_memory(
             histories = payload.get("player_histories", {})
             if not isinstance(histories, dict):
                 histories = {}
-            return {
+            loaded = {
                 "session_key": session_key,
                 "thoughts": thoughts,
                 "player_opinions": opinions,
                 "player_histories": histories,
             }
+            remembered = payload.get("remembered")
+            if isinstance(remembered, list) and remembered:
+                loaded["remembered"] = remembered
+            return loaded
     if extracted is not None:
         bootstrapped = bootstrap_thought_memory_from_extracted(extracted, session_key)
         if bootstrapped is not None:
@@ -2376,6 +2382,52 @@ def inject_thought_history(snapshot: dict[str, Any], memory: dict[str, Any]) -> 
         history["player_histories"] = copy.deepcopy(histories)
     else:
         history["player_histories"] = {}
+    notes = memory.get("remembered", [])
+    active: list[dict[str, Any]] = []
+    if isinstance(notes, list):
+        for item in notes:
+            if not isinstance(item, dict) or not str(item.get("text", "")).strip():
+                continue
+            expires = item.get("expires_turn")
+            if isinstance(expires, int) and expires < current_turn:
+                continue
+            active.append(copy.deepcopy(item))
+    history["remembered"] = active[-REMEMBER_MAX_NOTES:]
+
+
+REMEMBER_MAX_NOTES = 12
+REMEMBER_DEFAULT_TURNS = 20
+_REMEMBER_DURATION_RE = re.compile(
+    r"\(?\s*(?:duration\s*)?(?:(\d{1,4})\s*turns?|(forever|permanent|always))\s*\)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def append_remembered(memory: dict[str, Any], turn: int, notes: list[str]) -> dict[str, Any]:
+    """Store model `remember` notes with an expiry turn (default 20 turns, or forever)."""
+    stored = [item for item in memory.get("remembered", []) if isinstance(item, dict)]
+    stored = [
+        item for item in stored
+        if not (isinstance(item.get("expires_turn"), int) and item["expires_turn"] < turn)
+    ]
+    for raw in notes:
+        text = str(raw).strip()
+        if not text:
+            continue
+        expires: int | None = int(turn) + REMEMBER_DEFAULT_TURNS
+        match = _REMEMBER_DURATION_RE.search(text)
+        if match:
+            if match.group(2):
+                expires = None
+            else:
+                expires = int(turn) + max(1, int(match.group(1)))
+            text = text[: match.start()].rstrip(" ,;-") or text
+        text = text[:300]
+        if any(item.get("text") == text for item in stored):
+            continue
+        stored.append({"turn": int(turn), "text": text, "expires_turn": expires})
+    memory["remembered"] = stored[-REMEMBER_MAX_NOTES:]
+    return memory
 
 
 def _clip_player_opinion(text: str) -> str:
@@ -4171,6 +4223,10 @@ def _diplomacy_prompt_bias_lines(snapshot: dict[str, Any]) -> list[str]:
 
 
 def _model_response_instructions(snapshot: dict[str, Any]) -> str:
+    # Civ VI prompts carry their own RESPONSE/REQUIRED COMMANDS sections (JSON replies);
+    # the generic flat-wire block here would contradict them in the system message.
+    if str(snapshot.get("schema_version", "")).startswith("civ6ai-input/"):
+        return ""
     personality = snapshot.get("personality", {})
     leader = personality.get("leader_name", personality.get("leader_id", "the seated leader"))
     civ_id = personality.get("civilization_id")
@@ -4243,7 +4299,7 @@ def _model_response_instructions(snapshot: dict[str, Any]) -> str:
 def _model_instructions(snapshot: dict[str, Any], api_thinking: bool = False) -> str:
     """Combined role + response rules (legacy helper and OpenAI-style single blob)."""
     del api_thinking
-    return _model_role_instruction(snapshot) + "\n\n" + _model_response_instructions(snapshot)
+    return (_model_role_instruction(snapshot) + "\n\n" + _model_response_instructions(snapshot)).rstrip()
 
 
 def _http_error_category(status_code: int) -> str:
@@ -4723,7 +4779,7 @@ def call_model(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Primary model call: LM Studio (local), Gemini, or OpenAI with optional fallback."""
     provider = model_provider()
-    if provider == "lmstudio":
+    if provider in {"lmstudio", "openrouter"}:
         from sidecar import lmstudio_client
         from sidecar.civ6_config import load_local_config
 
@@ -4890,6 +4946,12 @@ def normalize_model_response(snapshot: dict[str, Any], response: dict[str, Any])
     """Shape live model JSON into the closed local contract without inventing gameplay choices."""
     if not isinstance(response, dict):
         raise BoundaryError("response_schema", "Model response must be an object")
+    if str(snapshot.get("schema_version", "")).startswith("civ6ai-input/"):
+        from sidecar import civ6_command_wire
+        remembered = civ6_command_wire.extract_remember(response)
+        response = civ6_command_wire.expand_civ6_command_wire(snapshot, response)
+    else:
+        remembered = []
     response = resolve_property_wire(snapshot, response)
     response = expand_flat_response(response, snapshot)
     normalized = copy.deepcopy(response)
@@ -5042,6 +5104,10 @@ def normalize_model_response(snapshot: dict[str, Any], response: dict[str, Any])
             cleaned_chats.append(chat)
     normalized["chat_messages"] = cleaned_chats[:chat_max_messages()]
     _ensure_proposal_chat_messages(snapshot, normalized)
+    if remembered:
+        normalized["remember"] = remembered
+    else:
+        normalized.pop("remember", None)
 
     return normalized
 

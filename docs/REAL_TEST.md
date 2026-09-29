@@ -27,10 +27,18 @@ vision model (text + map image).
    - `reasoning`: `on` (sent as LM Studio `reasoning=on|off` — **never** `reasoning_effort=on`)
    - `mp_move_sync`: `false` for SP
 4. In LM Studio: start the local server, load the vision model, enable vision.
-5. Install the mod into both Mods folders (backs up existing):
+5. Install the mod into both Mods folders (backs up existing to
+   `My Games\...\Civ6Ai_mod_backups`, outside `Mods` so Civ6 never sees a duplicate mod):
    ```powershell
    python scripts\install_mod.py
+   # options: --managed-seats 1   (LLM seats; human is seat 0 in SP; default 1)
+   #          --sidecar-timeout 600  (seconds per LLM decision; default config timeout_seconds)
+   #          --session-id live-...  (default live-<timestamp>)
    ```
+   This also generates the installed `Civ6Ai_Paths.lua` / `Civ6Ai_Runtime.lua` (repo path,
+   python, `SidecarLive=1`, managed seats, session, timeout) and
+   `My Games\...\civ6ai\runtime.json` for the host bridge (old file backed up).
+   Re-run it whenever you move the repo or want different seats. `--stub-only` skips this.
 6. Preflight (must be all PASS before a live game):
    ```powershell
    python scripts\preflight.py
@@ -58,8 +66,12 @@ python scripts\start_live.py --dry-run
 python scripts\start_live.py --dry-run --state fixtures\civ6\snapshot-turn-classical-golden.json
 ```
 
-Pass: JSON decision printed; `runtime/logs/dry_run_journal.jsonl` written; no
-`model_unloaded` / empty completion errors.
+Pass: exit code 0 and a final `DRY-RUN PASS: model=... commands=N` line;
+`runtime/logs/dry_run_journal.jsonl` written; no `model_unloaded` / empty completion errors.
+Any fallback / transport error (e.g. LM Studio not running) prints
+`DRY-RUN FAIL: <reason>` and exits 1. Use `--timeout <seconds>` to cap the wait.
+Dry runs neither enforce nor update the sidecar circuit breaker; `preflight.py`
+reports breaker counts (reset a live seat by setting its `circuit_breaker.json` to `{}`).
 
 ## 2) SP live test (M0)
 
@@ -126,6 +138,50 @@ See also `docs/GOALS.md`, `docs/MP_SYNC_TRANSPORT.md`, `docs/civ6_lan_probe.md`.
 ```
 
 Only after SP works: enable `mp_move_sync` and try LAN.
+
+## Seat timing (single player, model-driven AI seats)
+
+Civ6 single player runs seats one after another: P0 (the local seat) plays turn N,
+ends it, then AI seats 1..4 run their turn N, then P0 turn N+1 starts. The mod
+snapshots every managed seat at its own activation, but the host (lua log bridge
+-> sidecar -> LM Studio) answers seat by seat, so an AI seat's answer for turn N
+arrives while P0 is on turn N+1. The rule:
+
+- **Local seat (P0):** the snapshot, the answer and the apply all happen inside
+  P0's turn N (PendingApply entry turn must equal the current game turn). Orders use
+  the UI operations path.
+- **AI seats (1..4):** snapshot at the turn-N activation (the seat does not wait
+  there, `bridge|seat_async`). The answer is published as a PendingApply entry
+  `"<player>:turn"` with `turn = N`. At the seat's next activation (turn N+1) the
+  bridge applies that entry first (`bridge|pending_apply|...|turn=N|game_turn=N+1`,
+  then `pending_apply_ok`), through the GameCore routes
+  (`ExposedMembers.Civ6Ai.*ForPlayer`: move, research, civic, skip/fortify, found
+  city). Then it takes the turn N+1 snapshot. Commands without a GameCore route
+  (production, attack) fail one by one with `*_requires_local_player`.
+- **Barrier (autotest):** before P0 ends turn N+1, autotest waits until every AI
+  seat's turn-N answer has been delivered (`autotest|seat_barrier_wait` ...
+  `seat_barrier_done`), bounded by sidecar timeout x (pending seats + 1). So the
+  answers are ready when the AI seats activate. A sidecar failure or an empty
+  answer is still published as an empty entry, so the barrier never waits on a
+  seat that will not answer.
+- **No replays:** each entry carries session, player, turn, kind and an apply id.
+  Lua applies an entry only for the matching session and player, only for the turn
+  allowed above, and only once per apply id. The file stays on disk, so include()
+  re-reading it is harmless. Seats never share an entry.
+- **New game = new session:** `scripts/start_live.py` (default) rotates the session
+  id in the installed `Civ6Ai_Paths.lua` / `Civ6Ai_Runtime.lua` and `runtime.json`.
+  It also archives per-player transient files (decisions, apply files, snapshots,
+  markers) into `sessions/<id>/_archive_<stamp>/` and moves the Lua.log offsets to
+  the end. Start it **before** starting the new game. Use `--keep-session` only
+  to restart helpers for the game already running.
+
+Caveat: the Firaxis AI also plays AI seats. If it moved a unit before the bridge
+applied, the move fails with `no_moves_left` and the next snapshot shows the real
+state.
+
+**AI-seat unit hold.** The Firaxis AI spends a seat's moves the moment its turn starts, long before the model answers. For model-driven AI seats GameCore `FinishMoves` their movable units (not builders/traders/religious) at `PlayerTurnStarted` and `PlayerTurnStartComplete` (`gamecore|hold_units|...|phase=complete|count=N`) and `RestoreMovement` a held unit once when its model move arrives. Snapshots read unit moves through GameCore (`UnitMovesForPlayer`): held units report full moves and the local seat no longer reads the UI cache's stale 0 at turn start, so `legal_commands` includes moves again.
+
+**Turn timer must be off.** In Advanced Setup set the MP_helper "Smart-Timer" option to off/None. With "Smart-Timer: Classic" the game ends the local seat's turn after ~60 s regardless of the model, so answers (1-2 min per seat) arrive stale (`pending_apply_stale_turn`, `inbox_wait_abandoned`). `start_live --keep-session` no longer clears queued PendingApply answers, and Enter nudges are only sent while the local seat's turn is still active.
 
 ## Troubleshooting
 

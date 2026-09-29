@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -249,11 +250,58 @@ def _normalize_decision_wire(decision: dict[str, Any]) -> None:
             decision["reason"] = mapped
 
 
+_CHAT_TEXT_MAX = 240  # decision-input-v2 chat_record.text maxLength
+_ID_MAX = 128
+
+
+def inbox_message_id(turn: int, from_player_id: str, text: str) -> str:
+    """Stable id for a private chat record (same message -> same id on every snapshot)."""
+    digest = hashlib.sha1(f"{turn}|{from_player_id}|{text}".encode("utf-8")).hexdigest()[:16]
+    return f"MSG_T{turn}_{digest}"
+
+
+def _normalize_chat_record(message: Any) -> dict[str, Any] | None:
+    """Coerce one Lua private_inbox entry to schema chat_record (message_id, from_player_id, turn, text).
+
+    Older Civ6Ai_Chat.lua stored inbox messages without message_id, which failed
+    schema validation and cost the seat its model turn.
+    """
+    if not isinstance(message, dict):
+        return None
+    try:
+        turn = max(0, int(message.get("turn", 0)))
+    except (TypeError, ValueError):
+        turn = 0
+    sender = str(message.get("from_player_id") or "").strip()[:_ID_MAX] or "PLAYER_UNKNOWN"
+    text = message.get("text")
+    if not isinstance(text, str):
+        text = "" if text is None else str(text)
+    full_text = text
+    text = text[:_CHAT_TEXT_MAX]
+    message_id = str(message.get("message_id") or "").strip()[:_ID_MAX]
+    if not message_id:
+        message_id = inbox_message_id(turn, sender, full_text)
+    return {"message_id": message_id, "from_player_id": sender, "turn": turn, "text": text}
+
+
+def _normalize_private_inbox(snapshot: dict[str, Any]) -> None:
+    diplomacy = snapshot.get("diplomacy")
+    if not isinstance(diplomacy, dict):
+        return
+    inbox = diplomacy.get("private_inbox")
+    if isinstance(inbox, dict):  # Lua empty/sparse array
+        inbox = [inbox[k] for k in sorted(inbox, key=lambda k: int(k) if str(k).isdigit() else 0)]
+    if not isinstance(inbox, list):
+        return
+    diplomacy["private_inbox"] = [r for r in (_normalize_chat_record(m) for m in inbox) if r is not None]
+
+
 def _normalize_wire_shapes(snapshot: dict[str, Any]) -> None:
     """Normalize flat game/Lua wire into civ6ai-input schema before validation."""
     history = snapshot.get("history")
     if isinstance(history, dict):
         _normalize_history_wire(history)
+    _normalize_private_inbox(snapshot)
     decision = snapshot.get("decision")
     if isinstance(decision, dict):
         _normalize_decision_wire(decision)
@@ -271,7 +319,181 @@ def normalize_civ6_snapshot(snapshot: dict[str, Any]) -> None:
     civ6 = snapshot.get("civ6")
     if not isinstance(civ6, dict):
         snapshot["civ6"] = {}
+    normalize_civ6_diplomacy(snapshot)
+    derive_known_other_cities(snapshot)
     validate_civ6_snapshot(snapshot)
+
+
+def _as_list(value: Any) -> list[Any]:
+    """Lua sends empty arrays as {} and sparse ones as {"1": ..}; accept both."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        if not value:
+            return []
+        if all(str(key).isdigit() for key in value):
+            return [value[key] for key in sorted(value, key=lambda key: int(str(key)))]
+    return []
+
+
+def _normalize_trade_stock(stock: Any) -> dict[str, Any] | None:
+    if not isinstance(stock, dict):
+        return None
+    out: dict[str, Any] = {}
+    for key in ("luxuries", "strategics"):
+        rows = []
+        for row in _as_list(stock.get(key)):
+            if isinstance(row, dict) and isinstance(row.get("resource_id"), str):
+                amount = _as_schema_int(row.get("amount"))
+                rows.append({"resource_id": row["resource_id"], "amount": amount if amount is not None else 1})
+        out[key] = rows
+    for key in ("gold", "gold_per_turn"):
+        number = _as_schema_int(stock.get(key))
+        if number is not None:
+            out[key] = number
+    return out
+
+
+def normalize_civ6_diplomacy(snapshot: dict[str, Any]) -> None:
+    """Shape the optional ``civ6.diplomacy`` block (newer mods only).
+
+    Absent -> nothing to do (older Lua); malformed -> dropped rather than failing
+    schema validation, so a partly-working engine query never costs the turn.
+    """
+    civ6 = snapshot.get("civ6")
+    if not isinstance(civ6, dict) or "diplomacy" not in civ6:
+        return
+    raw = civ6.get("diplomacy")
+    if not isinstance(raw, dict):
+        civ6.pop("diplomacy", None)
+        return
+    out: dict[str, Any] = {}
+    majors = []
+    for row in _as_list(raw.get("majors")):
+        if not isinstance(row, dict) or not isinstance(row.get("player_id"), str):
+            continue
+        major: dict[str, Any] = {"player_id": row["player_id"]}
+        for key in ("state", "relationship", "alliance_type"):
+            if isinstance(row.get(key), str) and row[key]:
+                major[key] = row[key]
+        score = _as_schema_int(row.get("diplomatic_score"))
+        if score is not None:
+            major["diplomatic_score"] = score
+        for key in ("at_war", "denounced", "declared_friendship", "alliance", "open_borders", "defensive_pact"):
+            if isinstance(row.get(key), bool):
+                major[key] = row[key]
+        major["at_war_with"] = [p for p in _as_list(row.get("at_war_with")) if isinstance(p, str)]
+        reasons = []
+        for reason in _as_list(row.get("reasons")):
+            if isinstance(reason, dict) and isinstance(reason.get("text"), str):
+                reasons.append({"text": reason["text"][:80], "score": _as_schema_int(reason.get("score")) or 0})
+        major["reasons"] = reasons
+        trade = _normalize_trade_stock(row.get("trade"))
+        if trade is not None:
+            major["trade"] = trade
+        majors.append(major)
+    out["majors"] = majors
+    city_states = []
+    for row in _as_list(raw.get("city_states")):
+        if not isinstance(row, dict) or not isinstance(row.get("player_id"), str):
+            continue
+        cs: dict[str, Any] = {"player_id": row["player_id"]}
+        for key in ("name", "city_state_type", "suzerain_id"):
+            if isinstance(row.get(key), str) and row[key]:
+                cs[key] = row[key]
+        envoys = _as_schema_int(row.get("your_envoys"))
+        if envoys is not None:
+            cs["your_envoys"] = envoys
+        if isinstance(row.get("at_war"), bool):
+            cs["at_war"] = row["at_war"]
+        city_states.append(cs)
+    out["city_states"] = city_states
+    wars = []
+    for pair in _as_list(raw.get("wars")):
+        members = [p for p in _as_list(pair) if isinstance(p, str)]
+        if len(members) == 2:
+            wars.append(members)
+    out["wars"] = wars
+    trade = _normalize_trade_stock(raw.get("your_trade"))
+    if trade is not None:
+        out["your_trade"] = trade
+    envoys = _as_schema_int(raw.get("envoys_to_give"))
+    if envoys is not None:
+        out["envoys_to_give"] = envoys
+    civ6["diplomacy"] = out
+
+
+def _is_city_state_player(player: dict[str, Any]) -> bool:
+    leader = str(player.get("leader_id") or "").upper()
+    return leader.startswith("LEADER_MINOR_CIV_")
+
+
+def derive_known_other_cities(snapshot: dict[str, Any]) -> int:
+    """Fill ``known_other_cities`` from revealed city plots owned by other players.
+
+    Older Civ6Ai_Snapshot.lua always sent an empty list even though
+    ``known_map.plots`` carries ``city_id`` + ``revealed_owner_id`` for every
+    revealed foreign city tile, so the map had no foreign city marker and the prompt
+    no city list. Returns how many cities were added. No-op when the list is filled.
+    """
+    existing = snapshot.get("known_other_cities")
+    if isinstance(existing, list) and existing:
+        return 0
+    player_id = str((snapshot.get("decision") or {}).get("player_id") or "")
+    known_map = snapshot.get("known_map")
+    plots = known_map.get("plots") if isinstance(known_map, dict) else None
+    if not isinstance(plots, list):
+        return 0
+    players = {
+        str(p.get("player_id")): p
+        for p in snapshot.get("known_players", []) or []
+        if isinstance(p, dict) and p.get("player_id")
+    }
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
+    turn = next(
+        (value for value in (game.get("turn"), decision.get("turn")) if isinstance(value, int) and value >= 0),
+        0,
+    )
+    cities: list[dict[str, Any]] = []
+    for plot in plots:
+        if not isinstance(plot, dict) or not plot.get("city_id"):
+            continue
+        owner = plot.get("revealed_owner_id")
+        if not isinstance(owner, str) or not owner or owner == player_id:
+            continue
+        x, y = plot.get("x"), plot.get("y")
+        plot_id = plot.get("plot_id") or (f"PLOT_{x}_{y}" if x is not None and y is not None else None)
+        if not plot_id:
+            continue
+        player = players.get(owner, {})
+        leader_name = str(player.get("leader_name") or "").strip()
+        civ = str(player.get("civilization_id") or owner).removeprefix("CIVILIZATION_")
+        civ_label = civ.replace("_", " ").title()
+        if player and _is_city_state_player(player):
+            name = leader_name or civ_label
+        else:
+            name = f"{civ_label} city"
+        knowledge = plot.get("knowledge") if plot.get("knowledge") in ("visible", "remembered") else "remembered"
+        last_seen = plot.get("last_seen_turn")
+        if not isinstance(last_seen, int) or last_seen < 0:
+            last_seen = turn if knowledge == "visible" else 0
+        cities.append({
+            # Lua city ids are per-owner (CITY_65536 repeats across players); make them unique.
+            "city_id": f"CITY_{owner}_{plot_id}",
+            "owner_player_id": owner,
+            "name": name,
+            "plot_id": str(plot_id),
+            "area_id": str(plot.get("area_id") or "AREA_UNKNOWN"),
+            "knowledge": knowledge,
+            "last_seen_turn": int(last_seen),
+            "population": None,
+            "is_capital": None,
+            "visible_defense": None,
+        })
+    if cities:
+        snapshot["known_other_cities"] = cities
+    return len(cities)
 
 
 def load_capabilities() -> dict[str, Any]:
@@ -788,10 +1010,65 @@ def _merge_known_players(runtime: list[Any], template: list[Any]) -> list[dict[s
     return merged if merged else copy.deepcopy(template)
 
 
-def _merge_known_map(runtime: dict[str, Any], template: dict[str, Any]) -> dict[str, Any]:
+def _optional_int(value: Any) -> int | None:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _expand_cropped_grid(
+    grid: Any,
+    viewport: Any,
+    map_width: int | None,
+    map_height: int | None,
+) -> list[str] | None:
+    """Re-anchor a viewport-cropped ``visibility_grid`` to full-map (0,0) rows.
+
+    Lua crops the grid to ``known_map.viewport`` (e.g. x0=1, y0=6). The merge below
+    drops that viewport, and every reader then treated row 0 as y=0, which shifted the
+    revealed area on the map image by (x0, y0) tiles away from the real plots/units.
+    """
+    if not isinstance(grid, list) or not grid or not isinstance(viewport, dict):
+        return None
+    try:
+        x0 = int(viewport.get("x0") or 0)
+        y0 = int(viewport.get("y0") or 0)
+    except (TypeError, ValueError):
+        return None
+    if x0 == 0 and y0 == 0:
+        return None
+    rows = [row if isinstance(row, str) else "" for row in grid]
+    row_len = max((len(row) for row in rows), default=0)
+    width = int(map_width) if map_width else x0 + row_len
+    height = int(map_height) if map_height else y0 + len(rows)
+    full = [["?"] * width for _ in range(height)]
+    for r, row in enumerate(rows):
+        wy = y0 + r
+        if not 0 <= wy < height:
+            continue
+        for c, ch in enumerate(row):
+            wx = x0 + c
+            if 0 <= wx < width:
+                full[wy][wx] = ch
+    return ["".join(line) for line in full]
+
+
+def _merge_known_map(
+    runtime: dict[str, Any],
+    template: dict[str, Any],
+    map_width: int | None = None,
+    map_height: int | None = None,
+) -> dict[str, Any]:
     out = copy.deepcopy(template)
     if not isinstance(runtime, dict):
         return out
+    crop_viewport = runtime.get("viewport")
+    if not isinstance(crop_viewport, dict):
+        image_block = runtime.get("image")
+        if isinstance(image_block, dict):
+            crop_viewport = image_block.get("viewport")
     tpl_plots = template.get("plots", [])
     tpl_plot: dict[str, Any] = tpl_plots[0] if tpl_plots and isinstance(tpl_plots[0], dict) else _empty_plot()
     for key, value in runtime.items():
@@ -813,6 +1090,10 @@ def _merge_known_map(runtime: dict[str, Any], template: dict[str, Any]) -> dict[
             out["plots"] = merged_plots
         elif key != "viewport":
             out[key] = copy.deepcopy(value)
+    for grid_key in ("visibility_grid", "territory_owner_grid"):
+        expanded = _expand_cropped_grid(out.get(grid_key), crop_viewport, map_width, map_height)
+        if expanded is not None:
+            out[grid_key] = expanded
     out.pop("viewport", None)
     image = out.get("image")
     if isinstance(image, dict):
@@ -894,7 +1175,15 @@ def upgrade_runtime_snapshot(raw: dict[str, Any]) -> dict[str, Any]:
         if isinstance(raw.get("civ6"), dict):
             _deep_merge_from_raw(shell["civ6"], raw["civ6"])
         if isinstance(raw.get("known_map"), dict):
-            shell["known_map"] = _merge_known_map(raw["known_map"], template.get("known_map", {}))
+            raw_map = raw.get("civ6", {}).get("map") if isinstance(raw.get("civ6"), dict) else None
+            raw_game = raw.get("game") if isinstance(raw.get("game"), dict) else {}
+            raw_map = raw_map if isinstance(raw_map, dict) else {}
+            shell["known_map"] = _merge_known_map(
+                raw["known_map"],
+                template.get("known_map", {}),
+                map_width=_optional_int(raw_map.get("width") or raw_game.get("map_width")),
+                map_height=_optional_int(raw_map.get("height") or raw_game.get("map_height")),
+            )
         if isinstance(raw.get("your_cities"), list):
             shell["your_cities"] = [
                 _merge_live_city(city) for city in raw["your_cities"] if isinstance(city, dict)
