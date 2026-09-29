@@ -13,13 +13,13 @@ from sidecar import civ6_combat_wire as combat_wire
 from sidecar import civ6_rankings_wire as rankings_wire
 
 UNITS_NATIVE_CONTROL_HINT = (
-    "Firaxis AI moves unmoved units after your commands; use fortify/sleep/alert to hold a unit."
+    "Units you leave without orders stay where they are this turn; use fortify/sleep/alert to hold a unit on purpose."
 )
 CITIES_NATIVE_PRODUCTION_HINT = (
     "Cities keep auto production unless you set changeProduction."
 )
 CIV6_NATIVE_FALLBACK_POLICY = (
-    "Firaxis native AI moves unmoved units after your commands; cities keep auto production unless you override."
+    "Units left without orders stay where they are; cities keep auto production unless you override."
 )
 
 CIV6_EMPIRE_WIRE: dict[str, tuple[str, str]] = {
@@ -1238,7 +1238,7 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
 def _advice_section(context: dict[str, Any]) -> list[str]:
     lines = [
         "- In peacetime, scouts and warriors explore fog. Do not fortify the whole army, because units left "
-        "without orders fall back to the native AI.",
+        "without orders stay where they are.",
         "- Settlers should found or walk toward a settle tile; do not sleep on your own city.",
         "- Before you finish: issue one command for each entry under REQUIRED COMMANDS.",
     ]

@@ -95,7 +95,7 @@ Not full unit micro. Matches Civ IV AdvCiv split ([`docs/civ6-llm-ai-research.md
 
 | Domain | Default | LLM override | Opt-out |
 |--------|---------|--------------|---------|
-| Units | Firaxis native AI moves unmoved units after LLM apply | `moveTo`, `attackTo`, worker ops, etc. | `stance=fortify`, `sleep`, or `alert` |
+| Units | Units left without orders stay where they are (builders, traders, religious units stay with the game's AI) | `moveTo`, `attackTo`, worker ops, etc. | `stance=fortify`, `sleep`, or `alert` |
 | Production | Auto/deterministic pick when LLM doesn't override | `{City}.changeProduction` | Omit — city keeps queue or gets auto-pick |
 
 **Apply order:** LLM commands → native AI unit phase → deterministic production for cities still empty → host ends turn.
@@ -103,7 +103,7 @@ Not full unit micro. Matches Civ IV AdvCiv split ([`docs/civ6-llm-ai-research.md
 **Prompt hints:**
 
 ```text
-units.nativeControl = Firaxis AI moves unmoved units after your commands; use fortify/sleep/alert to hold a unit.
+units.nativeControl = Units you leave without orders stay where they are this turn; use fortify/sleep/alert to hold a unit on purpose.
 cities.nativeProduction = Cities keep auto production unless you set changeProduction.
 ```
 
@@ -201,7 +201,7 @@ empire.research.tech.progress = ...
 empire.research.civic = CIVIC_CRAFTSMANSHIP
 empire.government = GOVERNMENT_CLASSICAL_REPUBLIC
 empire.era_score = ...
-units.nativeControl = Firaxis AI moves unmoved units after your commands; use fortify/sleep/alert to hold a unit.
+units.nativeControl = Units you leave without orders stay where they are this turn; use fortify/sleep/alert to hold a unit on purpose.
 cities.nativeProduction = Cities keep auto production unless you set changeProduction.
 ```
 

@@ -37,9 +37,7 @@ class SessionRotationTests(unittest.TestCase):
             logs = tmp / "Logs"
             mod = tmp / "Mods" / "Civ6Ai"
             (mod / "InGame").mkdir(parents=True)
-            (mod / "Gameplay").mkdir(parents=True)
             (mod / "InGame" / "Civ6Ai_Paths.lua").write_text('Civ6Ai_Paths = {\n  SessionId = "live-old",\n}\n')
-            (mod / "Gameplay" / "Civ6Ai_Runtime.lua").write_text('Civ6Ai_Runtime = {\n  SessionId = "live-old",\n}\n')
             root.mkdir()
             (root / "runtime.json").write_text(json.dumps({"session_id": "live-old", "managed_seats": "0,1"}))
             old_p0 = root / "sessions" / "live-old" / "PLAYER_0"
@@ -53,9 +51,8 @@ class SessionRotationTests(unittest.TestCase):
             info = install_mod.rotate_session("live-new", civ6ai_root=root, mod_dirs=[mod], log_dir=logs)
 
             self.assertEqual(("live-old", "live-new"), (info["old"], info["new"]))
-            self.assertEqual(2, len(info["updated"]))
+            self.assertEqual(1, len(info["updated"]))
             self.assertIn('"live-new"', (mod / "InGame" / "Civ6Ai_Paths.lua").read_text())
-            self.assertIn('"live-new"', (mod / "Gameplay" / "Civ6Ai_Runtime.lua").read_text())
             runtime = json.loads((root / "runtime.json").read_text())
             self.assertEqual("live-new", runtime["session_id"])
             self.assertEqual("0,1", runtime["managed_seats"])
@@ -84,6 +81,8 @@ BRIDGE = ROOT / "mod" / "Civ6Ai" / "InGame" / "Civ6Ai_Bridge.lua"
 LUA_STUBS = r"""
 LOG = {}
 APPLIED = {}
+PANEL = {}
+TICKS = {}
 CURRENT_TURN = 1
 LOCAL_PLAYER = 0
 PENDING_SRC = ""
@@ -93,17 +92,25 @@ Game = {
 }
 Players = {}
 for i = 0, 4 do Players[i] = {} end
-Civ6Ai_Util = { Log = function(m) table.insert(LOG, m) end, CanReadHostFiles = function() return false end }
+Civ6Ai_Util = { Log = function(m) table.insert(LOG, m) end, CanReadHostFiles = function() return false end,
+  ScheduleTick = function(fn) table.insert(TICKS, fn) end }
 Civ6Ai_Config = {
   _managedSeats = {[0]=true,[1]=true,[2]=true,[3]=true,[4]=true},
   ShouldRunBridge = function(p) return p >= 0 and p <= 4 end,
+  ManagedSeatsList = function() return {0, 1, 2, 3, 4} end,
   SessionId = function() return "sess" end,
   SidecarTimeout = function() return 600 end,
 }
 Civ6Ai_Apply = {
-  ApplyDecision = function(p, d) table.insert(APPLIED, {player=p, n=#d.commands}) end,
+  ApplyDecision = function(p, d, t) table.insert(APPLIED, {player=p, n=#d.commands, turn=t}) end,
   _IsNetworkMultiplayer = function() return false end,
 }
+Civ6Ai_Chat = { PanelAdd = function(line) table.insert(PANEL, line) end }
+function RUN_TICKS()
+  local keep = {}
+  for _, fn in ipairs(TICKS) do if fn() then table.insert(keep, fn) end end
+  TICKS = keep
+end
 include = function(name)
   Civ6Ai_PendingApplyQueue = nil
   local chunk = load(PENDING_SRC)
@@ -133,24 +140,25 @@ class BridgePendingApplyLuaTests(unittest.TestCase):
     def _log(self):
         return [self.g.LOG[i] for i in range(1, len(self.g.LOG) + 1)]
 
-    def test_ai_seat_applies_previous_turn_answer_once(self):
+    def test_ai_seat_answer_sent_once_for_its_snapshot_turn(self):
         payload = '{"commands":[{"kind":"move_unit","command_id":"CMD_1","arguments":{"unit_id":"UNIT_1"}}]}'
         self._publish([(2, 3, payload, "sess")])
         self.g.CURRENT_TURN = 4
-        self.assertTrue(self.g.Civ6Ai_Bridge._ApplyPreviousTurnForSeat(2))
+        self.assertTrue(self.g.Civ6Ai_Bridge._DeliverSeatDecision(2, 3))
         self.assertEqual(1, len(self.g.APPLIED))
-        self.assertEqual(2, self.g.APPLIED[1].player)
-        self.assertFalse(self.g.Civ6Ai_Bridge._ApplyPreviousTurnForSeat(2))
+        self.assertEqual((2, 3), (self.g.APPLIED[1].player, self.g.APPLIED[1].turn))
+        self.assertFalse(self.g.Civ6Ai_Bridge._DeliverSeatDecision(2, 3))
         self.assertEqual(1, len(self.g.APPLIED))
-        self.assertTrue(any("pending_apply_ok|player=2|turn=3" in line for line in self._log()))
+        self.assertTrue(any("seat_decision_sent|player=2|snapshot_turn=3" in line for line in self._log()))
 
     def test_ai_seat_rejects_other_session_and_wrong_turn(self):
         payload = '{"commands":[{"kind":"move_unit","command_id":"CMD_1","arguments":{}}]}'
         self._publish([(2, 3, payload, "old-game")])
         self.g.CURRENT_TURN = 4
-        self.assertFalse(self.g.Civ6Ai_Bridge._ApplyPreviousTurnForSeat(2))
+        self.assertFalse(self.g.Civ6Ai_Bridge._DeliverSeatDecision(2, 3))
         self._publish([(2, 1, payload, "sess")])
-        self.assertFalse(self.g.Civ6Ai_Bridge._ApplyPreviousTurnForSeat(2))
+        self.g.Civ6Ai_Bridge._lastPendingReload = None
+        self.assertFalse(self.g.Civ6Ai_Bridge._DeliverSeatDecision(2, 3))
         self.assertEqual(0, len(self.g.APPLIED))
         stale = [line for line in self._log() if "stale" in line]
         self.assertEqual(2, len(stale))
@@ -159,8 +167,31 @@ class BridgePendingApplyLuaTests(unittest.TestCase):
         payload = '{"commands":[{"kind":"move_unit","command_id":"CMD_1","arguments":{}}]}'
         self._publish([(1, 3, payload, "sess")])
         self.g.CURRENT_TURN = 4
-        self.assertFalse(self.g.Civ6Ai_Bridge._ApplyPreviousTurnForSeat(2))
+        self.assertFalse(self.g.Civ6Ai_Bridge._DeliverSeatDecision(2, 3))
         self.assertEqual(0, len(self.g.APPLIED))
+
+    def test_delivery_waits_for_answer_then_stops(self):
+        self.g.CURRENT_TURN = 3
+        self._publish([])
+        self.g.Civ6Ai_Bridge._ScheduleSeatDelivery(2, 3)
+        self.lua.execute("RUN_TICKS()")
+        self.assertEqual(1, len(self.g.TICKS))
+        self._publish([(2, 3, '{"commands":[{"kind":"unit_skip","command_id":"C","arguments":{}}]}', "sess")])
+        self.g.Civ6Ai_Bridge._lastPendingReload = None
+        self.lua.execute("RUN_TICKS()")
+        self.assertEqual(0, len(self.g.TICKS))
+        self.assertEqual(1, len(self.g.APPLIED))
+
+    def test_delivery_gives_up_when_the_turn_it_was_for_is_over(self):
+        self.g.CURRENT_TURN = 3
+        self._publish([])
+        self.g.Civ6Ai_Bridge._dumpedKeys["2|3"] = True
+        self.g.Civ6Ai_Bridge._ScheduleSeatDelivery(2, 3)
+        self.g.CURRENT_TURN = 5
+        self.lua.execute("RUN_TICKS()")
+        self.assertEqual(0, len(self.g.TICKS))
+        self.assertTrue(self.g.Civ6Ai_Bridge.SeatDecisionSettled(2, 3))
+        self.assertIn("1 AI player(s) had no answer", self.g.PANEL[1])
 
     def test_local_seat_stale_turn_logs_once(self):
         payload = '{"commands":[{"kind":"move_unit","command_id":"CMD_1","arguments":{}}]}'
@@ -170,15 +201,20 @@ class BridgePendingApplyLuaTests(unittest.TestCase):
             self.assertFalse(self.g.Civ6Ai_Bridge._TryPendingApplyFromMod(0))
         self.assertEqual(1, sum("pending_apply_stale_turn" in line for line in self._log()))
 
-    def test_seat_decision_delivered(self):
+    def test_status_line_once_every_ai_seat_is_settled(self):
         self.g.CURRENT_TURN = 4
-        self.assertTrue(self.g.Civ6Ai_Bridge.SeatDecisionDelivered(3, 3))  # no snapshot dumped
+        self.assertTrue(self.g.Civ6Ai_Bridge.SeatDecisionSettled(3, 3))  # no snapshot dumped
         self.g.Civ6Ai_Bridge._dumpedKeys["3|3"] = True
-        self._publish([])
-        self.assertFalse(self.g.Civ6Ai_Bridge.SeatDecisionDelivered(3, 3))
+        self.g.Civ6Ai_Bridge._dumpedKeys["4|3"] = True
+        self.assertFalse(self.g.Civ6Ai_Bridge.SeatDecisionSettled(3, 3))
         self._publish([(3, 3, '{"commands":[],"chat_messages":[]}', "sess")])
+        self.assertTrue(self.g.Civ6Ai_Bridge._DeliverSeatDecision(3, 3))
+        self.assertTrue(self.g.Civ6Ai_Bridge.SeatDecisionSettled(3, 3))
+        self.assertEqual(0, len(self.g.PANEL))  # seat 4 still out
+        self._publish([(4, 3, '{"commands":[],"chat_messages":[]}', "sess")])
         self.g.Civ6Ai_Bridge._lastPendingReload = None
-        self.assertTrue(self.g.Civ6Ai_Bridge.SeatDecisionDelivered(3, 3))
+        self.assertTrue(self.g.Civ6Ai_Bridge._DeliverSeatDecision(4, 3))
+        self.assertEqual(["T4  All AI orders are in. You can end your turn."], list(self.g.PANEL.values()))
 
     def test_non_local_seat_can_apply_in_single_player(self):
         self.assertTrue(self.g.Civ6Ai_Bridge._CanApplyInGame(3))
@@ -217,7 +253,7 @@ class NudgeStalenessTests(unittest.TestCase):
 GAMECORE_STUBS = r"""
 LOG = {}
 print = function(s) table.insert(LOG, s) end
-ExposedMembers = { Civ6Ai = { HoldAiSeatUnits = { [2] = true } } }
+ExposedMembers = { Civ6Ai = {} }
 GameEvents = { PlayerTurnStartComplete = { Add = function() end }, PlayerTurnStarted = { Add = function() end } }
 io = nil
 os = nil
@@ -250,7 +286,7 @@ end
 
 
 @unittest.skipIf(LuaRuntime is None, "lupa not installed")
-class GameCoreHoldTests(unittest.TestCase):
+class GameCoreMoveTests(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime()
         self.lua.execute(GAMECORE_STUBS)
@@ -260,42 +296,21 @@ class GameCoreHoldTests(unittest.TestCase):
         self.gc._FindUnit = self.lua.eval(
             "function(p, id) for _, u in ipairs(UNITS) do if u.id == id then return nil, u, '' end end return nil, nil, 'no_unit' end")
 
-    def test_held_unit_moves_once_on_model_order(self):
-        self.assertEqual(0, self.gc.HoldSeatUnits(1))  # not a model seat
-        self.assertEqual(1, self.gc.HoldSeatUnits(2))  # builder (unit 2) left to the Firaxis AI
+    def test_move_needs_moves_left(self):
         unit = self.g.UNITS[1]
-        self.assertEqual(0, unit.moves)
-        self.assertEqual(2, self.g.UNITS[2].moves)
         ok, reason = self.gc.MoveUnitForPlayer(2, 1, 5, 1)
         self.assertTrue(ok, reason)
         self.assertEqual(5, unit.x)
         unit.moves = 0
-        ok, reason = self.gc.MoveUnitForPlayer(2, 1, 7, 1)
-        self.assertFalse(ok)
-        self.assertEqual("no_moves_left", reason)
+        self.assertEqual((False, "illegal_move:no_moves_left"), tuple(self.gc.MoveUnitForPlayer(2, 1, 7, 1)))
 
-    def test_snapshot_moves_report_held_units_as_movable(self):
-        self.gc.HoldSeatUnits(2, "complete")
-        moves, held = self.gc.UnitMovesForPlayer(2, 1)
-        self.assertEqual((2, True), (moves, held))
-        moves, held = self.gc.UnitMovesForPlayer(2, 2)  # builder, not held
-        self.assertEqual((2, False), (moves, held))
-        self.g.UNITS[1].moves = 0  # spent this turn; the answer applies next turn
-        moves, held = self.gc.UnitMovesForPlayer(2, 1)
-        self.assertEqual((2, True), (moves, held))
+    def test_planning_uses_full_movement(self):
+        # A seat whose orders play at its next turn start plans with full movement.
         self.g.UNITS[1].moves = 0
-        moves, held = self.gc.UnitMovesForPlayer(1, 1)  # not a hold seat
-        self.assertEqual((0, False), (moves, held))
-
-    def test_hold_accumulates_across_phases_and_expires_next_turn(self):
-        unit = self.g.UNITS[1]
-        unit.moves = 0  # PlayerTurnStarted: movement not restored yet
-        self.assertEqual(0, self.gc.HoldSeatUnits(2, "started"))
-        unit.moves = 2  # PlayerTurnStartComplete
-        self.assertEqual(1, self.gc.HoldSeatUnits(2, "complete"))
-        self.g.TURN = 5
-        ok, reason = self.gc.MoveUnitForPlayer(2, 1, 5, 1)
-        self.assertEqual((False, "no_moves_left"), (ok, reason))
+        self.assertEqual(0, self.gc.UnitMovesForPlayer(2, 1))
+        self.assertEqual(2, self.gc.UnitMovesForPlayer(2, 1, True))
+        self.assertEqual((False, "no_moves_left"), tuple(self.gc.CanMoveUnitToForPlayer(2, 1, 5, 1)))
+        self.assertTrue(self.gc.CanMoveUnitToForPlayer(2, 1, 5, 1, True)[0])
 
 
 @unittest.skipIf(LuaRuntime is None, "lupa not installed")
@@ -422,6 +437,7 @@ Civ6Ai_SeatExperiment = { Initialize = function() end, OnPlayerTurnActivated = f
 Civ6Ai_Autotest = { Initialize = function() end }
 Civ6Ai_HostChannel = { Initialize = function() end }
 Civ6Ai_Chat = { Initialize = function() end }
+Civ6Ai_OrderChannel = { Initialize = function() end }
 Civ6Ai_Util = { Log = function() end, InitializeTickPump = function() end, ProbeIo = function() end,
   ScheduleTick = function(fn) table.insert(TICKS, fn) end }
 Civ6Ai_Bridge = { RunTurnPulse = function(p) table.insert(PULSES, p) end, RunChatPulse = function() end,
@@ -475,14 +491,13 @@ class LocalSeatTurnStartTests(unittest.TestCase):
         lua.execute("NOW = NOW + 9; RUN_TICKS()")
         self.assertEqual(1, len(lua.globals().PULSES))
 
-    def test_gamecore_marks_turn_start_complete(self):
-        lua = LuaRuntime()
-        lua.execute(GAMECORE_STUBS)
-        lua.execute((ROOT / "mod/Civ6Ai/Gameplay/Civ6Ai_GameCore.lua").read_text(encoding="utf-8"))
-        lua.execute("ExposedMembers.Civ6Ai.HoldAiSeatUnits = {}")
-        lua.globals().Civ6Ai_OnPlayerTurnStartComplete(0)
-        turn = lua.eval("ExposedMembers.Civ6Ai.TurnStartComplete[0]")
-        self.assertEqual(lua.eval("Game.GetCurrentGameTurn()"), turn)
+    def test_other_seats_pulse_only_after_their_queue_ran(self):
+        lua = self._lua()
+        g = lua.globals()
+        g.Civ6Ai_OnPlayerTurnActivated(3, True)
+        self.assertEqual(0, len(g.PULSES))
+        g.Civ6Ai_OnPlayerTurnStartComplete(3)
+        self.assertEqual([3], list(g.PULSES.values()))
 
 
 @unittest.skipIf(LuaRuntime is None, "lupa not installed")

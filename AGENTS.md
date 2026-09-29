@@ -50,10 +50,10 @@ rules literally. Verify paths and callers before editing.
 
 ## Multiplayer sync rules
 
-- Anything that changes game state in MP must execute identically on every client (e.g. the `CIV6AI_MP_MOVE_SYNC` path in `mod/Civ6Ai/InGame/Civ6Ai_MpSync.lua`) or it will desync (OOS). Never apply game-state changes on the host only.
+- Anything that changes game state for a seat other than the local one goes through the synced order channel (`mod/Civ6Ai/InGame/Civ6Ai_OrderChannel.lua` sends an `EXECUTE_SCRIPT` player operation; `mod/Civ6Ai/Gameplay/Civ6Ai_Orders.lua` runs it on every PC). Single player uses the same path. Never apply game-state changes on one PC only, or the game desyncs (OOS).
+- An AI seat's decision for its turn-N snapshot is its order queue for turn N+1 (synced game properties), played at that seat's turn start with full movement; no queue means the game's own AI plays the seat.
 - The single-player local-player swap is blocked in network MP (`local_player_swap_blocked_mp`); do not try to re-enable it.
-- Keep the single-player Apply ladder working when MP flags are off.
-- New MP behavior goes behind a config flag, default **off** until David verifies on two PCs (`mp_move_sync` in local config / `CIV6AI_MP_MOVE_SYNC` / `Civ6Ai_Paths.MpMoveSync`).
+- Say plainly which MP behaviour has not been verified on two PCs yet.
 - LAN pass criteria: no new `OOSLog` lines after turn 1, identical unit positions on both PCs, host log shows `apply|ok|move_unit`. See `docs/civ6_lan_probe.md` and `docs/REAL_TEST.md`.
 
 ## LM Studio rules

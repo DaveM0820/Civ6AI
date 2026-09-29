@@ -37,7 +37,6 @@ class Civ6ConfigTests(unittest.TestCase):
                 "CIV6AI_LMSTUDIO_TIMEOUT_SECONDS": "120",
                 "CIV6AI_LMSTUDIO_VISION": "0",
                 "CIV6AI_LMSTUDIO_REASONING": "off",
-                "CIV6AI_MP_MOVE_SYNC": "1",
             },
             clear=False,
         ):
@@ -47,7 +46,6 @@ class Civ6ConfigTests(unittest.TestCase):
         self.assertEqual(120, cfg.timeout_seconds)
         self.assertFalse(cfg.vision)
         self.assertEqual("off", cfg.reasoning)
-        self.assertTrue(cfg.mp_move_sync)
 
     def test_local_json_overlay(self):
         with tempfile.TemporaryDirectory() as tmp:

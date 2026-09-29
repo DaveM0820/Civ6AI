@@ -1,20 +1,21 @@
--- Civ6Ai order channel (interface side). In a network game every model order
--- for an AI seat goes out as a synced EXECUTE_SCRIPT player operation, handled
--- on every PC by Gameplay/Civ6Ai_Orders.lua. This file never changes game
--- state itself.
+-- Civ6Ai order channel (interface side). Every model order for a seat other
+-- than the local one goes out as a synced EXECUTE_SCRIPT player operation,
+-- handled on every PC by Gameplay/Civ6Ai_Orders.lua, in network games and
+-- single player alike. This file never changes game state itself.
 --
--- Host: SendDecision turns a model decision into a batch of orders, keeps
--- seq -> command locally, and writes each command's real result to
--- apply-results.jsonl once the gameplay handler has run it (results arrive a
--- moment later, not during the send).
--- Every PC: a few seconds into each turn it reports its own checksum for the
--- turn, so the host's log shows whether the other PCs still match.
+-- Host: SendDecision turns a model decision into one batch of orders for the
+-- seat's next turn, keeps seq -> command locally, and writes each command's
+-- real result to apply-results.jsonl once the gameplay side has played it
+-- (at that seat's turn start).
+-- Every PC in a network game: a few seconds into each turn it reports its own
+-- checksum for the turn, so the host's log shows whether the other PCs still
+-- match.
 Civ6Ai_OrderChannel = Civ6Ai_OrderChannel or {}
 
 Civ6Ai_OrderChannel.K = {
-  MOVE = 1, RESEARCH = 2, CIVIC = 3, FOUND = 4, SKIP = 5, FORTIFY = 6, ATTACK = 7, RESOLVE = 8, PRIORITY = 9,
+  MOVE = 1, RESEARCH = 2, CIVIC = 3, FOUND = 4, SKIP = 5, FORTIFY = 6, ATTACK = 7, PRIORITY = 9,
   GOVERNMENT = 10, POLICY = 11, PANTHEON = 12, RELIGION = 13, GP_RECRUIT = 14, GP_PATRONIZE = 15, GOVERNOR = 16,
-  HOLD = 20, REPORT = 30, PING = 40, TEST_MODE = 49, TEST_INTROSPECT = 50, TEST_SPAWN_ENEMY = 51,
+  REPORT = 30, PING = 40, TEST_MODE = 49, TEST_INTROSPECT = 50, TEST_SPAWN_ENEMY = 51,
   TEST_MELEE_MOVE = 52, TEST_SCRIPTED_COMBAT = 53, TEST_SCRIPTED_PRODUCTION = 54, TEST_IMPROVEMENT = 55,
   TEST_EXPERIENCE = 56, TEST_FAR_MOVE = 57, TEST_COMBAT_PROBE = 58, TEST_DAMAGE_CHECK = 59,
   TEST_RESOLVED_ATTACK = 60, TEST_API_SURVEY = 61,
@@ -26,9 +27,6 @@ Civ6Ai_OrderChannel.KIND_BY_COMMAND = {
   change_government = 10, set_policies = 11, found_pantheon = 12, found_religion = 13,
   recruit_great_person = 14, patronize_great_person = 15,
 }
--- Kinds the gameplay side collects into a batch (B/J/N); others apply at once.
-Civ6Ai_OrderChannel.BATCHED_KINDS = { [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true }
-Civ6Ai_OrderChannel.RESULT_TIMEOUT_SECONDS = 45
 Civ6Ai_OrderChannel.REPORT_DELAY_SECONDS = 5
 Civ6Ai_OrderChannel._counter = Civ6Ai_OrderChannel._counter or 0
 Civ6Ai_OrderChannel._batch = Civ6Ai_OrderChannel._batch or 0
@@ -41,17 +39,6 @@ local function log(s)
   else
     print("CIV6AI|order_channel|" .. s)
   end
-end
-
-function Civ6Ai_OrderChannel.IsNetworkGame()
-  return GameConfiguration ~= nil and GameConfiguration.IsNetworkMultiplayer ~= nil
-    and GameConfiguration.IsNetworkMultiplayer() == true
-end
-
--- The synced channel is used in every network game. Hot-seat and single
--- player keep the direct routes (one PC, nothing to keep in sync).
-function Civ6Ai_OrderChannel.IsActive()
-  return Civ6Ai_OrderChannel.IsNetworkGame()
 end
 
 function Civ6Ai_OrderChannel._Shared()
@@ -106,10 +93,10 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
   local kind = Civ6Ai_OrderChannel.KIND_BY_COMMAND[command.kind or ""]
   if kind == nil then
     if command.kind == "queue_production" then
-      return nil, "production_no_mp_route"
+      return nil, "production_requires_local_player"
     end
     if command.kind == "appoint_governor" or command.kind == "assign_governor" or command.kind == "promote_governor" then
-      return nil, "governors cannot be set by a synced game script in a network game (no gameplay route); "
+      return nil, "governors cannot be set for this seat by a game script (no gameplay route); "
         .. "the game's own AI manages this seat's governors"
     end
     return nil, "unsupported_kind"
@@ -207,8 +194,9 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
   return f, ""
 end
 
--- Send a whole model decision for one AI seat as one batch.
-function Civ6Ai_OrderChannel.SendDecision(playerID, decision)
+-- Send a whole model decision for one seat as one batch of orders for turn
+-- forTurn. Returns the number of orders sent.
+function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn)
   local orders = {}
   for _, command in ipairs(decision.commands or {}) do
     local f, why, many = Civ6Ai_OrderChannel._Fields(playerID, command)
@@ -229,25 +217,14 @@ function Civ6Ai_OrderChannel.SendDecision(playerID, decision)
   Civ6Ai_OrderChannel._batch = Civ6Ai_OrderChannel._batch + 1
   local batch = Game.GetLocalPlayer() * 100000 + Civ6Ai_OrderChannel._batch
   local sent = 0
-  -- Only unit/research orders are batched on the gameplay side; numbering the
-  -- others too would leave the batch waiting for an index that never comes.
-  local batchedCount, j = 0, 0
-  for _, entry in ipairs(orders) do
-    if Civ6Ai_OrderChannel.BATCHED_KINDS[entry.fields.K] then
-      batchedCount = batchedCount + 1
-    end
-  end
-  for _, entry in ipairs(orders) do
+  for j, entry in ipairs(orders) do
     local f = entry.fields
-    if Civ6Ai_OrderChannel.BATCHED_KINDS[f.K] then
-      j = j + 1
-      f.B, f.J, f.N = batch, j, batchedCount
-    end
+    f.B, f.J, f.N = batch, j, #orders
     local kind = f.K
     f.K = nil
-    local seq = Civ6Ai_OrderChannel.Send(kind, f)
+    local seq = Civ6Ai_OrderChannel.Send(kind, f, forTurn)
     if seq ~= nil then
-      Civ6Ai_OrderChannel._pending[seq] = { playerID = playerID, command = entry.command, sentAt = Civ6Ai_OrderChannel._Now() }
+      Civ6Ai_OrderChannel._pending[seq] = { playerID = playerID, command = entry.command, turn = forTurn }
       sent = sent + 1
     else
       Civ6Ai_Apply._RecordResult(playerID, entry.command, false, "send_failed", entry.command.arguments or {})
@@ -257,55 +234,29 @@ function Civ6Ai_OrderChannel.SendDecision(playerID, decision)
   return sent
 end
 
--- Finish the turn for an AI seat's unordered units (synced).
-function Civ6Ai_OrderChannel.Resolve(playerID)
-  return Civ6Ai_OrderChannel.Send(Civ6Ai_OrderChannel.K.RESOLVE, { P = playerID }) ~= nil
-end
-
--- Make sure the given AI seats have the synced turn-start freeze on. Sent once
--- per seat per turn at most, and only while the synced value is not already on.
-Civ6Ai_OrderChannel._holdSent = Civ6Ai_OrderChannel._holdSent or {}
-function Civ6Ai_OrderChannel.EnsureHolds(seats)
-  local turn = Game.GetCurrentGameTurn()
-  for _, seat in ipairs(seats or {}) do
-    local p = Players[seat]
-    if p ~= nil and not p:IsHuman() and tonumber((Game:GetProperty("CIV6AI_HOLD_" .. tostring(seat))) or 0) ~= 1
-        and Civ6Ai_OrderChannel._holdSent[seat] ~= turn then
-      Civ6Ai_OrderChannel._holdSent[seat] = turn
-      Civ6Ai_OrderChannel.Send(Civ6Ai_OrderChannel.K.HOLD, { P = seat, V = 1 })
-    end
-  end
-end
-
 -- ---------------------------------------------------------------------------
 -- Results
 -- ---------------------------------------------------------------------------
+-- A sent order's result comes back when the gameplay side plays it (at the
+-- seat's turn start) or refuses it. An order still without a result once its
+-- turn is over never ran.
 function Civ6Ai_OrderChannel.DrainResults()
   local shared = Civ6Ai_OrderChannel._Shared()
-  local results = shared.OrderResults or {}
   local me = Game.GetLocalPlayer()
-  for _, r in ipairs(results) do
-    if r.sender == me and Civ6Ai_OrderChannel._pending[r.seq] ~= nil then
-      local entry = Civ6Ai_OrderChannel._pending[r.seq]
+  for _, r in ipairs(shared.OrderResults or {}) do
+    local entry = r.sender == me and Civ6Ai_OrderChannel._pending[r.seq] or nil
+    if entry ~= nil then
       Civ6Ai_OrderChannel._pending[r.seq] = nil
       Civ6Ai_Apply._RecordResult(entry.playerID, entry.command, r.ok == true, r.reason, entry.command.arguments or {})
-      if r.ok and entry.command.arguments ~= nil and entry.command.arguments.unit_id ~= nil then
-        local numeric = Civ6Ai_Apply._ParseUnitNumericId(entry.command.arguments.unit_id)
-        Civ6Ai_Apply._orderedUnits = Civ6Ai_Apply._orderedUnits or {}
-        Civ6Ai_Apply._orderedUnits[entry.playerID] = Civ6Ai_Apply._orderedUnits[entry.playerID] or {}
-        if numeric ~= nil then
-          Civ6Ai_Apply._orderedUnits[entry.playerID][numeric] = true
-        end
-      end
     end
   end
-  local now = Civ6Ai_OrderChannel._Now()
+  local turn = Game.GetCurrentGameTurn()
   local left = 0
   for seq, entry in pairs(Civ6Ai_OrderChannel._pending) do
-    if now - (entry.sentAt or now) > Civ6Ai_OrderChannel.RESULT_TIMEOUT_SECONDS then
+    if turn > entry.turn then
       Civ6Ai_OrderChannel._pending[seq] = nil
       Civ6Ai_Apply._RecordResult(entry.playerID, entry.command, false, "no_result_from_gameplay", entry.command.arguments or {})
-      log("result_timeout|seq=" .. tostring(seq))
+      log("result_missing|seq=" .. tostring(seq) .. "|for_turn=" .. tostring(entry.turn))
     else
       left = left + 1
     end
@@ -364,7 +315,7 @@ function Civ6Ai_OrderChannel._ScheduleReport()
 end
 
 function Civ6Ai_OrderChannel._OnTurnBegin()
-  if Civ6Ai_OrderChannel.IsActive() then
+  if Civ6Ai_Config.IsNetworkGame() then
     Civ6Ai_OrderChannel._ScheduleReport()
   end
 end
@@ -377,5 +328,5 @@ function Civ6Ai_OrderChannel.Initialize()
   if Events ~= nil and Events.LocalPlayerTurnBegin ~= nil then
     Events.LocalPlayerTurnBegin.Add(Civ6Ai_OrderChannel._OnTurnBegin)
   end
-  log("ready|active=" .. tostring(Civ6Ai_OrderChannel.IsActive()) .. "|local=" .. tostring(Game.GetLocalPlayer()))
+  log("ready|network=" .. tostring(Civ6Ai_Config.IsNetworkGame()) .. "|local=" .. tostring(Game.GetLocalPlayer()))
 end

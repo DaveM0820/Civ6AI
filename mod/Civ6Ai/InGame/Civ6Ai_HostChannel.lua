@@ -77,15 +77,6 @@ function Civ6Ai_HostChannel.OnLine(line)
     Civ6Ai_HostChannel.Arm(seconds)
     return
   end
-  if string.find(line, "CIV6AI|mp_sync_probe|", 1, true) == 1
-      or string.find(line, "CIV6AI|mp_move|", 1, true) == 1 then
-    if Civ6Ai_MpSync ~= nil and Civ6Ai_MpSync.HandleWireText ~= nil then
-      Civ6Ai_MpSync.HandleWireText(line, "host_inbox")
-    else
-      Civ6Ai_Util.Log("inbox|mp_sync_unavailable")
-    end
-    return
-  end
   if string.find(line, "CIV6AI|apply|begin|", 1, true) == 1 then
     local id, chunks, player, turn, session = string.match(
       line,
@@ -149,7 +140,7 @@ function Civ6Ai_HostChannel.OnLine(line)
         .. "|len="
         .. tostring(string.len(decoded))
     )
-    Civ6Ai_Bridge.ApplyPayload(blob.player, decoded)
+    Civ6Ai_Bridge.ApplyPayload(blob.player, decoded, { snapshotTurn = blob.turn })
     return
   end
 end
@@ -163,12 +154,6 @@ function Civ6Ai_HostChannel._IsCompleteWireLine(text)
   end
   if string.find(text, "CIV6AI|host|arm|", 1, true) == 1 then
     return string.match(text, "^CIV6AI|host|arm|(%d+)$") ~= nil
-  end
-  if string.find(text, "CIV6AI|mp_sync_probe|", 1, true) == 1 then
-    return string.match(text, "^CIV6AI|mp_sync_probe|(%-?%d+)|(%-?%d+)|(%-?%d+)|(%-?%d+)$") ~= nil
-  end
-  if string.find(text, "CIV6AI|mp_move|", 1, true) == 1 then
-    return string.match(text, "^CIV6AI|mp_move|([^|]+)|(%-?%d+)|(%-?%d+)|(%-?%d+)|(%-?%d+)$") ~= nil
   end
   if string.find(text, "CIV6AI|apply|begin|", 1, true) == 1 then
     return string.match(text, "^CIV6AI|apply|begin|([^|]+)|(%d+)|(%d+)|(-?%d+)|(.*)$") ~= nil

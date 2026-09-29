@@ -63,20 +63,24 @@ function Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs)
   Civ6Ai_Util.AppendJsonLine(Civ6Ai_Apply._ApplyResultsPath(playerID), payload)
 end
 
-function Civ6Ai_Apply.ApplyDecision(playerID, decision)
+-- snapshotTurn: the turn of the snapshot the decision answers (default: now).
+-- A seat other than the local one plays it at its next turn start: the orders
+-- go out on the synced channel (every PC makes the same change) for turn
+-- snapshotTurn + 1, and results are recorded when they come back.
+function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn)
   if decision == nil or decision.commands == nil then
     Civ6Ai_Util.Log("apply|no_commands|player=" .. tostring(playerID))
     return
   end
-  Civ6Ai_Apply._orderedUnits = Civ6Ai_Apply._orderedUnits or {}
-  Civ6Ai_Apply._orderedUnits[playerID] = {}
-  -- Network game: every PC must make the same change, so AI-seat orders go out
-  -- as synced player operations and results are recorded when they come back.
-  if Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive() and playerID ~= Game.GetLocalPlayer() then
-    local sent = Civ6Ai_OrderChannel.SendDecision(playerID, decision)
-    Civ6Ai_Util.Log("apply|order_channel|player=" .. tostring(playerID) .. "|sent=" .. tostring(sent))
+  if playerID ~= Game.GetLocalPlayer() then
+    local forTurn = (snapshotTurn or Game.GetCurrentGameTurn()) + 1
+    local sent = Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn)
+    Civ6Ai_Util.Log("apply|order_channel|player=" .. tostring(playerID) .. "|for_turn=" .. tostring(forTurn)
+      .. "|sent=" .. tostring(sent))
     return
   end
+  Civ6Ai_Apply._orderedUnits = Civ6Ai_Apply._orderedUnits or {}
+  Civ6Ai_Apply._orderedUnits[playerID] = {}
   local commands = decision.commands
   local maxPasses = 4
   local pending = {}
@@ -291,13 +295,6 @@ function Civ6Ai_Apply.ResolveAllUnitOrders(playerID)
   if player == nil then
     Civ6Ai_Util.Log("apply|resolve_units|player=" .. tostring(playerID) .. "|ok=false|no_player")
     return false
-  end
-  -- Network game, AI seat: the GameCore fallback below changes state on this
-  -- PC only, so finish the seat's turn through the synced channel instead.
-  if Civ6Ai_Apply._IsNetworkMultiplayer() and Game.GetLocalPlayer() ~= playerID then
-    local sent = Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.Resolve(playerID) or false
-    Civ6Ai_Util.Log("apply|resolve_units|player=" .. tostring(playerID) .. "|order_channel=" .. tostring(sent))
-    return sent
   end
   if Game.GetLocalPlayer() == playerID
       or (not Civ6Ai_Apply._IsNetworkMultiplayer()
@@ -534,27 +531,6 @@ function Civ6Ai_Apply._MoveUnit(playerID, args)
   local unit = Civ6Ai_Apply._FindUnit(playerID, unitId)
   if unit == nil then
     return false, "unit_not_found", args
-  end
-  -- M2 MP path: all-client GameCore move via chat broadcast (flagged). SP ladder unchanged.
-  if Civ6Ai_MpSync ~= nil and Civ6Ai_MpSync.IsActive ~= nil and Civ6Ai_MpSync.IsActive() then
-    if numericId == nil then
-      return false, "missing_unit_numeric_id", args
-    end
-    local syncOk, syncReason = Civ6Ai_MpSync.BroadcastMove(playerID, numericId, x, y)
-    if syncOk then
-      Civ6Ai_Util.Log(
-        "apply|mp_sync|ok|player="
-          .. tostring(playerID)
-          .. "|unit="
-          .. tostring(numericId)
-          .. "|plot="
-          .. tostring(x)
-          .. ","
-          .. tostring(y)
-      )
-      return true, "", args
-    end
-    return false, syncReason or "mp_sync_rejected", args
   end
   if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
     if numericId == nil then

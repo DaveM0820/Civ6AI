@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-  <Mod id="civ4ai-civ6ai-20260817" version="20">
+  <Mod id="civ4ai-civ6ai-20260817" version="21">
   <Properties>
     <Name>Civ6Ai</Name>
     <Teaser>LLM AI host (Civ4AI)</Teaser>
@@ -17,7 +17,6 @@
   <Files>
     <File>Data/Civ6Ai_Strategies.sql</File>
     <File>Data/Civ6Ai_Priorities.sql</File>
-    <File>Gameplay/Civ6Ai_Runtime.lua</File>
     <File>Gameplay/Civ6Ai_GameCore.lua</File>
     <File>Gameplay/Civ6Ai_Orders.lua</File>
     <File>InGame/Civ6Ai_Util.xml</File>
@@ -34,7 +33,6 @@
     <File>InGame/Civ6Ai_Apply.lua</File>
     <File>InGame/Civ6Ai_OrderChannel.lua</File>
     <File>InGame/Civ6Ai_MpTest.lua</File>
-    <File>InGame/Civ6Ai_MpSync.lua</File>
     <File>InGame/Civ6Ai_HostChannel.lua</File>
     <File>InGame/Civ6Ai_PendingApply.lua</File>
     <File>InGame/Civ6Ai_Bridge.xml</File>
@@ -67,7 +65,6 @@
     </UpdateDatabase>
     <GameplayScripts id="Civ6Ai_GameCore">
       <Items>
-        <File>Gameplay/Civ6Ai_Runtime.lua</File>
         <File>Gameplay/Civ6Ai_GameCore.lua</File>
       </Items>
     </GameplayScripts>
@@ -87,16 +84,15 @@
         <File>InGame/Civ6Ai_Config.lua</File>
         <File>InGame/Civ6Ai_Snapshot.lua</File>
         <File>InGame/Civ6Ai_Production.lua</File>
-    <File>InGame/Civ6Ai_Apply.lua</File>
-    <File>InGame/Civ6Ai_OrderChannel.lua</File>
-    <File>InGame/Civ6Ai_MpTest.lua</File>
-    <File>InGame/Civ6Ai_MpSync.lua</File>
-    <File>InGame/Civ6Ai_HostChannel.lua</File>
-    <File>InGame/Civ6Ai_PendingApply.lua</File>
-    <File>InGame/Civ6Ai_Bridge.lua</File>
+        <File>InGame/Civ6Ai_Apply.lua</File>
+        <File>InGame/Civ6Ai_OrderChannel.lua</File>
+        <File>InGame/Civ6Ai_MpTest.lua</File>
+        <File>InGame/Civ6Ai_HostChannel.lua</File>
+        <File>InGame/Civ6Ai_PendingApply.lua</File>
+        <File>InGame/Civ6Ai_Bridge.lua</File>
         <File>InGame/Civ6Ai_SeatExperiment.lua</File>
-    <File>InGame/Civ6Ai_Autotest.lua</File>
-    <File>InGame/Civ6Ai_Chat.lua</File>
+        <File>InGame/Civ6Ai_Autotest.lua</File>
+        <File>InGame/Civ6Ai_Chat.lua</File>
       </Items>
     </ImportFiles>
     <UserInterface id="Civ6Ai_InGame_UI">

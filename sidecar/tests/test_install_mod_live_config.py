@@ -22,7 +22,6 @@ def _settings(root: Path, **kw) -> dict:
         managed_seats="1",
         session_id="live-test",
         sidecar_timeout=600,
-        mp_move_sync=False,
         python="C:\\Users\\me\\miniconda3\\python.exe",
         repo=Path("C:\\Users\\me\\Civ6AI"),
     )
@@ -42,19 +41,14 @@ class LiveConfigRenderTests(unittest.TestCase):
         self.assertIn('ManagedSeats = "1"', text)
         self.assertIn('SessionId = "live-test"', text)
         self.assertIn("SidecarTimeoutSeconds = 600", text)
-        self.assertIn("MpMoveSync = 0", text)
         self.assertIn("Sid Meier's Civilization VI/civ6ai", text)  # apostrophe kept, slashes forward
         self.assertNotIn("\\", text)
         text.encode("ascii")
 
-    def test_runtime_lua_matches(self):
+    def test_seat_list_normalized(self):
         with tempfile.TemporaryDirectory() as tmp:
-            s = _settings(Path(tmp), managed_seats="1, 2,2", mp_move_sync=True)
-        text = install_mod.render_runtime_lua(s)
-        self.assertIn("Civ6Ai_Runtime = {", text)
-        self.assertIn('ManagedSeats = "1,2"', text)
-        self.assertIn("MpMoveSync = 1", text)
-        self.assertIn("Root = ", text)
+            s = _settings(Path(tmp), managed_seats="1, 2,2")
+        self.assertIn('ManagedSeats = "1,2"', install_mod.render_paths_lua(s))
 
     def test_quotes_escaped(self):
         self.assertEqual('"a\\"b"', install_mod._lua_str('a"b'))
@@ -108,7 +102,8 @@ class LiveConfigWriteTests(unittest.TestCase):
             paths_lua = (target / "InGame" / "Civ6Ai_Paths.lua").read_text(encoding="utf-8")
             self.assertIn("SidecarTimeoutSeconds = 900", paths_lua)
             self.assertIn('SessionId = "live-x"', paths_lua)
-            self.assertIn("SidecarLive = 1", (target / "Gameplay" / "Civ6Ai_Runtime.lua").read_text(encoding="utf-8"))
+            self.assertIn("SidecarLive = 1", paths_lua)
+            self.assertFalse((target / "Gameplay" / "Civ6Ai_Runtime.lua").exists())
             self.assertTrue((target / "Civ6Ai.modinfo").is_file())
             self.assertEqual("live-x", json.loads((civ6ai_root / "runtime.json").read_text(encoding="utf-8"))["session_id"])
             # repo stub untouched

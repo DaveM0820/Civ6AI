@@ -43,7 +43,6 @@ class Civ6AiLocalConfig:
     reasoning: str = "on"  # on|off only for LM Studio Qwen stacks
     context_budget: bool = True
     queue_shared_model: bool = True
-    mp_move_sync: bool = False
     # How many seat jobs may call the model at once. 0 = auto (1 for LM Studio,
     # OPENROUTER_PARALLEL_DEFAULT for OpenRouter, where seats run side by side).
     parallel_seats: int = 0
@@ -178,11 +177,6 @@ def load_local_config(
     cfg.reasoning = normalize_reasoning(reasoning_raw)
     cfg.context_budget = _env_bool("CIV6AI_CONTEXT_BUDGET", default=cfg.context_budget)
     cfg.queue_shared_model = _env_bool("CIV6AI_QUEUE_SHARED_MODEL", default=cfg.queue_shared_model)
-    cfg.mp_move_sync = _env_bool(
-        "CIV6AI_MP_MOVE_SYNC",
-        "CIV6AI_MP_MOVE_SYNC_FLAG",
-        default=cfg.mp_move_sync,
-    )
     cfg.timeout_seconds = max(30, int(cfg.timeout_seconds))
     cfg.max_retries = max(1, int(cfg.max_retries))
     cfg.parallel_seats = _env_int("CIV6AI_PARALLEL_SEATS", default=cfg.parallel_seats)
@@ -234,7 +228,3 @@ def apply_config_to_environ(cfg: Civ6AiLocalConfig) -> None:
         os.environ["OPENAI_BASE_URL"] = cfg.endpoint
         if cfg.api_key and "OPENROUTER_API_KEY" not in os.environ:
             os.environ["OPENROUTER_API_KEY"] = cfg.api_key
-    if cfg.mp_move_sync:
-        os.environ["CIV6AI_MP_MOVE_SYNC"] = "1"
-    elif "CIV6AI_MP_MOVE_SYNC" not in os.environ:
-        os.environ["CIV6AI_MP_MOVE_SYNC"] = "0"

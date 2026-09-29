@@ -12,6 +12,7 @@ Civ6Ai_Bridge._chatPulseSeq = 0
 Civ6Ai_Bridge._logOnceKeys = {}
 Civ6Ai_Bridge._consumedApplyIds = {}
 Civ6Ai_Bridge._dumpedKeys = {}
+Civ6Ai_Bridge._delivered = {}
 
 -- Log a line only the first time `key` is seen. Wait loops run every frame, so
 -- any status line inside them must go through here (or a wall-clock throttle).
@@ -87,23 +88,11 @@ function Civ6Ai_Bridge._IsLocalSeat(playerID)
   return Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID
 end
 
--- Whether a payload for playerID can be applied from this InGame context.
--- Local seat: UI operations. Single player non-local seats: Civ6Ai_Apply routes
--- each command through the GameCore ExposedMembers.Civ6Ai.*ForPlayer functions
--- (commands without a GameCore route fail one by one with a clear reason instead
--- of blocking the whole payload). Network MP keeps the old rule: only the local
--- seat, or a build that exposes PlayerManager.SetLocalPlayerAndObserver.
+-- Whether a payload for playerID can be applied from this InGame context. The
+-- local seat uses UI operations; any other seat the synced order channel
+-- (Civ6Ai_Apply.ApplyDecision), which needs the seat to exist.
 function Civ6Ai_Bridge._CanApplyInGame(playerID)
-  if Civ6Ai_Bridge._IsLocalSeat(playerID) then
-    return true
-  end
-  if PlayerManager ~= nil and PlayerManager.SetLocalPlayerAndObserver ~= nil then
-    return true
-  end
-  if Civ6Ai_Apply ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer() then
-    return Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive()
-  end
-  return Civ6Ai_Bridge._IsGameplayReady(playerID)
+  return Civ6Ai_Bridge._IsLocalSeat(playerID) or Civ6Ai_Bridge._IsGameplayReady(playerID)
 end
 
 function Civ6Ai_Bridge._PollMaxAttempts(waitSeconds)
@@ -517,9 +506,9 @@ end
 -- Turn rule (docs/REAL_TEST.md "Seat timing"). Single player runs the local seat's
 -- turn N first; the AI seats play turn N after it ends (same game turn number).
 --   local seat: payload turn must equal the current game turn (applied in its turn).
---   AI seats:   the answer for turn N lands while the local seat plays turn N+1 and
---               is applied at the seat's own turn N+1 activation, so the caller
---               passes expectedTurn = current - 1.
+--   AI seats:   the answer to the seat's turn N snapshot is sent as soon as it
+--               lands and played at the seat's turn N+1 start, so the caller
+--               passes expectedTurn = the snapshot turn.
 -- Anything else is a replay and is dropped (logged once). Chat replies may land
 -- one turn late. Each apply_id is consumed once, so re-including the same module
 -- never re-applies a payload.
@@ -604,7 +593,7 @@ function Civ6Ai_Bridge._TryPendingApplyFromMod(playerID)
       .. "|id=" .. applyId
       .. "|len=" .. tostring(string.len(jsonText or ""))
   )
-  if Civ6Ai_Bridge.ApplyPayload(playerID, jsonText, { turn = true }) then
+  if Civ6Ai_Bridge.ApplyPayload(playerID, jsonText, { turn = true, snapshotTurn = tonumber(entry.turn) }) then
     Civ6Ai_Util.Log(
       "bridge|pending_apply_ok|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn) .. "|kind=turn|id=" .. applyId
     )
@@ -620,68 +609,85 @@ function Civ6Ai_Bridge._TryPendingApplyFromMod(playerID)
   return true
 end
 
--- AI seat, at its own turn activation: apply the model's answer for the seat's
--- previous turn (see the turn rule above) through Civ6Ai_Apply, which routes
--- non-local seats to the GameCore functions. Runs before the new snapshot so the
--- snapshot reflects the orders. Does not touch the current turn's pulse keys.
-function Civ6Ai_Bridge._ApplyPreviousTurnForSeat(playerID)
-  local current = Game.GetCurrentGameTurn()
-  Civ6Ai_Bridge._ReloadPendingApplyMod(true)
+-- A seat other than the local one: send the model's answer to the seat's
+-- snapshot of snapshotTurn as soon as the host writes it. The orders go out on
+-- the synced channel for the seat's next turn (Civ6Ai_Apply.ApplyDecision) and
+-- its chat right away. Returns true once sent.
+function Civ6Ai_Bridge._DeliverSeatDecision(playerID, snapshotTurn)
+  Civ6Ai_Bridge._ReloadPendingApplyMod()
   local entry = Civ6Ai_Bridge._PendingApplyEntry(playerID, "turn")
-  if entry == nil then
-    if Civ6Ai_Bridge._dumpedKeys[tostring(playerID) .. "|" .. tostring(current - 1)] then
-      Civ6Ai_Util.Log("bridge|seat_apply_missing|player=" .. tostring(playerID) .. "|payload_turn=" .. tostring(current - 1))
-    end
-    return false
-  end
-  if not Civ6Ai_Bridge._PendingApplyIsCurrent(playerID, entry, "turn", current - 1) then
-    return false
-  end
-  if not Civ6Ai_Bridge._CanApplyInGame(playerID) then
-    Civ6Ai_Bridge._LogOnce(
-      "deferred|" .. tostring(playerID) .. "|" .. tostring(current),
-      "bridge|pending_apply_deferred|player=" .. tostring(playerID) .. "|turn=" .. tostring(current) .. "|reason=no_apply_route"
-    )
+  if not Civ6Ai_Bridge._PendingApplyIsCurrent(playerID, entry, "turn", snapshotTurn) then
     return false
   end
   local applyId = Civ6Ai_Bridge._ConsumeApplyId(entry)
   local decision = Civ6Ai_Bridge._ParseDecision(entry.json)
   local chats = Civ6Ai_Bridge._ParseChatMessages(entry.json)
-  Civ6Ai_Util.Log(
-    "bridge|pending_apply|player=" .. tostring(playerID) .. "|turn=" .. tostring(entry.turn)
-      .. "|game_turn=" .. tostring(current) .. "|local=false|id=" .. applyId
-      .. "|len=" .. tostring(string.len(entry.json or ""))
-  )
   if #decision.commands > 0 then
-    Civ6Ai_Apply.ApplyDecision(playerID, decision)
+    Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn)
   end
   if Civ6Ai_Chat ~= nil and #chats > 0 then
     Civ6Ai_Chat.SendMessages(playerID, chats)
   end
   Civ6Ai_Util.Log(
-    "bridge|apply_payload|player=" .. tostring(playerID) .. "|turn=" .. tostring(entry.turn)
-      .. "|game_turn=" .. tostring(current) .. "|commands=" .. tostring(#decision.commands)
+    "bridge|seat_decision_sent|player=" .. tostring(playerID) .. "|snapshot_turn=" .. tostring(snapshotTurn)
+      .. "|game_turn=" .. tostring(Game.GetCurrentGameTurn()) .. "|commands=" .. tostring(#decision.commands)
+      .. "|chats=" .. tostring(#chats) .. "|id=" .. applyId
   )
-  Civ6Ai_Util.Log(
-    "bridge|pending_apply_ok|player=" .. tostring(playerID) .. "|turn=" .. tostring(entry.turn)
-      .. "|kind=turn|id=" .. applyId
-  )
+  Civ6Ai_Bridge._SettleSeat(playerID, snapshotTurn, true)
   return true
 end
 
--- True when the host has delivered (or the seat already consumed) the model's
--- answer for the seat's snapshot of `turn`, or when no snapshot of that turn was
--- dumped (nothing to wait for). Used by the autotest seat barrier.
-function Civ6Ai_Bridge.SeatDecisionDelivered(playerID, turn)
-  if not Civ6Ai_Bridge._dumpedKeys[tostring(playerID) .. "|" .. tostring(turn)] then
+-- Note that a seat's answer to its snapshot was sent (or given up on), and
+-- tell the host's player once every AI seat's answer is settled: ending the
+-- turn before that leaves the unanswered seats to the game's own AI.
+function Civ6Ai_Bridge._SettleSeat(playerID, snapshotTurn, sent)
+  Civ6Ai_Bridge._delivered[tostring(playerID) .. "|" .. tostring(snapshotTurn)] = sent
+  local missing = 0
+  for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
+    if not Civ6Ai_Bridge._IsLocalSeat(seat) then
+      if not Civ6Ai_Bridge.SeatDecisionSettled(seat, snapshotTurn) then
+        return
+      end
+      if Civ6Ai_Bridge._delivered[tostring(seat) .. "|" .. tostring(snapshotTurn)] == false then
+        missing = missing + 1
+      end
+    end
+  end
+  local line = "All AI orders are in. You can end your turn."
+  if missing > 0 then
+    line = "AI orders are in; " .. missing .. " AI player(s) had no answer and play on the game's own AI this turn."
+  end
+  Civ6Ai_Chat.PanelAdd("T" .. tostring(Game.GetCurrentGameTurn()) .. "  " .. line)
+end
+
+-- Watch for the answer to a seat's snapshot until it is sent, the turn it was
+-- for is over, or the host's wait for all seats runs out.
+function Civ6Ai_Bridge._ScheduleSeatDelivery(playerID, snapshotTurn)
+  local waitSeconds = Civ6Ai_Bridge._InboxWaitSeconds()
+  local deadline = Civ6Ai_Bridge._WaitDeadline(waitSeconds)
+  local maxAttempts = Civ6Ai_Bridge._PollMaxAttempts(waitSeconds)
+  local attempts = 0
+  Civ6Ai_Util.ScheduleTick(function()
+    attempts = attempts + 1
+    if Civ6Ai_Bridge._DeliverSeatDecision(playerID, snapshotTurn) then
+      return false
+    end
+    if Game.GetCurrentGameTurn() > snapshotTurn + 1 or Civ6Ai_Bridge._WaitExpired(deadline, attempts, maxAttempts) then
+      Civ6Ai_Util.Log("bridge|seat_decision_missing|player=" .. tostring(playerID) .. "|snapshot_turn="
+        .. tostring(snapshotTurn) .. "|game_turn=" .. tostring(Game.GetCurrentGameTurn()))
+      Civ6Ai_Bridge._SettleSeat(playerID, snapshotTurn, false)
+      return false
+    end
     return true
-  end
-  Civ6Ai_Bridge._ReloadPendingApplyMod()
-  local entry = Civ6Ai_Bridge._PendingApplyEntry(playerID, "turn")
-  if entry == nil or tonumber(entry.turn) ~= turn or entry.session_id ~= Civ6Ai_Bridge.SessionId() then
-    return false
-  end
-  return entry.json ~= nil and entry.json ~= ""
+  end)
+end
+
+-- True when the model's answer to the seat's snapshot of `turn` has been sent
+-- or given up on, or when no snapshot of that turn was dumped (nothing to wait
+-- for). Used by the autotest seat barrier and the host's status line.
+function Civ6Ai_Bridge.SeatDecisionSettled(playerID, turn)
+  local key = tostring(playerID) .. "|" .. tostring(turn)
+  return not Civ6Ai_Bridge._dumpedKeys[key] or Civ6Ai_Bridge._delivered[key] ~= nil
 end
 
 function Civ6Ai_Bridge._TryPendingChatFromMod(playerID)
@@ -809,7 +815,7 @@ function Civ6Ai_Bridge._CompleteTurnAfterApply(playerID, chatOnly)
     Civ6Ai_Bridge._FinishTurnPulse(playerID)
     return
   end
-  if Civ6Ai_Config.IsAutotest() and Civ6Ai_Config.IsManagedSeat(playerID) then
+  if Civ6Ai_Config.IsAutotest() and Civ6Ai_Bridge._IsLocalSeat(playerID) then
     Civ6Ai_Apply.ResolveAllUnitOrders(playerID)
     if Civ6Ai_Autotest ~= nil then
       Civ6Ai_Autotest.AfterPulse(playerID)
@@ -931,10 +937,6 @@ function Civ6Ai_Bridge.RunTurnPulse(playerID)
     Civ6Ai_Bridge._FinishTurnPulse(playerID)
     return
   end
-  local asyncSeat = not Civ6Ai_Bridge._IsLocalSeat(playerID) and not Civ6Ai_Util.CanReadHostFiles()
-  if asyncSeat then
-    Civ6Ai_Bridge._ApplyPreviousTurnForSeat(playerID)
-  end
   local snapshotJson, legal = Civ6Ai_Snapshot.Build(playerID)
   if snapshotJson == nil then
     Civ6Ai_Util.Log("bridge|snapshot_failed|player=" .. tostring(playerID))
@@ -1005,10 +1007,11 @@ function Civ6Ai_Bridge.RunTurnPulse(playerID)
     Civ6Ai_Bridge._ScheduleSidecarPoll(playerID, decisionPath, playerDir, deadline)
     return
   end
-  if asyncSeat then
-    -- The answer for this snapshot arrives during the local seat's next turn and
-    -- is applied at this seat's next activation; nothing to wait for now.
+  if not Civ6Ai_Bridge._IsLocalSeat(playerID) then
+    -- The answer is sent when the host writes it and played at this seat's
+    -- next turn start; this turn's pulse is done.
     Civ6Ai_Util.Log("bridge|seat_async|player=" .. tostring(playerID) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))
+    Civ6Ai_Bridge._ScheduleSeatDelivery(playerID, Game.GetCurrentGameTurn())
     Civ6Ai_Bridge._FinishTurnPulse(playerID)
     return
   end
@@ -1183,7 +1186,7 @@ function Civ6Ai_Bridge.ApplyPayload(playerID, jsonText, options)
   end
   if Civ6Ai_Bridge._IsGameplayReady(playerID) then
     if not chatOnly then
-      Civ6Ai_Apply.ApplyDecision(playerID, decision)
+      Civ6Ai_Apply.ApplyDecision(playerID, decision, options.snapshotTurn)
     end
     if Civ6Ai_Chat ~= nil and chats ~= nil and #chats > 0 then
       Civ6Ai_Chat.SendMessages(playerID, chats)

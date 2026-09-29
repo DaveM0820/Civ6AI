@@ -25,7 +25,6 @@ vision model (text + map image).
    - `timeout_seconds`: `600`
    - `vision`: `true`
    - `reasoning`: `on` (sent as LM Studio `reasoning=on|off` — **never** `reasoning_effort=on`)
-   - `mp_move_sync`: `false` for SP
 4. In LM Studio: start the local server, load the vision model, enable vision.
 5. Install the mod into both Mods folders (backs up existing to
    `My Games\...\Civ6Ai_mod_backups`, outside `Mods` so Civ6 never sees a duplicate mod):
@@ -35,7 +34,7 @@ vision model (text + map image).
    #          --sidecar-timeout 600  (seconds per LLM decision; default config timeout_seconds)
    #          --session-id live-...  (default live-<timestamp>)
    ```
-   This also generates the installed `Civ6Ai_Paths.lua` / `Civ6Ai_Runtime.lua` (repo path,
+   This also generates the installed `Civ6Ai_Paths.lua` (repo path,
    python, `SidecarLive=1`, managed seats, session, timeout) and
    `My Games\...\civ6ai\runtime.json` for the host bridge (old file backed up).
    Re-run it whenever you move the repo or want different seats. `--stub-only` skips this.
@@ -53,7 +52,6 @@ vision model (text + map image).
 | `CIV6AI_LMSTUDIO_TIMEOUT_SECONDS` | Request timeout (default 600) |
 | `CIV6AI_LMSTUDIO_VISION` | `1`/`0` |
 | `CIV6AI_LMSTUDIO_REASONING` | `on`/`off` |
-| `CIV6AI_MP_MOVE_SYNC` | `1` enables M2 chat-bus move sync |
 | `CIV6_INSTALL` | Force Civ6 install root if auto-detect misses |
 
 ## 1) Dry-run (no Civ6) — do this first
@@ -109,14 +107,15 @@ See also `docs/GOALS.md`, `docs/MP_SYNC_TRANSPORT.md`, `docs/civ6_lan_probe.md`.
 2. Preflight PASS on host (friend needs mod install; LM Studio only on host)  
 3. Both join LAN; managed seats configured on **host only**
 
-### M2 — move sync MVP
+### M2 — AI seat orders over the synced channel
 
-1. On **both** PCs set `mp_move_sync: true` in `config/civ6ai.local.json` **or**
-   `CIV6AI_MP_MOVE_SYNC=1` / Paths `MpMoveSync = 1`  
-2. Host: `python scripts\start_live.py`  
-3. Play turns with LLM `move_unit`  
-4. Watch:
-   - Lua.log: `CIV6AI|mp_sync_…`, `apply|ok|move_unit`  
+No flag: in a network game the host's AI-seat orders always go through the
+synced order channel. Humans are never managed seats in a network game.
+1. Host: `python scripts\start_live.py`  
+2. Play turns; the host's AI chat panel shows "All AI orders are in" before you end the turn  
+3. Watch:
+   - Lua.log: `CIV6AI|orders|queued|...`, `CIV6AI|orders|queue_apply|...`, `CIV6AI|orders|result|...`  
+   - `CIV6AI|orders|sync|...|verdict=match` (each PC reports its checksum every turn)  
    - `OOSLog` / multiplayer OOS lines after turn 1  
 
 ### M2/M3 pass criteria
@@ -137,7 +136,7 @@ See also `docs/GOALS.md`, `docs/MP_SYNC_TRANSPORT.md`, `docs/civ6_lan_probe.md`.
 [ ] python scripts/stop_live.py
 ```
 
-Only after SP works: enable `mp_move_sync` and try LAN.
+Only after SP works: try LAN.
 
 ## Seat timing (single player, model-driven AI seats)
 
@@ -150,36 +149,34 @@ arrives while P0 is on turn N+1. The rule:
 - **Local seat (P0):** the snapshot, the answer and the apply all happen inside
   P0's turn N (PendingApply entry turn must equal the current game turn). Orders use
   the UI operations path.
-- **AI seats (1..4):** snapshot at the turn-N activation (the seat does not wait
-  there, `bridge|seat_async`). The answer is published as a PendingApply entry
-  `"<player>:turn"` with `turn = N`. At the seat's next activation (turn N+1) the
-  bridge applies that entry first (`bridge|pending_apply|...|turn=N|game_turn=N+1`,
-  then `pending_apply_ok`), through the GameCore routes
-  (`ExposedMembers.Civ6Ai.*ForPlayer`: move, research, civic, skip/fortify, found
-  city). Then it takes the turn N+1 snapshot. Commands without a GameCore route
-  (production, attack) fail one by one with `*_requires_local_player`.
+- **AI seats (1..4):** snapshot at the turn-N start, after the seat's queued
+  orders ran (the seat does not wait there, `bridge|seat_async`). The answer is
+  published as a PendingApply entry `"<player>:turn"` with `turn = N`; the bridge
+  sends it as soon as it lands (`bridge|seat_decision_sent|...|snapshot_turn=N`)
+  as one batch on the synced order channel for turn N+1. Every PC keeps it as the
+  seat's order queue (`orders|queued|player=P|for_turn=N+1`) and plays it at the
+  seat's turn N+1 start with full movement, with retry passes
+  (`orders|queue_apply`), then ends the turn of the units the model left in place
+  (builders, traders and religious units stay with the game's AI). Only then is
+  the turn N+1 snapshot taken. Commands without a gameplay route (city production,
+  policies, governors) fail one by one with a plain reason.
 - **Barrier (autotest):** before P0 ends turn N+1, autotest waits until every AI
-  seat's turn-N answer has been delivered (`autotest|seat_barrier_wait` ...
-  `seat_barrier_done`), bounded by sidecar timeout x (pending seats + 1). So the
-  answers are ready when the AI seats activate. A sidecar failure or an empty
-  answer is still published as an empty entry, so the barrier never waits on a
-  seat that will not answer.
+  seat's turn-N answer has been sent or given up on (`autotest|seat_barrier_wait`
+  ... `seat_barrier_done`), bounded by sidecar timeout x (pending seats + 1). The
+  host's AI chat panel says the same thing to a human player ("All AI orders are
+  in"). A seat with no orders when its turn starts is played by the game's AI.
 - **No replays:** each entry carries session, player, turn, kind and an apply id.
   Lua applies an entry only for the matching session and player, only for the turn
   allowed above, and only once per apply id. The file stays on disk, so include()
   re-reading it is harmless. Seats never share an entry.
 - **New game = new session:** `scripts/start_live.py` (default) rotates the session
-  id in the installed `Civ6Ai_Paths.lua` / `Civ6Ai_Runtime.lua` and `runtime.json`.
+  id in the installed `Civ6Ai_Paths.lua` and `runtime.json`.
   It also archives per-player transient files (decisions, apply files, snapshots,
   markers) into `sessions/<id>/_archive_<stamp>/` and moves the Lua.log offsets to
   the end. Start it **before** starting the new game. Use `--keep-session` only
   to restart helpers for the game already running.
 
-Caveat: the Firaxis AI also plays AI seats. If it moved a unit before the bridge
-applied, the move fails with `no_moves_left` and the next snapshot shows the real
-state.
-
-**AI-seat unit hold.** The Firaxis AI spends a seat's moves the moment its turn starts, long before the model answers. For model-driven AI seats GameCore `FinishMoves` their movable units (not builders/traders/religious) at `PlayerTurnStarted` and `PlayerTurnStartComplete` (`gamecore|hold_units|...|phase=complete|count=N`) and `RestoreMovement` a held unit once when its model move arrives. Snapshots read unit moves through GameCore (`UnitMovesForPlayer`): held units report full moves and the local seat no longer reads the UI cache's stale 0 at turn start, so `legal_commands` includes moves again.
+**Planning with full movement.** Because an AI seat's orders play at its next turn start, its snapshot reports every unit's full movement (`UnitMovesForPlayer(..., planning)`), and `legal_commands` are checked against full movement too. Untested: whether the game's AI can still move a seat's units between `PlayerTurnStartComplete` and the queue running.
 
 **Turn timer must be off.** In Advanced Setup set the MP_helper "Smart-Timer" option to off/None. With "Smart-Timer: Classic" the game ends the local seat's turn after ~60 s regardless of the model, so answers (1-2 min per seat) arrive stale (`pending_apply_stale_turn`, `inbox_wait_abandoned`). `start_live --keep-session` no longer clears queued PendingApply answers, and Enter nudges are only sent while the local seat's turn is still active.
 

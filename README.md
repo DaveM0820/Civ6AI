@@ -46,12 +46,13 @@ use env vars (`.env` is gitignored).
 
 See `docs/GOALS.md` (M0 SP → M1 same mod → M2 move sync → M3 LAN soak → M4 more ops).
 
-### M2 flag (unit move sync)
+### AI seat orders (single player and network MP)
 
-In network MP, set **`CIV6AI_MP_MOVE_SYNC=1`** (GameConfiguration) or
-`MpMoveSync = 1` in generated `Civ6Ai_Paths.lua`. When active, `move_unit` uses
-all-client GameCore apply via a `Network.SendChat` bus — **not verified in-game
-here**. SP with the flag off keeps the existing ladder.
+Every model order for an AI seat goes out as a synced player operation and runs
+on every PC (`Civ6Ai_OrderChannel.lua` -> `Gameplay/Civ6Ai_Orders.lua`). A seat's
+decision for its turn-N snapshot is played at the start of its turn N+1 with full
+movement; the host's AI chat panel says when every AI seat's orders are in. The
+network-game path has **not been verified on two PCs yet**.
 
 LAN probe: `docs/civ6_lan_probe.md`. Pass = no new OOS, identical unit plots,
 host `apply|ok|move_unit`.

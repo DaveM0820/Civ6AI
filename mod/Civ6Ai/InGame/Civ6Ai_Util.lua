@@ -43,15 +43,6 @@ function Civ6Ai_Util.LogDir()
   if Civ6Ai_Paths and Civ6Ai_Paths.LogDir and Civ6Ai_Paths.LogDir ~= "" then
     return Civ6Ai_Paths.LogDir:gsub("\\", "/")
   end
-  if Civ6Ai_Runtime and Civ6Ai_Runtime.LogDir and Civ6Ai_Runtime.LogDir ~= "" then
-    return Civ6Ai_Runtime.LogDir:gsub("\\", "/")
-  end
-  if ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil and ExposedMembers.Civ6Ai.Runtime ~= nil then
-    local runtime = ExposedMembers.Civ6Ai.Runtime
-    if runtime.LogDir and runtime.LogDir ~= "" then
-      return runtime.LogDir:gsub("\\", "/")
-    end
-  end
   if os and os.getenv then
     local localApp = os.getenv("LOCALAPPDATA")
     if localApp ~= nil and localApp ~= "" then
@@ -317,13 +308,7 @@ function Civ6Ai_Util.CanReadHostFiles()
   if Civ6Ai_Util.FileIoOk() then
     return true
   end
-  if Civ6Ai_Util._GameCoreIo() and ExposedMembers.Civ6Ai.ReadFile ~= nil then
-    local runtime = ExposedMembers.Civ6Ai.Runtime
-    if runtime ~= nil and runtime.GameCoreIo == true then
-      return true
-    end
-  end
-  return false
+  return Civ6Ai_Util._GameCoreIo() and ExposedMembers.Civ6Ai.ReadFile ~= nil and ExposedMembers.Civ6Ai.GameCoreIo == true
 end
 
 Civ6Ai_Util._ticks = Civ6Ai_Util._ticks or {}

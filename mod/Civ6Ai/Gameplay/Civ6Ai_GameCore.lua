@@ -170,8 +170,8 @@ end
 
 -- Founding legality from the gameplay side. The UI-side
 -- UnitManager.CanStartOperation is false for a non-local seat's settler (and for
--- one held with 0 moves), which kept found_city out of seats 1-4's legal commands.
--- Founding through Cities:Create needs no movement, so a held settler can found.
+-- one with 0 moves), which kept found_city out of seats 1-4's legal commands.
+-- Founding through Cities:Create needs no movement.
 function Civ6Ai_GameCore.CanFoundCityForPlayer(playerID, unitNumericId)
   local player, unit, reason = Civ6Ai_GameCore._FindUnit(playerID, unitNumericId)
   if unit == nil then
@@ -244,7 +244,9 @@ Civ6Ai_GameCore.EMBARK_COST = 3
 -- T31 P1's warrior, held with ChangeMovesRemaining and given 2/2 back, was
 -- refused forest-hills 6,13>7,13 (cost 3) although GetMoveToPath planned it,
 -- then moved through the top-up. Any hold of a unit costs it the engine's
--- exception, so FIRST_STEP_TOPUP stays on for held AI-seat units.
+-- exception. AI-seat orders now run at turn start on untouched movement (no
+-- hold); FIRST_STEP_TOPUP stays on until a live log shows AI seats taking the
+-- step through first_step:move_unit.
 Civ6Ai_GameCore.ALLOW_FIRST_STEP_EXCEPTION = true
 Civ6Ai_GameCore.FIRST_STEP_TOPUP = true
 
@@ -373,45 +375,15 @@ function Civ6Ai_GameCore._EmbarkProblem(playerID, plot)
   return nil
 end
 
--- Which AI seats have their units frozen at turn start. In a network game this
--- must be the same on every PC, so it is the synced game property
--- CIV6AI_HOLD_<id> (set by the host's HOLD order, see Civ6Ai_Orders). The
--- interface-published ExposedMembers table exists only on the PC that
--- published it, so it counts only outside network games.
-function Civ6Ai_GameCore._IsNetworkGame()
-  if GameConfiguration ~= nil and GameConfiguration.IsNetworkMultiplayer ~= nil then
-    local ok, v = pcall(GameConfiguration.IsNetworkMultiplayer)
-    return ok and v == true
-  end
-  return false
-end
-
-function Civ6Ai_GameCore.IsSeatHeld(playerID)
-  if Game ~= nil and Game.GetProperty ~= nil then
-    local v = Game:GetProperty("CIV6AI_HOLD_" .. tostring(playerID))
-    if v ~= nil then
-      return tonumber(v) == 1
-    end
-  end
-  if Civ6Ai_GameCore._IsNetworkGame() then
-    return false
-  end
-  local seats = ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil and ExposedMembers.Civ6Ai.HoldAiSeatUnits or nil
-  return seats ~= nil and seats[playerID] == true
-end
-
--- Moves the unit has for the model's order: real movement, or max movement for a
--- held AI-seat unit (see UnitMovesForPlayer). Returns moves, maxMoves.
-function Civ6Ai_GameCore._AvailableMoves(playerID, unit)
+-- Moves the unit has for an order: its real movement, or, when planning a
+-- seat's next turn (its orders run at that turn's start, Civ6Ai_Orders queue),
+-- its full movement. Returns moves, maxMoves.
+function Civ6Ai_GameCore._AvailableMoves(unit, planning)
   local maxMoves = Civ6Ai_GameCore._Call(unit, "GetMaxMoves") or 0
-  local moves = Civ6Ai_GameCore._Call(unit, "GetMovesRemaining") or 0
-  if moves <= 0 then
-    if Civ6Ai_GameCore.IsSeatHeld(playerID) and Civ6Ai_GameCore._ShouldHoldUnit(unit)
-        and not Civ6Ai_GameCore._WasReleased(playerID, unit) then
-      moves = maxMoves
-    end
+  if planning then
+    return maxMoves, maxMoves
   end
-  return moves, maxMoves
+  return Civ6Ai_GameCore._Call(unit, "GetMovesRemaining") or 0, maxMoves
 end
 
 -- Cost of the step and its kind ("land", "sea", "embark", "disembark").
@@ -444,7 +416,8 @@ end
 -- CanStartOperation(MOVE_TO) accepts every neighbour (water included) and the
 -- script mover gives up on steps the unit cannot pay for this turn, so check
 -- domain, embark rules, impassable terrain, stacking and the step cost.
-function Civ6Ai_GameCore.CanMoveUnitToForPlayer(playerID, unitNumericId, x, y)
+-- planning: judge the step for the seat's next turn (full movement).
+function Civ6Ai_GameCore.CanMoveUnitToForPlayer(playerID, unitNumericId, x, y, planning)
   local _, unit, reason = Civ6Ai_GameCore._FindUnit(playerID, unitNumericId)
   if unit == nil then
     return false, reason
@@ -495,7 +468,7 @@ function Civ6Ai_GameCore.CanMoveUnitToForPlayer(playerID, unitNumericId, x, y)
     -- several turns and ends the unit's turn, which is what burned moves.
     return false, "not_adjacent"
   end
-  local moves, maxMoves = Civ6Ai_GameCore._AvailableMoves(playerID, unit)
+  local moves, maxMoves = Civ6Ai_GameCore._AvailableMoves(unit, planning)
   if moves <= 0 then
     return false, "no_moves_left"
   end
@@ -561,13 +534,8 @@ function Civ6Ai_GameCore.MoveUnitForPlayer(playerID, unitNumericId, x, y)
     return true, "already_there"
   end
   local canMove, whyNot = Civ6Ai_GameCore.CanMoveUnitToForPlayer(playerID, unitNumericId, x, y)
-  if not canMove and whyNot ~= "no_moves_left" then
+  if not canMove then
     return false, "illegal_move:" .. tostring(whyNot)
-  end
-  if unit.GetMovesRemaining ~= nil and unit:GetMovesRemaining() <= 0 then
-    if not Civ6Ai_GameCore._ReleaseHeld(playerID, unit) then
-      return false, "no_moves_left"
-    end
   end
   if UnitManager.MoveUnit == nil then
     return false, "move_unit_unavailable"
@@ -599,7 +567,7 @@ function Civ6Ai_GameCore.MoveUnitForPlayer(playerID, unitNumericId, x, y)
 end
 
 -- Why did the engine refuse a step our check allowed? Logs our price of the
--- step with its parts, the unit's movement and hold state, and the engine's
+-- step with its parts, the unit's movement, and the engine's
 -- own route to the plot (UnitManager.GetMoveToPath: length, and whether its
 -- first step is the target).
 function Civ6Ai_GameCore._LogStepRefusal(playerID, unit, x, y, before, tag)
@@ -636,8 +604,6 @@ function Civ6Ai_GameCore._LogStepRefusal(playerID, unit, x, y, before, tag)
       .. "|cliff=" .. tostring(Civ6Ai_GameCore._Call(fromPlot, "IsCliffCrossingToPlot", toPlot))
       .. "|owner=" .. tostring(Civ6Ai_GameCore._Call(toPlot, "GetOwner"))
       .. "|moves=" .. tostring(before) .. ">" .. tostring(Civ6Ai_GameCore._Call(unit, "GetMovesRemaining")) .. "/" .. tostring(maxMoves)
-      .. "|held=" .. tostring(Civ6Ai_GameCore.IsSeatHeld(playerID))
-      .. "|released=" .. tostring(Civ6Ai_GameCore._WasReleased(playerID, unit))
       .. "|engine_path=" .. enginePath)
   end)
 end
@@ -718,10 +684,8 @@ function Civ6Ai_GameCore.MoveUnitAlongPathForPlayer(playerID, unitNumericId, x, 
   if UnitManager.GetMoveToPath == nil then
     return false, "path_unavailable"
   end
-  if unit.GetMovesRemaining ~= nil and unit:GetMovesRemaining() <= 0 then
-    if not Civ6Ai_GameCore._ReleaseHeld(playerID, unit) then
-      return false, "no_moves_left"
-    end
+  if unit:GetMovesRemaining() <= 0 then
+    return false, "no_moves_left"
   end
   local okPath, path = pcall(function() return UnitManager.GetMoveToPath(unit, target:GetIndex()) end)
   if not okPath or type(path) ~= "table" or #path == 0 then
@@ -772,22 +736,6 @@ function Civ6Ai_GameCore.MoveUnitAlongPathForPlayer(playerID, unitNumericId, x, 
     return true, "partial_" .. note
   end
   return false, note
-end
-
--- Give a held AI-seat unit its movement back before an order that is not a
--- move (an attack). Returns true when the unit has moves left afterwards.
-function Civ6Ai_GameCore.ReadyUnitForPlayer(playerID, unitNumericId)
-  local _, unit, reason = Civ6Ai_GameCore._FindUnit(playerID, unitNumericId)
-  if unit == nil then
-    return false, reason
-  end
-  if unit:GetMovesRemaining() > 0 then
-    return true, ""
-  end
-  if Civ6Ai_GameCore._ReleaseHeld(playerID, unit) then
-    return true, "released"
-  end
-  return false, "no_moves_left"
 end
 
 function Civ6Ai_GameCore.FinishMovesForPlayer(playerID, unitNumericId)
@@ -846,154 +794,15 @@ function Civ6Ai_GameCore.SetCivicForPlayer(playerID, civicIndex)
   return true, ""
 end
 
--- Model-driven AI seats: the Firaxis AI runs a seat's units as soon as its turn
--- starts, long before the model's orders reach the UI context, so model moves
--- used to fail with no_moves_left. At turn start we hold the seat's movable
--- units; when the model's order for a held unit arrives we restore its
--- movement once and move it. HOLD_MODE "zero_moves" (default) holds with
--- UnitManager.ChangeMovesRemaining(unit, -moves) and gives the same amount
--- back on release (exact amount, turn-start bonuses included); "finish_moves"
--- is the old FinishMoves / RestoreMovement pair. Both keep the Firaxis AI off
--- the unit (release logs stayed=true) and both lose the engine's full-movement
--- first step (see ALLOW_FIRST_STEP_EXCEPTION). Builders, traders and religious units stay with the
--- Firaxis AI (the model has no commands for them). Which seats are held comes
--- from IsSeatHeld: the synced game property CIV6AI_HOLD_<id> (set by the order
--- channel, required in network games), else InGame's local
--- ExposedMembers.Civ6Ai.HoldAiSeatUnits in single player and hot-seat.
-Civ6Ai_GameCore._held = Civ6Ai_GameCore._held or {}
-Civ6Ai_GameCore.HOLD_MODE = "zero_moves"
-
-function Civ6Ai_GameCore._ShouldHoldUnit(unit)
-  local info = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
-  if info == nil then
-    return false
-  end
-  if (info.BuildCharges or 0) > 0 or info.MakeTradeRoute == true or (info.ReligiousStrength or 0) > 0 then
-    return false
-  end
-  return true
-end
-
-function Civ6Ai_GameCore.HoldSeatUnits(playerID, phase)
-  if not Civ6Ai_GameCore.IsSeatHeld(playerID) then
-    return 0
-  end
-  local player = Players[playerID]
-  if player == nil or player:IsHuman() or UnitManager == nil or UnitManager.FinishMoves == nil then
-    return 0
-  end
-  -- Called at PlayerTurnStarted (moves may not be restored yet) and again at
-  -- PlayerTurnStartComplete; the set accumulates per game turn.
-  local turn = Game.GetCurrentGameTurn()
-  local rec = Civ6Ai_GameCore._held[playerID]
-  if rec == nil or rec.turn ~= turn then
-    rec = { turn = turn, units = {} }
-    Civ6Ai_GameCore._held[playerID] = rec
-  end
-  local count = 0
-  local modes = {}
-  for _, unit in ipairs(Civ6Ai_GameCore._IterateUnits(player:GetUnits())) do
-    local moves = unit:GetMovesRemaining()
-    if moves > 0 and Civ6Ai_GameCore._ShouldHoldUnit(unit) then
-      local mode = Civ6Ai_GameCore._HoldUnit(unit, moves)
-      if mode ~= nil then
-        rec.units[unit:GetID()] = { moves = moves, x = unit:GetX(), y = unit:GetY(), mode = mode }
-        modes[mode] = (modes[mode] or 0) + 1
-        count = count + 1
-      end
-    end
-  end
-  print("CIV6AI|gamecore|hold_units|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
-    .. "|phase=" .. tostring(phase) .. "|count=" .. tostring(count)
-    .. "|zero_moves=" .. tostring(modes.zero_moves or 0) .. "|finish_moves=" .. tostring(modes.finish_moves or 0))
-  return count
-end
-
--- Freeze one unit; returns the mode used or nil.
-function Civ6Ai_GameCore._HoldUnit(unit, moves)
-  if Civ6Ai_GameCore.HOLD_MODE == "zero_moves" and UnitManager.ChangeMovesRemaining ~= nil then
-    pcall(function() UnitManager.ChangeMovesRemaining(unit, -moves) end)
-    if unit:GetMovesRemaining() <= 0 then
-      return "zero_moves"
-    end
-  end
-  if pcall(function() UnitManager.FinishMoves(unit) end) then
-    return "finish_moves"
-  end
-  return nil
-end
-
--- True once a held unit got its movement back this turn: its moves are real
--- from then on (a released unit that spent them has 0, not max moves; the path
--- walker used to try one more step and log step_refused).
-function Civ6Ai_GameCore._WasReleased(playerID, unit)
-  local rec = Civ6Ai_GameCore._held[playerID]
-  return rec ~= nil and rec.turn == Game.GetCurrentGameTurn() and rec.released ~= nil
-    and rec.released[unit:GetID()] == true
-end
-
--- Give a held unit its movement back for the model's order (once per turn).
-function Civ6Ai_GameCore._ReleaseHeld(playerID, unit)
-  local rec = Civ6Ai_GameCore._held[playerID]
-  local id = unit:GetID()
-  local entry = rec ~= nil and rec.turn == Game.GetCurrentGameTurn() and rec.units[id] or nil
-  if not entry then
-    return false
-  end
-  rec.units[id] = nil
-  rec.released = rec.released or {}
-  rec.released[id] = true
-  if type(entry) ~= "table" then
-    entry = { mode = "finish_moves" }
-  end
-  local before = unit:GetMovesRemaining()
-  if entry.mode == "zero_moves" and entry.moves ~= nil and UnitManager.ChangeMovesRemaining ~= nil then
-    pcall(function() UnitManager.ChangeMovesRemaining(unit, entry.moves - before) end)
-  end
-  if unit:GetMovesRemaining() <= 0 and UnitManager.RestoreMovement ~= nil then
-    pcall(function() UnitManager.RestoreMovement(unit) end)
-  end
-  -- The hold must keep the Firaxis AI off the unit until now.
-  local stayed = entry.x == nil or (unit:GetX() == entry.x and unit:GetY() == entry.y)
-  print("CIV6AI|gamecore|release|player=" .. tostring(playerID) .. "|unit=" .. tostring(id) .. "|mode="
-    .. tostring(entry.mode) .. "|moves=" .. tostring(before) .. ">" .. tostring(unit:GetMovesRemaining())
-    .. "/" .. tostring(Civ6Ai_GameCore._Call(unit, "GetMaxMoves")) .. "|stayed=" .. tostring(stayed)
-    .. (stayed and "" or ("|hold_leak=" .. tostring(entry.x) .. "," .. tostring(entry.y) .. ">" .. unit:GetX() .. "," .. unit:GetY())))
-  return unit:GetMovesRemaining() > 0
-end
-
--- Authoritative movement for snapshots. The UI context's unit cache lags at turn
--- start (P0 reads 0 moves at LocalPlayerTurnBegin). An AI seat's snapshot of
--- turn N is answered and applied at turn N+1, when its holdable units are held
--- and get full movement back for the model's order, so those report max moves.
--- Returns moves, held.
-function Civ6Ai_GameCore.UnitMovesForPlayer(playerID, unitNumericId)
+-- Movement for snapshots. The interface's unit cache lags at turn start (the
+-- local seat reads 0 moves at LocalPlayerTurnBegin). planning: the seat's
+-- orders run at its next turn start (Civ6Ai_Orders queue), with full movement.
+function Civ6Ai_GameCore.UnitMovesForPlayer(playerID, unitNumericId, planning)
   local _, unit = Civ6Ai_GameCore._FindUnit(playerID, unitNumericId)
   if unit == nil then
-    return nil, false
+    return nil
   end
-  if Civ6Ai_GameCore.IsSeatHeld(playerID) and Civ6Ai_GameCore._ShouldHoldUnit(unit) then
-    return unit:GetMaxMoves(), true
-  end
-  return unit:GetMovesRemaining(), false
-end
-
-function Civ6Ai_OnPlayerTurnStarted(playerID)
-  Civ6Ai_GameCore.HoldSeatUnits(playerID, "started")
-end
-
-function Civ6Ai_OnPlayerTurnStartComplete(playerID)
-  Civ6Ai_GameCore.HoldSeatUnits(playerID, "complete")
-  -- Movement is restored by now. The local seat's LocalPlayerTurnBegin fires
-  -- earlier, so its pulse waits for this mark (see Civ6Ai_InGame).
-  if ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil then
-    ExposedMembers.Civ6Ai.TurnStartComplete = ExposedMembers.Civ6Ai.TurnStartComplete or {}
-    ExposedMembers.Civ6Ai.TurnStartComplete[playerID] = Game.GetCurrentGameTurn()
-  end
-  print("CIV6AI|gamecore|turn_start_complete|player=" .. tostring(playerID))
-  if LuaEvents ~= nil and LuaEvents.Civ6Ai_PlayerTurnStartComplete ~= nil then
-    LuaEvents.Civ6Ai_PlayerTurnStartComplete(playerID)
-  end
+  return (Civ6Ai_GameCore._AvailableMoves(unit, planning))
 end
 
 function Civ6Ai_InitializeGameCore()
@@ -1005,27 +814,17 @@ function Civ6Ai_InitializeGameCore()
   ExposedMembers.Civ6Ai.CanMoveUnitToForPlayer = Civ6Ai_GameCore.CanMoveUnitToForPlayer
   ExposedMembers.Civ6Ai.MoveUnitForPlayer = Civ6Ai_GameCore.MoveUnitForPlayer
   ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = Civ6Ai_GameCore.MoveUnitAlongPathForPlayer
-  ExposedMembers.Civ6Ai.ReadyUnitForPlayer = Civ6Ai_GameCore.ReadyUnitForPlayer
   ExposedMembers.Civ6Ai.SetResearchForPlayer = Civ6Ai_GameCore.SetResearchForPlayer
   ExposedMembers.Civ6Ai.SetCivicForPlayer = Civ6Ai_GameCore.SetCivicForPlayer
   ExposedMembers.Civ6Ai.FinishMovesForPlayer = Civ6Ai_GameCore.FinishMovesForPlayer
   ExposedMembers.Civ6Ai.UnitMovesForPlayer = Civ6Ai_GameCore.UnitMovesForPlayer
-  ExposedMembers.Civ6Ai.IsSeatHeld = Civ6Ai_GameCore.IsSeatHeld
   ExposedMembers.Civ6Ai.WriteFile = Civ6Ai_GameCore.WriteFile
   ExposedMembers.Civ6Ai.ReadFile = Civ6Ai_GameCore.ReadFile
   ExposedMembers.Civ6Ai.AppendFile = Civ6Ai_GameCore.AppendFile
-  if Civ6Ai_Runtime ~= nil then
-    ExposedMembers.Civ6Ai.Runtime = Civ6Ai_Runtime
-  end
   local hasIo = io ~= nil and io.open ~= nil
   local hasExec = os ~= nil and os.execute ~= nil
   local hasGetenv = os ~= nil and os.getenv ~= nil
-  ExposedMembers.Civ6Ai.Runtime = ExposedMembers.Civ6Ai.Runtime or {}
-  ExposedMembers.Civ6Ai.Runtime.GameCoreIo = hasIo
-  GameEvents.PlayerTurnStartComplete.Add(Civ6Ai_OnPlayerTurnStartComplete)
-  if GameEvents.PlayerTurnStarted ~= nil then
-    GameEvents.PlayerTurnStarted.Add(Civ6Ai_OnPlayerTurnStarted)
-  end
+  ExposedMembers.Civ6Ai.GameCoreIo = hasIo
   print("CIV6AI|gamecore|ready|io=" .. tostring(hasIo) .. "|os_exec=" .. tostring(hasExec) .. "|getenv=" .. tostring(hasGetenv))
 end
 

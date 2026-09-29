@@ -72,14 +72,7 @@ function Civ6Ai_Autotest._EnsureSessionId()
 end
 
 function Civ6Ai_Autotest.StopTurn()
-  if Civ6Ai_Paths and Civ6Ai_Paths.AutotestStopTurn then
-    return tonumber(Civ6Ai_Paths.AutotestStopTurn) or 20
-  end
-  local cfg = GameConfiguration.GetValue("CIV6AI_AUTOTEST_STOP_TURN")
-  if cfg ~= nil then
-    return tonumber(cfg) or 20
-  end
-  return 20
+  return Civ6Ai_Config.AutotestStopTurn()
 end
 
 function Civ6Ai_Autotest.IsStopped()
@@ -114,18 +107,18 @@ end
 -- Single player plays the local seat's turn N first; the AI seats play their turn
 -- N after it ends (same game turn number) and each dumps a snapshot then. The host
 -- asks the model for one seat at a time, so the AI answers for turn N arrive while
--- the local seat plays turn N+1, and each is applied at that seat's own turn N+1
--- activation (Civ6Ai_Bridge._ApplyPreviousTurnForSeat). The local seat therefore
--- holds its end-turn until every AI seat that dumped a turn N snapshot has had its
--- answer delivered to the pending-apply module; otherwise the AI turn N+1 would
--- start before the orders exist and they would be dropped as stale. Bounded by a
--- wall-clock deadline of sidecar timeout x (pending seats + 1).
+-- the local seat plays turn N+1; each is sent on the order channel as it lands and
+-- played at that seat's turn N+1 start (Civ6Ai_Bridge._DeliverSeatDecision). The
+-- local seat therefore holds its end-turn until every AI seat that dumped a turn N
+-- snapshot has had its answer sent (or given up on); otherwise the AI turn N+1 would start without
+-- it and the native AI would play the seat. Bounded by a wall-clock deadline of
+-- sidecar timeout x (pending seats + 1).
 function Civ6Ai_Autotest._PendingSeats(localPlayer)
   local pending = {}
   local previousTurn = Game.GetCurrentGameTurn() - 1
   for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
     if seat ~= localPlayer and Civ6Ai_Config.ShouldRunBridge(seat)
-        and not Civ6Ai_Bridge.SeatDecisionDelivered(seat, previousTurn) then
+        and not Civ6Ai_Bridge.SeatDecisionSettled(seat, previousTurn) then
       table.insert(pending, seat)
     end
   end

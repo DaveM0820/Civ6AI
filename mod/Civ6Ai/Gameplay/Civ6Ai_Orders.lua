@@ -10,10 +10,14 @@
 -- Game.GetLocalPlayer, no UI, no files, no clocks, no randomness. Params are
 -- integers only.
 --
--- Unit orders arrive in batches (B = batch id, J = index, N = count). The batch
--- is applied when its last order arrives, with the same retry passes the
--- single-player apply uses (a move blocked by another of the seat's own units
--- is retried after the others moved).
+-- A model decision for an AI seat arrives as one batch (B = batch id, J =
+-- index, N = count, T = the turn the orders are for). The complete batch is
+-- the seat's order queue for turn T, kept in synced game properties (saved
+-- with the game). When the seat's turn T starts, every PC plays the queue
+-- with the seat's full movement, with retry passes (a move blocked by another
+-- of the seat's own units is retried after the others moved), then ends the
+-- turn of the seat's units the model left in place. A seat with no queue is
+-- played by the game's own AI. The same path runs in single player.
 --
 -- Local-only bookkeeping (results for the host's apply log, checksums for the
 -- sync reports) goes into ExposedMembers.Civ6Ai, which each PC keeps for itself
@@ -31,7 +35,6 @@ Civ6Ai_Orders.K = {
   SKIP = 5,
   FORTIFY = 6,
   ATTACK = 7,
-  RESOLVE = 8,
   PRIORITY = 9,
   GOVERNMENT = 10,
   POLICY = 11,
@@ -40,7 +43,6 @@ Civ6Ai_Orders.K = {
   GP_RECRUIT = 14,
   GP_PATRONIZE = 15,
   GOVERNOR = 16,
-  HOLD = 20,
   REPORT = 30,
   PING = 40,
   TEST_MODE = 49,
@@ -60,13 +62,16 @@ Civ6Ai_Orders.K = {
   TEST_FORCE_BUILD = 63,
   TEST_PRIORITY = 64,
 }
-Civ6Ai_Orders.UNIT_KINDS = {
-  [1] = "move_unit", [4] = "found_city", [5] = "unit_skip", [6] = "unit_posture_fortify",
-  [7] = "attack_target", [2] = "set_research_tech", [3] = "set_research_civic",
+-- Kinds a model decision is made of (unit, research, priority, governance).
+Civ6Ai_Orders.DECISION_KINDS = {
+  [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [9] = true,
+  [10] = true, [11] = true, [12] = true, [13] = true, [14] = true, [15] = true, [16] = true,
 }
+-- Order fields kept in the queue (P is the seat itself). A missing field is
+-- stored as -1, which every kind that reads the field treats as "none".
+Civ6Ai_Orders.QUEUE_FIELDS = { "K", "U", "X", "Y", "I", "S" }
 Civ6Ai_Orders.MAX_PASSES = 4
 Civ6Ai_Orders._batches = Civ6Ai_Orders._batches or {}
-Civ6Ai_Orders._ordered = Civ6Ai_Orders._ordered or {}
 
 local function log(s)
   print(Civ6Ai_Orders.TAG .. s)
@@ -85,6 +90,17 @@ end
 
 local function num(v)
   return tonumber(v)
+end
+
+local function sortedMembers(coll)
+  local list = {}
+  if coll ~= nil and coll.Members ~= nil then
+    for _, v in coll:Members() do
+      list[#list + 1] = v
+    end
+  end
+  table.sort(list, function(a, b) return a:GetID() < b:GetID() end)
+  return list
 end
 
 function Civ6Ai_Orders._Shared()
@@ -117,14 +133,15 @@ end
 -- Sender rules
 -- ---------------------------------------------------------------------------
 -- Only humans send. A human may order only their own units; AI seats may be
--- ordered only by the controller, the human whose first HOLD order claimed
--- the AI seats (the host). The claim is a synced game property, so every PC
--- accepts and refuses the same orders.
+-- ordered only by the controller, the human whose order first reached an AI
+-- seat (the host, the only PC that runs the model). The claim is a synced game
+-- property, so every PC accepts and refuses the same orders. Returns nil when
+-- the order is allowed, else the reason.
 function Civ6Ai_Orders._Controller()
   return num(Game:GetProperty("CIV6AI_CONTROLLER"))
 end
 
-function Civ6Ai_Orders._SenderProblem(sender, owner)
+function Civ6Ai_Orders._Authorize(sender, owner)
   local s = Players[sender]
   if s == nil or not call(s, "IsHuman") then
     return "sender_not_human"
@@ -140,7 +157,9 @@ function Civ6Ai_Orders._SenderProblem(sender, owner)
     return nil
   end
   local controller = Civ6Ai_Orders._Controller()
-  if controller ~= nil and controller ~= sender then
+  if controller == nil then
+    Game:SetProperty("CIV6AI_CONTROLLER", sender)
+  elseif controller ~= sender then
     return "not_controller"
   end
   return nil
@@ -161,7 +180,7 @@ end
 function Civ6Ai_Orders._DoCommand(sender, o)
   local k = o.K
   local owner = o.P
-  local why = Civ6Ai_Orders._SenderProblem(sender, owner)
+  local why = Civ6Ai_Orders._Authorize(sender, owner)
   if why ~= nil then
     return false, why
   end
@@ -196,10 +215,6 @@ function Civ6Ai_Orders._Attack(owner, o)
   local unit = Civ6Ai_Orders._Unit(owner, o.U)
   if unit == nil then
     return false, "unit_not_found"
-  end
-  local ready, why = Civ6Ai_Orders._Route("ReadyUnitForPlayer", owner, o.U)
-  if not ready and why ~= "gamecore_unavailable:ReadyUnitForPlayer" then
-    return false, why
   end
   return Civ6Ai_Orders._ResolveAttack(unit, o.X, o.Y)
 end
@@ -400,28 +415,31 @@ local function retryable(k, reason)
   return string.find(text, "occupied", 1, true) ~= nil or string.find(text, "stack_limit", 1, true) ~= nil
 end
 
--- Apply a complete batch with retry passes; record each result.
-function Civ6Ai_Orders._ApplyBatch(sender, batch)
-  local pending = {}
-  for j = 1, batch.n do
-    if batch.orders[j] ~= nil then
-      pending[#pending + 1] = batch.orders[j]
-    else
-      Civ6Ai_Orders._Record(sender, { S = -1, K = 0, P = batch.p }, false, "batch_order_missing:" .. j)
-    end
+-- One decision order. Returns ok, reason.
+function Civ6Ai_Orders._Execute(sender, o)
+  local k = o.K
+  if k == Civ6Ai_Orders.K.PRIORITY then
+    return Civ6Ai_Orders._SetPriority(sender, o)
   end
+  if k ~= nil and k >= Civ6Ai_Orders.K.GOVERNMENT and k <= Civ6Ai_Orders.K.GOVERNOR then
+    return Civ6Ai_Orders._DoGovernance(sender, o)
+  end
+  return Civ6Ai_Orders._DoCommand(sender, o)
+end
+
+-- Play one seat's orders with retry passes and record each result, then end
+-- the turn of the seat's units the model left in place.
+function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
+  local pending = orders
   for pass = 1, Civ6Ai_Orders.MAX_PASSES do
     if #pending == 0 then
       break
     end
     local nextPending, progress = {}, false
     for _, o in ipairs(pending) do
-      local ok, reason = Civ6Ai_Orders._DoCommand(sender, o)
+      local ok, reason = Civ6Ai_Orders._Execute(sender, o)
       if ok then
         progress = true
-        if o.U ~= nil then
-          Civ6Ai_Orders._MarkOrdered(o.P, o.U)
-        end
         Civ6Ai_Orders._Record(sender, o, true, reason)
       elseif retryable(o.K, reason) and pass < Civ6Ai_Orders.MAX_PASSES then
         nextPending[#nextPending + 1] = o
@@ -437,43 +455,141 @@ function Civ6Ai_Orders._ApplyBatch(sender, batch)
     end
     pending = nextPending
   end
+  Civ6Ai_Orders._FinishIdleUnits(owner)
 end
 
-function Civ6Ai_Orders._MarkOrdered(owner, unitId)
-  local turn = Game.GetCurrentGameTurn()
-  local rec = Civ6Ai_Orders._ordered[owner]
-  if rec == nil or rec.turn ~= turn then
-    rec = { turn = turn, units = {} }
-    Civ6Ai_Orders._ordered[owner] = rec
+-- Units the model commands. Builders, traders and religious units stay with
+-- the game's AI (the model has no commands for them).
+function Civ6Ai_Orders._ModelCommandsUnit(unit)
+  local info = GameInfo.Units[unit:GetType()]
+  if info == nil then
+    return false
   end
-  rec.units[unitId] = true
+  return not ((num(info.BuildCharges) or 0) > 0 or info.MakeTradeRoute == true or (num(info.ReligiousStrength) or 0) > 0)
 end
 
--- End the turn for an AI seat's units the model did not order (the model's
--- "resolve" at the end of its orders). Held units already have no moves.
-function Civ6Ai_Orders._Resolve(sender, owner)
-  local why = Civ6Ai_Orders._SenderProblem(sender, owner)
-  if why ~= nil then
-    return false, why
-  end
-  local rec = Civ6Ai_Orders._ordered[owner]
-  local turn = Game.GetCurrentGameTurn()
-  local ordered = (rec ~= nil and rec.turn == turn) and rec.units or {}
-  local count = 0
+-- An AI seat's model-commanded units end their turn after its orders, so the
+-- game's AI does not move the units the model left in place. A human seat
+-- finishes its own units.
+function Civ6Ai_Orders._FinishIdleUnits(owner)
   local p = Players[owner]
-  local list = {}
-  for _, u in (call(p, "GetUnits") or { Members = function() return function() return nil end end }):Members() do
-    list[#list + 1] = u
+  if p == nil or call(p, "IsHuman") then
+    return 0
   end
-  table.sort(list, function(a, b) return a:GetID() < b:GetID() end)
-  for _, u in ipairs(list) do
-    if not ordered[u:GetID()] and (call(u, "GetMovesRemaining") or 0) > 0 then
-      if pcall(UnitManager.FinishMoves, u) then
-        count = count + 1
-      end
+  local count = 0
+  for _, u in ipairs(sortedMembers(call(p, "GetUnits"))) do
+    if (call(u, "GetMovesRemaining") or 0) > 0 and Civ6Ai_Orders._ModelCommandsUnit(u)
+        and pcall(UnitManager.FinishMoves, u) then
+      count = count + 1
     end
   end
-  return true, "resolved=" .. count
+  log("finish_idle|player=" .. tostring(owner) .. "|units=" .. count)
+  return count
+end
+
+-- ---------------------------------------------------------------------------
+-- Order queue: one seat's orders for one turn, in synced game properties
+-- ---------------------------------------------------------------------------
+local function qkey(owner, name)
+  return "CIV6AI_Q_" .. tostring(owner) .. "_" .. name
+end
+
+function Civ6Ai_Orders._StartedTurn(owner)
+  return num(Game:GetProperty("CIV6AI_STARTED_" .. tostring(owner))) or -1
+end
+
+function Civ6Ai_Orders._Store(sender, owner, turn, orders)
+  for j, o in ipairs(orders) do
+    for _, f in ipairs(Civ6Ai_Orders.QUEUE_FIELDS) do
+      Game:SetProperty(qkey(owner, j .. "_" .. f), o[f] or -1)
+    end
+  end
+  Game:SetProperty(qkey(owner, "N"), #orders)
+  Game:SetProperty(qkey(owner, "FROM"), sender)
+  Game:SetProperty(qkey(owner, "T"), turn)
+  log("queued|player=" .. tostring(owner) .. "|for_turn=" .. tostring(turn) .. "|orders=" .. #orders
+    .. "|from=" .. tostring(sender))
+end
+
+-- Remove and return the seat's queue: turn, sender, orders (nil when empty).
+function Civ6Ai_Orders._Take(owner)
+  local turn = num(Game:GetProperty(qkey(owner, "T")))
+  if turn == nil or turn < 0 then
+    return nil
+  end
+  local orders = {}
+  for j = 1, num(Game:GetProperty(qkey(owner, "N"))) or 0 do
+    local o = { P = owner }
+    for _, f in ipairs(Civ6Ai_Orders.QUEUE_FIELDS) do
+      o[f] = num(Game:GetProperty(qkey(owner, j .. "_" .. f)))
+    end
+    orders[j] = o
+  end
+  Game:SetProperty(qkey(owner, "T"), -1)
+  return turn, num(Game:GetProperty(qkey(owner, "FROM"))), orders
+end
+
+-- A complete batch: the sender's orders for one seat's turn T. Queued until
+-- the seat's turn T starts. When that turn has already started, the orders run
+-- at once while the seat still has its turn, and are dropped otherwise.
+function Civ6Ai_Orders._Deliver(sender, batch)
+  local orders = {}
+  for j = 1, batch.n do
+    if batch.orders[j] ~= nil then
+      orders[#orders + 1] = batch.orders[j]
+    else
+      Civ6Ai_Orders._Record(sender, { S = -1, K = 0, P = batch.p }, false, "batch_order_missing:" .. j)
+    end
+  end
+  local owner, t, turn = batch.p, batch.t, Game.GetCurrentGameTurn()
+  local started = t ~= nil and Civ6Ai_Orders._StartedTurn(owner) >= t
+  local why = Civ6Ai_Orders._Authorize(sender, owner)
+  if why == nil and (t == nil or t < turn or t > turn + 1) then
+    why = "stale_turn:" .. tostring(t)
+  elseif why == nil and started and call(Players[owner], "IsTurnActive") ~= true then
+    why = "seat_turn_over:" .. tostring(t)
+  end
+  if why ~= nil then
+    for _, o in ipairs(orders) do
+      Civ6Ai_Orders._Record(sender, o, false, why)
+    end
+    return
+  end
+  if started then
+    log("late_batch|player=" .. tostring(owner) .. "|turn=" .. tostring(t))
+    Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
+    return
+  end
+  Civ6Ai_Orders._Store(sender, owner, t, orders)
+end
+
+-- A seat's turn start, on every PC: note it, then play the seat's queue for
+-- this turn (none: the game's own AI plays the seat). Movement is restored by
+-- now and the game's AI has not moved yet.
+function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
+  local turn = Game.GetCurrentGameTurn()
+  Game:SetProperty("CIV6AI_STARTED_" .. tostring(owner), turn)
+  local t, sender, orders = Civ6Ai_Orders._Take(owner)
+  if t == turn then
+    log("queue_apply|player=" .. tostring(owner) .. "|turn=" .. turn .. "|orders=" .. #orders)
+    Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
+  elseif t ~= nil then
+    for _, o in ipairs(orders) do
+      Civ6Ai_Orders._Record(sender, o, false, "stale_turn:" .. tostring(t))
+    end
+  end
+end
+
+-- Tell the interface the seat's turn has started (after its queue ran, so the
+-- snapshot sees the result). The local seat's LocalPlayerTurnBegin fires
+-- earlier, so its pulse waits for the TurnStartComplete mark (Civ6Ai_InGame).
+function Civ6Ai_Orders._PublishTurnStart(owner)
+  local shared = Civ6Ai_Orders._Shared()
+  shared.TurnStartComplete = shared.TurnStartComplete or {}
+  shared.TurnStartComplete[owner] = Game.GetCurrentGameTurn()
+  if LuaEvents ~= nil and LuaEvents.Civ6Ai_PlayerTurnStartComplete ~= nil then
+    LuaEvents.Civ6Ai_PlayerTurnStartComplete(owner)
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -508,17 +624,6 @@ end
 -- ---------------------------------------------------------------------------
 -- Checksum of synced state
 -- ---------------------------------------------------------------------------
-local function sortedMembers(coll)
-  local list = {}
-  if coll ~= nil and coll.Members ~= nil then
-    for _, v in coll:Members() do
-      list[#list + 1] = v
-    end
-  end
-  table.sort(list, function(a, b) return a:GetID() < b:GetID() end)
-  return list
-end
-
 -- Every living player's gold, research and civic (with progress), every
 -- unit's position, moves, damage and experience, every city's size, current
 -- production and its progress, and every owned plot's owner and improvement.
@@ -635,20 +740,12 @@ function Civ6Ai_Orders.OnOrder(sender, params)
     Civ6Ai_Orders._Report(sender, params)
     return
   end
-  if num(params.T) ~= turn then
+  if params.B ~= nil and Civ6Ai_Orders.DECISION_KINDS[k] then
+    Civ6Ai_Orders._Batch(sender, o, params)
+  elseif num(params.T) ~= turn then
     Civ6Ai_Orders._Record(sender, o, false, "stale_turn:" .. tostring(params.T))
-    return
-  end
-  if k == Civ6Ai_Orders.K.HOLD then
-    Civ6Ai_Orders._Hold(sender, o, num(params.V) == 1)
-  elseif k == Civ6Ai_Orders.K.PRIORITY then
-    local ok, reason = Civ6Ai_Orders._SetPriority(sender, o)
-    Civ6Ai_Orders._Record(sender, o, ok, reason)
-  elseif k ~= nil and k >= Civ6Ai_Orders.K.GOVERNMENT and k <= Civ6Ai_Orders.K.GOVERNOR then
-    local ok, reason = Civ6Ai_Orders._DoGovernance(sender, o)
-    Civ6Ai_Orders._Record(sender, o, ok, reason)
-  elseif k == Civ6Ai_Orders.K.RESOLVE then
-    local ok, reason = Civ6Ai_Orders._Resolve(sender, o.P)
+  elseif Civ6Ai_Orders.DECISION_KINDS[k] then
+    local ok, reason = Civ6Ai_Orders._Execute(sender, o)
     Civ6Ai_Orders._Record(sender, o, ok, reason)
   elseif k == Civ6Ai_Orders.K.PING then
     local n = (num(Game:GetProperty("CIV6AI_PINGS")) or 0) + 1
@@ -657,59 +754,36 @@ function Civ6Ai_Orders.OnOrder(sender, params)
   elseif k ~= nil and k >= Civ6Ai_Orders.K.TEST_MODE then
     local ok, reason = Civ6Ai_Orders.RunTest(sender, o, params)
     Civ6Ai_Orders._Record(sender, o, ok, reason)
-  elseif Civ6Ai_Orders.UNIT_KINDS[k] ~= nil then
-    Civ6Ai_Orders._Batch(sender, o, params)
   else
     Civ6Ai_Orders._Record(sender, o, false, "unknown_kind")
   end
   Game:SetProperty("CIV6AI_LAST_SEQ_" .. tostring(sender), o.S)
 end
 
+-- Collect one batch per sender (orders arrive one operation each) and deliver
+-- it when its last order arrives. A new batch id before the old one completed
+-- delivers the old one as it is.
 function Civ6Ai_Orders._Batch(sender, o, params)
-  local b, j, n = num(params.B), num(params.J), num(params.N)
-  if b == nil or j == nil or n == nil or n < 1 or j < 1 or j > n then
-    Civ6Ai_Orders._ApplyBatch(sender, { n = 1, p = o.P, orders = { o } })
-    return
+  local b, j, n, t = num(params.B), num(params.J), num(params.N), num(params.T)
+  if j == nil or n == nil or n < 1 or j < 1 or j > n then
+    j, n = 1, 1
   end
   local cur = Civ6Ai_Orders._batches[sender]
   if cur ~= nil and cur.id ~= b then
     log("batch_abandoned|from=" .. tostring(sender) .. "|batch=" .. tostring(cur.id))
-    Civ6Ai_Orders._ApplyBatch(sender, cur)
+    Civ6Ai_Orders._batches[sender] = nil
+    Civ6Ai_Orders._Deliver(sender, cur)
     cur = nil
   end
   if cur == nil then
-    cur = { id = b, n = n, p = o.P, orders = {} }
+    cur = { id = b, n = n, p = o.P, t = t, orders = {} }
     Civ6Ai_Orders._batches[sender] = cur
   end
   cur.orders[j] = o
   if j == n then
     Civ6Ai_Orders._batches[sender] = nil
-    Civ6Ai_Orders._ApplyBatch(sender, cur)
+    Civ6Ai_Orders._Deliver(sender, cur)
   end
-end
-
--- HOLD: turn the turn-start freeze on or off for one AI seat. The first HOLD
--- claims the controller role for its sender.
-function Civ6Ai_Orders._Hold(sender, o, on)
-  local p = Players[o.P]
-  if p == nil or call(p, "IsHuman") then
-    Civ6Ai_Orders._Record(sender, o, false, "hold_needs_ai_seat")
-    return
-  end
-  local s = Players[sender]
-  if s == nil or not call(s, "IsHuman") then
-    Civ6Ai_Orders._Record(sender, o, false, "sender_not_human")
-    return
-  end
-  local controller = Civ6Ai_Orders._Controller()
-  if controller == nil then
-    Game:SetProperty("CIV6AI_CONTROLLER", sender)
-  elseif controller ~= sender then
-    Civ6Ai_Orders._Record(sender, o, false, "not_controller")
-    return
-  end
-  Game:SetProperty("CIV6AI_HOLD_" .. tostring(o.P), on and 1 or 0)
-  Civ6Ai_Orders._Record(sender, o, true, on and "hold_on" or "hold_off")
 end
 
 -- ---------------------------------------------------------------------------
@@ -1069,7 +1143,7 @@ end
 
 -- Synced channel dispatch for the governance kinds.
 function Civ6Ai_Orders._DoGovernance(sender, o)
-  local why = Civ6Ai_Orders._SenderProblem(sender, o.P)
+  local why = Civ6Ai_Orders._Authorize(sender, o.P)
   if why ~= nil then
     return false, why
   end
@@ -1941,7 +2015,7 @@ end
 -- X = level 0..PRIORITY_MAX_LEVEL (0 switches that category off).
 function Civ6Ai_Orders._SetPriority(sender, o)
   local owner = o.P
-  local problem = Civ6Ai_Orders._SenderProblem(sender, owner)
+  local problem = Civ6Ai_Orders._Authorize(sender, owner)
   if problem ~= nil then
     return false, problem
   end
@@ -2143,6 +2217,13 @@ function Civ6Ai_Orders.Init()
   if GameEvents.OnGameTurnStarted ~= nil then
     GameEvents.OnGameTurnStarted.Add(Civ6Ai_Orders.OnGameTurnStarted)
   end
+  GameEvents.PlayerTurnStartComplete.Add(function(owner)
+    local ok, err = pcall(Civ6Ai_Orders.OnPlayerTurnStartComplete, owner)
+    if not ok then
+      log("turn_start_error|player=" .. tostring(owner) .. "|" .. tostring(err))
+    end
+    Civ6Ai_Orders._PublishTurnStart(owner)
+  end)
   Civ6Ai_Orders.RegisterForceStrategies()
   local nPrio = Civ6Ai_Orders.RegisterPriorityStrategies()
   local shared = Civ6Ai_Orders._Shared()

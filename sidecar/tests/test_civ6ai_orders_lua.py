@@ -1,5 +1,5 @@
-"""Offline checks for the synced MP order channel (Gameplay/Civ6Ai_Orders.lua,
-InGame/Civ6Ai_OrderChannel.lua) and the synced seat hold in Civ6Ai_GameCore."""
+"""Offline checks for the synced order channel (Gameplay/Civ6Ai_Orders.lua,
+InGame/Civ6Ai_OrderChannel.lua): per-turn order queue, sender rules, combat."""
 import pathlib
 import unittest
 
@@ -48,6 +48,7 @@ local function mkPlayer(id,human,units)
   local p = {id=id,human=human,units=units}
   function p:IsAlive() return true end
   function p:IsHuman() return self.human end
+  function p:IsTurnActive() return self.active ~= false end
   function p:GetUnits()
     local me=self
     return {Members=function() local i=0; return function() i=i+1; if me.units[i] then return i, me.units[i] end end end,
@@ -87,6 +88,9 @@ ExposedMembers.Civ6Ai = {
   SetResearchForPlayer=function(p,i) Players[p].tech=i; return true, "tech="..i end,
   FinishMovesForPlayer=function(p,uid) return true, "finished" end,
 }
+published = {}
+LuaEvents = {Civ6Ai_PlayerTurnStartComplete=function(p)
+  table.insert(published, {p=p, y=Players[2].units[1].y}) end}
 """
 
 
@@ -111,21 +115,22 @@ class OrdersGameplayTests(unittest.TestCase):
     def last(self):
         return self.results()[-1]
 
+    def turn_start(self, owner, turn=None):
+        if turn is not None:
+            self.rt.globals().SetTurn(turn)
+        self.rt.eval("GameEvents.PlayerTurnStartComplete.fns[1]")(owner)
+
     def test_registers_event_handler(self):
         self.assertEqual(len(_vals(self.rt.eval("GameEvents.Civ6AiOrder.fns"))), 1)
         self.assertEqual(len(_vals(self.rt.eval("GameEvents.OnGameTurnStarted.fns"))), 1)
+        self.assertEqual(len(_vals(self.rt.eval("GameEvents.PlayerTurnStartComplete.fns"))), 1)
 
-    def test_first_hold_claims_controller_and_blocks_others(self):
-        self.order(0, K=20, P=2, V=1, S=1)
+    def test_first_ai_order_claims_controller_and_blocks_others(self):
+        self.order(0, K=2, P=2, I=3, S=1)
         self.assertEqual(self.rt.eval("GetProp('CIV6AI_CONTROLLER')"), 0)
-        self.assertEqual(self.rt.eval("GetProp('CIV6AI_HOLD_2')"), 1)
         self.order(1, K=1, P=2, U=7, X=10, Y=11, S=2)
         self.assertEqual(self.last()["reason"], "not_controller")
         self.assertEqual(self.rt.eval("Players[2].units[1].y"), 10)
-
-    def test_hold_refuses_human_seat(self):
-        self.order(0, K=20, P=1, V=1, S=1)
-        self.assertEqual(self.last()["reason"], "hold_needs_ai_seat")
 
     def test_human_cannot_order_other_humans_units(self):
         self.order(1, K=1, P=0, U=1, X=5, Y=6, S=3)
@@ -136,53 +141,98 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertTrue(self.last()["reason"].startswith("stale_turn"))
         self.assertEqual(self.rt.eval("Players[2].units[1].y"), 10)
 
-    def test_batch_waits_for_last_order_and_retries_occupied(self):
+    def test_batch_queued_until_seat_turn_starts_then_retries_occupied(self):
         # Unit 7 moves onto unit 8's tile; unit 8 moves away second. Pass 1
         # fails 7 (occupied), moves 8; pass 2 moves 7.
-        self.order(0, K=1, P=2, U=7, X=11, Y=10, S=5, B=9, J=1, N=2)
+        self.order(0, K=1, P=2, U=7, X=11, Y=10, S=5, B=9, J=1, N=2, T=6)
+        self.order(0, K=1, P=2, U=8, X=11, Y=11, S=6, B=9, J=2, N=2, T=6)
         self.assertIsNone(self.rt.eval("ExposedMembers.Civ6Ai.OrderResults"))
-        self.order(0, K=1, P=2, U=8, X=11, Y=11, S=6, B=9, J=2, N=2)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_Q_2_T')"), 6)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_LAST_SEQ_0')"), 6)
+        self.turn_start(2, turn=6)
         res = self.results()
         self.assertEqual([r["seq"] for r in res], [6, 5])
         self.assertTrue(all(r["ok"] for r in res))
         self.assertEqual(self.rt.eval("Players[2].units[1].x"), 11)
-        self.assertEqual(self.rt.eval("GetProp('CIV6AI_LAST_SEQ_0')"), 6)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_Q_2_T')"), -1)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_STARTED_2')"), 6)
 
-    def test_new_batch_flushes_incomplete_old_one(self):
-        self.order(0, K=2, P=2, I=3, S=7, B=1, J=1, N=2)
-        self.order(0, K=2, P=2, I=4, S=8, B=2, J=1, N=1)
-        reasons = [r["reason"] for r in self.results()]
-        self.assertIn("batch_order_missing:2", reasons)
+    def test_queue_is_game_state_and_survives_a_reload(self):
+        self.order(0, K=2, P=2, I=4, S=7, B=1, J=1, N=1, T=6)
+        self.rt.execute("Civ6Ai_Orders = nil; GameEvents.PlayerTurnStartComplete.fns = {}")
+        self.rt.execute((MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text())
+        self.turn_start(2, turn=6)
         self.assertEqual(self.rt.eval("Players[2].tech"), 4)
 
-    def test_resolve_skips_ordered_units(self):
-        self.order(0, K=1, P=2, U=7, X=10, Y=11, S=9, B=3, J=1, N=1)
-        self.rt.execute("Players[2].units[1].moves = 1")
-        self.order(0, K=8, P=2, S=10)
-        self.assertEqual(self.last()["reason"], "resolved=2")
-        self.assertEqual(self.rt.eval("Players[2].units[1].moves"), 1)
+    def test_snapshot_published_after_queue_ran(self):
+        self.order(0, K=1, P=2, U=7, X=10, Y=11, S=5, B=9, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        pub = dict(self.rt.eval("published[1]").items())
+        self.assertEqual((pub["p"], pub["y"]), (2, 11))
+        self.assertEqual(self.rt.eval("ExposedMembers.Civ6Ai.TurnStartComplete[2]"), 6)
+
+    def test_no_queue_leaves_seat_to_the_game_ai(self):
+        self.turn_start(2, turn=6)
+        self.assertIsNone(self.rt.eval("ExposedMembers.Civ6Ai.OrderResults"))
+        self.assertEqual(self.rt.eval("Players[2].units[2].moves"), 2)
+
+    def test_idle_units_end_their_turn_but_builders_stay_with_game_ai(self):
+        self.rt.execute("GameInfo.Units[2] = {BuildCharges=3}; table.insert(Players[2].units, MkUnit(2,10,1,1,2))")
+        self.order(0, K=2, P=2, I=4, S=7, B=1, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
         self.assertEqual(self.rt.eval("Players[2].units[2].moves"), 0)
+        self.assertEqual(self.rt.eval("Players[2].units[4].moves"), 2)
+
+    def test_late_batch_runs_while_seat_turn_is_active(self):
+        self.turn_start(2)
+        self.order(0, K=2, P=2, I=4, S=7, B=1, J=1, N=1)
+        self.assertTrue(self.last()["ok"])
+        self.assertEqual(self.rt.eval("Players[2].tech"), 4)
+        self.rt.execute("Players[2].active = false")
+        self.order(0, K=2, P=2, I=5, S=8, B=2, J=1, N=1)
+        self.assertEqual(self.last()["reason"], "seat_turn_over:5")
+
+    def test_batch_for_a_past_or_far_turn_is_refused(self):
+        self.order(0, K=2, P=2, I=4, S=7, B=1, J=1, N=1, T=4)
+        self.assertEqual(self.last()["reason"], "stale_turn:4")
+        self.order(0, K=2, P=2, I=4, S=8, B=2, J=1, N=1, T=7)
+        self.assertEqual(self.last()["reason"], "stale_turn:7")
+        self.assertIsNone(self.rt.eval("GetProp('CIV6AI_Q_2_T')"))
+
+    def test_queue_for_a_missed_turn_is_dropped(self):
+        self.order(0, K=2, P=2, I=4, S=7, B=1, J=1, N=1, T=6)
+        self.turn_start(2, turn=7)
+        self.assertEqual(self.last()["reason"], "stale_turn:6")
+        self.assertIsNone(self.rt.eval("Players[2].tech"))
+
+    def test_new_batch_flushes_incomplete_old_one(self):
+        self.order(0, K=2, P=2, I=3, S=7, B=1, J=1, N=2, T=6)
+        self.order(0, K=2, P=2, I=4, S=8, B=2, J=1, N=1, T=6)
+        reasons = [r["reason"] for r in self.results()]
+        self.assertIn("batch_order_missing:2", reasons)
+        self.turn_start(2, turn=6)
+        self.assertEqual(self.rt.eval("Players[2].tech"), 4)
 
     def test_ranged_attack_uses_engine_forecast(self):
         self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,4,13,10,0))")
-        self.order(0, K=7, P=2, U=9, X=13, Y=10, S=11, B=4, J=1, N=1)
+        self.order(0, K=7, P=2, U=9, X=13, Y=10, S=11)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
         self.assertTrue(self.last()["reason"].startswith("ranged:def_dmg=0>30:att_dmg=0>0"))
         self.assertEqual(self.rt.eval("Players[2].units[3].moves"), 0)
 
     def test_ranged_attack_respects_range(self):
         self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,4,15,10,0))")
-        self.order(0, K=7, P=2, U=9, X=15, Y=10, S=11, B=4, J=1, N=1)
+        self.order(0, K=7, P=2, U=9, X=15, Y=10, S=11)
         self.assertEqual(self.last()["reason"], "out_of_range:3")
 
     def test_melee_attack_needs_enemy_adjacency_and_war(self):
-        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=12, B=5, J=1, N=1)
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=12)
         self.assertEqual(self.last()["reason"], "no_enemy_on_plot")
         self.rt.execute("table.insert(Players[1].units, MkUnit(1,3,10,11,0))")
-        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=13, B=6, J=1, N=1)
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=13)
         self.assertEqual(self.last()["reason"], "not_at_war")
         self.rt.execute("Players[2].war = {[1]=true}")
-        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=14, B=7, J=1, N=1)
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=14)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
         self.assertEqual(self.rt.eval("Players[2].units[1].dmg"), 20)
         self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
@@ -190,14 +240,14 @@ class OrdersGameplayTests(unittest.TestCase):
     def test_melee_kill_advances_into_plot(self):
         self.rt.execute("Players[2].war = {[1]=true}; local e = MkUnit(1,3,10,11,0); e.dmg = 80;"
                         " table.insert(Players[1].units, e)")
-        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=13, B=6, J=1, N=1)
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=13)
         self.assertIn("killed=true", self.last()["reason"])
         self.assertEqual(self.rt.eval("#Players[1].units"), 1)
         self.assertEqual(self.rt.eval("Players[2].units[1].y"), 11)
 
     def test_far_move_uses_path_route(self):
         self.rt.execute("ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = function(p,u,x,y) path_called = {p,u,x,y}; return true, 'path' end")
-        self.order(0, K=1, P=2, U=7, X=13, Y=13, S=20, B=8, J=1, N=1)
+        self.order(0, K=1, P=2, U=7, X=13, Y=13, S=20)
         self.assertEqual(self.last()["reason"], "path")
         self.assertEqual(self.rt.eval("path_called[3]"), 13)
 
@@ -352,10 +402,12 @@ class OrdersGameplayTests(unittest.TestCase):
             rt = lupa.LuaRuntime(unpack_returned_tuples=True)
             rt.execute(FAKE_ENV)
             rt.execute((MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text())
-            for p in ({"K": 20, "P": 2, "V": 1, "S": 1}, {"K": 1, "P": 2, "U": 7, "X": 11, "Y": 10, "S": 2, "B": 1, "J": 1, "N": 2},
-                      {"K": 1, "P": 2, "U": 8, "X": 11, "Y": 11, "S": 3, "B": 1, "J": 2, "N": 2}, {"K": 8, "P": 2, "S": 4}):
-                p["T"] = 5
+            for p in ({"K": 2, "P": 2, "I": 3, "S": 1, "T": 5},
+                      {"K": 1, "P": 2, "U": 7, "X": 11, "Y": 10, "S": 2, "B": 1, "J": 1, "N": 2, "T": 6},
+                      {"K": 1, "P": 2, "U": 8, "X": 11, "Y": 11, "S": 3, "B": 1, "J": 2, "N": 2, "T": 6}):
                 rt.globals().Civ6Ai_Orders.OnOrder(0, rt.table_from(p))
+            rt.globals().SetTurn(6)
+            rt.eval("GameEvents.PlayerTurnStartComplete.fns[1]")(2)
             return rt.eval("ExposedMembers.Civ6Ai.OrderHash"), rt.eval("Civ6Ai_Orders.Checksum()")
         self.assertEqual(run(), run())
 
@@ -377,7 +429,8 @@ PlayerOperations = {EXECUTE_SCRIPT = 99}
 UI = {RequestPlayerOperation=function(me, op, params) table.insert(sent, params) end}
 now = 0
 Automation = {GetTime=function() return now end}
-Game = {GetLocalPlayer=function() return 0 end, GetCurrentGameTurn=function() return 5 end,
+TURN = 5
+Game = {GetLocalPlayer=function() return 0 end, GetCurrentGameTurn=function() return TURN end,
         GetProperty=function(_, k) return nil end}
 GameInfo = {Technologies={TECH_MINING={Index=3}}, Civics={}}
 Players = {[2]={IsHuman=function() return false end}}
@@ -402,15 +455,16 @@ class OrderChannelTests(unittest.TestCase):
             '{kind="set_research_tech", arguments={tech_id="TECH_MINING"}}',
             '{kind="queue_production", arguments={city_id="C1"}}',
         ])
-        self.assertEqual(rt.globals().Civ6Ai_OrderChannel.SendDecision(2, d), 2)
+        self.assertEqual(rt.globals().Civ6Ai_OrderChannel.SendDecision(2, d, 6), 2)
         sent = [dict(p.items()) for p in _vals(rt.eval("sent"))]
         self.assertEqual([p["K"] for p in sent], [1, 2])
         self.assertEqual({p["OnStart"] for p in sent}, {"Civ6AiOrder"})
+        self.assertEqual({p["T"] for p in sent}, {6})
         self.assertEqual([(p["J"], p["N"]) for p in sent], [(1, 2), (2, 2)])
         self.assertEqual(sent[0]["U"], 7)
         self.assertEqual(sent[1]["I"], 3)
         rec = [dict(r.items()) for r in _vals(rt.eval("recorded"))]
-        self.assertEqual(rec[0]["reason"], "production_no_mp_route")
+        self.assertEqual(rec[0]["reason"], "production_requires_local_player")
         # Gameplay reports both results; the channel records them.
         rt.execute("ExposedMembers.Civ6Ai.OrderResults = {"
                    "{sender=0, seq=%d, ok=true, reason='moved'}, {sender=0, seq=%d, ok=false, reason='x'}}"
@@ -419,19 +473,16 @@ class OrderChannelTests(unittest.TestCase):
         rec = [dict(r.items()) for r in _vals(rt.eval("recorded"))]
         self.assertEqual([(r["kind"], r["ok"]) for r in rec[1:]], [("move_unit", True), ("set_research_tech", False)])
 
-    def test_missing_result_times_out(self):
+    def test_result_missing_once_the_turn_it_was_for_is_over(self):
         rt = self.rt
         d = self.decision(['{kind="unit_skip", arguments={unit_id="UNIT_2_8"}}'])
-        rt.globals().Civ6Ai_OrderChannel.SendDecision(2, d)
-        rt.execute("now = 100")
-        rt.globals().Civ6Ai_OrderChannel.DrainResults()
+        rt.globals().Civ6Ai_OrderChannel.SendDecision(2, d, 6)
+        rt.execute("TURN = 6")
+        self.assertEqual(rt.globals().Civ6Ai_OrderChannel.DrainResults(), 1)
+        self.assertIsNone(rt.eval("recorded[1]"))
+        rt.execute("TURN = 7")
+        self.assertEqual(rt.globals().Civ6Ai_OrderChannel.DrainResults(), 0)
         self.assertEqual(rt.eval("recorded[1].reason"), "no_result_from_gameplay")
-
-    def test_hold_sent_once_per_turn(self):
-        rt = self.rt
-        rt.execute("Civ6Ai_OrderChannel.EnsureHolds({2}); Civ6Ai_OrderChannel.EnsureHolds({2})")
-        sent = [dict(p.items()) for p in _vals(rt.eval("sent"))]
-        self.assertEqual([(p["K"], p["P"], p["V"]) for p in sent], [(20, 2, 1)])
 
     def test_report_uses_local_checksum(self):
         rt = self.rt
@@ -439,34 +490,6 @@ class OrderChannelTests(unittest.TestCase):
         self.assertTrue(rt.globals().Civ6Ai_OrderChannel.SendReport(5))
         p = dict(rt.eval("sent[1]").items())
         self.assertEqual((p["K"], p["T"], p["H"], p["R"], p["Q"]), (30, 5, 11, 22, 3))
-
-
-GAMECORE_ENV = r"""
-local props = {}
-Game = {GetProperty=function(_, k) return props[k] end}
-function SetProp(k, v) props[k] = v end
-ExposedMembers = {Civ6Ai = {HoldAiSeatUnits = {[3] = true}}}
-net = false
-GameConfiguration = {IsNetworkMultiplayer=function() return net end}
-"""
-
-
-@unittest.skipIf(lupa is None, "lupa not installed")
-class SyncedHoldTests(unittest.TestCase):
-    def test_is_seat_held_prefers_synced_property(self):
-        src = (MOD / "Gameplay" / "Civ6Ai_GameCore.lua").read_text()
-        start = src.index("function Civ6Ai_GameCore._IsNetworkGame")
-        end_ = src.index("\nend\n", src.index("function Civ6Ai_GameCore.IsSeatHeld")) + 5
-        rt = lupa.LuaRuntime(unpack_returned_tuples=True)
-        rt.execute(GAMECORE_ENV + "\nCiv6Ai_GameCore = {}\n" + src[start:end_])
-        held = rt.eval("function(p) return Civ6Ai_GameCore.IsSeatHeld(p) end")
-        self.assertTrue(held(3))       # single player: local table
-        rt.execute("net = true")
-        self.assertFalse(held(3))      # network: local table ignored
-        rt.execute("SetProp('CIV6AI_HOLD_3', 1)")
-        self.assertTrue(held(3))       # network: synced property
-        rt.execute("SetProp('CIV6AI_HOLD_3', 0); net = false")
-        self.assertFalse(held(3))      # synced "off" wins everywhere
 
 
 PATH_ENV = r"""
@@ -478,7 +501,6 @@ function unit:GetMovesRemaining() return self.moves end
 function unit:GetID() return 7 end
 function Civ6Ai_GameCore._FindUnit(p, id) return nil, unit, "" end
 function Civ6Ai_GameCore._Call(o, n) return o[n](o) end
-function Civ6Ai_GameCore._ReleaseHeld() return false end
 restored = 0
 function Civ6Ai_GameCore._RestoreMoves() restored = restored + 1 end
 -- a step costs 1 move; a step is refused when no moves are left
@@ -510,10 +532,12 @@ class PathMoveTests(unittest.TestCase):
 
     def run_path(self, moves):
         src = (MOD / "Gameplay" / "Civ6Ai_GameCore.lua").read_text()
-        start = src.index("function Civ6Ai_GameCore.MoveUnitAlongPathForPlayer")
-        end_ = src.index("\nend\n", start) + 5
+
+        def fn(name):
+            start = src.index("function Civ6Ai_GameCore." + name + "(")
+            return src[start:src.index("\nend\n", start) + 5]
         rt = lupa.LuaRuntime(unpack_returned_tuples=True)
-        rt.execute(PATH_ENV + "\n" + src[start:end_])
+        rt.execute(PATH_ENV + "\n" + fn("_FirstStepCost") + fn("MoveUnitAlongPathForPlayer"))
         rt.execute("unit.moves = %d" % moves)
         return rt, rt.eval("Civ6Ai_GameCore.MoveUnitAlongPathForPlayer(1, 7, 3, 0)")
 
@@ -619,7 +643,7 @@ class PriorityOrderTests(unittest.TestCase):
     def test_rejects_bad_input_and_foreign_sender(self):
         self.assertEqual(self.order(0, K=9, P=2, I=99, X=1, S=1)["reason"], "bad_priority")
         self.assertEqual(self.order(0, K=9, P=2, I=8, X=4, S=2)["reason"], "bad_level")
-        self.order(0, K=20, P=2, V=1, S=3)  # sender 0 becomes controller
+        self.order(0, K=9, P=2, I=8, X=1, S=3)  # sender 0 becomes controller
         self.assertEqual(self.order(1, K=9, P=2, I=8, X=1, S=4)["reason"], "not_controller")
         self.assertEqual(self.order(1, K=9, P=0, I=8, X=1, S=5)["reason"], "not_owner")
         self.assertTrue(self.order(1, K=9, P=1, I=8, X=1, S=6)["ok"])  # a human sets their own

@@ -31,13 +31,13 @@ local function prop(name)
 end
 
 function Civ6Ai_MpTest.IsHostRunner()
-  return Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive() and Civ6Ai_Config.IsMpTest()
+  return Civ6Ai_Config.IsNetworkGame() and Civ6Ai_Config.IsMpTest()
     and Civ6Ai_Config.IsHostPc()
 end
 
 -- Test mode on in this game (synced), seen by every PC.
 function Civ6Ai_MpTest.IsOn()
-  return Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive() and prop("CIV6AI_MPTEST") == 1
+  return Civ6Ai_Config.IsNetworkGame() and prop("CIV6AI_MPTEST") == 1
 end
 
 function Civ6Ai_MpTest.Step()
@@ -88,7 +88,7 @@ end
 
 -- The AI seat and its melee unit the scripted checks use.
 function Civ6Ai_MpTest.PickSubject()
-  for _, seat in ipairs(Civ6Ai_InGame._mpHoldSeats or {}) do
+  for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
     local p = Players[seat]
     if p ~= nil and p:IsAlive() then
       for _, u in ipairs(members(p:GetUnits())) do
@@ -153,7 +153,6 @@ Civ6Ai_MpTest.Steps = {}
 Civ6Ai_MpTest.Steps[0] = function(seat, unit)
   local send = Civ6Ai_OrderChannel.Send
   send(K().TEST_MODE, { V = 1 })
-  Civ6Ai_OrderChannel.EnsureHolds(Civ6Ai_InGame._mpHoldSeats or {})
   send(K().TEST_INTROSPECT, { P = seat or 0, Note = "civ6ai-note" })
   send(K().PING, {})
   Civ6Ai_MpTest.Say("Multiplayer test started. Turns end by themselves; it takes about 25 turns. Please don't quit yet.")
@@ -221,7 +220,7 @@ Civ6Ai_MpTest.Steps[3] = function(seat, unit)
       commands[#commands + 1] = { kind = "attack_target", arguments = { unit_id = "UNIT_" .. slinger:GetID(), target_x = ex, target_y = ey } }
     end
     commands[#commands + 1] = { kind = "attack_target", arguments = { unit_id = "UNIT_" .. unit:GetID(), target_x = ex, target_y = ey } }
-    Civ6Ai_OrderChannel.SendDecision(seat, { commands = commands })
+    Civ6Ai_OrderChannel.SendDecision(seat, { commands = commands }, Game.GetCurrentGameTurn())
   end
   send(K().TEST_SCRIPTED_PRODUCTION, { P = seat })
 end
@@ -362,7 +361,7 @@ end
 -- step 9 turns unit construction on again.
 function Civ6Ai_MpTest._SteerSeats()
   local seats = {}
-  for _, seat in ipairs(Civ6Ai_InGame._mpHoldSeats or {}) do
+  for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
     local p = Players[seat]
     if p ~= nil and p:IsAlive() and p:GetCities() ~= nil and p:GetCities():GetCount() > 0 then
       seats[#seats + 1] = seat
@@ -396,7 +395,7 @@ Civ6Ai_MpTest.STEER_BY_STEP = {}
 -- each seat has and is building, step 13 switches them off.
 function Civ6Ai_MpTest._ForceSeats()
   local seats = {}
-  for _, seat in ipairs(Civ6Ai_InGame._mpHoldSeats or {}) do
+  for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
     local p = Players[seat]
     if p ~= nil and p:IsAlive() and p:GetCities() ~= nil and p:GetCities():GetCount() > 0 then
       seats[#seats + 1] = seat
@@ -424,9 +423,8 @@ end
 Civ6Ai_MpTest.FORCE_BY_STEP = {}
 
 -- Build priorities (Data/Civ6Ai_Priorities.sql) through the real PRIORITY
--- order the model will use. Every AI major with a city plays freely (holds
--- released so settlers and builders act normally); the first three get
--- priorities and the fourth is the control:
+-- order the model will use. Every AI major with a city plays freely; the
+-- first three get priorities and the fourth is the control:
 --   A: total_war all-in (after war light, to check one posture replaces another)
 --   B: science_victory all-in + growth strong + gold light (stacking), then a
 --      fourth focus that must be refused
@@ -446,14 +444,7 @@ function Civ6Ai_MpTest._PrioSeats()
   if st ~= nil then
     return st
   end
-  local seats = {}
-  for i = 0, 63 do
-    local p = Players[i]
-    if p ~= nil and p:IsAlive() and p:IsMajor() and not p:IsHuman() and p:GetCities() ~= nil
-        and p:GetCities():GetCount() > 0 then
-      seats[#seats + 1] = i
-    end
-  end
+  local seats = Civ6Ai_MpTest._ForceSeats()
   st = { seats = seats }
   Civ6Ai_MpTest._state.prio = st
   log("prio|seats|total_war=" .. tostring(seats[1]) .. "|stacked=" .. tostring(seats[2]) .. "|naval=" .. tostring(seats[3])
@@ -471,10 +462,6 @@ end
 
 function Civ6Ai_MpTest._PrioStep(step)
   if step == 1 then
-    Civ6Ai_MpTest._holdsReleased = true
-    for _, seat in ipairs(Civ6Ai_InGame._mpHoldSeats or {}) do
-      Civ6Ai_OrderChannel.Send(K().HOLD, { P = seat, V = 0 })
-    end
     return Civ6Ai_MpTest._PrioRead(3)
   end
   local s = Civ6Ai_MpTest._PrioSeats().seats
@@ -507,10 +494,6 @@ for step = 1, Civ6Ai_MpTest.LAST_STEP - 1 do
 end
 
 Civ6Ai_MpTest.Steps[Civ6Ai_MpTest.LAST_STEP] = function()
-  Civ6Ai_MpTest._holdsReleased = nil
-  for _, seat in ipairs(Civ6Ai_InGame._mpHoldSeats or {}) do
-    Civ6Ai_OrderChannel.Send(K().HOLD, { P = seat, V = 0 })
-  end
   Civ6Ai_OrderChannel.Send(K().TEST_MODE, { V = 2 })
   Civ6Ai_MpTest.Say("Multiplayer test finished. Thanks! You can quit the game now.")
 end
@@ -623,7 +606,7 @@ function Civ6Ai_MpTest._OnLocalTurnEnd()
 end
 
 function Civ6Ai_MpTest.Initialize()
-  if Civ6Ai_MpTest._initialized or Civ6Ai_OrderChannel == nil or not Civ6Ai_OrderChannel.IsActive() then
+  if Civ6Ai_MpTest._initialized or not Civ6Ai_Config.IsNetworkGame() then
     return
   end
   Civ6Ai_MpTest._initialized = true

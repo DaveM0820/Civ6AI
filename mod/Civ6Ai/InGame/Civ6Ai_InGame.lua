@@ -8,7 +8,6 @@ include("Civ6Ai_Production.lua")
 include("Civ6Ai_Apply.lua")
 include("Civ6Ai_OrderChannel.lua")
 include("Civ6Ai_MpTest.lua")
-include("Civ6Ai_MpSync.lua")
 include("Civ6Ai_Bridge.lua")
 include("Civ6Ai_SeatExperiment.lua")
 include("Civ6Ai_Autotest.lua")
@@ -16,10 +15,6 @@ include("Civ6Ai_HostChannel.lua")
 include("Civ6Ai_Chat.lua")
 
 function Civ6Ai_OnLocalPlayerTurnBegin()
-  if Civ6Ai_InGame._mpHoldSeats ~= nil and Civ6Ai_OrderChannel ~= nil
-      and not (Civ6Ai_MpTest ~= nil and Civ6Ai_MpTest._holdsReleased) then
-    Civ6Ai_OrderChannel.EnsureHolds(Civ6Ai_InGame._mpHoldSeats)
-  end
   -- STABLE: autotest first-turn pulse entry (do not change when fixing apply/inject).
   if not Civ6Ai_Config.IsAutotest() then
     return
@@ -101,18 +96,16 @@ function Civ6Ai_OnPlayerTurnStartComplete(playerID)
   Civ6Ai_Bridge.RunTurnPulse(playerID)
 end
 
+-- Other seats pulse only from Civ6Ai_PlayerTurnStartComplete, which gameplay
+-- sends after playing their queued orders, so the snapshot shows the result.
 function Civ6Ai_OnPlayerTurnActivated(playerID, isFirstTime)
   Civ6Ai_SeatExperiment.OnPlayerTurnActivated(playerID)
-  if Civ6Ai_Autotest_IsLocalSeat(playerID) then
+  if Civ6Ai_Autotest_IsLocalSeat(playerID) or playerID ~= Game.GetLocalPlayer() then
     return
   end
   -- Outside autotest the local seat pulses from here, which can also run before
   -- GameCore restores its movement; give it the same wait as LocalPlayerTurnBegin.
-  if Game.GetLocalPlayer ~= nil and playerID == Game.GetLocalPlayer() then
-    Civ6Ai_InGame.PulseAfterTurnStart(playerID, Game.GetCurrentGameTurn())
-    return
-  end
-  Civ6Ai_Bridge.RunTurnPulse(playerID)
+  Civ6Ai_InGame.PulseAfterTurnStart(playerID, Game.GetCurrentGameTurn())
 end
 
 function Civ6Ai_OnLoadScreenClose()
@@ -145,47 +138,11 @@ function Civ6Ai_InitializeInGame()
   Civ6Ai_Autotest.Initialize()
   Civ6Ai_HostChannel.Initialize()
   Civ6Ai_Chat.Initialize()
-  if Civ6Ai_MpSync ~= nil and Civ6Ai_MpSync.Initialize ~= nil then
-    Civ6Ai_MpSync.Initialize()
-  end
   Civ6Ai_Util.InitializeTickPump()
-  if Civ6Ai_OrderChannel ~= nil then
-    Civ6Ai_OrderChannel.Initialize()
-  end
+  Civ6Ai_OrderChannel.Initialize()
   ExposedMembers.Civ6Ai = ExposedMembers.Civ6Ai or {}
   ExposedMembers.Civ6Ai.RunTurnPulse = Civ6Ai_Bridge.RunTurnPulse
   ExposedMembers.Civ6Ai.RunChatPulse = Civ6Ai_Bridge.RunChatPulse
-  -- Model-driven AI seats: GameCore holds their units at turn start so the
-  -- Firaxis AI does not spend the moves before the model's orders arrive.
-  local hold = {}
-  if Civ6Ai_Config.IsSidecarLive() then
-    for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
-      if seat ~= Game.GetLocalPlayer() then
-        hold[seat] = true
-      end
-    end
-  end
-  ExposedMembers.Civ6Ai.HoldAiSeatUnits = hold
-  -- Network game: the freeze has to be synced game state, so the host asks for
-  -- it through the order channel (GameCore ignores HoldAiSeatUnits there).
-  if Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive() and Civ6Ai_Config.IsHostPc() then
-    local seats = {}
-    for seat in pairs(hold) do
-      seats[#seats + 1] = seat
-    end
-    -- Test mode without the model running: use the game's AI majors.
-    if #seats == 0 and Civ6Ai_Config.IsMpTest() then
-      for i = 0, 63 do
-        local p = Players[i]
-        if p ~= nil and p:IsAlive() and p:IsMajor() and not p:IsHuman() then
-          seats[#seats + 1] = i
-        end
-      end
-    end
-    table.sort(seats)
-    Civ6Ai_InGame._mpHoldSeats = seats
-    Civ6Ai_OrderChannel.EnsureHolds(seats)
-  end
   if Civ6Ai_MpTest ~= nil then
     Civ6Ai_MpTest.Initialize()
   end

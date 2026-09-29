@@ -324,13 +324,7 @@ function Civ6Ai_Chat.SendMessages(senderPlayerID, messages)
 end
 
 function Civ6Ai_Chat._ShouldEnableWorldTrackerChat()
-  if Civ6Ai_Config ~= nil and Civ6Ai_Config.EnableSinglePlayerChat ~= nil then
-    return Civ6Ai_Config.EnableSinglePlayerChat()
-  end
-  if Civ6Ai_Paths ~= nil and Civ6Ai_Paths.EnableSinglePlayerChat ~= nil then
-    return tonumber(Civ6Ai_Paths.EnableSinglePlayerChat) == 1
-  end
-  return true
+  return Civ6Ai_Config.EnableSinglePlayerChat()
 end
 
 function Civ6Ai_Chat._LookupControl(paths)

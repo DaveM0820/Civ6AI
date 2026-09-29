@@ -1,83 +1,57 @@
--- Civ6Ai seat manifest and runtime flags.
+-- Civ6Ai seat roles and host settings.
+--
+-- Host settings come from one file, InGame/Civ6Ai_Paths.lua, which
+-- scripts/install_mod.py writes into the host's installed copy. The shipped
+-- package carries a neutral stub, so a friend's PC runs with defaults: it never
+-- drives a seat, because only the network host runs the bridge.
+--
+-- Seat roles come from game state. A human seat is never model-driven in a
+-- network game; autotest (the model playing the local human seat) is a
+-- single-player mode.
 Civ6Ai_Config = Civ6Ai_Config or {}
 
-function Civ6Ai_Config._Runtime()
-  if Civ6Ai_Runtime ~= nil and Civ6Ai_Runtime.Root ~= nil and Civ6Ai_Runtime.Root ~= "" then
-    return Civ6Ai_Runtime
+local function setting(name)
+  if Civ6Ai_Paths == nil then
+    return nil
   end
-  if ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil then
-    return ExposedMembers.Civ6Ai.Runtime
+  local value = Civ6Ai_Paths[name]
+  if value == "" then
+    return nil
   end
-  return nil
+  return value
+end
+
+local function flag(name)
+  return tonumber(setting(name)) == 1
+end
+
+function Civ6Ai_Config.IsNetworkGame()
+  return GameConfiguration ~= nil and GameConfiguration.IsNetworkMultiplayer ~= nil
+    and GameConfiguration.IsNetworkMultiplayer() == true
 end
 
 function Civ6Ai_Config.Initialize()
-  local runtime = Civ6Ai_Config._Runtime()
-  Civ6Ai_Config._managedSeats = Civ6Ai_Config._ParseSeatList(GameConfiguration.GetValue("CIV6AI_MANAGED_SEATS"))
-  if Civ6Ai_Paths and Civ6Ai_Paths.ManagedSeats and Civ6Ai_Paths.ManagedSeats ~= "" then
-    Civ6Ai_Config._managedSeats = Civ6Ai_Config._ParseSeatList(Civ6Ai_Paths.ManagedSeats)
-  elseif runtime and runtime.ManagedSeats then
-    Civ6Ai_Config._managedSeats = Civ6Ai_Config._ParseSeatList(runtime.ManagedSeats)
-  end
-  Civ6Ai_Config._humanSeats = Civ6Ai_Config._ParseSeatList(GameConfiguration.GetValue("CIV6AI_HUMAN_SEATS"))
-  Civ6Ai_Config._autotest = GameConfiguration.GetValue("CIV6AI_AUTOTEST") == 1
-  if Civ6Ai_Paths and tonumber(Civ6Ai_Paths.Autotest) == 1 then
-    Civ6Ai_Config._autotest = true
-  elseif runtime and tonumber(runtime.Autotest) == 1 then
-    Civ6Ai_Config._autotest = true
-  end
-  Civ6Ai_Config._seatExperiment = GameConfiguration.GetValue("CIV6AI_SEAT_EXPERIMENT") == 1
-  if Civ6Ai_Paths and Civ6Ai_Paths.SeatExperiment then
-    Civ6Ai_Config._seatExperiment = Civ6Ai_Config._seatExperiment or tonumber(Civ6Ai_Paths.SeatExperiment) == 1
-  end
-  Civ6Ai_Config._enabled = GameConfiguration.GetValue("CIV6AI_ENABLED") ~= 0
-  Civ6Ai_Config._fastEndTurn = GameConfiguration.GetValue("CIV6AI_FAST_END_TURN") == 1
-  if Civ6Ai_Paths and tonumber(Civ6Ai_Paths.FastEndTurn) == 1 then
-    Civ6Ai_Config._fastEndTurn = true
-  elseif runtime and tonumber(runtime.FastEndTurn) == 1 then
-    Civ6Ai_Config._fastEndTurn = true
-  end
-  if Civ6Ai_Paths and Civ6Ai_Paths.Civ6AiRoot and Civ6Ai_Paths.Civ6AiRoot ~= "" then
-    Civ6Ai_Config._root = Civ6Ai_Paths.Civ6AiRoot
-  elseif runtime and runtime.Root and runtime.Root ~= "" then
-    Civ6Ai_Config._root = runtime.Root
-  elseif Civ6Ai_Config._root ~= nil and Civ6Ai_Config._root ~= "" and Civ6Ai_Config._root ~= "civ6ai" then
-    -- keep previously initialized root across UI reloads
-  else
-    Civ6Ai_Config._root = "civ6ai"
-  end
-  if runtime and runtime.SessionId and runtime.SessionId ~= "" then
-    Civ6Ai_Config._sessionId = runtime.SessionId
-  elseif Civ6Ai_Paths and Civ6Ai_Paths.SessionId and Civ6Ai_Paths.SessionId ~= "" then
-    Civ6Ai_Config._sessionId = Civ6Ai_Paths.SessionId
-  end
-  Civ6Ai_Config._enableSinglePlayerChat = true
-  if Civ6Ai_Paths and Civ6Ai_Paths.EnableSinglePlayerChat ~= nil then
-    Civ6Ai_Config._enableSinglePlayerChat = tonumber(Civ6Ai_Paths.EnableSinglePlayerChat) == 1
-  end
-  Civ6Ai_Config._mpMoveSync = GameConfiguration.GetValue("CIV6AI_MP_MOVE_SYNC") == 1
-  if Civ6Ai_Paths and tonumber(Civ6Ai_Paths.MpMoveSync) == 1 then
-    Civ6Ai_Config._mpMoveSync = true
-  elseif runtime and tonumber(runtime.MpMoveSync) == 1 then
-    Civ6Ai_Config._mpMoveSync = true
-  end
-  Civ6Ai_Config._mpTest = (Civ6Ai_Paths ~= nil and tonumber(Civ6Ai_Paths.MpTest) == 1)
-    or (runtime ~= nil and tonumber(runtime.MpTest) == 1)
+  Civ6Ai_Config._managedSeats = Civ6Ai_Config._ParseSeatList(setting("ManagedSeats"))
+  Civ6Ai_Config._autotest = flag("Autotest") and not Civ6Ai_Config.IsNetworkGame()
+  Civ6Ai_Config._seatExperiment = flag("SeatExperiment")
+  Civ6Ai_Config._fastEndTurn = flag("FastEndTurn")
+  Civ6Ai_Config._root = setting("Civ6AiRoot") or "civ6ai"
+  Civ6Ai_Config._sessionId = setting("SessionId") or ""
+  Civ6Ai_Config._enableSinglePlayerChat = setting("EnableSinglePlayerChat") == nil or flag("EnableSinglePlayerChat")
+  Civ6Ai_Config._mpTest = flag("MpTest")
   local managed = {}
-  for seat, enabled in pairs(Civ6Ai_Config._managedSeats) do
-    if enabled then
-      table.insert(managed, tostring(seat))
-    end
+  for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
+    table.insert(managed, tostring(seat))
   end
-  table.sort(managed)
   Civ6Ai_Util.Log(
     "config|root=" .. tostring(Civ6Ai_Config._root)
+      .. "|network=" .. tostring(Civ6Ai_Config.IsNetworkGame())
+      .. "|host_pc=" .. tostring(Civ6Ai_Config.IsHostPc())
       .. "|autotest=" .. tostring(Civ6Ai_Config._autotest)
       .. "|managed=" .. table.concat(managed, ",")
       .. "|sidecar_live=" .. tostring(Civ6Ai_Config.IsSidecarLive())
       .. "|fast_end_turn=" .. tostring(Civ6Ai_Config.IsFastEndTurn())
       .. "|sp_chat=" .. tostring(Civ6Ai_Config.EnableSinglePlayerChat())
-      .. "|mp_move_sync=" .. tostring(Civ6Ai_Config.IsMpMoveSync())
       .. "|mp_test=" .. tostring(Civ6Ai_Config.IsMpTest())
       .. "|session=" .. tostring(Civ6Ai_Config.SessionId())
   )
@@ -88,8 +62,7 @@ function Civ6Ai_Config._ParseSeatList(raw)
   if raw == nil then
     return seats
   end
-  local text = tostring(raw)
-  for token in string.gmatch(text, "([^,]+)") do
+  for token in string.gmatch(tostring(raw), "([^,]+)") do
     local seat = tonumber(token)
     if seat ~= nil then
       seats[seat] = true
@@ -98,41 +71,55 @@ function Civ6Ai_Config._ParseSeatList(raw)
   return seats
 end
 
-function Civ6Ai_Config.IsEnabled()
-  return Civ6Ai_Config._enabled
-end
-
 function Civ6Ai_Config.IsAutotest()
-  return Civ6Ai_Config._autotest
+  return Civ6Ai_Config._autotest == true
 end
 
 function Civ6Ai_Config.IsSeatExperiment()
-  return Civ6Ai_Config._seatExperiment
+  return Civ6Ai_Config._seatExperiment == true
 end
 
+-- A seat a person plays. In single-player autotest the model plays the listed
+-- local human seat, so that seat does not count as human.
 function Civ6Ai_Config.IsHumanSeat(playerID)
-  if Civ6Ai_Config._humanSeats[playerID] then
-    return true
-  end
-  if Civ6Ai_Config.IsAutotest() and Civ6Ai_Config._managedSeats[playerID] then
+  local player = Players[playerID]
+  if player == nil or not player:IsHuman() then
     return false
   end
-  local player = Players[playerID]
-  if player ~= nil and player:IsHuman() and not Civ6Ai_Config.IsAutotest() then
-    return true
-  end
-  return false
+  return not (Civ6Ai_Config.IsAutotest() and Civ6Ai_Config._managedSeats[playerID] == true)
 end
 
-function Civ6Ai_Config.IsLlmControlledSeat(playerID)
-  return Civ6Ai_Config.IsManagedSeat(playerID)
+-- A seat the model drives: a living major civilization that no person plays,
+-- on the host's seat list (every such seat when the list is empty).
+function Civ6Ai_Config.IsManagedSeat(playerID)
+  local player = Players[playerID]
+  if player == nil or not player:IsAlive() or not player:IsMajor() then
+    return false
+  end
+  if Civ6Ai_Config.IsHumanSeat(playerID) then
+    return false
+  end
+  if next(Civ6Ai_Config._managedSeats) == nil then
+    return true
+  end
+  return Civ6Ai_Config._managedSeats[playerID] == true
+end
+
+function Civ6Ai_Config.ManagedSeatsList()
+  local seats = {}
+  for i = 0, 63 do
+    if Civ6Ai_Config.IsManagedSeat(i) then
+      table.insert(seats, i)
+    end
+  end
+  return seats
 end
 
 function Civ6Ai_Config.IsFastEndTurn()
   if Civ6Ai_Config.IsSidecarLive() then
     return false
   end
-  return Civ6Ai_Config._fastEndTurn
+  return Civ6Ai_Config._fastEndTurn == true
 end
 
 function Civ6Ai_Config.EnableSinglePlayerChat()
@@ -164,44 +151,15 @@ function Civ6Ai_Config._IsNetworkHost()
 end
 
 function Civ6Ai_Config.IsHostPc()
-  if GameConfiguration ~= nil and GameConfiguration.IsNetworkMultiplayer ~= nil and GameConfiguration.IsNetworkMultiplayer() then
+  if Civ6Ai_Config.IsNetworkGame() then
     return Civ6Ai_Config._IsNetworkHost()
   end
   return true
 end
 
-function Civ6Ai_Config.IsMpMoveSync()
-  return Civ6Ai_Config._mpMoveSync == true
-end
-
-function Civ6Ai_Config.IsManagedSeat(playerID)
-  if not Civ6Ai_Config.IsEnabled() then
-    return false
-  end
-  if Civ6Ai_Config.IsHumanSeat(playerID) then
-    return false
-  end
-  local player = Players[playerID]
-  if player == nil or not player:IsAlive() or player:IsBarbarian() or player:IsFreeCities() then
-    return false
-  end
-  if Civ6Ai_Config._managedSeats[playerID] then
-    return true
-  end
-  if next(Civ6Ai_Config._managedSeats) == nil then
-    return not player:IsHuman()
-  end
-  return false
-end
-
+-- The bridge (snapshot, model, orders) runs for managed seats on the host PC only.
 function Civ6Ai_Config.ShouldRunBridge(playerID)
-  if not Civ6Ai_Config.IsManagedSeat(playerID) then
-    return false
-  end
-  if GameConfiguration.IsNetworkMultiplayer() then
-    return Civ6Ai_Config._IsNetworkHost()
-  end
-  return true
+  return Civ6Ai_Config.IsManagedSeat(playerID) and Civ6Ai_Config.IsHostPc()
 end
 
 function Civ6Ai_Config.RootDir()
@@ -209,68 +167,31 @@ function Civ6Ai_Config.RootDir()
 end
 
 function Civ6Ai_Config.SessionId()
-  if Civ6Ai_Config._sessionId ~= nil and Civ6Ai_Config._sessionId ~= "" then
-    return Civ6Ai_Config._sessionId
-  end
-  return ""
+  return Civ6Ai_Config._sessionId or ""
 end
 
 function Civ6Ai_Config.SidecarTimeout()
-  local runtime = Civ6Ai_Config._Runtime()
-  if Civ6Ai_Paths and Civ6Ai_Paths.SidecarTimeoutSeconds then
-    return tonumber(Civ6Ai_Paths.SidecarTimeoutSeconds) or 180
-  end
-  if runtime and runtime.SidecarTimeoutSeconds then
-    return tonumber(runtime.SidecarTimeoutSeconds) or 180
-  end
-  return 180
+  return tonumber(setting("SidecarTimeoutSeconds")) or 180
 end
 
 function Civ6Ai_Config.PythonExe()
-  if Civ6Ai_Paths and Civ6Ai_Paths.Python and Civ6Ai_Paths.Python ~= "" then
-    return Civ6Ai_Paths.Python
-  end
-  local runtime = Civ6Ai_Config._Runtime()
-  if runtime and runtime.Python and runtime.Python ~= "" then
-    return runtime.Python
-  end
-  return "python"
+  return setting("Python") or "python"
 end
 
 function Civ6Ai_Config.RepoRoot()
-  if Civ6Ai_Paths and Civ6Ai_Paths.Repo and Civ6Ai_Paths.Repo ~= "" then
-    return Civ6Ai_Paths.Repo
-  end
-  local runtime = Civ6Ai_Config._Runtime()
-  if runtime and runtime.Repo and runtime.Repo ~= "" then
-    return runtime.Repo
-  end
-  return ""
+  return setting("Repo") or ""
 end
 
 function Civ6Ai_Config.SidecarScript()
-  if Civ6Ai_Paths and Civ6Ai_Paths.SidecarScript then
-    return Civ6Ai_Paths.SidecarScript
-  end
-  return "sidecar/run_civ6.py"
+  return setting("SidecarScript") or "sidecar/run_civ6.py"
 end
 
 function Civ6Ai_Config.IsSidecarLive()
-  if Civ6Ai_Paths and tonumber(Civ6Ai_Paths.SidecarLive) == 1 then
-    return true
-  end
-  local runtime = Civ6Ai_Config._Runtime()
-  if runtime and tonumber(runtime.SidecarLive) == 1 then
-    return true
-  end
-  return GameConfiguration.GetValue("CIV6AI_SIDECAR_LIVE") == 1
+  return flag("SidecarLive")
 end
 
 function Civ6Ai_Config.AutotestStopTurn()
-  if Civ6Ai_Paths and Civ6Ai_Paths.AutotestStopTurn then
-    return tonumber(Civ6Ai_Paths.AutotestStopTurn) or 20
-  end
-  return tonumber(GameConfiguration.GetValue("CIV6AI_AUTOTEST_STOP_TURN")) or 20
+  return tonumber(setting("AutotestStopTurn")) or 20
 end
 
 function Civ6Ai_Config.PersonalityPath(playerID)
@@ -279,25 +200,4 @@ function Civ6Ai_Config.PersonalityPath(playerID)
     return ""
   end
   return Civ6Ai_Util.JoinPath(repo, "fixtures/civ6/ai_player_" .. tostring(playerID) .. "_personality.json")
-end
-
-function Civ6Ai_Config.ManagedSeatsList()
-  local seats = {}
-  for seat, enabled in pairs(Civ6Ai_Config._managedSeats) do
-    if enabled then
-      table.insert(seats, seat)
-    end
-  end
-  if #seats == 0 then
-    for i = 0, 63 do
-      local player = Players[i]
-      if player ~= nil and player:IsAlive() and not player:IsBarbarian() and not player:IsFreeCities() then
-        if Civ6Ai_Config.IsManagedSeat(i) then
-          table.insert(seats, i)
-        end
-      end
-    end
-  end
-  table.sort(seats)
-  return seats
 end

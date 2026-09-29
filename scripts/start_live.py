@@ -304,7 +304,7 @@ def main() -> int:
     print(f"Started {len(workers)} hidden worker(s). PIDs -> {PID_FILE}")
     for w in workers:
         print(f"  {w['name']} pid={w['pid']} log={w['log']}")
-    print("Config:", cfg.endpoint, cfg.model, f"vision={cfg.vision}", f"mp_sync={cfg.mp_move_sync}")
+    print("Config:", cfg.endpoint, cfg.model, f"vision={cfg.vision}")
     print("Stop with: python scripts/stop_live.py")
     print("Watch: Lua.log + runtime/logs/*.log  (see docs/REAL_TEST.md)")
     if logs_dirs():

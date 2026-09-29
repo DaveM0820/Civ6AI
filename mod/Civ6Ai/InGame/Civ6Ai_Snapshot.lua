@@ -1887,13 +1887,20 @@ function Civ6Ai_Snapshot._IterateUnits(playerUnits)
   return list
 end
 
--- Movement the unit has for the model's orders this turn. Prefers the GameCore
--- view (see Civ6Ai_GameCore.UnitMovesForPlayer): the UI cache reads 0 at turn
--- start and for held AI-seat units, which hid every move from legal_commands.
+-- A seat other than the local one has its orders played at its next turn
+-- start (Civ6Ai_Orders queue), when its units have full movement, so its
+-- snapshot plans that turn. The local seat's orders run in this turn.
+function Civ6Ai_Snapshot._PlansNextTurn(playerID)
+  return Game.GetLocalPlayer() ~= playerID
+end
+
+-- Movement the unit has for the model's orders. Prefers the GameCore view (see
+-- Civ6Ai_GameCore.UnitMovesForPlayer): the UI cache reads 0 at turn start.
 function Civ6Ai_Snapshot._UnitMoves(unit)
   local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
   if routes ~= nil and routes.UnitMovesForPlayer ~= nil then
-    local ok, moves = pcall(routes.UnitMovesForPlayer, unit:GetOwner(), unit:GetID())
+    local owner = unit:GetOwner()
+    local ok, moves = pcall(routes.UnitMovesForPlayer, owner, unit:GetID(), Civ6Ai_Snapshot._PlansNextTurn(owner))
     if ok and type(moves) == "number" then
       return moves
     end
@@ -1920,7 +1927,7 @@ function Civ6Ai_Snapshot._CanFoundCity(unit, foundOp)
 end
 
 -- Gameplay-side founding check (Civ6Ai_GameCore.CanFoundCityForPlayer) for
--- settlers the UI check rejects: non-local seats and held units.
+-- settlers the UI check rejects: non-local seats and units with 0 moves.
 function Civ6Ai_Snapshot._GameCoreCanFound(unit)
   local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
   if routes == nil or routes.CanFoundCityForPlayer == nil then
@@ -1939,7 +1946,8 @@ function Civ6Ai_Snapshot._GameCoreCanMove(unit, x, y)
   if routes == nil or routes.CanMoveUnitToForPlayer == nil then
     return true
   end
-  local ok, can = pcall(routes.CanMoveUnitToForPlayer, unit:GetOwner(), unit:GetID(), x, y)
+  local owner = unit:GetOwner()
+  local ok, can = pcall(routes.CanMoveUnitToForPlayer, owner, unit:GetID(), x, y, Civ6Ai_Snapshot._PlansNextTurn(owner))
   return not ok or can == true
 end
 
@@ -2029,8 +2037,8 @@ end
 
 -- Plots the engine says the unit can reach this turn (UI-side
 -- UnitManager.GetReachableMovement, a list of plot indices). nil when the API is
--- missing or has nothing to say: held AI-seat units read 0 moves here, so their
--- targets rest on the GameCore step-cost check alone.
+-- missing or has nothing to say: a seat planning its next turn has spent its
+-- moves this turn, so its targets rest on the GameCore step-cost check alone.
 function Civ6Ai_Snapshot._ReachablePlotSet(unit)
   if UnitManager == nil or UnitManager.GetReachableMovement == nil then
     return nil
@@ -3352,13 +3360,11 @@ end
 
 function Civ6Ai_Snapshot._GovRoutes(playerID)
   local isLocal = Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID
-  local network = Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive()
-  local uiSwap = not isLocal and not network
   return {
     government = true, pantheon = true, religion = true, great_people = true, civic = true,
-    policies = isLocal or uiSwap,
-    governors = isLocal or uiSwap,
-    mode = isLocal and "local_player" or (network and "synced_order" or "single_player_ai_seat"),
+    policies = isLocal,
+    governors = isLocal,
+    mode = isLocal and "local_player" or "synced_order",
   }
 end
 
@@ -3408,10 +3414,10 @@ function Civ6Ai_Snapshot.Build(playerID, options)
   else
     Civ6Ai_Util.Log("snapshot|economy_failed|" .. tostring(economy))
   end
-  -- Build priorities travel only on the synced order channel (AI seats in a
-  -- network game), so only those seats report them; the sidecar offers the
+  -- Build priorities travel only on the synced order channel (every seat but
+  -- the local one), so only those seats report them; the sidecar offers the
   -- priorities command only when this list is present.
-  if Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.IsActive() and playerID ~= Game.GetLocalPlayer() then
+  if playerID ~= Game.GetLocalPlayer() then
     civ6Block.priorities = Civ6Ai_Snapshot._Priorities(playerID)
   end
   local okDiplo, civ6Diplomacy = pcall(Civ6Ai_Snapshot._BuildDiplomacy, playerID)
