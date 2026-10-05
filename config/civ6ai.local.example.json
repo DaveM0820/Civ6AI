@@ -7,8 +7,8 @@
   "timeout_seconds": 600,
   "max_retries": 3,
   "vision": true,
-  "reasoning": "on",
+  "reasoning": "off",
   "context_budget": true,
   "queue_shared_model": true,
-  "comment": "Copy to config/civ6ai.local.json (gitignored) or override via env. reasoning is on|off only — never send reasoning_effort=on to LM Studio. Env overrides: CIV6AI_MODEL_PROVIDER, LMSTUDIO_BASE_URL, LMSTUDIO_MODEL, LMSTUDIO_API_KEY, CIV6AI_LMSTUDIO_TIMEOUT_SECONDS, CIV6AI_LMSTUDIO_VISION, CIV6AI_LMSTUDIO_REASONING, CIV6AI_CONTEXT_BUDGET, CIV6AI_QUEUE_SHARED_MODEL."
+  "comment": "Copy to config/civ6ai.local.json (gitignored) or override via env. reasoning is on|off only \u2014 never send reasoning_effort=on to LM Studio. Env overrides: CIV6AI_MODEL_PROVIDER, LMSTUDIO_BASE_URL, LMSTUDIO_MODEL, LMSTUDIO_API_KEY, CIV6AI_LMSTUDIO_TIMEOUT_SECONDS, CIV6AI_LMSTUDIO_VISION, CIV6AI_LMSTUDIO_REASONING, CIV6AI_CONTEXT_BUDGET, CIV6AI_QUEUE_SHARED_MODEL. Prefer reasoning=off for OpenRouter qwen \u2014 the Civ6AI prompt already includes reasoning."
 }
