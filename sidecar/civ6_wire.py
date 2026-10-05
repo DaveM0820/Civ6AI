@@ -643,8 +643,17 @@ def _civ6_chat_rules(snapshot: dict[str, Any]) -> list[str]:
     skip_words = ("lobby", "spam", "rare", "chat.public", "broadcast", "proactively")
     for line in pipeline._chat_format_guidance(snapshot):
         low = line.lower()
+        # Keep early-turn intro lines even though they mention chat.all / greetings.
+        if line.lstrip().startswith("EARLY TURN"):
+            if line not in keep:
+                keep.append(line)
+            continue
         if any(word in low for word in skip_words) and "not spoken publicly" not in low:
             continue
+        if line not in keep:
+            keep.append(line)
+    # Unconditional: also append if cadence path was filtered upstream.
+    for line in pipeline.early_turn_intro_chat_lines(snapshot):
         if line not in keep:
             keep.append(line)
     return keep

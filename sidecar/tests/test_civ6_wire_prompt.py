@@ -143,5 +143,51 @@ class Civ6WirePromptTests(unittest.TestCase):
         self.assertNotIn("You have no city yet", wire)
 
 
+
+
+    def test_early_turn_intro_chat_injected_on_turn_1(self):
+        from sidecar import pipeline_v2 as pipeline
+        from sidecar import civ6_wire
+
+        snapshot = {
+            "schema_version": "civ6ai-input/1",
+            "decision": {"turn": 1, "player_id": "PLAYER_0"},
+            "personality": {
+                "leader_name": "Pericles",
+                "leader_id": "LEADER_PERICLES",
+                "civilization_id": "CIVILIZATION_GREECE",
+            },
+            "known_players": [],
+            "diplomacy": {},
+            "your_units": [],
+            "your_cities": [],
+            "legal_commands": [],
+        }
+        intro = pipeline.early_turn_intro_chat_lines(snapshot)
+        self.assertEqual(1, len(intro))
+        self.assertIn("EARLY TURN 1", intro[0])
+        self.assertIn("chat.all", intro[0])
+        self.assertIn("introducing yourself", intro[0])
+        rules = civ6_wire._civ6_chat_rules(snapshot)
+        self.assertTrue(any("EARLY TURN 1" in line for line in rules))
+        # Sparse rare-cadence must not suppress the intro on T1
+        self.assertFalse(any("chat.all should be rare" in line for line in rules))
+
+    def test_early_turn_intro_chat_absent_after_window(self):
+        from sidecar import pipeline_v2 as pipeline
+        from sidecar import civ6_wire
+
+        snapshot = {
+            "schema_version": "civ6ai-input/1",
+            "decision": {"turn": 10, "player_id": "PLAYER_0"},
+            "personality": {"leader_name": "Pericles", "civilization_id": "CIVILIZATION_GREECE"},
+            "known_players": [],
+            "diplomacy": {},
+        }
+        self.assertEqual([], pipeline.early_turn_intro_chat_lines(snapshot))
+        rules = civ6_wire._civ6_chat_rules(snapshot)
+        self.assertFalse(any(line.lstrip().startswith("EARLY TURN") for line in rules))
+
+
 if __name__ == "__main__":
     unittest.main()

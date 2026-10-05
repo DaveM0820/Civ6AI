@@ -843,7 +843,11 @@ def _civ5_chat_rule_lines(snapshot: dict[str, Any]) -> list[str]:
             text = str(alert.get("text", "")).strip()
             if text:
                 lines.append(text)
-    lines.append("chat.all should be rare — skip most turns; silence is normal.")
+    intro = pipeline.early_turn_intro_chat_lines(snapshot)
+    if intro:
+        lines.extend(intro)
+    else:
+        lines.append("chat.all should be rare - skip most turns; silence is normal.")
     return lines
 
 

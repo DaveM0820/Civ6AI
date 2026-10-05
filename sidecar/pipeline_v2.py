@@ -145,6 +145,8 @@ MODEL_DEADLINE_SECONDS = 90
 CHAT_MAX_MESSAGES_DEFAULT = 3
 CHAT_MIN_MESSAGES_DEFAULT = 1
 CHAT_HISTORY_MAX_DEFAULT = 12
+# Unconditional intro-chat coaching on turns 1..N (Civ V lobby parity).
+EARLY_TURN_INTRO_CHAT_THROUGH = 3
 PLAYER_OPINION_MAX_CHARS_DEFAULT = 480
 PLAYER_HISTORY_MAX_CHARS_DEFAULT = 2000
 
@@ -333,6 +335,47 @@ def chat_min_messages() -> int:
         return max(0, min(chat_max_messages(), int(raw)))
     except ValueError:
         return min(CHAT_MIN_MESSAGES_DEFAULT, chat_max_messages())
+
+
+
+def early_turn_intro_chat_lines(snapshot: dict[str, Any]) -> list[str]:
+    """Unconditional early-game chat.all nudge: introduce yourself (Civ V lobby parity).
+
+    Injected on turns 1..EARLY_TURN_INTRO_CHAT_THROUGH even when sparse-chat coaching
+    would otherwise prefer silence.
+    """
+    decision = snapshot.get("decision", {})
+    if not isinstance(decision, dict):
+        return []
+    try:
+        turn = int(decision.get("turn", 0) or 0)
+    except (TypeError, ValueError):
+        return []
+    if turn < 1 or turn > EARLY_TURN_INTRO_CHAT_THROUGH:
+        return []
+    personality = snapshot.get("personality", {})
+    if not isinstance(personality, dict):
+        personality = {}
+    leader = (
+        personality.get("leader_name")
+        or _leader_id_display_name(personality.get("leader_id", ""))
+        or "your leader"
+    )
+    civ_id = personality.get("civilization_id")
+    civ_label = _readable_id(civ_id, "CIVILIZATION_") if civ_id else ""
+    who = f"{leader}" + (f" of {civ_label}" if civ_label else "")
+    if turn == 1:
+        return [
+            f"EARLY TURN {turn}: send chat.all introducing yourself as {who} - a short "
+            "in-character greeting, boast, or arrival line. Do this even if you would "
+            "otherwise stay silent; silence is not preferred on the opening turn."
+        ]
+    return [
+        f"EARLY TURN {turn}: send chat.all as {who} if you have not introduced yourself "
+        "yet (brief in-character intro). Opening-lobby presence overrides the usual "
+        "sparse chat cadence this early."
+    ]
+
 
 
 def _schema_errors(validator: Draft202012Validator, value: Any) -> list[str]:
@@ -2766,6 +2809,10 @@ def _gandhi_voice_guidance(snapshot: dict[str, Any]) -> list[str]:
 def _chat_cadence_lines(snapshot: dict[str, Any]) -> list[str]:
     current_turn = int(snapshot.get("decision", {}).get("turn", 0))
     last_turn = _last_self_public_chat_turn(snapshot)
+    early = early_turn_intro_chat_lines(snapshot)
+    if early:
+        # Opening turns: intro beats sparse-chat defaults (still allow later cadence after).
+        return list(early)
     if _is_gandhi_leader(snapshot):
         lines = [
             "Gandhi exception: unhinged public lines every 3-5 turns when something fits — standalone bombs "
