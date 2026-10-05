@@ -518,8 +518,8 @@ end
 
 function Civ6Ai_Chat.OnPanelInput(text)
   text = tostring(text or "")
-  text = string.gsub(text, "^%s+", "")
-  text = string.gsub(text, "%s+$", "")
+  text = Civ6Ai_Util.TrimAsciiWSLeft(text)
+  text = Civ6Ai_Util.TrimAsciiWSRight(text)
   local c = Civ6Ai_Chat._PanelControls()
   if c ~= nil and c.Civ6AiChatInput ~= nil then
     c.Civ6AiChatInput:SetText("")

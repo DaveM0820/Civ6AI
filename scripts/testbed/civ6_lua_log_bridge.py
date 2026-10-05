@@ -28,6 +28,15 @@ _CHUNK = re.compile(r"CIV6AI\|blob\|c\|(?P<id>[^|]+)\|(?P<index>\d+)\|(?P<data>[
 _END = re.compile(r"CIV6AI\|blob\|end\|(?P<id>[^|]+)")
 
 
+def _decode_blob_payload(raw: bytes) -> str:
+    """Decode snapshot JSON bytes; salvage seats when legacy blobs have bad UTF-8."""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as error:
+        log.warning("Blob payload has invalid UTF-8 (%s); using replacement characters", error)
+        return raw.decode("utf-8", errors="replace")
+
+
 _LOGGED_ONCE: set[str] = set()
 
 
@@ -158,8 +167,8 @@ def parse_blob_lines(text: str) -> list[dict[str, Any]]:
         pieces = [blob["parts"].get(i, "") for i in range(blob["chunks"])]
         encoded = "".join(pieces)
         try:
-            payload = base64.b64decode(encoded.encode("ascii"), validate=False).decode("utf-8")
-        except (ValueError, UnicodeDecodeError) as error:
+            payload = _decode_blob_payload(base64.b64decode(encoded.encode("ascii"), validate=False))
+        except ValueError as error:
             log.warning("Blob decode failed %s: %s", blob["id"], error)
             continue
         blob["payload"] = payload
