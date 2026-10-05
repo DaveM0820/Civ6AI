@@ -43,6 +43,13 @@ Civ6Ai_Orders.K = {
   GP_RECRUIT = 14,
   GP_PATRONIZE = 15,
   GOVERNOR = 16,
+  WAR = 17,
+  PEACE = 18,
+  BUY = 19,
+  BUY_TILE = 20,
+  IMPROVE = 21,
+  PILLAGE = 22,
+  FINISH_SEAT = 23,
   REPORT = 30,
   PING = 40,
   TEST_MODE = 49,
@@ -66,10 +73,11 @@ Civ6Ai_Orders.K = {
 Civ6Ai_Orders.DECISION_KINDS = {
   [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [9] = true,
   [10] = true, [11] = true, [12] = true, [13] = true, [14] = true, [15] = true, [16] = true,
+  [17] = true, [18] = true, [19] = true, [20] = true, [21] = true, [22] = true,
 }
 -- Order fields kept in the queue (P is the seat itself). A missing field is
 -- stored as -1, which every kind that reads the field treats as "none".
-Civ6Ai_Orders.QUEUE_FIELDS = { "K", "U", "X", "Y", "I", "S" }
+Civ6Ai_Orders.QUEUE_FIELDS = { "K", "U", "X", "Y", "I", "V", "W", "S" }
 Civ6Ai_Orders.MAX_PASSES = 4
 Civ6Ai_Orders._batches = Civ6Ai_Orders._batches or {}
 
@@ -424,6 +432,13 @@ function Civ6Ai_Orders._Execute(sender, o)
   if k ~= nil and k >= Civ6Ai_Orders.K.GOVERNMENT and k <= Civ6Ai_Orders.K.GOVERNOR then
     return Civ6Ai_Orders._DoGovernance(sender, o)
   end
+  if k == Civ6Ai_Orders.K.WAR or k == Civ6Ai_Orders.K.PEACE
+      or k == Civ6Ai_Orders.K.BUY or k == Civ6Ai_Orders.K.BUY_TILE then
+    return Civ6Ai_Orders._DoDeal(sender, o)
+  end
+  if k == Civ6Ai_Orders.K.IMPROVE or k == Civ6Ai_Orders.K.PILLAGE then
+    return Civ6Ai_Orders._DoWork(sender, o)
+  end
   return Civ6Ai_Orders._DoCommand(sender, o)
 end
 
@@ -458,8 +473,8 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
   Civ6Ai_Orders._FinishIdleUnits(owner)
 end
 
--- Units the model commands. Builders, traders and religious units stay with
--- the game's AI (the model has no commands for them).
+-- Units the model commands. Traders and religious units stay with the game's
+-- AI. Builders stay with it unless this file applies an improve order.
 function Civ6Ai_Orders._ModelCommandsUnit(unit)
   local info = GameInfo.Units[unit:GetType()]
   if info == nil then
@@ -484,6 +499,26 @@ function Civ6Ai_Orders._FinishIdleUnits(owner)
     end
   end
   log("finish_idle|player=" .. tostring(owner) .. "|units=" .. count)
+  return count
+end
+
+-- Every unit with movement left. Used when a managed AI seat has dumped its
+-- snapshot: the model's orders play next turn, and this turn must actually
+-- end. In a network game the local-player swap that requests ENDTURN is not
+-- used, so leftover movement (a settler still "needs orders") is what keeps
+-- the seat's portrait up and blocks every other player on simultaneous T1.
+function Civ6Ai_Orders._FinishAllMoves(owner)
+  local p = Players[owner]
+  if p == nil then
+    return 0
+  end
+  local count = 0
+  for _, u in ipairs(sortedMembers(call(p, "GetUnits"))) do
+    if (call(u, "GetMovesRemaining") or 0) > 0 and pcall(UnitManager.FinishMoves, u) then
+      count = count + 1
+    end
+  end
+  log("finish_all|player=" .. tostring(owner) .. "|units=" .. count)
   return count
 end
 
@@ -568,6 +603,7 @@ end
 -- now and the game's AI has not moved yet.
 function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
   local turn = Game.GetCurrentGameTurn()
+  log("turn_start|player=" .. tostring(owner) .. "|turn=" .. tostring(turn))
   Game:SetProperty("CIV6AI_STARTED_" .. tostring(owner), turn)
   local t, sender, orders = Civ6Ai_Orders._Take(owner)
   if t == turn then
@@ -727,7 +763,7 @@ end
 local function readOrder(params)
   return {
     K = num(params.K), P = num(params.P), U = num(params.U), X = num(params.X), Y = num(params.Y),
-    I = num(params.I), S = num(params.S) or -1,
+    I = num(params.I), V = num(params.V), W = num(params.W), S = num(params.S) or -1,
   }
 end
 
@@ -738,6 +774,16 @@ function Civ6Ai_Orders.OnOrder(sender, params)
   local k = o.K
   if k == Civ6Ai_Orders.K.REPORT then
     Civ6Ai_Orders._Report(sender, params)
+    return
+  end
+  if k == Civ6Ai_Orders.K.FINISH_SEAT then
+    local why = Civ6Ai_Orders._Authorize(sender, o.P)
+    if why ~= nil then
+      Civ6Ai_Orders._Record(sender, o, false, why)
+      return
+    end
+    local n = Civ6Ai_Orders._FinishAllMoves(o.P)
+    Civ6Ai_Orders._Record(sender, o, true, "finish_seat=" .. n)
     return
   end
   if params.B ~= nil and Civ6Ai_Orders.DECISION_KINDS[k] then
@@ -994,8 +1040,9 @@ local function holySiteCity(owner, x, y)
 end
 
 -- Found a religion with a Great Prophet standing on your Holy Site (the unit
--- is used up), plus up to two beliefs (one Founder, one Follower).
-function Gov.FoundReligion(owner, religionIndex, unitId, beliefA, beliefB)
+-- is used up), plus one belief of each class that is still free: Founder,
+-- Follower, and, when the ruleset has them, Worship and Enhancer.
+function Gov.FoundReligion(owner, religionIndex, unitId, ...)
   local p = Players[owner]
   local rel = call(p, "GetReligion")
   local game = Game.GetReligion ~= nil and Game.GetReligion() or nil
@@ -1026,14 +1073,14 @@ function Gov.FoundReligion(owner, religionIndex, unitId, beliefA, beliefB)
     return false, "the Great Prophet must stand on your own Holy Site district"
   end
   local beliefs, seenClass = {}, {}
-  for _, b in ipairs({ beliefA, beliefB }) do
+  for _, b in ipairs({ ... }) do
     if b ~= nil and b >= 0 then
       local row = GameInfo.Beliefs[b]
       if row == nil or row.BeliefClassType == "BELIEF_CLASS_PANTHEON" then
         return false, "belief " .. tostring(b) .. " is not a religion belief"
       end
       if seenClass[row.BeliefClassType] then
-        return false, "pick beliefs of different kinds (one Founder, one Follower)"
+        return false, "pick beliefs of different kinds (one Founder, one Follower, one Worship, one Enhancer)"
       end
       if call(game, "IsInSomeReligion", row.Index) == true then
         return false, row.BeliefType .. " is already used by another religion"
@@ -1141,6 +1188,384 @@ function Gov.Governor(owner)
     .. "(the game only offers that to the local player's screen); the game's own AI manages this seat's governors"
 end
 
+local function cityById(owner, cityId)
+  for _, c in ipairs(sortedMembers(call(Players[owner], "GetCities"))) do
+    if c:GetID() == cityId then
+      return c
+    end
+  end
+  return nil
+end
+
+local function warType(surprise)
+  if WarTypes == nil then
+    return nil
+  end
+  if surprise and WarTypes.SURPRISE_WAR ~= nil then
+    return WarTypes.SURPRISE_WAR
+  end
+  return WarTypes.FORMAL_WAR
+end
+
+-- Firaxis scenario scripts (AlexanderScenario, NubiaScenario, VikingScenario,
+-- WarMachineScenario): Players[n]:GetDiplomacy():DeclareWarOn(other, WarTypes.FORMAL_WAR, true).
+function Gov.DeclareWar(owner, other, surprise)
+  local them = Players[other]
+  if them == nil or call(them, "IsAlive") ~= true then
+    return false, "that civilization is not in the game"
+  end
+  local diplo = call(Players[owner], "GetDiplomacy")
+  if diplo == nil or diplo.DeclareWarOn == nil then
+    return false, "this game has no gameplay route to declare war"
+  end
+  if call(diplo, "IsAtWarWith", other) == true then
+    return false, "you are already at war with them"
+  end
+  if call(diplo, "CanDeclareWarOn", other) == false then
+    return false, "the game does not allow declaring war on them now"
+  end
+  local wt = warType(surprise)
+  local ok, err
+  if wt ~= nil then
+    ok, err = pcall(diplo.DeclareWarOn, diplo, other, wt, true)
+  else
+    ok, err = pcall(diplo.DeclareWarOn, diplo, other)
+  end
+  if not ok then
+    return false, "the game refused the declaration" .. (err ~= nil and (": " .. tostring(err)) or "")
+  end
+  if call(diplo, "IsAtWarWith", other) ~= true then
+    return false, "the declaration did not take effect"
+  end
+  return true, "war_on=" .. tostring(other)
+end
+
+-- PiratesScenario_StartScript: pDiplo:MakePeaceWith(other) and CanMakePeaceWith.
+function Gov.MakePeace(owner, other)
+  local them = Players[other]
+  if them == nil or call(them, "IsAlive") ~= true then
+    return false, "that civilization is not in the game"
+  end
+  local diplo = call(Players[owner], "GetDiplomacy")
+  if diplo == nil or diplo.MakePeaceWith == nil then
+    return false, "this game has no gameplay route to make peace"
+  end
+  if call(diplo, "IsAtWarWith", other) ~= true then
+    return false, "you are not at war with them"
+  end
+  if call(diplo, "CanMakePeaceWith", other) == false then
+    return false, "the game does not allow peace with them now"
+  end
+  local ok, err = pcall(diplo.MakePeaceWith, diplo, other)
+  if not ok then
+    return false, "the game refused peace" .. (err ~= nil and (": " .. tostring(err)) or "")
+  end
+  if call(diplo, "IsAtWarWith", other) == true then
+    return false, "peace did not take effect"
+  end
+  return true, "peace_with=" .. tostring(other)
+end
+
+local UNAVAILABLE_COST = 1000000000
+
+local function yieldIndex(useFaith)
+  local row = GameInfo ~= nil and GameInfo.Yields ~= nil
+    and GameInfo.Yields[useFaith and "YIELD_FAITH" or "YIELD_GOLD"] or nil
+  return row and row.Index or (useFaith and 5 or 0)
+end
+
+local function itemCost(city, hash, useFaith, formation)
+  local gold = call(city, "GetGold")
+  local y = yieldIndex(useFaith)
+  if formation ~= nil then
+    return call(gold, "GetPurchaseCost", y, hash, formation)
+  end
+  return call(gold, "GetPurchaseCost", y, hash)
+end
+
+local function debit(owner, useFaith, cost)
+  local p = Players[owner]
+  if useFaith then
+    local rel = call(p, "GetReligion")
+    local bal = call(rel, "GetFaithBalance") or 0
+    if bal < cost then
+      return false, "needs " .. math.floor(cost) .. " faith; you have " .. math.floor(bal)
+    end
+    pcall(rel.ChangeFaithBalance, rel, -cost)
+    return true, bal
+  end
+  local tre = call(p, "GetTreasury")
+  local bal = call(tre, "GetGoldBalance") or 0
+  if bal < cost then
+    return false, "needs " .. math.floor(cost) .. " gold; you have " .. math.floor(bal)
+  end
+  pcall(tre.ChangeGoldBalance, tre, -cost)
+  return true, bal
+end
+
+local function credit(owner, useFaith, cost)
+  local p = Players[owner]
+  if useFaith then
+    local rel = call(p, "GetReligion")
+    pcall(rel.ChangeFaithBalance, rel, cost)
+  else
+    local tre = call(p, "GetTreasury")
+    pcall(tre.ChangeGoldBalance, tre, cost)
+  end
+end
+
+-- Gold/faith purchase: debit the treasury, then spawn the unit (UnitManager.InitUnit,
+-- Firaxis scenarios and this file's own MP tests) or complete the building
+-- (BuildQueue:CreateIncompleteBuilding at 100%, TunerCityPanel.lua).
+function Gov.PurchaseItem(owner, cityId, itemIndex, isBuilding, useFaith)
+  local city = cityById(owner, cityId)
+  if city == nil then
+    return false, "you have no city " .. tostring(cityId)
+  end
+  local row, hash, typeName
+  if isBuilding then
+    row = GameInfo.Buildings[itemIndex]
+    hash = row and row.Hash
+    typeName = row and row.BuildingType
+  else
+    row = GameInfo.Units[itemIndex]
+    hash = row and row.Hash
+    typeName = row and row.UnitType
+  end
+  if row == nil or hash == nil then
+    return false, "unknown item to purchase"
+  end
+  if isBuilding then
+    local buildings = call(city, "GetBuildings")
+    if call(buildings, "HasBuilding", row.Index) == true then
+      return false, typeName .. " is already in that city"
+    end
+  end
+  local formation = (not isBuilding) and MilitaryFormationTypes ~= nil
+    and MilitaryFormationTypes.STANDARD_MILITARY_FORMATION or nil
+  local cost = itemCost(city, hash, useFaith, formation)
+  if type(cost) ~= "number" or cost <= 0 or cost >= UNAVAILABLE_COST then
+    return false, typeName .. " cannot be purchased with " .. (useFaith and "faith" or "gold") .. " in that city"
+  end
+  local okPay, why = debit(owner, useFaith, cost)
+  if not okPay then
+    return false, why
+  end
+  local made = false
+  if isBuilding then
+    local bq = call(city, "GetBuildQueue")
+    local plot = Map.GetPlot(city:GetX(), city:GetY())
+    local index = plot ~= nil and call(plot, "GetIndex") or nil
+    if bq ~= nil and bq.CreateIncompleteBuilding ~= nil and index ~= nil then
+      made = pcall(bq.CreateIncompleteBuilding, bq, row.Index, index, 100)
+    end
+    made = made and call(call(city, "GetBuildings"), "HasBuilding", row.Index) == true
+  else
+    local unit
+    local okU
+    okU, unit = pcall(UnitManager.InitUnit, owner, typeName, city:GetX(), city:GetY())
+    made = okU and unit ~= nil
+  end
+  if not made then
+    credit(owner, useFaith, cost)
+    return false, "the game refused to create " .. typeName
+  end
+  return true, "bought=" .. typeName .. ":" .. (useFaith and "faith" or "gold") .. "=" .. math.floor(cost)
+    .. ":city=" .. tostring(cityId)
+end
+
+-- Tile buy: Plot:SetOwner is a gameplay setter (AustraliaScenario.lua). Cost
+-- is CityGold:GetPlotPurchaseCost, the same figure PlotInfo.lua shows on the coin.
+function Gov.PurchaseTile(owner, cityId, x, y)
+  local city = cityById(owner, cityId)
+  local plot = Map.GetPlot(x, y)
+  if city == nil then
+    return false, "you have no city " .. tostring(cityId)
+  end
+  if plot == nil then
+    return false, "there is no tile at " .. tostring(x) .. "," .. tostring(y)
+  end
+  local plotOwner = call(plot, "GetOwner")
+  if plotOwner ~= nil and plotOwner >= 0 then
+    return false, "that tile is already owned"
+  end
+  local gold = call(city, "GetGold")
+  local index = call(plot, "GetIndex")
+  local cost = type(index) == "number" and call(gold, "GetPlotPurchaseCost", index) or nil
+  if type(cost) ~= "number" or cost <= 0 or cost >= UNAVAILABLE_COST then
+    return false, "that city cannot buy the tile at " .. tostring(x) .. "," .. tostring(y)
+  end
+  local okPay, why = debit(owner, false, cost)
+  if not okPay then
+    return false, why
+  end
+  local ok = pcall(plot.SetOwner, plot, owner, city:GetID())
+  if not ok or call(plot, "GetOwner") ~= owner then
+    pcall(plot.SetOwner, plot, owner)
+  end
+  if call(plot, "GetOwner") ~= owner then
+    credit(owner, false, cost)
+    return false, "the game refused to grant that tile"
+  end
+  return true, "tile=" .. tostring(x) .. "," .. tostring(y) .. ":gold=" .. math.floor(cost)
+    .. ":city=" .. tostring(cityId)
+end
+
+-- Spend one builder charge. Civ6 kills the unit on the last charge (UnitPanel
+-- GetBuildCharges). ChangeBuildCharges is tried when present; if charges cannot
+-- be spent the improvement is not left on the plot.
+local function spendCharge(unit)
+  local before = call(unit, "GetBuildCharges")
+  if type(before) ~= "number" then
+    return false, "this game has no gameplay route to read build charges"
+  end
+  if before <= 0 then
+    return false, "that unit has no build charges left"
+  end
+  if unit.ChangeBuildCharges ~= nil then
+    pcall(unit.ChangeBuildCharges, unit, -1)
+  elseif unit.SetBuildCharges ~= nil then
+    pcall(unit.SetBuildCharges, unit, before - 1)
+  end
+  local after = call(unit, "GetBuildCharges")
+  if type(after) == "number" and after < before then
+    if after <= 0 then
+      pcall(UnitManager.Kill, unit)
+    else
+      pcall(UnitManager.FinishMoves, unit)
+    end
+    return true, after
+  end
+  if before == 1 then
+    pcall(UnitManager.Kill, unit)
+    return true, 0
+  end
+  return false, "this game has no gameplay route to spend a build charge"
+end
+
+-- Builder improve: ImprovementBuilder.SetImprovementType (Firaxis scenarios and
+-- this file's TEST_IMPROVEMENT). The unit must stand on the tile.
+function Gov.ImproveTile(owner, unitId, improvementIndex, x, y)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  if unit == nil then
+    return false, "unit_not_found"
+  end
+  local charges = call(unit, "GetBuildCharges")
+  if type(charges) ~= "number" then
+    return false, "this game has no gameplay route to read build charges"
+  end
+  if charges <= 0 then
+    return false, "that unit has no build charges left"
+  end
+  local ux, uy = call(unit, "GetX"), call(unit, "GetY")
+  if type(x) == "number" and x >= 0 and type(y) == "number" and y >= 0 then
+    if ux ~= x or uy ~= y then
+      return false, "that builder is not on " .. tostring(x) .. "," .. tostring(y)
+    end
+  else
+    x, y = ux, uy
+  end
+  local plot = Map.GetPlot(x, y)
+  local row = GameInfo.Improvements ~= nil and GameInfo.Improvements[improvementIndex] or nil
+  if plot == nil or row == nil then
+    return false, "unknown improvement or plot"
+  end
+  if ImprovementBuilder == nil or ImprovementBuilder.SetImprovementType == nil then
+    return false, "this game has no gameplay route to place an improvement"
+  end
+  local team = call(Players[owner], "GetTeam")
+  if ImprovementBuilder.CanHaveImprovement ~= nil then
+    local okCan, can = pcall(ImprovementBuilder.CanHaveImprovement, plot, row.Index, team)
+    if okCan and can == false then
+      return false, (row.ImprovementType or "that improvement") .. " cannot be built on that tile"
+    end
+  end
+  local beforeImp = call(plot, "GetImprovementType")
+  local okSet = pcall(ImprovementBuilder.SetImprovementType, plot, row.Index, owner)
+  local afterImp = call(plot, "GetImprovementType")
+  if not okSet or afterImp ~= row.Index then
+    return false, "the game refused to place " .. tostring(row.ImprovementType)
+  end
+  local spent, why = spendCharge(unit)
+  if not spent then
+    pcall(ImprovementBuilder.SetImprovementType, plot, beforeImp or -1, owner)
+    return false, why
+  end
+  return true, "improvement=" .. tostring(row.ImprovementType) .. ":plot=" .. tostring(x) .. "," .. tostring(y)
+    .. ":charges=" .. tostring(why)
+end
+
+-- Pillage the improvement under a combat unit. TunerMapPanel uses
+-- ImprovementBuilder.SetImprovementPillaged; PlotToolTip reads it back with
+-- plot:IsImprovementPillaged. The unit must be standing on that tile.
+function Gov.PillageImprovement(owner, unitId, x, y)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  if unit == nil then
+    return false, "unit_not_found"
+  end
+  local row = GameInfo.Units[unit:GetType()]
+  if row == nil or (num(row.Combat) or 0) <= 0 then
+    return false, "only a combat unit can pillage"
+  end
+  local ux, uy = call(unit, "GetX"), call(unit, "GetY")
+  if type(x) == "number" and x >= 0 and type(y) == "number" and y >= 0 then
+    if ux ~= x or uy ~= y then
+      return false, "that unit is not on " .. tostring(x) .. "," .. tostring(y)
+    end
+  end
+  local plot = Map.GetPlot(ux, uy)
+  if plot == nil or plot.IsImprovementPillaged == nil then
+    return false, "this game has no gameplay route to read a pillaged improvement"
+  end
+  local imp = call(plot, "GetImprovementType")
+  if type(imp) ~= "number" or imp < 0 then
+    return false, "there is no improvement on that tile"
+  end
+  if plot:IsImprovementPillaged() == true then
+    return false, "that improvement is already pillaged"
+  end
+  if ImprovementBuilder == nil or ImprovementBuilder.SetImprovementPillaged == nil then
+    return false, "this game has no gameplay route to pillage an improvement"
+  end
+  local okSet = pcall(ImprovementBuilder.SetImprovementPillaged, plot, true)
+  if not okSet or plot:IsImprovementPillaged() ~= true then
+    return false, "the game refused to pillage that improvement"
+  end
+  pcall(UnitManager.FinishMoves, unit)
+  local irow = GameInfo.Improvements[imp]
+  return true, "pillaged=" .. tostring(irow ~= nil and irow.ImprovementType or imp)
+    .. ":plot=" .. tostring(ux) .. "," .. tostring(uy)
+end
+
+function Civ6Ai_Orders._DoDeal(sender, o)
+  local why = Civ6Ai_Orders._Authorize(sender, o.P)
+  if why ~= nil then
+    return false, why
+  end
+  local k = o.K
+  if k == Civ6Ai_Orders.K.WAR then
+    return Gov.DeclareWar(o.P, o.I, o.X == 1)
+  elseif k == Civ6Ai_Orders.K.PEACE then
+    return Gov.MakePeace(o.P, o.I)
+  elseif k == Civ6Ai_Orders.K.BUY then
+    return Gov.PurchaseItem(o.P, o.X, o.I, o.U == 1, o.Y == 1)
+  elseif k == Civ6Ai_Orders.K.BUY_TILE then
+    return Gov.PurchaseTile(o.P, o.I, o.X, o.Y)
+  end
+  return false, "unknown_kind"
+end
+
+function Civ6Ai_Orders._DoWork(sender, o)
+  local why = Civ6Ai_Orders._Authorize(sender, o.P)
+  if why ~= nil then
+    return false, why
+  end
+  if o.K == Civ6Ai_Orders.K.PILLAGE then
+    return Gov.PillageImprovement(o.P, o.U, o.X, o.Y)
+  end
+  return Gov.ImproveTile(o.P, o.U, o.I, o.X, o.Y)
+end
+
 -- Synced channel dispatch for the governance kinds.
 function Civ6Ai_Orders._DoGovernance(sender, o)
   local why = Civ6Ai_Orders._Authorize(sender, o.P)
@@ -1155,7 +1580,7 @@ function Civ6Ai_Orders._DoGovernance(sender, o)
   elseif k == Civ6Ai_Orders.K.PANTHEON then
     return Gov.FoundPantheon(o.P, o.I)
   elseif k == Civ6Ai_Orders.K.RELIGION then
-    return Gov.FoundReligion(o.P, o.I, o.U, o.X, o.Y)
+    return Gov.FoundReligion(o.P, o.I, o.U, o.X, o.Y, o.V, o.W)
   elseif k == Civ6Ai_Orders.K.GP_RECRUIT then
     return Gov.RecruitGreatPerson(o.P, o.I)
   elseif k == Civ6Ai_Orders.K.GP_PATRONIZE then

@@ -153,6 +153,21 @@
           "type": "object",
           "additionalProperties": true
         },
+        "climate": {
+          "description": "Optional Gathering Storm climate (GameClimate.*, ClimateScreen.lua). Omitted until CO2, temperature, or climate level is underway.",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "power": {
+          "description": "Optional Gathering Storm city power (city:GetPower, CityBannerManager.lua / CityPanelPower.lua). Omitted until a city requires or produces power.",
+          "type": "object",
+          "additionalProperties": true
+        },
+        "stockpiles": {
+          "description": "Optional Gathering Storm strategic stockpiles (PlayerResources GetResourceAmount/Cap/Accumulation/Demand, TopPanel_Expansion2.lua). Omitted until a strategic has stock, income, or demand.",
+          "type": "object",
+          "additionalProperties": true
+        },
         "diplomacy": {
           "description": "Optional (older mods omit it). Civ5-style relations: majors met with their diplomatic state toward you, relationship, wars (theirs too), attitude reasons and trade stock; city-states met with suzerain and your envoys; your own trade stock.",
           "type": "object",
@@ -170,6 +185,8 @@
                   "relationship": {"type": ["string", "null"]},
                   "diplomatic_score": {"type": ["integer", "null"]},
                   "at_war": {"type": "boolean"},
+                  "can_declare_war": {"type": "boolean"},
+                  "can_make_peace": {"type": "boolean"},
                   "denounced": {"type": "boolean"},
                   "declared_friendship": {"type": "boolean"},
                   "alliance": {"type": "boolean"},
@@ -194,7 +211,9 @@
                   "city_state_type": {"type": ["string", "null"]},
                   "suzerain_id": {"type": ["string", "null"]},
                   "your_envoys": {"type": ["integer", "null"]},
-                  "at_war": {"type": "boolean"}
+                  "at_war": {"type": "boolean"},
+                  "can_declare_war": {"type": "boolean"},
+                  "can_make_peace": {"type": "boolean"}
                 }
               }
             },

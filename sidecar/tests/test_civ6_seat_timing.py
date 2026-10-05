@@ -100,10 +100,12 @@ Civ6Ai_Config = {
   ManagedSeatsList = function() return {0, 1, 2, 3, 4} end,
   SessionId = function() return "sess" end,
   SidecarTimeout = function() return 600 end,
+  IsAutotest = function() return false end,
 }
 Civ6Ai_Apply = {
   ApplyDecision = function(p, d, t) table.insert(APPLIED, {player=p, n=#d.commands, turn=t}) end,
   _IsNetworkMultiplayer = function() return false end,
+  ResolveAllUnitOrders = function() end,
 }
 Civ6Ai_Chat = { PanelAdd = function(line) table.insert(PANEL, line) end }
 function RUN_TICKS()
@@ -131,9 +133,10 @@ class BridgePendingApplyLuaTests(unittest.TestCase):
     def _publish(self, entries):
         state = {}
         for player, turn, payload, session in entries:
+            apply_id = f"id-{session}-{player}-{turn}-{abs(hash(payload)) % 10**8}"
             state[f"{player}:turn"] = {
                 "session_id": session, "player": player, "turn": turn, "kind": "turn",
-                "apply_id": f"id-{session}-{player}-{turn}", "json": payload,
+                "apply_id": apply_id, "json": payload,
             }
         self.g.PENDING_SRC = _lua_queue_content(state)
 
@@ -218,6 +221,32 @@ class BridgePendingApplyLuaTests(unittest.TestCase):
 
     def test_non_local_seat_can_apply_in_single_player(self):
         self.assertTrue(self.g.Civ6Ai_Bridge._CanApplyInGame(3))
+
+    def test_sp_turn_one_does_not_wait_for_turn_zero(self):
+        self.g.CURRENT_TURN = 1
+        self.assertEqual(0, int(self.g.Civ6Ai_Bridge.HostWaitSnapshotTurn()))
+        self.assertFalse(self.g.Civ6Ai_Bridge.SeatAnswerOutstanding(1, 0))
+
+    def test_lan_turn_one_waits_until_this_turn_is_delivered(self):
+        self.g.Civ6Ai_Apply._IsNetworkMultiplayer = lambda: True
+        self.g.CURRENT_TURN = 1
+        self.assertEqual(1, int(self.g.Civ6Ai_Bridge.HostWaitSnapshotTurn()))
+        self.assertTrue(self.g.Civ6Ai_Bridge.SeatAnswerOutstanding(1, 1))
+        self.g.Civ6Ai_Bridge._delivered["1|1"] = False
+        self.assertFalse(self.g.Civ6Ai_Bridge.SeatAnswerOutstanding(1, 1))
+
+    def test_empty_pending_apply_is_replaced_by_later_commands(self):
+        key = self.g.Civ6Ai_Bridge._PulseKey(0)
+        self.g.Civ6Ai_Bridge._pulseKeys[key] = True
+        self._publish([(0, 1, '{"commands":[]}', "sess")])
+        self.assertTrue(self.g.Civ6Ai_Bridge._TryPendingApplyFromMod(0))
+        self.assertEqual(0, len(self.g.APPLIED))
+        self.assertTrue(self.g.Civ6Ai_Bridge._WasEmptyAppliedThisPulse(0))
+        self._publish([(0, 1, '{"commands":[{"kind":"move_unit","command_id":"CMD_1","arguments":{}}]}', "sess")])
+        self.g.Civ6Ai_Bridge._lastPendingReload = None
+        self.assertTrue(self.g.Civ6Ai_Bridge._TryPendingApplyFromMod(0))
+        self.assertEqual(1, len(self.g.APPLIED))
+        self.assertTrue(any("apply_replace_empty|player=0" in line for line in self._log()))
 
 
 class SidecarJobStderrTests(unittest.TestCase):
@@ -371,6 +400,21 @@ class SeatFoundAndCivicTests(unittest.TestCase):
         kinds = [cmds[i].kind for i in range(1, len(cmds) + 1)]
         self.assertIn("found_city", kinds)
 
+    def test_queued_seat_is_not_offered_city_production(self):
+        lua = LuaRuntime()
+        lua.execute("Civ6Ai_Util = { Log = function() end }")
+        lua.execute((ROOT / "mod/Civ6Ai/InGame/Civ6Ai_Snapshot.lua").read_text(encoding="utf-8"))
+        lua.execute("""
+          Game = { GetLocalPlayer = function() return 0 end }
+          LOOKED = false
+          Players = setmetatable({}, { __index = function() LOOKED = true end })
+        """)
+        snap = lua.globals().Civ6Ai_Snapshot
+        self.assertTrue(snap._CanQueueProduction(0))
+        self.assertFalse(snap._CanQueueProduction(2))
+        snap._AddProductionCommands([], 2)
+        self.assertFalse(lua.eval("LOOKED"))
+
     def test_gamecore_adjacent_move_rejects_water_mountain_and_stacking(self):
         lua = LuaRuntime()
         lua.execute(GAMECORE_STUBS)
@@ -432,7 +476,8 @@ NOW = 1000
 Game = { GetLocalPlayer = function() return 0 end, GetCurrentGameTurn = function() return 27 end }
 Civ6Ai_Config = { Initialize = function() end, IsAutotest = function() return true end,
   IsManagedSeat = function() return true end, IsSidecarLive = function() return false end,
-  ManagedSeatsList = function() return {} end }
+  ShouldRunBridge = function() return true end,
+  ManagedSeatsList = function() return {0, 1, 2, 3, 4} end }
 Civ6Ai_SeatExperiment = { Initialize = function() end, OnPlayerTurnActivated = function() end }
 Civ6Ai_Autotest = { Initialize = function() end }
 Civ6Ai_HostChannel = { Initialize = function() end }
@@ -494,10 +539,18 @@ class LocalSeatTurnStartTests(unittest.TestCase):
     def test_other_seats_pulse_only_after_their_queue_ran(self):
         lua = self._lua()
         g = lua.globals()
+        lua.execute("ExposedMembers.Civ6Ai.TurnStartComplete = {}")
         g.Civ6Ai_OnPlayerTurnActivated(3, True)
         self.assertEqual(0, len(g.PULSES))
         g.Civ6Ai_OnPlayerTurnStartComplete(3)
         self.assertEqual([3], list(g.PULSES.values()))
+
+    def test_other_seats_pulse_from_turn_start_mark(self):
+        lua = self._lua()
+        g = lua.globals()
+        lua.execute("ExposedMembers.Civ6Ai.TurnStartComplete = { [1] = 27 }")
+        g.Civ6Ai_InGame._WatchTurnStarts()
+        self.assertEqual([1], list(g.PULSES.values()))
 
 
 @unittest.skipIf(LuaRuntime is None, "lupa not installed")

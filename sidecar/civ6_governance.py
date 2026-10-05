@@ -204,7 +204,12 @@ def prompt_lines(snapshot: dict) -> list[str]:
             opts = [str(x) for x in _lst(r.get("religion_options"))]
             if opts:
                 lines.append("  Religions still free: " + ", ".join(_short(x, "RELIGION_") for x in opts[:12]))
-            for label, key in (("Founder beliefs", "founder_beliefs"), ("Follower beliefs", "follower_beliefs")):
+            for label, key in (
+                ("Founder beliefs", "founder_beliefs"),
+                ("Follower beliefs", "follower_beliefs"),
+                ("Worship beliefs", "worship_beliefs"),
+                ("Enhancer beliefs", "enhancer_beliefs"),
+            ):
                 bl = [b for b in _lst(r.get(key)) if isinstance(b, dict)]
                 if bl:
                     lines.append(f"  {label}: " + "; ".join(
@@ -527,7 +532,8 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         rel_text, beliefs_text = _split_pair(value, ":(")
         beliefs_text = beliefs_text.rstrip(")")
         rid = _match_id(rel_text, [str(x) for x in _lst(r.get("religion_options"))], ("RELIGION_",))
-        pool = [str(b.get("id")) for key2 in ("founder_beliefs", "follower_beliefs")
+        pool = [str(b.get("id")) for key2 in (
+            "founder_beliefs", "follower_beliefs", "worship_beliefs", "enhancer_beliefs")
                 for b in _lst(r.get(key2)) if isinstance(b, dict)]
         chosen = []
         for part in re.split(r"[,;+/]", beliefs_text):
@@ -544,7 +550,7 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         elif prophet is None:
             notes.append(f"{key}: you need a Great Prophet to found a religion")
         else:
-            fixed = {"religion_id": rid, "belief_ids": ",".join(chosen[:2]), "unit_id": str(prophet.get("unit_id"))}
+            fixed = {"religion_id": rid, "belief_ids": ",".join(chosen[:4]), "unit_id": str(prophet.get("unit_id"))}
             if not fixed["belief_ids"]:
                 fixed.pop("belief_ids")
             ids.append(_add_command(snapshot, "found_religion", fixed, f"found religion {rid}"))

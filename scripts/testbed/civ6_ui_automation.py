@@ -21,6 +21,8 @@ if sys.platform == "win32":
 
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_ABSOLUTE = 0x8000
 INPUT_KEYBOARD = 1
 KEYEVENTF_UNICODE = 0x0004
 KEYEVENTF_KEYUP = 0x0002
@@ -313,8 +315,20 @@ def focus_game(hwnd: int) -> bool:
             attached_target = bool(user32.AttachThreadInput(our_thread, target_thread, True))
         if win32gui.IsIconic(hwnd):
             win32gui.ShowWindow(hwnd, 9)
+        win32gui.ShowWindow(hwnd, 9)
         win32gui.BringWindowToTop(hwnd)
-        win32gui.SetForegroundWindow(hwnd)
+        HWND_TOPMOST = -1
+        HWND_NOTOPMOST = -2
+        SWP_NOMOVE = 0x0002
+        SWP_NOSIZE = 0x0001
+        SWP_SHOWWINDOW = 0x0040
+        user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+        user32.keybd_event(0x12, 0, 0, 0)
+        try:
+            win32gui.SetForegroundWindow(hwnd)
+        finally:
+            user32.keybd_event(0x12, 0, 2, 0)
+        user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
         if attached_target:
             user32.AttachThreadInput(our_thread, target_thread, False)
         if attached_fg:
@@ -361,13 +375,44 @@ def _post_client_click(hwnd: int, client_x: int, client_y: int, taps: int = 1) -
         time.sleep(0.08)
 
 
+def pin_civ_topmost(hwnd: int, on: bool) -> None:
+    """Keep the game above other windows so SendInput hits Civ, not Cursor."""
+    user32 = ctypes.windll.user32
+    HWND_TOPMOST = -1
+    HWND_NOTOPMOST = -2
+    flags = 0x0001 | 0x0002 | 0x0040  # NOSIZE | NOMOVE | SHOWWINDOW
+    user32.SetWindowPos(hwnd, HWND_TOPMOST if on else HWND_NOTOPMOST, 0, 0, 0, 0, flags)
+    time.sleep(0.15)
+
+
+def click_civ_title_bar(win: WindowInfo) -> None:
+    import win32gui
+
+    left, top, right, bottom = win32gui.GetWindowRect(win.hwnd)
+    sx = (left + right) // 2
+    sy = top + 10
+    log.info("click title bar screen (%d,%d)", sx, sy)
+    _send_mouse_click_screen(sx, sy, taps=1)
+
+
 def _send_mouse_click_screen(screen_x: int, screen_y: int, taps: int = 1) -> None:
-    """Click via local mouse_event after the game is already foreground."""
-    ctypes.windll.user32.SetCursorPos(int(screen_x), int(screen_y))
-    time.sleep(0.08)
+    user32 = ctypes.windll.user32
+    vx = user32.GetSystemMetrics(76)
+    vy = user32.GetSystemMetrics(77)
+    vw = max(1, user32.GetSystemMetrics(78))
+    vh = max(1, user32.GetSystemMetrics(79))
+    dx = int((int(screen_x) - vx) * 65535 / vw)
+    dy = int((int(screen_y) - vy) * 65535 / vh)
+    move = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | 0x4000
+    down = MOUSEEVENTF_LEFTDOWN | MOUSEEVENTF_ABSOLUTE | 0x4000
+    up = MOUSEEVENTF_LEFTUP | MOUSEEVENTF_ABSOLUTE | 0x4000
+    user32.mouse_event(move, dx, dy, 0, 0)
+    time.sleep(0.05)
     for _ in range(max(1, taps)):
-        _click_win32(screen_x, screen_y)
-        time.sleep(0.12)
+        user32.mouse_event(down, dx, dy, 0, 0)
+        time.sleep(0.04)
+        user32.mouse_event(up, dx, dy, 0, 0)
+        time.sleep(0.08)
 
 
 def _client_to_screen(hwnd: int, client_x: int, client_y: int) -> tuple[int, int]:
@@ -2102,45 +2147,396 @@ def bootstrap_click_begin_game_timed(win: WindowInfo) -> None:
             time.sleep(_BOOTSTRAP_BEGIN_GAME_INTERVAL_S)
 
 
-def bootstrap_create_game_timed(win: WindowInfo) -> list[str]:
-    """Deterministic new-game bootstrap: recorded sequence or calibrated clicks + fixed sleeps.
-
-    STABLE PATH — see .cursor/rules/civ6-stable-runtime.mdc before editing.
+def _hit_client(win: WindowInfo, client_x: int, client_y: int, taps: int = 1) -> None:
+    """One real cursor click. Stacking PostMessage+SendMessage+SendInput fires extra
+    clicks after the first one already changed the menu (LAN then Additional Content).
+    Must go through click_client so Civ is foreground; raw mouse_event hits Cursor.
     """
-    if has_menu_sequence() and load_menu_sequence().get("steps"):
-        win = _ensure_civ_foreground(win, "bootstrap_start")
-        time.sleep(_BOOTSTRAP_BEFORE_MENU_CLICKS_S)
-        events = replay_menu_sequence(win)
+    click_client(win, client_x, client_y, taps=max(1, taps))
+
+
+def _click_labels(
+    win: WindowInfo,
+    labels: tuple[str, ...],
+    *,
+    timeout: float = 6.0,
+    min_x_fraction: float = 0.0,
+) -> str | None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         win = refresh_window(win)
-        if win is None:
-            win = find_civ_window()
+        focus_game(win.hwnd)
+        results = ocr_window(win)
+        for label in labels:
+            if "delete" in label.lower():
+                continue
+            match = find_text(
+                results,
+                label,
+                exact=True,
+                win=win,
+                min_x_fraction=min_x_fraction,
+            )
+            if match:
+                text, x, y = match
+                cx, cy = x - win.x + 20, y - win.y + 4
+                _hit_client(win, cx, cy, taps=1)
+                log.info("hit '%s' client (%d,%d)", text, cx, cy)
+                time.sleep(1.0)
+                return label
+        time.sleep(0.35)
+    return None
+
+
+def raise_civ_via_taskbar() -> bool:
+    """Click the Civ6 taskbar button so the game is the real foreground window."""
+    from PIL import ImageGrab
+
+    user32 = ctypes.windll.user32
+    sw = user32.GetSystemMetrics(0)
+    sh = user32.GetSystemMetrics(1)
+    top = max(0, sh - 56)
+    strip = ImageGrab.grab(bbox=(0, top, sw, sh))
+    hits = ocr_image(strip, 0, top)
+    log.info("taskbar OCR: %s", [(t, x, y) for t, x, y in hits[:20]])
+    for text, x, y in hits:
+        low = text.lower()
+        if "civil" in low or "sid meier" in low or "civ6" in low:
+            log.info("taskbar OCR '%s' at (%d,%d)", text, x, y)
+            _send_mouse_click_screen(x, y, taps=1)
+            time.sleep(0.5)
+            return True
+    log.info("taskbar OCR found %d tokens, none matched Civ", len(hits))
+    return False
+
+
+def _alt_tab_to_civ(win: WindowInfo) -> None:
+    user32 = ctypes.windll.user32
+    for _ in range(12):
+        if user32.GetForegroundWindow() == win.hwnd:
+            return
+        user32.keybd_event(0x12, 0, 0, 0)
+        time.sleep(0.05)
+        user32.keybd_event(0x09, 0, 0, 0)
+        time.sleep(0.05)
+        user32.keybd_event(0x09, 0, 2, 0)
+        time.sleep(0.05)
+        user32.keybd_event(0x12, 0, 2, 0)
+        time.sleep(0.25)
+    log.info("foreground after alt-tab hwnd=%s want=%s", user32.GetForegroundWindow(), win.hwnd)
+
+
+def ocr_blob_is_main_menu(blob: str) -> bool:
+    text = blob.lower()
+    if "local network games" in text or "staging room" in text or "multiplayer game setup" in text:
+        return False
+    return "single player" in text and "multiplayer" in text
+
+
+def ocr_blob_is_loading_or_ingame(blob: str) -> bool:
+    """True once staging/setup is gone and the load or HUD is up.
+
+    Staging lists Turn Mode, so startswith('turn ') is not a load signal.
+    """
+    text = blob.lower()
+    if "staging room" in text or "are you ready?" in text:
+        return False
+    if "multiplayer game setup" in text or "local network games" in text:
+        return False
+    if "load configuration" in text or "confirm delete" in text:
+        return False
+    if re.search(r"\bturn\s+\d+", text):
+        return True
+    if "loading" in text:
+        return True
+    return False
+
+
+def wait_for_title_menu(*, timeout_s: float = 180.0) -> WindowInfo:
+    """Wait until the title menu (Single Player / Multiplayer) is OCR-visible."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        win = find_civ_window()
         if win is not None:
-            bootstrap_click_begin_game_timed(win)
-            events.append("begin_game_after_sequence")
-        return events
+            blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
+            if ocr_blob_is_main_menu(blob):
+                log.info("main menu ready hwnd=%s", win.hwnd)
+                return win
+        time.sleep(2.0)
+    raise RuntimeError("Timed out waiting for Civ6 main menu")
 
+
+def wait_for_host_click_ui(*, timeout_s: float = 180.0) -> WindowInfo:
+    """Title menu, LAN browser, MP setup, or staging — any screen the host clicker can continue from."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        win = find_civ_window()
+        if win is not None:
+            blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
+            if (
+                ocr_blob_is_main_menu(blob)
+                or "local network games" in blob
+                or "multiplayer game setup" in blob
+                or "staging room" in blob
+            ):
+                log.info("host click UI ready hwnd=%s", win.hwnd)
+                return win
+        time.sleep(1.5)
+    raise RuntimeError("Timed out waiting for a LAN host menu")
+
+
+def _open_multiplayer_flyout(win: WindowInfo) -> bool:
+    """Click the OCR'd Multiplayer label (centered or shifted), wait for Local Network."""
+    for attempt in range(5):
+        win = refresh_window(win) or find_civ_window()
+        if win is None:
+            return False
+        focus_game(win.hwnd)
+        results = ocr_window(win)
+        match = find_text(results, "Multiplayer", exact=True, win=win)
+        if match:
+            _text, x, y = match
+            cx, cy = x - win.x + 20, y - win.y + 4
+            _hit_client(win, cx, cy, taps=1)
+            log.info("clicked Multiplayer client (%d,%d) attempt=%d", cx, cy, attempt + 1)
+        else:
+            _hit_client(win, 760, 478, taps=1)
+            log.info("clicked Multiplayer fallback 760,478 attempt=%d", attempt + 1)
+        time.sleep(1.4)
+        names = [t.lower() for t, _, _ in ocr_window(win)]
+        log.info("after Multiplayer OCR names=%s", names[:20])
+        if any("local network" in n for n in names):
+            return True
+    return False
+
+
+def start_lan_test_game(win: WindowInfo) -> list[str]:
+    """Main menu -> Multiplayer -> LAN -> Create Game -> test config -> 2 AI -> Start."""
     steps: list[str] = []
-    win = _ensure_civ_foreground(win, "bootstrap_start")
-    time.sleep(_BOOTSTRAP_BEFORE_MENU_CLICKS_S)
+    raise_civ_via_taskbar()
+    _alt_tab_to_civ(win)
+    pin_civ_topmost(win.hwnd, True)
+    try:
+        click_civ_title_bar(win)
+        focus_game(win.hwnd)
+        pin_civ_topmost(win.hwnd, True)
+        time.sleep(0.4)
+        return _start_lan_test_game_clicks(win, steps)
+    finally:
+        pin_civ_topmost(win.hwnd, False)
 
-    bootstrap_click_menu(win, "main_single_player")
-    steps.append("clicked_single_player")
-    time.sleep(_BOOTSTRAP_AFTER_SINGLE_PLAYER_S)
 
-    win = _ensure_civ_foreground(win, "after_single_player")
-    bootstrap_click_menu(win, "sp_create_game")
-    steps.append("clicked_create_game")
-    time.sleep(_BOOTSTRAP_AFTER_CREATE_GAME_S)
+def _start_lan_test_game_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
+    entry = ocr_window(win)
+    blob = " ".join(t.lower() for t, _, _ in entry)
+    log.info("lan entry OCR: %s", [(t, x - win.x, y - win.y) for t, x, y in entry[:40]])
+    if "autosaves" in blob or ("load game" in blob and "back" in blob and "no file" in blob):
+        _hit_client(win, 1240, 148, taps=1)
+        steps.append("clicked_back_load_game")
+        time.sleep(1.2)
+        entry = ocr_window(win)
+        blob = " ".join(t.lower() for t, _, _ in entry)
+        log.info("after back OCR: %s", [(t, x - win.x, y - win.y) for t, x, y in entry[:40]])
+    on_lan_browser = "local network games" in blob or ("join game" in blob and "refresh" in blob)
+    on_mp_setup = "multiplayer game setup" in blob
+    on_staging = "staging room" in blob
+    if detect_menu(win) == "single_player" and not on_lan_browser and not on_mp_setup:
+        press_escape(win)
+        time.sleep(0.5)
 
-    win = _ensure_civ_foreground(win, "after_create_game")
-    bootstrap_click_menu(win, "start_game")
-    steps.append("clicked_start_game")
-    time.sleep(_BOOTSTRAP_AFTER_START_GAME_S)
+    if not on_mp_setup and not on_lan_browser and not on_staging:
+        opened = _open_multiplayer_flyout(win)
+        if not opened:
+            raise RuntimeError("Could not open Multiplayer panel")
+        hit = _click_labels(win, ("Local Network",), timeout=8.0, min_x_fraction=0.48)
+        if hit is None:
+            raise RuntimeError("Could not click Local Network")
+        steps.append(f"clicked_{hit}")
+        time.sleep(1.6)
+        results = ocr_window(win)
+        log.info("after lan OCR: %s", [(t, x - win.x, y - win.y) for t, x, y in results[:40]])
+        names = [t.lower() for t, _, _ in results]
+        if any("hall of fame" in n or n.strip() == "mods" for n in names):
+            press_escape(win)
+            time.sleep(0.4)
+            _hit_client(win, 760, 478, taps=1)
+            time.sleep(1.0)
+            _hit_client(win, 895, 569, taps=1)
+            time.sleep(1.2)
 
-    win = _ensure_civ_foreground(win, "before_begin_game")
-    bootstrap_click_begin_game_timed(win)
-    steps.append("clicked_begin_game")
+    if on_staging:
+        steps.append("already_staging")
+        if _click_labels(win, ("ADD PLAYER", "Add Player"), timeout=3.0):
+            time.sleep(0.5)
+            _click_labels(win, ("AI", "Computer"), timeout=3.0)
+            steps.append("staging_add_player")
+        host_ready = False
+        for _ in range(8):
+            names = [t.lower() for t, _, _ in ocr_window(win)]
+            blob_now = " ".join(names)
+            if ocr_blob_is_loading_or_ingame(blob_now):
+                steps.append("staging_loading")
+                return steps
+            if "not ready" in blob_now:
+                # Host Ready is a small circle to the left of the "Not Ready" label.
+                _hit_client(win, 1088, 332, taps=1)
+                time.sleep(0.8)
+                continue
+            host_ready = True
+            break
+        if host_ready:
+            clicked_go = click_text(win, "ARE YOU READY?", timeout=3.0, exact=True, prefer_bottom=True)
+            if not clicked_go:
+                _hit_client(win, 799, 1005, taps=1)
+            steps.append("clicked_are_you_ready")
+        steps.append("staging_ready")
+        deadline = time.monotonic() + 90.0
+        while time.monotonic() < deadline:
+            win = refresh_window(win) or find_civ_window()
+            if win is None:
+                break
+            blob2 = " ".join(t.lower() for t, _, _ in ocr_window(win))
+            if ocr_blob_is_loading_or_ingame(blob2):
+                steps.append("ingame_or_loading")
+                return steps
+            if "staging room" not in blob2:
+                bootstrap_click_begin_game_timed(win)
+                steps.append("clicked_begin_game")
+                return steps
+            if "not ready" in blob2:
+                _hit_client(win, 1088, 332, taps=1)
+            elif "are you ready?" in blob2:
+                click_text(win, "ARE YOU READY?", timeout=2.0, exact=True, prefer_bottom=True)
+            time.sleep(2.0)
+        return steps
+
+    if not on_mp_setup:
+        if on_lan_browser:
+            steps.append("already_lan_browser")
+            _hit_client(win, 1180, 1001, taps=1)
+            hit = "CreateGame_fallback"
+        else:
+            hit = None
+            for label in ("Create Game", "Host Game", "Create a Game"):
+                hit = _click_labels(win, (label,), timeout=3.0, min_x_fraction=0.20)
+                if hit:
+                    break
+            if hit is None:
+                _hit_client(win, 1180, 1001, taps=1)
+                hit = "CreateGame_fallback"
+        steps.append(f"clicked_{hit}")
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline:
+            blob_now = " ".join(t.lower() for t, _, _ in ocr_window(win))
+            if "multiplayer game setup" in blob_now:
+                on_mp_setup = True
+                break
+            if "confirm delete" in blob_now:
+                press_escape(win)
+                time.sleep(0.4)
+            time.sleep(0.5)
+        if not on_mp_setup:
+            _hit_client(win, 1180, 1001, taps=1)
+            time.sleep(1.5)
+            blob_now = " ".join(t.lower() for t, _, _ in ocr_window(win))
+            on_mp_setup = "multiplayer game setup" in blob_now
+        if not on_mp_setup:
+            steps.append("never_reached_mp_setup")
+            return steps
+    else:
+        steps.append("already_mp_setup")
+
+    # Never open the file picker from the LAN browser: OCR "Load Configuration"
+    # there is the wrong control, and later clicks hit Delete on the picker.
+    blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
+    if "confirm delete" in blob:
+        press_escape(win)
+        steps.append("escaped_confirm_delete")
+        time.sleep(0.5)
+        blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
+    if "autosaves" in blob:
+        _hit_client(win, 1240, 148, taps=1)
+        steps.append("backed_out_file_picker")
+        time.sleep(1.0)
+        return steps
+
+    added = 0
+    for _ in range(2):
+        if _click_labels(win, ("Open",), timeout=2.0):
+            _click_labels(win, ("AI", "Computer", "Civilization"), timeout=3.0)
+            added += 1
+            steps.append("ai_from_open")
+        elif _click_labels(win, ("Closed",), timeout=2.0):
+            _click_labels(win, ("AI", "Computer"), timeout=3.0)
+            added += 1
+            steps.append("ai_from_closed")
+        elif _click_labels(win, ("Add AI", "Add Player"), timeout=2.0):
+            added += 1
+            steps.append("clicked_add_ai")
+        else:
+            break
+        time.sleep(0.4)
+    if added == 0:
+        _hit_client(win, 958, 511, taps=1)
+        time.sleep(0.4)
+        if _click_labels(win, ("AI", "Computer"), timeout=2.0):
+            added += 1
+        _hit_client(win, 957, 623, taps=1)
+        time.sleep(0.4)
+        if _click_labels(win, ("AI", "Computer"), timeout=2.0):
+            added += 1
+        steps.append("ai_from_slots")
+    steps.append(f"ai_added={added}")
+
+    if _click_labels(win, ("Confirm Settings", "Start Game"), timeout=6.0) is None:
+        _hit_client(win, 1057, 1005, taps=1)
+        steps.append("clicked_confirm_settings_fallback")
+    else:
+        steps.append("clicked_start_or_confirm")
+    time.sleep(2.0)
+
+    win = refresh_window(win) or find_civ_window()
+    if win is not None:
+        check = ocr_window(win)
+        menu_blob = " ".join(t.lower() for t, _, _ in check)
+        still_setup = (
+            "staging room" not in menu_blob
+            and any(
+                k in menu_blob
+                for k in (
+                    "multiplayer game setup",
+                    "load configuration",
+                    "confirm delete",
+                    "local network games",
+                    "autosaves",
+                )
+            )
+        )
+        if "confirm delete" in menu_blob:
+            press_escape(win)
+            steps.append("escaped_confirm_delete")
+            still_setup = True
+        elif still_setup and "load configuration" not in menu_blob and "autosaves" not in menu_blob:
+            _hit_client(win, 1057, 1005, taps=1)
+            time.sleep(1.5)
+            check = ocr_window(win)
+            menu_blob = " ".join(t.lower() for t, _, _ in check)
+            still_setup = any(
+                k in menu_blob
+                for k in ("game setup", "load configuration", "confirm delete", "local network games")
+            )
+        if not still_setup:
+            bootstrap_click_begin_game_timed(win)
+            steps.append("clicked_begin_game")
+        else:
+            steps.append("still_on_setup")
     return steps
+
+
+def bootstrap_create_game_timed(win: WindowInfo) -> list[str]:
+    """Host a LAN test game (Multiplayer / Local Network), then Begin Game."""
+    time.sleep(_BOOTSTRAP_BEFORE_MENU_CLICKS_S)
+    return start_lan_test_game(win)
 
 
 def create_advanced_setup_game(

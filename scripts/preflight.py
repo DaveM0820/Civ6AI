@@ -41,9 +41,9 @@ from sidecar.civ6_config import (  # noqa: E402
 from sidecar import lmstudio_client  # noqa: E402
 from sidecar import pipeline_v2 as pipeline  # noqa: E402
 
-# 1x1 PNG
+# 16x16 PNG. A 1x1 probe is rejected by Qwen on OpenRouter (min edge > 10).
 _TINY_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAIklEQVR4nGNUClViIAUwkaSaYVQDcYCJSHVwMKqBGECyBgAHjAC5/GhsnwAAAABJRU5ErkJggg=="
 )
 
 
@@ -182,7 +182,7 @@ def _check_image_call(cfg) -> Check:
             snapshot,
             cfg=cfg,
             image_data_url=data_url,
-            wire_text="A 1x1 PNG is attached. Reply with: thought.situation = saw_image\nthought.strategy = ok\n",
+            wire_text="A small PNG is attached. Reply with: thought.situation = saw_image\nthought.strategy = ok\n",
         )
         check.pass_(f"vision_enabled={meta.get('vision_enabled')} latency_ms={meta.get('latency_ms')}")
     except pipeline.BoundaryError as error:
@@ -278,11 +278,10 @@ def _check_live_config(mod_dirs: list[Path] | None = None, civ6ai_root: Path | N
             problems.append(f"{where}: Repo={values.get('Repo', '')!r} (expected this repo)")
         if values.get("SidecarLive") != "1":
             problems.append(f"{where}: SidecarLive is not 1")
-        if not values.get("ManagedSeats"):
-            problems.append(f"{where}: ManagedSeats empty")
         sessions.add(values.get("SessionId", ""))
+        seats = values.get("ManagedSeats", "") or "all"
         detail = (
-            f"managed_seats={values.get('ManagedSeats', '')} session={values.get('SessionId', '')} "
+            f"managed_seats={seats} session={values.get('SessionId', '')} "
             f"sidecar_timeout={values.get('SidecarTimeoutSeconds', '')}s"
         )
     runtime: dict = {}

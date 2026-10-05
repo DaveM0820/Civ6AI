@@ -15,6 +15,8 @@ Civ6Ai_OrderChannel = Civ6Ai_OrderChannel or {}
 Civ6Ai_OrderChannel.K = {
   MOVE = 1, RESEARCH = 2, CIVIC = 3, FOUND = 4, SKIP = 5, FORTIFY = 6, ATTACK = 7, PRIORITY = 9,
   GOVERNMENT = 10, POLICY = 11, PANTHEON = 12, RELIGION = 13, GP_RECRUIT = 14, GP_PATRONIZE = 15, GOVERNOR = 16,
+  WAR = 17, PEACE = 18, BUY = 19, BUY_TILE = 20, IMPROVE = 21, PILLAGE = 22,
+  FINISH_SEAT = 23,
   REPORT = 30, PING = 40, TEST_MODE = 49, TEST_INTROSPECT = 50, TEST_SPAWN_ENEMY = 51,
   TEST_MELEE_MOVE = 52, TEST_SCRIPTED_COMBAT = 53, TEST_SCRIPTED_PRODUCTION = 54, TEST_IMPROVEMENT = 55,
   TEST_EXPERIENCE = 56, TEST_FAR_MOVE = 57, TEST_COMBAT_PROBE = 58, TEST_DAMAGE_CHECK = 59,
@@ -26,6 +28,8 @@ Civ6Ai_OrderChannel.KIND_BY_COMMAND = {
   unit_posture_fortify = 6, attack_target = 7, set_build_priority = 9,
   change_government = 10, set_policies = 11, found_pantheon = 12, found_religion = 13,
   recruit_great_person = 14, patronize_great_person = 15,
+  send_diplomatic_action = 17, propose_peace = 18, purchase_item = 19, purchase_tile = 20,
+  worker_improve = 21, pillage_improvement = 22,
 }
 Civ6Ai_OrderChannel.REPORT_DELAY_SECONDS = 5
 Civ6Ai_OrderChannel._counter = Civ6Ai_OrderChannel._counter or 0
@@ -85,6 +89,37 @@ function Civ6Ai_OrderChannel.Send(kind, fields, turnOverride)
     return nil
   end
   return params.S
+end
+
+function Civ6Ai_OrderChannel._PlayerNum(id)
+  if type(id) == "number" then
+    return id
+  end
+  local n = string.match(tostring(id or ""), "PLAYER_(%d+)")
+  if n ~= nil then
+    return tonumber(n)
+  end
+  return tonumber(id)
+end
+
+function Civ6Ai_OrderChannel._CityNum(id)
+  local n = tonumber((tostring(id or "")):match("CITY_(%d+)"))
+  if n ~= nil then
+    return n % 65536
+  end
+  return tonumber(id)
+end
+
+function Civ6Ai_OrderChannel._WarAction(action)
+  local text = string.upper(tostring(action or ""))
+  text = string.gsub(text, "%s+", "_")
+  if text == "DECLARE_SURPRISE_WAR" or text == "SURPRISE_WAR" then
+    return 1
+  end
+  if text == "DECLARE_WAR" or text == "DECLARE_FORMAL_WAR" or text == "FORMAL_WAR" or text == "WAR" then
+    return 0
+  end
+  return nil
 end
 
 -- Integer fields for one model command, or nil, reason when it has no synced
@@ -179,7 +214,7 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
       end
       b[#b + 1] = brow.Index
     end
-    f.X, f.Y = b[1] or -1, b[2] or -1
+    f.X, f.Y, f.V, f.W = b[1] or -1, b[2] or -1, b[3] or -1, b[4] or -1
     f.U = f.U or -1
   elseif kind == 14 or kind == 15 then
     local row = args.individual_id ~= nil and GameInfo.GreatPersonIndividuals[args.individual_id] or nil
@@ -188,6 +223,60 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
     end
     f.I = row.Index
     f.X = string.lower(tostring(args.yield or "gold")) == "faith" and 1 or 0
+  elseif kind == 17 then
+    local other = Civ6Ai_OrderChannel._PlayerNum(args.target_player_id)
+    local war = Civ6Ai_OrderChannel._WarAction(args.action_id)
+    if other == nil then
+      return nil, "missing_target_player"
+    end
+    if war == nil then
+      return nil, "only DECLARE_WAR can be sent on the order channel"
+    end
+    f.I, f.X = other, war
+  elseif kind == 18 then
+    local other = Civ6Ai_OrderChannel._PlayerNum(args.target_player_id)
+    if other == nil then
+      return nil, "missing_target_player"
+    end
+    f.I = other
+  elseif kind == 19 then
+    local cityNum = Civ6Ai_OrderChannel._CityNum(args.city_id)
+    local item = args.item_id
+    local unitRow = item ~= nil and GameInfo.Units ~= nil and GameInfo.Units[item] or nil
+    local bldRow = item ~= nil and GameInfo.Buildings ~= nil and GameInfo.Buildings[item] or nil
+    if cityNum == nil then
+      return nil, "missing_city_id"
+    end
+    if unitRow == nil and bldRow == nil then
+      return nil, item == nil and "missing_item_id" or ("unknown item " .. tostring(item))
+    end
+    f.X = cityNum
+    f.I = (unitRow or bldRow).Index
+    f.U = bldRow ~= nil and 1 or 0
+    f.Y = string.lower(tostring(args.yield or "gold")) == "faith" and 1 or 0
+  elseif kind == 20 then
+    local cityNum = Civ6Ai_OrderChannel._CityNum(args.city_id)
+    local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
+    if cityNum == nil or x == nil or y == nil then
+      return nil, "missing_city_or_tile"
+    end
+    f.I, f.X, f.Y = cityNum, x, y
+  elseif kind == 21 then
+    local row = args.improvement_id ~= nil and GameInfo.Improvements ~= nil
+      and GameInfo.Improvements[args.improvement_id] or nil
+    if f.U == nil or row == nil then
+      return nil, args.improvement_id == nil and "missing_unit_or_improvement"
+        or ("unknown improvement " .. tostring(args.improvement_id))
+    end
+    f.I = row.Index
+    local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
+    f.X, f.Y = x or -1, y or -1
+  elseif kind == 22 then
+    if f.U == nil then
+      return nil, "missing_unit_id"
+    end
+    local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
+    f.X, f.Y = x or -1, y or -1
   elseif f.U == nil then
     return nil, "missing_unit_id"
   end

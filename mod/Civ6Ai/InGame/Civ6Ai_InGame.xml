@@ -6,15 +6,37 @@
   <Container ID="Civ6AiChatRoot" Anchor="L,C" Offset="12,120" Size="620,380">
     <Box ID="Civ6AiChatBg" Size="parent,parent" Color="10,30,50,215" ConsumeMouseOver="1">
       <Image Size="parent,parent" Texture="Controls_Gradient" Color="80,133,177,50"/>
-      <Label ID="Civ6AiChatTitle" Anchor="L,T" Offset="10,6" Style="FontNormal16" Color="255,215,120,255" String="AI chat (type below; @Name text = private)"/>
+      <Label ID="Civ6AiChatTitle" Anchor="L,T" Offset="10,6" Style="FontNormal16" Color="255,215,120,255" String="AI chat"/>
       <GridButton ID="Civ6AiChatToggle" Anchor="R,T" Offset="6,4" Size="70,24" Texture="Controls_ButtonControl" SliceCorner="12,12" SliceTextureSize="24,24" StateOffsetIncrement="0,24" String="Hide" Style="FontNormal14"/>
       <ScrollPanel ID="Civ6AiChatScroll" Anchor="L,T" Offset="10,34" Size="596,300" Vertical="1" AutoScrollBar="1">
         <ScrollBar Style="Slider_Blue" Anchor="R,T" Offset="-2,0"/>
         <Label ID="Civ6AiChatLog" Anchor="L,T" Offset="0,0" WrapWidth="570" Style="FontNormal14" Color="235,235,235,255" String=" "/>
       </ScrollPanel>
-      <Box Anchor="L,B" Offset="10,8" Size="600,28" Color="0,0,0,200">
-        <EditBox ID="Civ6AiChatInput" Anchor="L,C" Offset="6,0" Size="588,24" Style="FontNormal14" MaxLength="400" ConsumeMouse="1"/>
-      </Box>
+      <Container ID="Civ6AiChatInputRow" Anchor="L,B" Offset="8,6" Size="600,28">
+        <PullDown ID="Civ6AiChatPull" Anchor="L,C" Offset="0,0" Size="168,26" AutoSizePopUp="1" SpaceForScroll="0">
+          <ButtonData>
+            <GridButton Style="ButtonControl" Anchor="L,C" Size="parent,parent" TextColor="0,0,0,0">
+              <Label ID="Civ6AiChatTargetIcon" Anchor="L,C" Offset="4,0" String="[ICON_Global]" Style="FontNormal18"/>
+              <Label ID="Civ6AiChatTargetLabel" Anchor="L,C" Offset="28,0" String="To All" Style="FontNormal14" Color="208,212,217,255"/>
+            </GridButton>
+          </ButtonData>
+          <GridData Offset="0,26" Texture="Controls_DropdownPanel" InnerPadding="0,6" SliceCorner="10,10" SliceTextureSize="22,22"/>
+          <ScrollPanelData Anchor="C,C" Vertical="1" Size="parent,parent" AutoScrollBar="1">
+            <ScrollBar Style="Slider_Blue" Anchor="R,C" AnchorSide="O,I"/>
+          </ScrollPanelData>
+          <InstanceData Name="InstanceOne">
+            <GridButton ID="Button" Style="ButtonControl" Anchor="C,T" Size="160,26" FontStyle="glow" ColorSet="BlueGlow" TextAnchor="L,C" TextOffset="28,0">
+              <Label ID="ChatIcon" Anchor="L,C" Offset="4,0" String="[ICON_Global]" Style="FontNormal18"/>
+            </GridButton>
+          </InstanceData>
+        </PullDown>
+        <Box ID="Civ6AiChatInputBox" Anchor="L,C" Offset="174,0" Size="420,24" Color="0,0,0,160">
+          <EditBox ID="Civ6AiChatInput" Anchor="C,C" Offset="4,0" Size="parent-8,16" Style="FontNormal14" FontStyle="glow" Color0="208,212,217,255" Color1="16,43,67,100" MaxLength="400" ConsumeMouse="1"/>
+        </Box>
+      </Container>
+      <Button ID="Civ6AiChatDrag" Texture="Controls_ChatResizeButton" Size="30,30" Anchor="R,B" Offset="-2,-2" ToolTip="LOC_CLICK_TO_DRAG">
+        <Drag ID="Civ6AiChatDragSizer" Size="parent,parent" Buttons="L" SnapBackSpeed="0" DragThreshold="0" />
+      </Button>
     </Box>
   </Container>
   <GridButton ID="Civ6AiChatShow" Anchor="L,C" Offset="12,120" Size="110,26" Texture="Controls_ButtonControl" SliceCorner="12,12" SliceTextureSize="24,24" StateOffsetIncrement="0,24" String="AI chat" Style="FontNormal14" Hidden="1"/>

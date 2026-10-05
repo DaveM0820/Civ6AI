@@ -100,6 +100,24 @@ class Civ6LuaLogBridgeTests(unittest.TestCase):
             mirror = lua_log.parent / "civ6ai" / "sessions" / "sess" / "PLAYER_0" / "decision.json"
             self.assertTrue(mirror.is_file())
 
+    def test_sidecar_timeout_does_not_publish_empty_apply(self):
+        payload = '{"ok":true}'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lua_log = root / "Lua.log"
+            lua_log.write_text(_frame(payload, session="sess"), encoding="utf-8")
+            civ6ai = root / "civ6ai"
+            civ6ai.mkdir()
+            published = []
+
+            def boom(job, repo):
+                raise TimeoutError("timed out after 180 seconds")
+
+            with mock.patch("civ6_lua_log_bridge._run_job", side_effect=boom), \
+                    mock.patch("civ6_pending_apply.publish_empty_for_turn", side_effect=lambda *a, **k: published.append(True)):
+                ran = process_lua_log_blobs(lua_log, civ6ai, ROOT, python="python")
+            self.assertEqual(0, ran)
+            self.assertEqual([], published)
 
 
 class BlobSplitAcrossReadsTests(unittest.TestCase):

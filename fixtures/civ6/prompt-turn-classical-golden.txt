@@ -81,7 +81,7 @@ settler_1.maxMovement = 2
 
 === DIPLOMACY ===
 Model what rivals want and fear — trade, isolation, and alliances are tools, not filler.
-HAGGLE IN DMs: highly encourage chat.LeaderName BEFORE any formal trade or alliance, and keep DMing WHILE a deal is pending (counter-offers, sweeteners, threats, flattery). Chat is where you bargain. There are no formal deal commands for you in this game yet, so agreements live in chat and in what you actually do on the map (remember them).
+HAGGLE IN DMs: highly encourage chat.LeaderName BEFORE any formal trade or alliance, and keep DMing WHILE a deal is pending (counter-offers, sweeteners, threats, flattery). Chat is where you bargain. There are no war or peace orders for you this turn, so agreements live in chat and in what you actually do on the map (remember them).
 Use private DMs (chat.LeaderName) on relationship milestones: first meeting, declaring war, deal talks, ultimatums, and replies to fresh inbox messages.
 Never reveal military plans, weak cities, or hidden ambitions in chat.all (those go in private DMs).
 Be original and occasionally funny — in-character wit beats generic filler.

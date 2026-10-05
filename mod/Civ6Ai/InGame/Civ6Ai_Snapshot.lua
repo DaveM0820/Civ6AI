@@ -1299,6 +1299,25 @@ function Civ6Ai_Snapshot._Method(obj, name, ...)
   return nil
 end
 
+-- C-side tables that ClimateScreen.lua calls with a dot (GameClimate.GetTotalCO2Footprint),
+-- not a colon. Passing the table as self makes those calls fail.
+function Civ6Ai_Snapshot._Static(tbl, name, ...)
+  if tbl == nil then
+    return nil
+  end
+  local okGet, fn = pcall(function() return tbl[name] end)
+  if not okGet or type(fn) ~= "function" then
+    return nil
+  end
+  local args = { ... }
+  local unpackFn = unpack or table.unpack
+  local ok, value = pcall(function() return fn(unpackFn(args)) end)
+  if ok then
+    return value
+  end
+  return nil
+end
+
 function Civ6Ai_Snapshot._Arr()
   if Civ6Ai_Util ~= nil and Civ6Ai_Util.JsonArrayList ~= nil then
     return Civ6Ai_Util.JsonArrayList()
@@ -1418,6 +1437,29 @@ function Civ6Ai_Snapshot._RelationFacts(playerID, otherID)
     facts.alliance = facts.alliance or facts.alliance_type ~= nil
   end
   facts.denounced = facts.state == "DIPLO_STATE_DENOUNCED"
+  -- CanDeclareWarOn / CanMakePeaceWith are the leader-screen checks (CityStates.lua
+  -- in the base game). Snapshot is InGame, so they are present; if a ruleset
+  -- omits them, war is legal when not already at war / allied / same team, and
+  -- peace is legal when at war.
+  local canWar = Civ6Ai_Snapshot._Method(myDiplo, "CanDeclareWarOn", otherID)
+  if canWar == true then
+    facts.can_declare_war = true
+  elseif canWar == false then
+    facts.can_declare_war = false
+  else
+    local meTeam = Civ6Ai_Snapshot._Method(me, "GetTeam")
+    local themTeam = Civ6Ai_Snapshot._Method(Players[otherID], "GetTeam")
+    facts.can_declare_war = facts.at_war ~= true and facts.alliance ~= true
+      and (meTeam == nil or themTeam == nil or meTeam ~= themTeam)
+  end
+  local canPeace = Civ6Ai_Snapshot._Method(myDiplo, "CanMakePeaceWith", otherID)
+  if canPeace == true then
+    facts.can_make_peace = true
+  elseif canPeace == false then
+    facts.can_make_peace = false
+  else
+    facts.can_make_peace = facts.at_war == true
+  end
   if facts.at_war then
     facts.relationship = "war"
   elseif facts.alliance then
@@ -1541,14 +1583,16 @@ function Civ6Ai_Snapshot._BuildDiplomacy(playerID)
           local suzerain = Civ6Ai_Snapshot._Method(influence, "GetSuzerain")
           local envoys = Civ6Ai_Snapshot._Method(influence, "GetTokensReceived", playerID)
           local leader = tostring(Civ6Ai_Snapshot._Try(Civ6Ai_Snapshot._LeaderId, otherID) or "")
-          local myDiplo = Civ6Ai_Snapshot._Method(Players[playerID], "GetDiplomacy")
+          local csFacts = Civ6Ai_Snapshot._RelationFacts(playerID, otherID)
           table.insert(out.city_states, {
             player_id = Civ6Ai_Snapshot._PlayerLabel(otherID),
             name = Civ6Ai_Snapshot._Try(Civ6Ai_Snapshot._LeaderName, otherID) or Civ6Ai_Snapshot._PlayerLabel(otherID),
             city_state_type = leader:match("^LEADER_MINOR_CIV_(.+)$"),
             suzerain_id = (type(suzerain) == "number" and suzerain >= 0) and Civ6Ai_Snapshot._PlayerLabel(suzerain) or nil,
             your_envoys = type(envoys) == "number" and math.floor(envoys) or nil,
-            at_war = Civ6Ai_Snapshot._Method(myDiplo, "IsAtWarWith", otherID) == true,
+            at_war = csFacts.at_war == true,
+            can_declare_war = csFacts.can_declare_war == true,
+            can_make_peace = csFacts.can_make_peace == true,
           })
         end
       end
@@ -1573,6 +1617,8 @@ function Civ6Ai_Snapshot._BuildDiplomacy(playerID)
       relationship = facts.relationship,
       diplomatic_score = facts.score,
       at_war = facts.at_war,
+      can_declare_war = facts.can_declare_war == true,
+      can_make_peace = facts.can_make_peace == true,
       denounced = facts.denounced,
       declared_friendship = facts.declared_friendship,
       alliance = facts.alliance,
@@ -1584,6 +1630,7 @@ function Civ6Ai_Snapshot._BuildDiplomacy(playerID)
       trade = inv,
     })
   end
+  Civ6Ai_Snapshot._FillDiplomacySessions(playerID, out, metMajors)
   out.your_trade = Civ6Ai_Snapshot._TradeInventory(playerID)
   local myInfluence = Civ6Ai_Snapshot._Method(Players[playerID], "GetInfluence")
   local tokens = Civ6Ai_Snapshot._Method(myInfluence, "GetTokensToGive")
@@ -1591,6 +1638,114 @@ function Civ6Ai_Snapshot._BuildDiplomacy(playerID)
     out.envoys_to_give = math.floor(tokens)
   end
   return out
+end
+
+-- Sessions the leader screen answers with DiplomacyManager.AddResponse, plus
+-- the actions IsDiplomaticActionValid still allows this seat to open.
+Civ6Ai_Snapshot.DIPLO_ACTIONS = {
+  { valid = "DIPLOACTION_DIPLOMATIC_DELEGATION", session = "DIPLOMATIC_DELEGATION", label = "delegation" },
+  { valid = "DIPLOACTION_RESIDENT_EMBASSY", session = "RESIDENT_EMBASSY", label = "embassy" },
+  { valid = "DIPLOACTION_DECLARE_FRIENDSHIP", session = "DECLARE_FRIEND", label = "friendship" },
+  { valid = "DIPLOACTION_DENOUNCE", session = "DENOUNCE", label = "denounce" },
+  { valid = "DIPLOACTION_OPEN_BORDERS", session = "OPEN_BORDERS", label = "open_borders" },
+}
+
+function Civ6Ai_Snapshot._SessionTypeName(info)
+  if info == nil or DiplomacyManager == nil or DiplomacyManager.GetKeyName == nil then
+    return nil
+  end
+  local ok, name = pcall(DiplomacyManager.GetKeyName, info.StatementType or info.SessionType)
+  if ok and type(name) == "string" and name ~= "" then
+    return name
+  end
+  return nil
+end
+
+function Civ6Ai_Snapshot._DealLines(owner, other)
+  if DealManager == nil or DealManager.GetWorkingDeal == nil or DealDirection == nil then
+    return nil
+  end
+  local ok, deal = pcall(DealManager.GetWorkingDeal, DealDirection.INCOMING, owner, other)
+  if not ok or deal == nil or deal.Items == nil then
+    return nil
+  end
+  local lines = Civ6Ai_Snapshot._Arr()
+  local okItems, err = pcall(function()
+    for item in deal:Items() do
+      local amount = item.GetAmount ~= nil and item:GetAmount() or nil
+      local name = item.GetValueTypeNameID ~= nil and item:GetValueTypeNameID() or nil
+      local fromId = item.GetFromPlayerID ~= nil and item:GetFromPlayerID() or nil
+      local text = tostring(name or item:GetType())
+      if type(amount) == "number" and amount > 0 then
+        text = tostring(math.floor(amount)) .. " " .. text
+      end
+      if fromId ~= nil then
+        text = Civ6Ai_Snapshot._PlayerLabel(fromId) .. ": " .. text
+      end
+      table.insert(lines, text)
+    end
+  end)
+  if not okItems then
+    return nil
+  end
+  return lines
+end
+
+function Civ6Ai_Snapshot._FillDiplomacySessions(playerID, out, metMajors)
+  out.pending_requests = Civ6Ai_Snapshot._Arr()
+  out.available_actions = Civ6Ai_Snapshot._Arr()
+  local diplo = Civ6Ai_Snapshot._Method(Players[playerID], "GetDiplomacy")
+  if DiplomacyManager ~= nil and DiplomacyManager.FindOpenSessionID ~= nil then
+    local seen = {}
+    for _, otherID in ipairs(metMajors) do
+      for _, pair in ipairs({ { otherID, playerID }, { playerID, otherID } }) do
+        local ok, sessionID = pcall(DiplomacyManager.FindOpenSessionID, pair[1], pair[2])
+        if ok and type(sessionID) == "number" and seen[sessionID] ~= true then
+          seen[sessionID] = true
+          local info = nil
+          if DiplomacyManager.GetSessionInfo ~= nil then
+            local okInfo, got = pcall(DiplomacyManager.GetSessionInfo, sessionID)
+            if okInfo then
+              info = got
+            end
+          end
+          local fromID = info ~= nil and info.FromPlayer or pair[1]
+          local toID = info ~= nil and info.ToPlayer or pair[2]
+          if toID == playerID then
+            table.insert(out.pending_requests, {
+              session_id = sessionID,
+              from_player_id = Civ6Ai_Snapshot._PlayerLabel(fromID),
+              type = Civ6Ai_Snapshot._SessionTypeName(info),
+              items = Civ6Ai_Snapshot._DealLines(playerID, fromID),
+            })
+          end
+        end
+      end
+    end
+  end
+  if diplo == nil or diplo.IsDiplomaticActionValid == nil then
+    return
+  end
+  for _, otherID in ipairs(metMajors) do
+    for _, action in ipairs(Civ6Ai_Snapshot.DIPLO_ACTIONS) do
+      local ok, valid = pcall(diplo.IsDiplomaticActionValid, diplo, action.valid, otherID, true)
+      if ok and valid == true then
+        local cost = nil
+        if diplo.GetDiplomaticActionCost ~= nil then
+          local okCost, gold = pcall(diplo.GetDiplomaticActionCost, diplo, action.valid)
+          if okCost and type(gold) == "number" then
+            cost = math.floor(gold)
+          end
+        end
+        table.insert(out.available_actions, {
+          player_id = Civ6Ai_Snapshot._PlayerLabel(otherID),
+          action = action.session,
+          label = action.label,
+          gold_cost = cost,
+        })
+      end
+    end
+  end
 end
 
 function Civ6Ai_Snapshot._MapWrap()
@@ -1831,6 +1986,20 @@ function Civ6Ai_Snapshot._DeriveStrategicSummary(playerID, yourCities, yourUnits
       basis = "owned units needing orders",
     })
   end
+  local player = Players[playerID]
+  if player ~= nil then
+    for _, unit in ipairs(Civ6Ai_Snapshot._IterateUnits(player:GetUnits())) do
+      local why = Civ6Ai_Snapshot._FoundBlockReason(unit)
+      if why ~= nil then
+        local wireId = Civ6Ai_Snapshot._UnitWireId(unit)
+        table.insert(summary.city_alerts, Civ6Ai_Snapshot._MakeAlert(
+          "city", "critical",
+          wireId .. " cannot found a city on its tile (" .. why
+            .. "). FoundCity is not listed until the settler stands on a legal site; cities must be 4 tiles apart, on land you own or that nobody owns.",
+          { wireId }))
+      end
+    end
+  end
   if diplomacy ~= nil and diplomacy.pending_requests ~= nil and #diplomacy.pending_requests > 0 then
     table.insert(summary.diplomacy_alerts, Civ6Ai_Snapshot._MakeAlert(
       "diplomacy", "critical", "Pending diplomacy requests require a response", {}))
@@ -1895,6 +2064,13 @@ function Civ6Ai_Snapshot._PlansNextTurn(playerID)
   return Game.GetLocalPlayer() ~= playerID
 end
 
+-- CityManager.RequestOperation(BUILD) is the local player's production screen.
+-- Queued seats have no such route (OrderChannel has no queue_production kind);
+-- they steer what the engine AI builds with set_build_priority instead.
+function Civ6Ai_Snapshot._CanQueueProduction(playerID)
+  return not Civ6Ai_Snapshot._PlansNextTurn(playerID)
+end
+
 -- Movement the unit has for the model's orders. Prefers the GameCore view (see
 -- Civ6Ai_GameCore.UnitMovesForPlayer): the UI cache reads 0 at turn start.
 function Civ6Ai_Snapshot._UnitMoves(unit)
@@ -1936,6 +2112,20 @@ function Civ6Ai_Snapshot._GameCoreCanFound(unit)
   end
   local ok, can = pcall(routes.CanFoundCityForPlayer, unit:GetOwner(), unit:GetID())
   return ok and can == true
+end
+
+-- Why FoundCity is absent for a settler standing on a bad site. Empty when
+-- the unit cannot found at all, or when the current tile is a legal city site.
+function Civ6Ai_Snapshot._FoundBlockReason(unit)
+  local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+  if routes == nil or routes.CanFoundCityForPlayer == nil or unit == nil then
+    return nil
+  end
+  local ok, can, why = pcall(routes.CanFoundCityForPlayer, unit:GetOwner(), unit:GetID())
+  if not ok or can == true or why == nil or why == "" or why == "unit_cannot_found_city" then
+    return nil
+  end
+  return tostring(why)
 end
 
 -- The UI MOVE_TO test accepts every neighbour for every seat, the local one
@@ -2077,6 +2267,111 @@ function Civ6Ai_Snapshot._PlotIndex(plot)
   return nil
 end
 
+Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP = 8
+
+function Civ6Ai_Snapshot._HasImprovementPrereqs(playerID, row)
+  if row == nil then
+    return false
+  end
+  if row.PrereqTech ~= nil then
+    local tech = GameInfo.Technologies ~= nil and GameInfo.Technologies[row.PrereqTech] or nil
+    local techs = Civ6Ai_Snapshot._Method(Players[playerID], "GetTechs")
+    if tech ~= nil and Civ6Ai_Snapshot._Method(techs, "HasTech", tech.Index) ~= true then
+      return false
+    end
+  end
+  if row.PrereqCivic ~= nil then
+    local civic = GameInfo.Civics ~= nil and GameInfo.Civics[row.PrereqCivic] or nil
+    local culture = Civ6Ai_Snapshot._Method(Players[playerID], "GetCulture")
+    if civic ~= nil and Civ6Ai_Snapshot._Method(culture, "HasCivic", civic.Index) ~= true then
+      return false
+    end
+  end
+  return true
+end
+
+-- Improvements this builder can place on its current tile. UnitPanel lists them
+-- with CanStartOperation(BUILD_IMPROVEMENT); that check is local-player UI, so
+-- AI seats fall back to ImprovementBuilder.CanHaveImprovement (CivRoyale /
+-- BlackDeath scenarios) plus tech/civic prereqs.
+function Civ6Ai_Snapshot._AddBuilderCommands(commands, playerID, unit, unitId)
+  local charges = Civ6Ai_Snapshot._Method(unit, "GetBuildCharges")
+  if type(charges) ~= "number" or charges <= 0 then
+    return
+  end
+  local plot = Map.GetPlot(unit:GetX(), unit:GetY())
+  if plot == nil or GameInfo == nil or GameInfo.Improvements == nil then
+    return
+  end
+  local added = 0
+  local function offer(improvementType)
+    if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then
+      return
+    end
+    table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+      command_id = "CMD_improve_" .. unitId .. "_" .. improvementType,
+      kind = "worker_improve",
+      fixed_arguments = {
+        unit_id = unitId,
+        improvement_id = improvementType,
+        target_x = plot:GetX(),
+        target_y = plot:GetY(),
+      },
+    }))
+    added = added + 1
+  end
+  local listed = false
+  local op = UnitOperationTypes ~= nil and UnitOperationTypes.BUILD_IMPROVEMENT or nil
+  if op == nil and GameInfo.UnitOperations ~= nil then
+    local row = GameInfo.UnitOperations["UNITOPERATION_BUILD_IMPROVEMENT"]
+    op = row ~= nil and row.Hash or nil
+  end
+  if op ~= nil and UnitManager ~= nil and UnitManager.CanStartOperation ~= nil then
+    local params = {}
+    if UnitOperationTypes ~= nil then
+      params[UnitOperationTypes.PARAM_X] = unit:GetX()
+      params[UnitOperationTypes.PARAM_Y] = unit:GetY()
+    end
+    local ok, can, results = pcall(function()
+      return UnitManager.CanStartOperation(unit, op, nil, params, true)
+    end)
+    local improvements = nil
+    if ok and can == true and type(results) == "table" and UnitOperationResults ~= nil then
+      improvements = results[UnitOperationResults.IMPROVEMENTS]
+    end
+    if type(improvements) == "table" then
+      listed = true
+      for _, hash in ipairs(improvements) do
+        if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then break end
+        local row = GameInfo.Improvements[hash]
+        if row ~= nil and row.ImprovementType ~= nil then
+          offer(row.ImprovementType)
+        end
+      end
+    end
+  end
+  if listed then
+    return
+  end
+  local team = Civ6Ai_Snapshot._Method(Players[playerID], "GetTeam")
+  pcall(function()
+    for row in GameInfo.Improvements() do
+      if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then return end
+      if row.Buildable == true and (row.TraitType == nil or row.TraitType == "")
+          and Civ6Ai_Snapshot._HasImprovementPrereqs(playerID, row) then
+        local can = true
+        if ImprovementBuilder ~= nil and ImprovementBuilder.CanHaveImprovement ~= nil then
+          local okCan, allowed = pcall(ImprovementBuilder.CanHaveImprovement, plot, row.Index, team)
+          can = okCan and allowed == true
+        end
+        if can then
+          offer(row.ImprovementType)
+        end
+      end
+    end
+  end)
+end
+
 -- Neighbour steps the unit can take this turn. Each target must pass the UI
 -- MOVE_TO test, the GameCore step check (domain, embark, stacking, move cost incl.
 -- rivers: Civ6Ai_GameCore.CanMoveUnitToForPlayer) and, when the engine lists
@@ -2131,6 +2426,9 @@ function Civ6Ai_Snapshot._CanQueueRow(city, row, paramKey)
 end
 
 function Civ6Ai_Snapshot._AddProductionCommands(commands, playerID)
+  if not Civ6Ai_Snapshot._CanQueueProduction(playerID) then
+    return
+  end
   if Civ6Ai_Production == nil or Players[playerID] == nil or GameInfo == nil then
     return
   end
@@ -2171,6 +2469,170 @@ function Civ6Ai_Snapshot._AddProductionCommands(commands, playerID)
         if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP then break end
         if Civ6Ai_Snapshot._CanQueueRow(city, row, CityOperationTypes.PARAM_PROJECT_TYPE) then
           add(row.ProjectType)
+        end
+      end
+    end
+  end
+end
+
+Civ6Ai_Snapshot.PURCHASE_UNAVAILABLE = 1000000000
+Civ6Ai_Snapshot.PURCHASE_PER_CITY_CAP = 12
+Civ6Ai_Snapshot.TILE_PURCHASE_CAP = 8
+Civ6Ai_Snapshot.TILE_PURCHASE_RANGE = 3
+
+function Civ6Ai_Snapshot._YieldIndex(yieldType)
+  if GameInfo == nil or GameInfo.Yields == nil then
+    return nil
+  end
+  local row = GameInfo.Yields[yieldType]
+  return row ~= nil and row.Index or nil
+end
+
+-- Gold/faith price the city gold object reports, or nil when that item cannot
+-- be bought (0 or the engine's INT_MAX "unavailable" sentinel).
+function Civ6Ai_Snapshot._PurchaseCost(city, yieldType, hash, formation)
+  local gold = Civ6Ai_Snapshot._Method(city, "GetGold")
+  local y = Civ6Ai_Snapshot._YieldIndex(yieldType)
+  if gold == nil or y == nil or hash == nil then
+    return nil
+  end
+  local cost
+  if formation ~= nil then
+    cost = Civ6Ai_Snapshot._Method(gold, "GetPurchaseCost", y, hash, formation)
+  else
+    cost = Civ6Ai_Snapshot._Method(gold, "GetPurchaseCost", y, hash)
+  end
+  if type(cost) ~= "number" or cost <= 0 or cost >= Civ6Ai_Snapshot.PURCHASE_UNAVAILABLE then
+    return nil
+  end
+  return math.floor(cost)
+end
+
+function Civ6Ai_Snapshot._CanStartPurchase(city, params)
+  if CityManager == nil or CityManager.CanStartCommand == nil
+      or CityCommandTypes == nil or CityCommandTypes.PURCHASE == nil then
+    return nil
+  end
+  local ok, can = pcall(function()
+    return CityManager.CanStartCommand(city, CityCommandTypes.PURCHASE, true, params, false)
+  end)
+  if not ok then
+    return nil
+  end
+  return can == true
+end
+
+function Civ6Ai_Snapshot._GoldBalance(playerID)
+  local treasury = Civ6Ai_Snapshot._Method(Players[playerID], "GetTreasury")
+  local gold = Civ6Ai_Snapshot._Method(treasury, "GetGoldBalance")
+  return type(gold) == "number" and gold or 0
+end
+
+function Civ6Ai_Snapshot._FaithBalance(playerID)
+  local rel = Civ6Ai_Snapshot._Method(Players[playerID], "GetReligion")
+  local faith = Civ6Ai_Snapshot._Method(rel, "GetFaithBalance")
+  return type(faith) == "number" and faith or 0
+end
+
+-- Gold/faith unit and building buys, plus tiles the city gold object prices.
+-- CityManager.CanStartCommand(PURCHASE) is the production-screen check and is
+-- only reliable for the local city; other seats use GetPurchaseCost (the same
+-- CityGold object PlotInfo.lua / ProductionPanel.lua read).
+function Civ6Ai_Snapshot._AddPurchaseCommands(commands, playerID)
+  local player = Players[playerID]
+  if player == nil or GameInfo == nil or Civ6Ai_Production == nil then
+    return
+  end
+  local cities = player.GetCities ~= nil and player:GetCities() or nil
+  if cities == nil then
+    return
+  end
+  local goldBal = Civ6Ai_Snapshot._GoldBalance(playerID)
+  local faithBal = Civ6Ai_Snapshot._FaithBalance(playerID)
+  local formation = MilitaryFormationTypes ~= nil and MilitaryFormationTypes.STANDARD_MILITARY_FORMATION or nil
+  local goldYield = "YIELD_GOLD"
+  local faithYield = "YIELD_FAITH"
+  for _, city in cities:Members() do
+    local cityId = Civ6Ai_Production._WireCityId(city)
+    local added = 0
+    local function offer(kind, fixed, suffix)
+      table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+        command_id = "CMD_" .. suffix .. "_" .. cityId,
+        kind = kind,
+        fixed_arguments = fixed,
+      }))
+      added = added + 1
+    end
+    local function tryItem(itemId, hash, isUnit)
+      if added >= Civ6Ai_Snapshot.PURCHASE_PER_CITY_CAP then
+        return
+      end
+      for _, pair in ipairs({ { goldYield, goldBal, "gold" }, { faithYield, faithBal, "faith" } }) do
+        local yieldType, bal, yieldName = pair[1], pair[2], pair[3]
+        local cost = isUnit
+          and Civ6Ai_Snapshot._PurchaseCost(city, yieldType, hash, formation)
+          or Civ6Ai_Snapshot._PurchaseCost(city, yieldType, hash)
+        if cost ~= nil and cost <= bal then
+          local params = {}
+          if CityCommandTypes ~= nil then
+            params[isUnit and CityCommandTypes.PARAM_UNIT_TYPE or CityCommandTypes.PARAM_BUILDING_TYPE] = hash
+            if Civ6Ai_Snapshot._YieldIndex(yieldType) ~= nil then
+              params[CityCommandTypes.PARAM_YIELD_TYPE] = Civ6Ai_Snapshot._YieldIndex(yieldType)
+            end
+          end
+          local can = Civ6Ai_Snapshot._CanStartPurchase(city, params)
+          if can ~= false then
+            local fixed = { city_id = cityId, item_id = itemId }
+            if yieldName == "faith" then
+              fixed["yield"] = "faith"
+            end
+            offer("purchase_item", fixed, "buy_" .. itemId .. "_" .. yieldName)
+            break
+          end
+        end
+      end
+    end
+    if GameInfo.Units ~= nil then
+      for row in GameInfo.Units() do
+        if added >= Civ6Ai_Snapshot.PURCHASE_PER_CITY_CAP then break end
+        tryItem(row.UnitType, row.Hash, true)
+      end
+    end
+    if GameInfo.Buildings ~= nil then
+      for row in GameInfo.Buildings() do
+        if added >= Civ6Ai_Snapshot.PURCHASE_PER_CITY_CAP then break end
+        if not row.IsWonder then
+          local buildings = Civ6Ai_Snapshot._Method(city, "GetBuildings")
+          if Civ6Ai_Snapshot._Method(buildings, "HasBuilding", row.Index) ~= true then
+            tryItem(row.BuildingType, row.Hash, false)
+          end
+        end
+      end
+    end
+    local tileAdded = 0
+    local cx, cy = city:GetX(), city:GetY()
+    local cityGold = Civ6Ai_Snapshot._Method(city, "GetGold")
+    local range = Civ6Ai_Snapshot.TILE_PURCHASE_RANGE
+    for dy = -range, range do
+      for dx = -range, range do
+        if tileAdded >= Civ6Ai_Snapshot.TILE_PURCHASE_CAP then break end
+        local plot = Map.GetPlot(cx + dx, cy + dy)
+        if plot ~= nil then
+          local dist = Map.GetPlotDistance(cx, cy, plot:GetX(), plot:GetY())
+          local owner = Civ6Ai_Snapshot._Method(plot, "GetOwner")
+          local unowned = owner == nil or owner < 0
+          if dist >= 1 and dist <= range and unowned then
+            local index = Civ6Ai_Snapshot._Method(plot, "GetIndex")
+            local cost = type(index) == "number" and Civ6Ai_Snapshot._Method(cityGold, "GetPlotPurchaseCost", index) or nil
+            if type(cost) == "number" and cost > 0 and cost < Civ6Ai_Snapshot.PURCHASE_UNAVAILABLE and cost <= goldBal then
+              offer("purchase_tile", {
+                city_id = cityId,
+                target_x = plot:GetX(),
+                target_y = plot:GetY(),
+              }, "tile_" .. tostring(plot:GetX()) .. "_" .. tostring(plot:GetY()))
+              tileAdded = tileAdded + 1
+            end
+          end
         end
       end
     end
@@ -2268,6 +2730,35 @@ function Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
       end
     end
   end
+end
+
+-- Pillage the improvement the unit is standing on. Legality is the plot state
+-- (PlotToolTip's IsImprovementPillaged), not CanStartOperation, which is a
+-- local-player UI check and is empty for an AI seat.
+function Civ6Ai_Snapshot._AddPillageCommand(commands, unit, unitId)
+  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+  if row == nil or (tonumber(row.Combat) or 0) <= 0 then
+    return
+  end
+  local plot = Map.GetPlot(unit:GetX(), unit:GetY())
+  if plot == nil or plot.IsImprovementPillaged == nil or plot.GetImprovementType == nil then
+    return
+  end
+  local imp = plot:GetImprovementType()
+  if type(imp) ~= "number" or imp < 0 or plot:IsImprovementPillaged() == true then
+    return
+  end
+  local irow = GameInfo.Improvements ~= nil and GameInfo.Improvements[imp] or nil
+  table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+    command_id = "CMD_pillage_" .. unitId,
+    kind = "pillage_improvement",
+    fixed_arguments = {
+      unit_id = unitId,
+      improvement_id = irow ~= nil and irow.ImprovementType or nil,
+      target_x = plot:GetX(),
+      target_y = plot:GetY(),
+    },
+  }))
 end
 
 -- ---------------------------------------------------------------------------
@@ -2659,7 +3150,7 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
   local commands = {}
   local prodCommands = {}
   Civ6Ai_Snapshot._AddProductionCommands(prodCommands, playerID)
-  if Civ6Ai_Config.IsSeatExperiment() then
+  if Civ6Ai_Config.IsSeatExperiment() and Civ6Ai_Snapshot._CanQueueProduction(playerID) then
     local cityId, buildId = Civ6Ai_Production.FindExperimentTarget(playerID)
     if buildId ~= nil and cityId ~= nil then
       table.insert(prodCommands, Civ6Ai_Snapshot._EnrichLegalCommand({
@@ -2696,7 +3187,9 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
           end
         end
         Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
+        Civ6Ai_Snapshot._AddPillageCommand(commands, unit, unitId)
         Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
+        Civ6Ai_Snapshot._AddBuilderCommands(commands, playerID, unit, unitId)
       end
     end
   end
@@ -2730,6 +3223,7 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
   for _, command in ipairs(prodCommands) do
     table.insert(commands, command)
   end
+  Civ6Ai_Snapshot._AddPurchaseCommands(commands, playerID)
   local capped = {}
   for index, command in ipairs(commands) do
     if index > Civ6Ai_Snapshot.LEGAL_COMMAND_CAP then
@@ -3094,6 +3588,8 @@ function Civ6Ai_Snapshot._GovReligion(playerID, player)
     religion_options = Civ6Ai_Util.JsonArrayList(),
     founder_beliefs = Civ6Ai_Util.JsonArrayList(),
     follower_beliefs = Civ6Ai_Util.JsonArrayList(),
+    worship_beliefs = Civ6Ai_Util.JsonArrayList(),
+    enhancer_beliefs = Civ6Ai_Util.JsonArrayList(),
     prophets = Civ6Ai_Util.JsonArrayList(),
     religious_units = {},
   }
@@ -3143,6 +3639,10 @@ function Civ6Ai_Snapshot._GovReligion(playerID, player)
           out.founder_beliefs[#out.founder_beliefs + 1] = entry
         elseif b.BeliefClassType == "BELIEF_CLASS_FOLLOWER" then
           out.follower_beliefs[#out.follower_beliefs + 1] = entry
+        elseif b.BeliefClassType == "BELIEF_CLASS_WORSHIP" then
+          out.worship_beliefs[#out.worship_beliefs + 1] = entry
+        elseif b.BeliefClassType == "BELIEF_CLASS_ENHANCER" then
+          out.enhancer_beliefs[#out.enhancer_beliefs + 1] = entry
         end
       end
     end
@@ -3438,6 +3938,24 @@ function Civ6Ai_Snapshot.Build(playerID, options)
     civ6Block.rankings = rankings
   else
     Civ6Ai_Util.Log("snapshot|rankings_failed|" .. tostring(rankings))
+  end
+  local okClimate, climate = pcall(Civ6Ai_Snapshot._BuildClimate, playerID)
+  if okClimate and type(climate) == "table" then
+    civ6Block.climate = climate
+  elseif not okClimate then
+    Civ6Ai_Util.Log("snapshot|climate_failed|" .. tostring(climate))
+  end
+  local okPower, power = pcall(Civ6Ai_Snapshot._BuildPower, playerID)
+  if okPower and type(power) == "table" then
+    civ6Block.power = power
+  elseif not okPower then
+    Civ6Ai_Util.Log("snapshot|power_failed|" .. tostring(power))
+  end
+  local okStock, stockpiles = pcall(Civ6Ai_Snapshot._BuildStockpiles, playerID)
+  if okStock and type(stockpiles) == "table" then
+    civ6Block.stockpiles = stockpiles
+  elseif not okStock then
+    Civ6Ai_Util.Log("snapshot|stockpiles_failed|" .. tostring(stockpiles))
   end
   local okGov, governance = pcall(Civ6Ai_Snapshot._BuildGovernance, playerID)
   if okGov and type(governance) == "table" then
@@ -3839,5 +4357,196 @@ function Civ6Ai_Snapshot._BuildRankings(playerID)
     diplomatic_vp_needed = Civ6Ai_Snapshot._RankNum(dipNeeded),
     you = Civ6Ai_Snapshot._PlayerLabel(playerID),
     players = players,
+  }
+end
+
+-- Gathering Storm climate / city power / strategic stockpiles. APIs are the ones
+-- ClimateScreen.lua, CityBannerManager.lua, CityPanelPower.lua, and
+-- TopPanel_Expansion2.lua already call. Each builder returns nil until the
+-- system is relevant (CO2/temperature/level underway; a city that needs or
+-- produces power; a strategic with stock, income, or demand) so early ages
+-- stay quiet.
+
+function Civ6Ai_Snapshot._ClimateNum(name, ...)
+  local value = Civ6Ai_Snapshot._Static(GameClimate, name, ...)
+  if type(value) == "number" then
+    return value
+  end
+  return nil
+end
+
+function Civ6Ai_Snapshot._BuildClimate(playerID)
+  if GameClimate == nil then
+    return nil
+  end
+  local co2World = Civ6Ai_Snapshot._ClimateNum("GetTotalCO2Footprint") or 0
+  local co2You = Civ6Ai_Snapshot._ClimateNum("GetPlayerCO2Footprint", playerID, false) or 0
+  local level = Civ6Ai_Snapshot._ClimateNum("GetClimateChangeLevel") or 0
+  local temp = Civ6Ai_Snapshot._ClimateNum("GetTemperatureChange") or 0
+  if co2World <= 0 and co2You <= 0 and level <= 0 and temp <= 0 then
+    return nil
+  end
+  local out = {
+    source = "ClimateScreen.lua GameClimate",
+    co2_world = math.floor(co2World),
+    co2_you = math.floor(co2You),
+    level = math.floor(level),
+    temperature_c_tenths = math.floor(temp * 10 + (temp >= 0 and 0.5 or -0.5)),
+  }
+  local seaTurns = Civ6Ai_Snapshot._ClimateNum("GetNextSeaLevelRiseTurns")
+  if type(seaTurns) == "number" then
+    out.sea_rise_turns = math.floor(seaTurns)
+  end
+  local flooded = Civ6Ai_Snapshot._ClimateNum("GetTilesFlooded")
+  if type(flooded) == "number" then
+    out.tiles_flooded = math.floor(flooded)
+  end
+  local submerged = Civ6Ai_Snapshot._ClimateNum("GetTilesSubmerged")
+  if type(submerged) == "number" then
+    out.tiles_submerged = math.floor(submerged)
+  end
+  local storm = Civ6Ai_Snapshot._ClimateNum("GetStormPercentChance")
+  if type(storm) == "number" then
+    out.storm_pct = math.floor(storm)
+  end
+  local flood = Civ6Ai_Snapshot._ClimateNum("GetFloodPercentChance")
+  if type(flood) == "number" then
+    out.flood_pct = math.floor(flood)
+  end
+  local drought = Civ6Ai_Snapshot._ClimateNum("GetDroughtPercentChance")
+  if type(drought) == "number" then
+    out.drought_pct = math.floor(drought)
+  end
+  return out
+end
+
+function Civ6Ai_Snapshot._PowerCityId(city)
+  if Civ6Ai_Production ~= nil and Civ6Ai_Production._WireCityId ~= nil then
+    return Civ6Ai_Production._WireCityId(city)
+  end
+  return "CITY_" .. tostring(Civ6Ai_Snapshot._Method(city, "GetID") or 0)
+end
+
+function Civ6Ai_Snapshot._BuildPower(playerID)
+  local player = Players[playerID]
+  if player == nil then
+    return nil
+  end
+  local cities = Civ6Ai_Snapshot._Method(player, "GetCities")
+  if cities == nil then
+    return nil
+  end
+  local rows = Civ6Ai_Snapshot._Arr()
+  local seen = false
+  local anyApi = false
+  local powered = 0
+  local needing = 0
+  for _, city in cities:Members() do
+    local pwr = Civ6Ai_Snapshot._Method(city, "GetPower")
+    if pwr ~= nil then
+      anyApi = true
+      local free = Civ6Ai_Snapshot._Method(pwr, "GetFreePower")
+      local temp = Civ6Ai_Snapshot._Method(pwr, "GetTemporaryPower")
+      local req = Civ6Ai_Snapshot._Method(pwr, "GetRequiredPower")
+      if type(free) ~= "number" then free = 0 end
+      if type(temp) ~= "number" then temp = 0 end
+      if type(req) ~= "number" then req = 0 end
+      -- CityBannerManager.lua only shows the icon when any of these is > 0.
+      if free > 0 or temp > 0 or req > 0 then
+        seen = true
+        needing = needing + 1
+        local fully = Civ6Ai_Snapshot._Method(pwr, "IsFullyPowered") == true
+        if fully then
+          powered = powered + 1
+        end
+        table.insert(rows, {
+          city_id = Civ6Ai_Snapshot._PowerCityId(city),
+          name = Locale.Lookup(Civ6Ai_Snapshot._Method(city, "GetName") or ""),
+          required = req,
+          free = free,
+          temporary = temp,
+          powered = fully,
+          powered_by_project = Civ6Ai_Snapshot._Method(pwr, "IsFullyPoweredByActiveProject") == true,
+        })
+      end
+    end
+  end
+  if not anyApi or not seen then
+    return nil
+  end
+  return {
+    source = "CityBannerManager.lua city:GetPower",
+    cities_powered = powered,
+    cities_needing = needing,
+    cities = rows,
+  }
+end
+
+Civ6Ai_Snapshot.STOCKPILE_CAP = 12
+
+function Civ6Ai_Snapshot._ResourceNum(resources, method, row)
+  local byType = Civ6Ai_Snapshot._Method(resources, method, row.ResourceType)
+  if type(byType) == "number" then
+    return byType
+  end
+  local byIndex = Civ6Ai_Snapshot._Method(resources, method, row.Index)
+  if type(byIndex) == "number" then
+    return byIndex
+  end
+  return 0
+end
+
+function Civ6Ai_Snapshot._BuildStockpiles(playerID)
+  local player = Players[playerID]
+  if player == nil then
+    return nil
+  end
+  local resources = Civ6Ai_Snapshot._Method(player, "GetResources")
+  if resources == nil then
+    return nil
+  end
+  local okCap, capFn = pcall(function() return resources.GetResourceStockpileCap end)
+  if not okCap or type(capFn) ~= "function" then
+    return nil
+  end
+  if GameInfo == nil or GameInfo.Resources == nil then
+    return nil
+  end
+  local rows = Civ6Ai_Snapshot._Arr()
+  pcall(function()
+    for row in GameInfo.Resources() do
+      if row.ResourceClassType == "RESOURCECLASS_STRATEGIC" and #rows < Civ6Ai_Snapshot.STOCKPILE_CAP then
+        local amount = Civ6Ai_Snapshot._ResourceNum(resources, "GetResourceAmount", row)
+        local cap = Civ6Ai_Snapshot._ResourceNum(resources, "GetResourceStockpileCap", row)
+        local reserved = Civ6Ai_Snapshot._ResourceNum(resources, "GetReservedResourceAmount", row)
+        local acc = Civ6Ai_Snapshot._ResourceNum(resources, "GetResourceAccumulationPerTurn", row)
+        local imported = Civ6Ai_Snapshot._ResourceNum(resources, "GetResourceImportPerTurn", row)
+        local bonus = Civ6Ai_Snapshot._ResourceNum(resources, "GetBonusResourcePerTurn", row)
+        local unitDemand = Civ6Ai_Snapshot._ResourceNum(resources, "GetUnitResourceDemandPerTurn", row)
+        local powerDemand = Civ6Ai_Snapshot._ResourceNum(resources, "GetPowerResourceDemandPerTurn", row)
+        if amount > 0 or reserved > 0 or acc > 0 or imported > 0 or bonus > 0
+            or unitDemand > 0 or powerDemand > 0 then
+          table.insert(rows, {
+            resource_id = row.ResourceType,
+            amount = math.floor(amount),
+            cap = math.floor(cap),
+            reserved = math.floor(reserved),
+            per_turn = math.floor(acc + imported + bonus + 0.5),
+            from_improvements = math.floor(acc),
+            import = math.floor(imported),
+            bonus = math.floor(bonus),
+            unit_demand = math.floor(unitDemand),
+            power_demand = math.floor(powerDemand),
+          })
+        end
+      end
+    end
+  end)
+  if #rows == 0 then
+    return nil
+  end
+  return {
+    source = "TopPanel_Expansion2.lua GetResources stockpile",
+    strategics = rows,
   }
 end

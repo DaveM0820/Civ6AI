@@ -37,7 +37,7 @@ class LiveConfigRenderTests(unittest.TestCase):
         self.assertIn('Repo = "C:/Users/me/Civ6AI"', text)
         self.assertIn('Python = "C:/Users/me/miniconda3/python.exe"', text)
         self.assertIn("SidecarLive = 1", text)
-        self.assertIn("Autotest = 0", text)
+        self.assertIn("Autotest = 1", text)
         self.assertIn('ManagedSeats = "1"', text)
         self.assertIn('SessionId = "live-test"', text)
         self.assertIn("SidecarTimeoutSeconds = 600", text)
@@ -53,16 +53,25 @@ class LiveConfigRenderTests(unittest.TestCase):
     def test_quotes_escaped(self):
         self.assertEqual('"a\\"b"', install_mod._lua_str('a"b'))
 
+    def test_empty_seats_means_all(self):
+        self.assertEqual("", install_mod.normalize_seats(""))
+        self.assertEqual("", install_mod.normalize_seats(" , "))
+
     def test_bad_seats_rejected(self):
         with self.assertRaises(ValueError):
             install_mod.normalize_seats("x")
-        with self.assertRaises(ValueError):
-            install_mod.normalize_seats(" , ")
 
     def test_timeout_floor(self):
         with tempfile.TemporaryDirectory() as tmp:
             s = _settings(Path(tmp), sidecar_timeout=5)
         self.assertEqual(30, s["sidecar_timeout_seconds"])
+
+    def test_no_autotest_writes_zero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s = _settings(Path(tmp), autotest=False)
+        self.assertIn("Autotest = 0", install_mod.render_paths_lua(s))
+        args = install_mod.parse_args(["--no-autotest"])
+        self.assertFalse(args.autotest)
 
 
 class LiveConfigWriteTests(unittest.TestCase):
@@ -80,11 +89,20 @@ class LiveConfigWriteTests(unittest.TestCase):
             self.assertEqual("C:/Users/me/Civ6AI", data["repo"])
             self.assertEqual("live-test", data["session_id"])
             self.assertEqual(1, data["sidecar_live"])
-            self.assertEqual(0, data["autotest"])
+            self.assertEqual(1, data["autotest"])
             self.assertEqual(600, data["sidecar_timeout_seconds"])
             for base in (root, mirror):
                 self.assertTrue((base / "sessions" / "live-test" / "PLAYER_1").is_dir())
                 self.assertTrue((base / "sessions" / "live-test" / "PLAYER_2").is_dir())
+
+    def test_empty_seats_skips_player_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s = _settings(Path(tmp), managed_seats="")
+            root = Path(s["root"])
+            install_mod.write_runtime_json(root, s)
+            self.assertTrue((root / "sessions" / "live-test").is_dir())
+            self.assertEqual([], list((root / "sessions" / "live-test").glob("PLAYER_*")))
+            self.assertEqual("", json.loads((root / "runtime.json").read_text(encoding="utf-8"))["managed_seats"])
 
     def test_main_installs_live_config_into_targets_only(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -103,6 +121,7 @@ class LiveConfigWriteTests(unittest.TestCase):
             self.assertIn("SidecarTimeoutSeconds = 900", paths_lua)
             self.assertIn('SessionId = "live-x"', paths_lua)
             self.assertIn("SidecarLive = 1", paths_lua)
+            self.assertIn("Autotest = 1", paths_lua)
             self.assertFalse((target / "Gameplay" / "Civ6Ai_Runtime.lua").exists())
             self.assertTrue((target / "Civ6Ai.modinfo").is_file())
             self.assertEqual("live-x", json.loads((civ6ai_root / "runtime.json").read_text(encoding="utf-8"))["session_id"])

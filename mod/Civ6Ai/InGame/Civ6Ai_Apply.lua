@@ -67,9 +67,42 @@ end
 -- A seat other than the local one plays it at its next turn start: the orders
 -- go out on the synced channel (every PC makes the same change) for turn
 -- snapshotTurn + 1, and results are recorded when they come back.
+-- DiplomacyManager is the leader screen's own session call (RequestSession /
+-- AddResponse). It is the network diplomacy path, so the host answers once
+-- when the model replies instead of queueing it for the seat's next turn.
+Civ6Ai_Apply.SESSION_NOW = {
+  respond_to_diplomacy = true,
+  diplomatic_session = true,
+}
+
+function Civ6Ai_Apply._SessionCommands(decision)
+  local now, later = {}, {}
+  for _, command in ipairs(decision.commands or {}) do
+    if Civ6Ai_Apply.SESSION_NOW[command.kind] then
+      table.insert(now, command)
+    else
+      table.insert(later, command)
+    end
+  end
+  return now, later
+end
+
+function Civ6Ai_Apply._ApplySessions(playerID, commands)
+  for _, command in ipairs(commands) do
+    local ok, reason, args = Civ6Ai_Apply._DiplomacySession(playerID, command)
+    Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, args)
+  end
+end
+
 function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn)
   if decision == nil or decision.commands == nil then
     Civ6Ai_Util.Log("apply|no_commands|player=" .. tostring(playerID))
+    return
+  end
+  local sessions, rest = Civ6Ai_Apply._SessionCommands(decision)
+  Civ6Ai_Apply._ApplySessions(playerID, sessions)
+  decision = { commands = rest }
+  if #rest == 0 then
     return
   end
   if playerID ~= Game.GetLocalPlayer() then
@@ -365,6 +398,16 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
   end
   if command.kind == "attack_target" then
     return Civ6Ai_Apply._AttackTarget(playerID, args)
+  end
+  if command.kind == "respond_to_diplomacy" or command.kind == "diplomatic_session" then
+    return Civ6Ai_Apply._DiplomacySession(playerID, command)
+  end
+  if command.kind == "send_diplomatic_action" or command.kind == "propose_peace"
+      or command.kind == "purchase_item" or command.kind == "purchase_tile" then
+    return Civ6Ai_Apply._Deal(playerID, command, args)
+  end
+  if command.kind == "worker_improve" or command.kind == "pillage_improvement" then
+    return Civ6Ai_Apply._Work(playerID, command, args)
   end
   if Civ6Ai_Apply.GOV_KINDS ~= nil and Civ6Ai_Apply.GOV_KINDS[command.kind] then
     return Civ6Ai_Apply._Governance(playerID, command, args)
@@ -1088,7 +1131,9 @@ function Civ6Ai_Apply._FoundReligion(playerID, command, args)
     end
     beliefs[#beliefs + 1] = brow.Index
   end
-  local ok, reason = Civ6Ai_Apply._GovRoute("FoundReligion", playerID, row.Index, unitNum or -1, beliefs[1] or -1, beliefs[2] or -1)
+  local ok, reason = Civ6Ai_Apply._GovRoute(
+    "FoundReligion", playerID, row.Index, unitNum or -1,
+    beliefs[1] or -1, beliefs[2] or -1, beliefs[3] or -1, beliefs[4] or -1)
   return ok, reason, args
 end
 
@@ -1273,6 +1318,119 @@ function Civ6Ai_Apply._Governor(playerID, command, args)
   return Civ6Ai_Apply._Defer(playerID, command, args, label, wrapped, function()
     Civ6Ai_Apply._AsSeat(playerID, function() return Civ6Ai_Apply._PlayerOp(playerID, opName, retryParams) end)
   end)
+end
+
+function Civ6Ai_Apply._PlayerNum(id)
+  local n = tonumber(string.match(tostring(id or ""), "(%d+)$"))
+  return n
+end
+
+function Civ6Ai_Apply._CityNum(id)
+  local n = tonumber(string.match(tostring(id or ""), "CITY_(%d+)"))
+  if n ~= nil then
+    return n % 65536
+  end
+  return tonumber(id)
+end
+
+-- War, peace, gold/faith purchase, tile purchase: the gameplay Gov functions
+-- (DeclareWarOn / MakePeaceWith / InitUnit / SetOwner). Local seat in single
+-- player calls them through ExposedMembers; queued seats go through the order
+-- channel before this file.
+function Civ6Ai_Apply._Deal(playerID, command, args)
+  local kind = command.kind
+  if kind == "send_diplomatic_action" then
+    local other = Civ6Ai_Apply._PlayerNum(args.target_player_id)
+    if other == nil then
+      return false, "missing_target_player", args
+    end
+    local action = string.upper(tostring(args.action_id or ""))
+    if string.find(action, "WAR", 1, true) == nil then
+      return false, "only DECLARE_WAR can be applied", args
+    end
+    local ok, reason = Civ6Ai_Apply._GovRoute("DeclareWar", playerID, other, string.find(action, "SURPRISE", 1, true) ~= nil)
+    return ok, reason, args
+  end
+  if kind == "propose_peace" then
+    local other = Civ6Ai_Apply._PlayerNum(args.target_player_id)
+    if other == nil then
+      return false, "missing_target_player", args
+    end
+    local ok, reason = Civ6Ai_Apply._GovRoute("MakePeace", playerID, other)
+    return ok, reason, args
+  end
+  if kind == "purchase_item" then
+    local cityNum = Civ6Ai_Apply._CityNum(args.city_id)
+    local item = args.item_id
+    local unitRow = item ~= nil and GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[item] or nil
+    local bldRow = item ~= nil and GameInfo ~= nil and GameInfo.Buildings ~= nil and GameInfo.Buildings[item] or nil
+    if cityNum == nil or (unitRow == nil and bldRow == nil) then
+      return false, "missing_city_or_item", args
+    end
+    local ok, reason = Civ6Ai_Apply._GovRoute(
+      "PurchaseItem", playerID, cityNum, (unitRow or bldRow).Index, bldRow ~= nil,
+      string.lower(tostring(args.yield or "gold")) == "faith")
+    return ok, reason, args
+  end
+  if kind == "purchase_tile" then
+    local cityNum = Civ6Ai_Apply._CityNum(args.city_id)
+    local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
+    if cityNum == nil or x == nil or y == nil then
+      return false, "missing_city_or_tile", args
+    end
+    local ok, reason = Civ6Ai_Apply._GovRoute("PurchaseTile", playerID, cityNum, x, y)
+    return ok, reason, args
+  end
+  return false, "unsupported_kind", args
+end
+
+function Civ6Ai_Apply._DiplomacySession(playerID, command)
+  local args = command.arguments or {}
+  if DiplomacyManager == nil then
+    return false, "this game has no diplomacy session manager", args
+  end
+  if command.kind == "respond_to_diplomacy" then
+    local sessionID = tonumber(args.session_id)
+    if sessionID == nil or DiplomacyManager.AddResponse == nil then
+      return false, "missing diplomacy session", args
+    end
+    local response = string.upper(tostring(args.response or ""))
+    local key = (response == "ACCEPT" or response == "POSITIVE" or response == "YES") and "POSITIVE" or "NEGATIVE"
+    local ok = pcall(DiplomacyManager.AddResponse, sessionID, playerID, key)
+    if not ok then
+      return false, "the game refused the diplomacy response", args
+    end
+    return true, "session=" .. tostring(sessionID) .. ":response=" .. key, args
+  end
+  local other = tonumber((tostring(args.target_player_id or "")):match("PLAYER_(%d+)")) or tonumber(args.target_player_id)
+  local session = tostring(args.action_id or "")
+  if other == nil or session == "" or DiplomacyManager.RequestSession == nil then
+    return false, "missing diplomacy target or action", args
+  end
+  local ok = pcall(DiplomacyManager.RequestSession, playerID, other, session)
+  if not ok then
+    return false, "the game refused to open that diplomacy session", args
+  end
+  return true, "session=" .. session .. ":to=" .. tostring(other), args
+end
+
+function Civ6Ai_Apply._Work(playerID, command, args)
+  local unitNum = Civ6Ai_Apply._ParseUnitNumericId(args.unit_id)
+  local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
+  if command.kind == "pillage_improvement" then
+    if unitNum == nil then
+      return false, "missing_unit_id", args
+    end
+    local ok, reason = Civ6Ai_Apply._GovRoute("PillageImprovement", playerID, unitNum, x, y)
+    return ok, reason, args
+  end
+  local row = args.improvement_id ~= nil and GameInfo ~= nil and GameInfo.Improvements ~= nil
+    and GameInfo.Improvements[args.improvement_id] or nil
+  if unitNum == nil or row == nil then
+    return false, "missing_unit_or_improvement", args
+  end
+  local ok, reason = Civ6Ai_Apply._GovRoute("ImproveTile", playerID, unitNum, row.Index, x, y)
+  return ok, reason, args
 end
 
 function Civ6Ai_Apply._Governance(playerID, command, args)

@@ -4,6 +4,7 @@ Civ6Ai_Bridge = Civ6Ai_Bridge or {}
 Civ6Ai_Bridge._sessionId = nil
 Civ6Ai_Bridge._pulseKeys = {}
 Civ6Ai_Bridge._appliedKeys = {}
+Civ6Ai_Bridge._emptyAppliedKeys = {}
 Civ6Ai_Bridge._chatPulseKeys = {}
 Civ6Ai_Bridge._chatAppliedKeys = {}
 Civ6Ai_Bridge._activeChatPulseKey = {}
@@ -117,10 +118,23 @@ end
 
 function Civ6Ai_Bridge.MarkLoadScreenClosed()
   Civ6Ai_Bridge._loadScreenClosed = true
+  -- The InGame script can restart mid-game (the load-screen event does not fire
+  -- again). Keep the flag where that restart can still see it.
+  if ExposedMembers ~= nil then
+    ExposedMembers.Civ6Ai = ExposedMembers.Civ6Ai or {}
+    ExposedMembers.Civ6Ai.LoadScreenClosed = true
+  end
 end
 
 function Civ6Ai_Bridge.IsLoadScreenClosed()
-  return Civ6Ai_Bridge._loadScreenClosed == true
+  if Civ6Ai_Bridge._loadScreenClosed == true then
+    return true
+  end
+  if ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil and ExposedMembers.Civ6Ai.LoadScreenClosed == true then
+    Civ6Ai_Bridge._loadScreenClosed = true
+    return true
+  end
+  return false
 end
 
 function Civ6Ai_Bridge._CanStartAutotestPulse(playerID)
@@ -262,14 +276,32 @@ function Civ6Ai_Bridge._FinishTurnPulse(playerID)
     return
   end
   Civ6Ai_Bridge._finishedKeys[key] = true
-  -- Only the local seat has to clear its units before it can end the turn. AI
-  -- seats end their own turns; units the model did not order are left to the
-  -- native AI (the documented fallback) instead of being force-finished.
+  -- Only the local seat has to clear its units before it can end the turn.
+  -- Units the model did not order on an AI seat are left to the native AI
+  -- until that seat's turn is ended below.
   if Civ6Ai_Bridge._IsLocalSeat(playerID) then
     Civ6Ai_Apply.ResolveAllUnitOrders(playerID)
   end
   if Civ6Ai_Autotest ~= nil then
     Civ6Ai_Autotest.AfterPulse(playerID)
+  end
+  -- Live play does not go through AfterPulse. After the snapshot, leftover
+  -- movement on a managed AI seat is ended on every PC through the order
+  -- channel (settlers/warriors still "need orders" otherwise keep that seat
+  -- turn-active in simultaneous network games). Single-player also requests
+  -- ENDTURN via the local-player swap; that swap is not used in network MP.
+  if not Civ6Ai_Config.IsAutotest() then
+    local p = Players ~= nil and Players[playerID] or nil
+    if p ~= nil and p.IsHuman ~= nil and not p:IsHuman() then
+      if Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.Send ~= nil
+          and Civ6Ai_OrderChannel.K ~= nil and Civ6Ai_OrderChannel.K.FINISH_SEAT ~= nil then
+        Civ6Ai_OrderChannel.Send(Civ6Ai_OrderChannel.K.FINISH_SEAT, { P = playerID })
+      end
+      if Civ6Ai_Autotest ~= nil
+          and not (Civ6Ai_Apply._IsNetworkMultiplayer ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer()) then
+        Civ6Ai_Autotest._EndManagedTurn(playerID)
+      end
+    end
   end
 end
 
@@ -311,6 +343,22 @@ end
 
 function Civ6Ai_Bridge._MarkApplied(playerID)
   Civ6Ai_Bridge._appliedKeys[Civ6Ai_Bridge._PulseKey(playerID)] = true
+end
+
+function Civ6Ai_Bridge._MarkEmptyApplied(playerID)
+  local key = Civ6Ai_Bridge._PulseKey(playerID)
+  Civ6Ai_Bridge._appliedKeys[key] = true
+  Civ6Ai_Bridge._emptyAppliedKeys[key] = true
+end
+
+function Civ6Ai_Bridge._ClearEmptyApplied(playerID)
+  local key = Civ6Ai_Bridge._PulseKey(playerID)
+  Civ6Ai_Bridge._appliedKeys[key] = nil
+  Civ6Ai_Bridge._emptyAppliedKeys[key] = nil
+end
+
+function Civ6Ai_Bridge._WasEmptyAppliedThisPulse(playerID)
+  return Civ6Ai_Bridge._emptyAppliedKeys[Civ6Ai_Bridge._PulseKey(playerID)] == true
 end
 
 function Civ6Ai_Bridge._MarkChatApplied(playerID)
@@ -372,7 +420,7 @@ function Civ6Ai_Bridge._IsReadyDecision(text, turn, mode)
 end
 
 function Civ6Ai_Bridge._ApplyDecisionFiles(playerID, decisionPath, playerDir)
-  if Civ6Ai_Bridge._WasAppliedThisPulse(playerID) then
+  if Civ6Ai_Bridge._WasAppliedThisPulse(playerID) and not Civ6Ai_Bridge._WasEmptyAppliedThisPulse(playerID) then
     return true
   end
   local applyPath = Civ6Ai_Util.JoinPath(playerDir, "apply_commands.json")
@@ -568,7 +616,7 @@ function Civ6Ai_Bridge._ConsumeApplyId(entry)
 end
 
 function Civ6Ai_Bridge._TryPendingApplyFromMod(playerID)
-  if Civ6Ai_Bridge._WasAppliedThisPulse(playerID) then
+  if Civ6Ai_Bridge._WasAppliedThisPulse(playerID) and not Civ6Ai_Bridge._WasEmptyAppliedThisPulse(playerID) then
     return true
   end
   Civ6Ai_Bridge._ReloadPendingApplyMod()
@@ -599,12 +647,12 @@ function Civ6Ai_Bridge._TryPendingApplyFromMod(playerID)
     )
     return true
   end
-  -- Empty or unusable payload: the model answered, there is just nothing to run.
-  -- Finish the pulse so the seat does not wait out the full timeout.
+  -- Empty or unusable payload: finish so we do not wait the full timeout, but
+  -- keep the pulse replaceable if a later mailbox has real commands.
   Civ6Ai_Util.Log(
     "bridge|pending_apply_empty|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn) .. "|kind=turn|id=" .. applyId
   )
-  Civ6Ai_Bridge._MarkApplied(playerID)
+  Civ6Ai_Bridge._MarkEmptyApplied(playerID)
   Civ6Ai_Bridge._CompleteTurnAfterApply(playerID, false)
   return true
 end
@@ -684,10 +732,30 @@ end
 
 -- True when the model's answer to the seat's snapshot of `turn` has been sent
 -- or given up on, or when no snapshot of that turn was dumped (nothing to wait
--- for). Used by the autotest seat barrier and the host's status line.
+-- for). Status line uses this; the autotest barrier does not (see SeatAnswerOutstanding).
 function Civ6Ai_Bridge.SeatDecisionSettled(playerID, turn)
   local key = tostring(playerID) .. "|" .. tostring(turn)
   return not Civ6Ai_Bridge._dumpedKeys[key] or Civ6Ai_Bridge._delivered[key] ~= nil
+end
+
+-- Simultaneous LAN: the host must wait for this turn's dumps (queues for N+1).
+-- Sequential SP: AI dump turn N while the local seat plays N+1, so wait for N-1.
+function Civ6Ai_Bridge.HostWaitSnapshotTurn()
+  local turn = Game.GetCurrentGameTurn()
+  if Civ6Ai_Apply ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer() then
+    return turn
+  end
+  return turn - 1
+end
+
+-- True until this seat's snapshot of `turn` is sent or given up. Not dumped yet
+-- still counts: on LAN the host can finish its pulse before the other seats dump.
+function Civ6Ai_Bridge.SeatAnswerOutstanding(playerID, turn)
+  if turn == nil or turn < 1 then
+    return false
+  end
+  local key = tostring(playerID) .. "|" .. tostring(turn)
+  return Civ6Ai_Bridge._delivered[key] == nil
 end
 
 function Civ6Ai_Bridge._TryPendingChatFromMod(playerID)
@@ -1160,17 +1228,22 @@ function Civ6Ai_Bridge.ApplyPayload(playerID, jsonText, options)
   end
   local chatOnly = options.chatOnly == true
     or (options.turn ~= true and Civ6Ai_Bridge._activeChatPulseKey[playerID] ~= nil)
+  local decision = Civ6Ai_Bridge._ParseDecision(jsonText)
+  local chats = Civ6Ai_Bridge._ParseChatMessages(jsonText)
   if chatOnly then
     if Civ6Ai_Bridge._WasAppliedThisChatPulse(playerID) then
       Civ6Ai_Util.Log("bridge|chat_apply_skip_duplicate|player=" .. tostring(playerID))
       return true
     end
   elseif Civ6Ai_Bridge._WasAppliedThisPulse(playerID) then
-    Civ6Ai_Util.Log("bridge|apply_skip_duplicate|player=" .. tostring(playerID))
-    return true
+    if Civ6Ai_Bridge._WasEmptyAppliedThisPulse(playerID) and #decision.commands > 0 then
+      Civ6Ai_Util.Log("bridge|apply_replace_empty|player=" .. tostring(playerID))
+      Civ6Ai_Bridge._ClearEmptyApplied(playerID)
+    else
+      Civ6Ai_Util.Log("bridge|apply_skip_duplicate|player=" .. tostring(playerID))
+      return true
+    end
   end
-  local decision = Civ6Ai_Bridge._ParseDecision(jsonText)
-  local chats = Civ6Ai_Bridge._ParseChatMessages(jsonText)
   local turnPulseActive = Civ6Ai_Bridge._pulseKeys[Civ6Ai_Bridge._PulseKey(playerID)] == true
   if not chatOnly and not turnPulseActive and #decision.commands == 0 and #chats > 0 then
     chatOnly = true
@@ -1264,7 +1337,8 @@ end
 
 Civ6Ai_Bridge.GOV_ARG_KEYS = {
   "government_id", "slots", "belief_id", "belief_ids", "religion_id", "individual_id", "yield",
-  "governor_id", "promotion_id",
+  "governor_id", "promotion_id", "action_id", "target_player_id", "item_id",
+  "improvement_id",
 }
 
 function Civ6Ai_Bridge._ParseDecision(text)

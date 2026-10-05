@@ -70,6 +70,16 @@ class PrioritiesModelTests(unittest.TestCase):
         ok = [c["command_id"] for c in validated["commands"]]
         self.assertIn(prio.command_id(war, 2), ok)
 
+    def test_prompt_says_priorities_steer_production_when_queue_is_absent(self):
+        from sidecar import civ6_wire
+        snap = _snapshot({})
+        self.assertEqual(civ6_wire.CIV6_PRIORITY_PRODUCTION_POLICY, civ6_wire.native_fallback_policy(snap))
+        snap["legal_commands"] = [{
+            "kind": "queue_production",
+            "fixed_arguments": {"city_id": "CITY_0", "build_id": "UNIT_WARRIOR"},
+        }]
+        self.assertEqual(civ6_wire.CIV6_NATIVE_FALLBACK_POLICY, civ6_wire.native_fallback_policy(snap))
+
 
 if __name__ == "__main__":
     unittest.main()

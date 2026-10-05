@@ -26,7 +26,7 @@ UNIT_POSTURE_TOKENS = {
 }
 
 # Wire property names the prompt uses for city orders.
-CITY_PROPS = ("production", "buy", "buyTile", "focus", "rangeStrike", "clearQueue", "removeQueueOrder")
+CITY_PROPS = ("production", "buy", "purchase", "buyTile", "focus", "rangeStrike", "clearQueue", "removeQueueOrder")
 
 # Keys that are prose/bookkeeping, never orders.
 LAST_UNRESOLVED: list[str] = []
@@ -95,6 +95,8 @@ def unit_command_token(command: dict[str, Any]) -> str | None:
         return f"Promote({promo})" if isinstance(promo, str) and promo else "Promote"
     if kind == "delete_unit":
         return "Delete"
+    if kind == "pillage_improvement":
+        return "Pillage"
     if kind.startswith("worker_"):
         build = fixed.get("improvement_id") or fixed.get("build_id") or fixed.get("route_id")
         verb = _camel(kind[len("worker_"):])
@@ -143,7 +145,10 @@ def city_command_token(command: dict[str, Any]) -> tuple[str, str] | None:
     if kind == "queue_production":
         return "production", production_token(fixed.get("build_id"), fixed)
     if kind == "purchase_item":
-        return "buy", production_token(fixed.get("item_id"), fixed)
+        item = production_token(fixed.get("item_id"), fixed)
+        if str(fixed.get("yield") or "").lower() == "faith":
+            item = f"{item}:faith"
+        return "purchase", item
     if kind == "purchase_tile":
         xy = _xy(fixed)
         return "buyTile", f"({xy[0]},{xy[1]})" if xy else "apply"
@@ -282,8 +287,8 @@ def _synthesize_far_move(snapshot: dict[str, Any], unit_id: str, x: int, y: int)
 def resolve_city_token(snapshot: dict[str, Any], city_id: str, prop: str, value: Any) -> str | None:
     if isinstance(value, str) and value.strip().startswith("CMD_"):
         return value.strip()
-    prop_l = {"changeproduction": "production", "purchase": "buy", "changefocus": "focus",
-              "attack": "rangestrike", "bombard": "rangestrike"}.get(prop.lower(), prop.lower())
+    prop_l = {"changeproduction": "production", "purchase": "purchase", "buy": "purchase",
+              "changefocus": "focus", "attack": "rangestrike", "bombard": "rangestrike"}.get(prop.lower(), prop.lower())
     wanted = _norm(value)
     if not wanted or "|" in wanted:
         return None
@@ -343,11 +348,17 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
                         bound.append(cmd_id)
             continue
         from sidecar import civ6_governance as governance_wire
+        from sidecar import civ6_diplomacy as diplomacy_wire
 
         if governance_wire.is_reply_key(key):
             gov_ids, gov_notes = governance_wire.bind_reply(snapshot, key, value)
             bound.extend(gov_ids)
             unresolved.extend(gov_notes)
+            continue
+        if diplomacy_wire.is_reply_key(key):
+            diplo_ids, diplo_notes = diplomacy_wire.bind_reply(snapshot, key, value)
+            bound.extend(diplo_ids)
+            unresolved.extend(diplo_notes)
             continue
         head, _, prop = key.partition(".")
         if prop.lower() in ("moveto", "move") and head in units:
@@ -355,6 +366,15 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
             if cmd_id:
                 bound.append(cmd_id)
                 continue
+        if prop.lower() == "improve" and head in units:
+            raw = str(value).strip()
+            token = raw if raw.lower().startswith("improve(") else f"Improve({raw})"
+            cmd_id = resolve_unit_token(snapshot, units[head], token)
+            if cmd_id:
+                bound.append(cmd_id)
+                continue
+            unresolved.append(f"{key}={value}")
+            continue
         if prop == "command" and head in units:
             cmd_id = resolve_unit_token(snapshot, units[head], value)
             if cmd_id:
@@ -364,7 +384,7 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
             continue
         if prop and head.lower() in cities and prop.lower() in {
             p.lower() for p in CITY_PROPS
-        } | {"changeproduction", "purchase", "changefocus", "attack", "bombard"}:
+        } | {"changeproduction", "purchase", "buy", "changefocus", "attack", "bombard"}:
             cmd_id = resolve_city_token(snapshot, cities[head.lower()], prop, value)
             if cmd_id:
                 bound.append(cmd_id)

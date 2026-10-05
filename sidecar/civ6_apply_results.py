@@ -199,6 +199,19 @@ def _order_label(row: dict[str, Any], wire_ids: dict[str, str], city_names: dict
     if kind in civ6_governance.ORDER_LABELS:
         label, field = civ6_governance.ORDER_LABELS[kind]
         return label, str(fixed.get(field) or "?")
+    from sidecar import civ6_diplomacy
+
+    if kind in civ6_diplomacy.ORDER_LABELS:
+        label, field = civ6_diplomacy.ORDER_LABELS[kind]
+        return label, str(fixed.get(field) or "?")
+    if kind == "purchase_item":
+        city = str(fixed.get("city_id") or "")
+        return f"{city_names.get(city, city or 'city')}.purchase", str(fixed.get("item_id") or "?")
+    if kind == "purchase_tile":
+        city = str(fixed.get("city_id") or "")
+        return f"{city_names.get(city, city or 'city')}.buyTile", _coords(fixed) or "tile"
+    if kind == "worker_improve":
+        return actor or "builder", str(fixed.get("improvement_id") or "improve")
     return actor or "order", kind or "command"
 
 
@@ -230,6 +243,17 @@ def _success_text(row: dict[str, Any]) -> str:
     gov_text = civ6_governance.success_text(kind, fixed)
     if gov_text:
         return gov_text
+    from sidecar import civ6_diplomacy
+
+    diplo_text = civ6_diplomacy.success_text(kind, fixed)
+    if diplo_text:
+        return diplo_text
+    if kind == "purchase_item":
+        return f"ok — bought {fixed.get('item_id') or 'item'}"
+    if kind == "purchase_tile":
+        return "ok — tile purchased"
+    if kind == "worker_improve":
+        return f"ok — built {fixed.get('improvement_id') or 'improvement'}"
     return "ok" + (f" ({detail})" if detail and not detail.startswith("finish moves") else "")
 
 

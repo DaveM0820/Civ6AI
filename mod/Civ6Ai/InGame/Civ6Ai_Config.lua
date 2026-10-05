@@ -5,9 +5,9 @@
 -- package carries a neutral stub, so a friend's PC runs with defaults: it never
 -- drives a seat, because only the network host runs the bridge.
 --
--- Seat roles come from game state. A human seat is never model-driven in a
--- network game; autotest (the model playing the local human seat) is a
--- single-player mode.
+-- Seat roles come from game state. Live install writes Autotest = 1 so the
+-- model plays every managed major, including the local human, in SP and LAN.
+-- --no-autotest leaves the local human for you to play.
 Civ6Ai_Config = Civ6Ai_Config or {}
 
 local function setting(name)
@@ -32,7 +32,7 @@ end
 
 function Civ6Ai_Config.Initialize()
   Civ6Ai_Config._managedSeats = Civ6Ai_Config._ParseSeatList(setting("ManagedSeats"))
-  Civ6Ai_Config._autotest = flag("Autotest") and not Civ6Ai_Config.IsNetworkGame()
+  Civ6Ai_Config._autotest = flag("Autotest")
   Civ6Ai_Config._seatExperiment = flag("SeatExperiment")
   Civ6Ai_Config._fastEndTurn = flag("FastEndTurn")
   Civ6Ai_Config._root = setting("Civ6AiRoot") or "civ6ai"
@@ -79,18 +79,22 @@ function Civ6Ai_Config.IsSeatExperiment()
   return Civ6Ai_Config._seatExperiment == true
 end
 
--- A seat a person plays. In single-player autotest the model plays the listed
--- local human seat, so that seat does not count as human.
+-- A seat a person plays. Autotest treats the local human as model-driven, so
+-- that seat does not count as human.
 function Civ6Ai_Config.IsHumanSeat(playerID)
   local player = Players[playerID]
   if player == nil or not player:IsHuman() then
     return false
   end
-  return not (Civ6Ai_Config.IsAutotest() and Civ6Ai_Config._managedSeats[playerID] == true)
+  if Civ6Ai_Config.IsAutotest() then
+    return false
+  end
+  return true
 end
 
--- A seat the model drives: a living major civilization that no person plays,
--- on the host's seat list (every such seat when the list is empty).
+-- A seat the model drives: a living major that no person plays. An empty
+-- ManagedSeats list means every such major (and, in autotest, the local human).
+-- A comma list still restricts to those seats when you want a subset.
 function Civ6Ai_Config.IsManagedSeat(playerID)
   local player = Players[playerID]
   if player == nil or not player:IsAlive() or not player:IsMajor() then

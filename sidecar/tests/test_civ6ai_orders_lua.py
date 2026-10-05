@@ -25,7 +25,18 @@ function GetProp(k) return props[k] end
 logs = {}
 print = function(s) table.insert(logs, s) end
 Map = {GetPlotDistance=function(a,b,c,d) return math.max(math.abs(a-c), math.abs(b-d)) end}
-function Map.GetPlot(x,y) return {x=x,y=y} end
+local plots = {}
+function Map.GetPlot(x,y)
+  local k = tostring(x) .. "," .. tostring(y)
+  if plots[k] == nil then
+    plots[k] = {x=x,y=y,owner=-1,
+      GetX=function(s) return s.x end, GetY=function(s) return s.y end,
+      GetOwner=function(s) return s.owner end, SetOwner=function(s,p) s.owner=p end,
+      GetIndex=function(s) return s.x*1000+s.y end,
+      GetImprovementType=function(s) return s.improvement end}
+  end
+  return plots[k]
+end
 local function mkUnit(owner,id,x,y,typ)
   local u = {owner=owner,id=id,x=x,y=y,moves=2,typ=typ,dmg=0}
   function u:GetID() return self.id end
@@ -41,6 +52,8 @@ local function mkUnit(owner,id,x,y,typ)
   function u:GetAttacksRemaining() return 1 end
   function u:GetRange() return (GameInfo.Units[self.typ].Range or 0) end
   function u:GetExperience() local me=self; return {ChangeExperience=function(_, n) me.xp=(me.xp or 0)+n end} end
+  function u:GetBuildCharges() return self.charges or 0 end
+  function u:ChangeBuildCharges(n) self.charges = (self.charges or 0) + n end
   return u
 end
 MkUnit = mkUnit
@@ -55,12 +68,40 @@ local function mkPlayer(id,human,units)
             FindID=function(_, id) for _,u in ipairs(me.units) do if u.id==id then return u end end end}
   end
   function p:GetCities() return {Members=function() return function() return nil end end} end
-  function p:GetTreasury() return {GetGoldBalance=function() return 10 end} end
+  function p:GetTreasury()
+    local me=self
+    me.gold = me.gold or 200
+    return {GetGoldBalance=function() return me.gold end,
+            ChangeGoldBalance=function(_, n) me.gold = me.gold + n end}
+  end
+  function p:GetReligion()
+    local me=self
+    me.faith = me.faith or 0
+    return {GetFaithBalance=function() return me.faith end,
+            ChangeFaithBalance=function(_, n) me.faith = me.faith + n end}
+  end
   function p:IsBarbarian() return self.barb == true end
-  function p:GetDiplomacy() local me=self; return {IsAtWarWith=function(_, o) return (me.war or {})[o] == true end} end
+  function p:GetTeam() return self.id end
+  function p:GetDiplomacy()
+    local me=self
+    me.war = me.war or {}
+    return {
+      IsAtWarWith=function(_, o) return me.war[o] == true end,
+      CanDeclareWarOn=function(_, o) return me.war[o] ~= true end,
+      CanMakePeaceWith=function(_, o) return me.war[o] == true end,
+      DeclareWarOn=function(_, o) me.war[o] = true end,
+      MakePeaceWith=function(_, o) me.war[o] = nil end,
+    }
+  end
   return p
 end
-GameInfo = {Units={[0]={Combat=20},[1]={Combat=15,RangedCombat=25,Range=2}}}
+GameInfo = {Units={[0]={Combat=20,UnitType="UNIT_WARRIOR",Hash=100},[1]={Combat=15,RangedCombat=25,Range=2},
+                    UNIT_WARRIOR={Index=0,UnitType="UNIT_WARRIOR",Hash=100}},
+            Buildings={BUILDING_MONUMENT={Index=2,BuildingType="BUILDING_MONUMENT",Hash=200},[2]={BuildingType="BUILDING_MONUMENT",Hash=200}},
+            Yields={YIELD_GOLD={Index=0},YIELD_FAITH={Index=5}},
+            Improvements={IMPROVEMENT_FARM={Index=0,ImprovementType="IMPROVEMENT_FARM"},
+                          [0]={Index=0,ImprovementType="IMPROVEMENT_FARM"}}}
+WarTypes = {FORMAL_WAR=1, SURPRISE_WAR=2}
 Players = {[0]=mkPlayer(0,true,{mkUnit(0,1,5,5,0)}), [1]=mkPlayer(1,true,{mkUnit(1,2,6,6,0)}),
            [2]=mkPlayer(2,false,{mkUnit(2,7,10,10,0), mkUnit(2,8,11,10,0), mkUnit(2,9,12,10,1)})}
 Units = {GetUnitsInPlot=function(plot)
@@ -78,6 +119,12 @@ UnitManager = {
   MoveUnit=function(u,x,y) u.x=x; u.y=y; u.moves=u.moves-1 end,
   FinishMoves=function(u) u.moves=0 end,
   RestoreMovement=function(u) u.moves=2 end,
+  InitUnit=function(pid, typ, x, y)
+    local p=Players[pid]; local id=100+#p.units; local u=MkUnit(pid,id,x,y,0); table.insert(p.units,u); return u end,
+}
+ImprovementBuilder = {
+  CanHaveImprovement=function(plot, idx, team) return true end,
+  SetImprovementType=function(plot, idx, owner) plot.improvement = idx end,
 }
 -- GameCore routes: a move fails with plot_occupied while a seat unit sits there.
 ExposedMembers.Civ6Ai = {
@@ -391,6 +438,14 @@ class OrdersGameplayTests(unittest.TestCase):
         self.order(1, K=30, T=5, H=mine["sum"] + 1, R=mine["orders"], Q=mine["count"], S=19)
         self.assertTrue(rt.eval("ExposedMembers.Civ6Ai.SyncReports[1].verdict").startswith("MISMATCH:sum=false"))
 
+    def test_finish_seat_zeroes_remaining_moves(self):
+        self.assertGreater(self.rt.eval("Players[2].units[1].moves"), 0)
+        self.order(0, K=23, P=2, S=21, T=5)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertTrue(self.last()["reason"].startswith("finish_seat="))
+        self.assertEqual(self.rt.eval("Players[2].units[1].moves"), 0)
+        self.assertEqual(self.rt.eval("Players[2].units[2].moves"), 0)
+
     def test_checksum_tracks_units_and_damage(self):
         before = self.rt.eval("Civ6Ai_Orders.Checksum()")
         self.rt.execute("Players[2].units[1].dmg = 10")
@@ -421,7 +476,7 @@ recorded = {}
 Civ6Ai_Apply = {
   _RecordResult=function(pid, cmd, ok, reason) table.insert(recorded, {pid=pid, kind=cmd.kind, ok=ok, reason=reason}) end,
   _ParseUnitNumericId=function(id) return tonumber(tostring(id):match("(%d+)$")) end,
-  _ResolveTargetCoords=function(a) return a.x, a.y end,
+  _ResolveTargetCoords=function(a) return a.target_x or a.x, a.target_y or a.y end,
 }
 ExposedMembers = {Civ6Ai = {}}
 GameConfiguration = {IsNetworkMultiplayer=function() return true end}
@@ -432,7 +487,10 @@ Automation = {GetTime=function() return now end}
 TURN = 5
 Game = {GetLocalPlayer=function() return 0 end, GetCurrentGameTurn=function() return TURN end,
         GetProperty=function(_, k) return nil end}
-GameInfo = {Technologies={TECH_MINING={Index=3}}, Civics={}}
+GameInfo = {Technologies={TECH_MINING={Index=3}}, Civics={},
+            Units={UNIT_WARRIOR={Index=0,UnitType="UNIT_WARRIOR"}},
+            Buildings={BUILDING_MONUMENT={Index=1,BuildingType="BUILDING_MONUMENT"}},
+            Improvements={IMPROVEMENT_FARM={Index=0,ImprovementType="IMPROVEMENT_FARM"}}}
 Players = {[2]={IsHuman=function() return false end}}
 """
 
@@ -652,6 +710,115 @@ class PriorityOrderTests(unittest.TestCase):
         before = self.rt.eval("ExposedMembers.Civ6Ai.OrderHash")
         self.order(0, K=9, P=2, I=5, X=3, S=1)
         self.assertNotEqual(self.rt.eval("ExposedMembers.Civ6Ai.OrderHash"), before)
+
+
+@unittest.skipIf(lupa is None, "lupa not installed")
+class DealOrdersTests(unittest.TestCase):
+    def setUp(self):
+        self.rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+        self.rt.execute(FAKE_ENV)
+        self.rt.execute((MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text())
+
+    def order(self, sender, **params):
+        params.setdefault("T", 5)
+        self.rt.globals().Civ6Ai_Orders.OnOrder(sender, self.rt.table_from(params))
+
+    def last(self):
+        return [dict(r.items()) for r in _vals(self.rt.eval("ExposedMembers.Civ6Ai.OrderResults"))][-1]
+    def _add_city(self):
+        self.rt.execute(r"""
+          local c = {id=3, x=4, y=5, buildings={}}
+          function c:GetID() return self.id end
+          function c:GetX() return self.x end
+          function c:GetY() return self.y end
+          function c:GetGold()
+            return {GetPurchaseCost=function() return 40 end, GetPlotPurchaseCost=function() return 25 end}
+          end
+          function c:GetBuildings()
+            local me=self
+            return {HasBuilding=function(_, i) return me.buildings[i]==true end}
+          end
+          function c:GetBuildQueue()
+            local me=self
+            return {CreateIncompleteBuilding=function(_, idx) me.buildings[idx]=true end}
+          end
+          local p=Players[2]
+          function p:GetCities()
+            local cities={c}
+            return {Members=function()
+              local i=0
+              return function() i=i+1; if cities[i] then return i, cities[i] end end
+            end}
+          end
+        """)
+
+    def test_declare_war_then_peace(self):
+        self.order(0, K=17, P=2, I=1, X=0, S=1)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertTrue(self.rt.eval("Players[2].war[1]"))
+        self.order(0, K=18, P=2, I=1, S=2)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertIsNone(self.rt.eval("Players[2].war[1]"))
+
+    def test_war_refused_when_already_at_war(self):
+        self.rt.execute("Players[2]:GetDiplomacy(); Players[2].war[1]=true")
+        self.order(0, K=17, P=2, I=1, S=3)
+        self.assertEqual(self.last()["reason"], "you are already at war with them")
+
+    def test_buy_unit_debits_gold_and_spawns(self):
+        self._add_city()
+        self.rt.execute("Players[2]:GetTreasury()")
+        before = self.rt.eval("#Players[2].units")
+        gold = self.rt.eval("Players[2].gold")
+        self.order(0, K=19, P=2, U=0, X=3, Y=0, I=0, S=4)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertEqual(self.rt.eval("#Players[2].units"), before + 1)
+        self.assertEqual(self.rt.eval("Players[2].gold"), gold - 40)
+
+    def test_buy_tile_sets_owner(self):
+        self._add_city()
+        self.rt.execute("Players[2]:GetTreasury()")
+        gold = self.rt.eval("Players[2].gold")
+        self.order(0, K=20, P=2, I=3, X=6, Y=7, S=5)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertEqual(self.rt.eval("Map.GetPlot(6,7).owner"), 2)
+        self.assertEqual(self.rt.eval("Players[2].gold"), gold - 25)
+
+    def test_improve_places_and_spends_charge(self):
+        self.rt.execute("Players[2].units[1].charges=3; Players[2].units[1].x=6; Players[2].units[1].y=7")
+        self.order(0, K=21, P=2, U=7, I=0, X=6, Y=7, S=6)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertEqual(self.rt.eval("Map.GetPlot(6,7).improvement"), 0)
+        self.assertEqual(self.rt.eval("Players[2].units[1].charges"), 2)
+
+    def test_improve_refused_without_charges(self):
+        self.rt.execute("Players[2].units[1].charges=0; Players[2].units[1].x=6; Players[2].units[1].y=7")
+        self.order(0, K=21, P=2, U=7, I=0, X=6, Y=7, S=7)
+        self.assertEqual(self.last()["reason"], "that unit has no build charges left")
+        self.assertIsNone(self.rt.eval("Map.GetPlot(6,7).improvement"))
+
+
+class OrderChannelDealTests(OrderChannelTests):
+    def test_war_peace_purchase_pack_integer_fields(self):
+        rt = self.rt
+        d = self.decision([
+            '{kind="send_diplomatic_action", arguments={target_player_id="PLAYER_1", action_id="DECLARE_WAR"}}',
+            '{kind="propose_peace", arguments={target_player_id="PLAYER_3"}}',
+            '{kind="purchase_item", arguments={city_id="CITY_3", item_id="UNIT_WARRIOR"}}',
+            '{kind="purchase_tile", arguments={city_id="CITY_3", target_x=6, target_y=7}}',
+            '{kind="worker_improve", arguments={unit_id="UNIT_7", improvement_id="IMPROVEMENT_FARM", target_x=6, target_y=7}}',
+        ])
+        self.assertEqual(rt.globals().Civ6Ai_OrderChannel.SendDecision(2, d, 6), 5)
+        sent = [dict(p.items()) for p in _vals(rt.eval("sent"))]
+        self.assertEqual([p["K"] for p in sent], [17, 18, 19, 20, 21])
+        self.assertEqual(sent[0]["I"], 1)
+        self.assertEqual(sent[0]["X"], 0)
+        self.assertEqual(sent[1]["I"], 3)
+        self.assertEqual(sent[2]["X"], 3)
+        self.assertEqual(sent[2]["I"], 0)
+        self.assertEqual(sent[2]["U"], 0)
+        self.assertEqual((sent[3]["I"], sent[3]["X"], sent[3]["Y"]), (3, 6, 7))
+        self.assertEqual((sent[4]["U"], sent[4]["I"], sent[4]["X"], sent[4]["Y"]), (7, 0, 6, 7))
 
 
 if __name__ == "__main__":

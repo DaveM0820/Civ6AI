@@ -91,10 +91,15 @@ function Civ6Ai_Autotest.AfterPulse(playerID)
   Civ6Ai_Autotest._DisableBoostPopups()
   Civ6Ai_Autotest._CloseQueuedPopups()
   Civ6Ai_Autotest._DismissBlockers(playerID)
-  -- Only the human/local seat needs an explicit end turn; AI seats end their own turns.
+  -- Ending the turn is what the diplomacy ribbon uses to drop a portrait
+  -- (RemotePlayerTurnEnd / IsTurnActive). Humans wait until every AI seat's
+  -- answer is in. AI seats end as soon as this pulse is done, the same request
+  -- the human uses, so their portrait shows completed.
   local p = Players[playerID]
   if p ~= nil and p:IsHuman() then
     Civ6Ai_Autotest._EndTurnAfterSeats(playerID)
+  elseif p ~= nil and not (Civ6Ai_Apply._IsNetworkMultiplayer ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer()) then
+    Civ6Ai_Autotest._EndManagedTurn(playerID)
   end
   if turn >= Civ6Ai_Autotest.StopTurn() then
     Civ6Ai_Autotest._WriteSessionSummary()
@@ -113,12 +118,18 @@ end
 -- snapshot has had its answer sent (or given up on); otherwise the AI turn N+1 would start without
 -- it and the native AI would play the seat. Bounded by a wall-clock deadline of
 -- sidecar timeout x (pending seats + 1).
+-- Sequential SP: hold end-turn until every AI seat's turn N-1 snapshot has an
+-- answer (those answers play at turn N). Simultaneous LAN: hold until this
+-- turn's dumps are sent, otherwise the year rolls and Firaxis plays the seats.
 function Civ6Ai_Autotest._PendingSeats(localPlayer)
   local pending = {}
-  local previousTurn = Game.GetCurrentGameTurn() - 1
+  local snapshotTurn = Civ6Ai_Bridge.HostWaitSnapshotTurn()
+  if snapshotTurn < 1 then
+    return pending
+  end
   for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
     if seat ~= localPlayer and Civ6Ai_Config.ShouldRunBridge(seat)
-        and not Civ6Ai_Bridge.SeatDecisionSettled(seat, previousTurn) then
+        and Civ6Ai_Bridge.SeatAnswerOutstanding(seat, snapshotTurn) then
       table.insert(pending, seat)
     end
   end

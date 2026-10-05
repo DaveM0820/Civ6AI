@@ -6,6 +6,7 @@ from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
 from sidecar import civ6_economy as economy_wire
+from sidecar import civ6_gs_wire as gs_wire
 from sidecar import civ6_prompt_coaching as coaching
 from sidecar import civ6_apply_results
 from sidecar import civ6_command_wire as command_wire
@@ -21,6 +22,29 @@ CITIES_NATIVE_PRODUCTION_HINT = (
 CIV6_NATIVE_FALLBACK_POLICY = (
     "Units left without orders stay where they are; cities keep auto production unless you override."
 )
+CIV6_PRIORITY_PRODUCTION_POLICY = (
+    "Units left without orders stay where they are; cities keep auto production, steered by build priorities."
+)
+
+
+def _has_queue_production(snapshot: dict[str, Any] | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    legal = snapshot.get("legal_commands")
+    if not isinstance(legal, list):
+        return False
+    return any(isinstance(item, dict) and item.get("kind") == "queue_production" for item in legal)
+
+
+def native_fallback_policy(snapshot: dict[str, Any] | None = None) -> str:
+    """What happens when the model leaves cities/units alone, matching this seat's apply path."""
+    if _has_queue_production(snapshot):
+        return CIV6_NATIVE_FALLBACK_POLICY
+    from sidecar import civ6_priorities
+    if civ6_priorities.priorities_supported(snapshot or {}):
+        return CIV6_PRIORITY_PRODUCTION_POLICY
+    return CIV6_NATIVE_FALLBACK_POLICY
+
 
 CIV6_EMPIRE_WIRE: dict[str, tuple[str, str]] = {
     "set_research_tech": ("legal.research.tech", "tech_id"),
@@ -132,6 +156,9 @@ def _civ6_unit_property_parts(command: dict[str, Any]) -> tuple[str, str]:
             camel = "removeFeature"
         elif camel == "build_route":
             camel = "buildRoute"
+        build = fixed.get("improvement_id") or fixed.get("build_id") or fixed.get("route_id")
+        if isinstance(build, str) and build.strip():
+            return camel, build
         return camel, "apply"
     if kind == "trade_route":
         coords = pipeline._coords_from_fixed_arguments(fixed)
@@ -592,6 +619,8 @@ def _civ6_required_rows(snapshot: dict[str, Any]) -> list[tuple[str, str]]:
         rows.append((f"{wire_ids.get(unit_id, unit_id)}.command", " | ".join(options)))
     for city_name, options in _required_city_rows(snapshot):
         rows.append((f"{city_name}.production", " | ".join(options)))
+    from sidecar import civ6_diplomacy as diplomacy_wire
+    rows.extend(diplomacy_wire.required_rows(snapshot))
     return rows
 
 
@@ -655,7 +684,7 @@ def build_civ6_role_instruction(snapshot: dict[str, Any]) -> str:
         "war, taunts, replies) — private DMs are expected on first meetings, war declarations, major deals, "
         f"and inbox replies. Use only facts from the prompt.{map_clause}"
         "After your response the host applies only your explicit orders; "
-        f"{CIV6_NATIVE_FALLBACK_POLICY}"
+        f"{native_fallback_policy(snapshot)}"
     )
 
 
@@ -721,6 +750,7 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
     lines = ["# == Summary =="]
     _append_civ6_empire_wire(lines, context)
     lines.extend(economy_wire.empire_lines(context))
+    lines.extend(gs_wire.empire_lines(context))
     summary = context.get("strategic_summary")
     if isinstance(summary, dict):
         for section, wire_name in (("city_alerts", "city"), ("economy_alerts", "economy"),
@@ -745,6 +775,7 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
             name = pipeline._city_prompt_name(city)
             lines.extend(l for l in city_block if l.startswith((f"{name}.", f"***{name}.")))
             lines.extend(economy_wire.city_lines(context, city, name))
+            lines.extend(gs_wire.city_lines(context, city, name))
             lines.append("")
         if lines[-1] == "":
             lines.pop()
@@ -814,16 +845,19 @@ _CIV6_DEAL_KINDS = frozenset({"form_alliance", "propose_trade", "propose_peace",
 
 
 def _diplomacy_section(context: dict[str, Any]) -> list[str]:
-    deal_rows = any(isinstance(c, dict) and c.get("kind") in _CIV6_DEAL_KINDS
-                    for c in context.get("legal_commands", []))
+    from sidecar import civ6_diplomacy as diplomacy_wire
+
+    deal_rows = diplomacy_wire.has_orders(context) or any(
+        isinstance(c, dict) and c.get("kind") in _CIV6_DEAL_KINDS
+        for c in context.get("legal_commands", []))
     met = [r for r in context.get("known_players", []) if isinstance(r, dict)
            and isinstance(r.get("relation"), dict) and r["relation"].get("met")]
     lines = [
         "Model what rivals want and fear — trade, isolation, and alliances are tools, not filler.",
         "HAGGLE IN DMs: highly encourage chat.LeaderName BEFORE any formal trade or alliance, and keep DMing "
         "WHILE a deal is pending (counter-offers, sweeteners, threats, flattery). Chat is where you bargain."
-        + (" legal.trade.* / legal.alliance / legal.peace are only the final engine apply." if deal_rows else
-           " There are no formal deal commands for you in this game yet, so agreements live in chat and in "
+        + (" legal.diplomacy.Leader / legal.peace.Leader are the war and peace orders." if deal_rows else
+           " There are no war or peace orders for you this turn, so agreements live in chat and in "
            "what you actually do on the map (remember them)."),
         "Use private DMs (chat.LeaderName) on relationship milestones: first meeting, declaring war, deal talks, "
         "ultimatums, and replies to fresh inbox messages.",
@@ -1250,7 +1284,8 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
         lines.append(f"- Settler: {coaching.CIV6_SETTLER_MAP_ADVICE}")
     lines.extend(combat_wire.tactics_advice_lines(context))
     lines.append("- Pick research and civics before they run out so science and culture are never wasted.")
-    lines.append("- Do not queue production that is already building.")
+    if _has_queue_production(context):
+        lines.append("- Do not queue production that is already building.")
     return lines
 
 
@@ -1314,7 +1349,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "- Attacks: AttackTo(x,y) options appear on the unit's own row only when a visible enemy (a civ you are at "
         "war with, or barbarians) is in reach — adjacent for melee, within range for ranged units.",
         "- A city with currentProduction set: leave cityName.production out unless you really mean to switch.",
-        "- Hybrid control: " + CIV6_NATIVE_FALLBACK_POLICY,
+        "- Hybrid control: " + native_fallback_policy(snapshot),
         "- Optional commands (chat, research, civics, remember) are encouraged when useful; chat.all only when you have an original line.",
     ]
     if any(isinstance(c, dict) and c.get("kind") == "found_city" for c in snapshot.get("legal_commands", [])):
@@ -1340,6 +1375,9 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     from sidecar import civ6_governance as governance_wire
 
     optional_keys.extend(governance_wire.optional_key_hints(snapshot))
+    from sidecar import civ6_diplomacy as diplomacy_wire
+
+    optional_keys.extend(diplomacy_wire.optional_key_hints(snapshot))
     optional_keys.append(("chat", "chat.all | chat.LeaderName"))
     optional_keys.append(("remember", "text (duration N turns | forever)"))
     from sidecar import civ6_priorities
@@ -1450,6 +1488,7 @@ def build_civ6_wire_prompt(context: dict[str, Any], map_stats: list[str] | None 
     if idle:
         attention.append(f"***Idle units: {', '.join(sorted(idle))}***")
     attention.extend(economy_wire.attention_items(context))
+    attention.extend(gs_wire.attention_items(context))
     attention.extend(governance_wire.attention_items(context))
     if attention:
         sections.append(pipeline._wire_section("ATTENTION", attention))

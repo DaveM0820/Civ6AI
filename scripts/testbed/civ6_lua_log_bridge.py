@@ -520,13 +520,6 @@ def process_lua_log_blobs(
         except Exception as error:
             log.warning("Lua-log sidecar failed player=%s chat=%s: %s | %s", player, is_chat, error,
                         getattr(error, "stderr", "") or "")
-            if not is_chat:
-                try:
-                    from civ6_pending_apply import publish_empty_for_turn
-
-                    publish_empty_for_turn(player_dir)
-                except Exception as publish_error:
-                    log.warning("Empty apply publish failed player=%s: %s", player, publish_error)
             return False
         with _PUBLISH_LOCK:
             mirror_player_outputs(player_dir, log_path, session_id_of(player_dir), player)

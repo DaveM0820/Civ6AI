@@ -13,7 +13,7 @@ from sidecar import civ6_config
 
 class Civ6ConfigTests(unittest.TestCase):
     def test_example_config_loads(self):
-        cfg = civ6_config.load_local_config(apply_env=False)
+        cfg = civ6_config.load_local_config(civ6_config.EXAMPLE_CONFIG, apply_env=False)
         self.assertEqual("lmstudio", cfg.provider)
         self.assertTrue(cfg.endpoint.startswith("http"))
         self.assertGreaterEqual(cfg.timeout_seconds, 600)
@@ -61,12 +61,7 @@ class Civ6ConfigTests(unittest.TestCase):
                 }),
                 encoding="utf-8",
             )
-            with mock.patch.dict(os.environ, {}, clear=False):
-                # Clear relevant env so file wins
-                for key in list(os.environ):
-                    if "LMSTUDIO" in key or key.startswith("CIV6AI_"):
-                        os.environ.pop(key, None)
-                cfg = civ6_config.load_local_config(path)
+            cfg = civ6_config.load_local_config(path, apply_env=False)
             self.assertEqual("http://localhost:5555/v1", cfg.endpoint)
             self.assertEqual("local-model", cfg.model)
             self.assertEqual(90, cfg.timeout_seconds)

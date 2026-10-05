@@ -31,7 +31,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "mod" / "Civ6Ai"
 MEIER = "Sid Meier's Civilization VI"
-DEFAULT_MANAGED_SEATS = "1"  # SP: human is seat 0, first AI rival is seat 1
+DEFAULT_MANAGED_SEATS = ""  # empty = every AI major (and the local human when autotest is on)
 
 
 def mods_targets() -> list[Path]:
@@ -108,6 +108,7 @@ def _fwd(path: Path | str) -> str:
 
 
 def normalize_seats(value: str) -> str:
+    """Comma list of seats, or empty for 'every AI major' (plus local human in autotest)."""
     seats = []
     for token in str(value or "").split(","):
         token = token.strip()
@@ -115,8 +116,6 @@ def normalize_seats(value: str) -> str:
             int(token)  # raises ValueError on junk
             if token not in seats:
                 seats.append(token)
-    if not seats:
-        raise ValueError("at least one managed seat is required")
     return ",".join(seats)
 
 
@@ -127,7 +126,7 @@ def live_settings(
     managed_seats: str,
     session_id: str,
     sidecar_timeout: int,
-    autotest: bool = False,
+    autotest: bool = True,
     stop_turn: int = 0,
     mp_test: bool = False,
     python: str | None = None,
@@ -199,8 +198,12 @@ def write_runtime_json(civ6ai_root: Path, settings: dict, extra_session_roots: l
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     for root in [civ6ai_root] + list(extra_session_roots or []):
-        for seat in settings["managed_seats"].split(","):
-            (root / "sessions" / settings["session_id"] / f"PLAYER_{seat}").mkdir(parents=True, exist_ok=True)
+        session = root / "sessions" / settings["session_id"]
+        session.mkdir(parents=True, exist_ok=True)
+        for seat in str(settings["managed_seats"] or "").split(","):
+            seat = seat.strip()
+            if seat:
+                (session / f"PLAYER_{seat}").mkdir(parents=True, exist_ok=True)
     return backup
 
 
@@ -340,12 +343,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     timeout_default = _config_timeout()
     parser = argparse.ArgumentParser(description="Install Civ6Ai mod (+ live config) into Civ6 Mods folders")
     parser.add_argument("--managed-seats", default=DEFAULT_MANAGED_SEATS,
-                        help="LLM-controlled player seats, comma separated (default: 1; human is seat 0 in SP)")
+                        help="LLM seats, comma separated. Empty (default) = every AI major "
+                             "(and the local human while autotest is on)")
     parser.add_argument("--sidecar-timeout", type=int, default=timeout_default,
                         help="Seconds the game/bridge wait for one LLM decision (default: config timeout_seconds)")
     parser.add_argument("--session-id", default="", help="Session id (default: live-<timestamp>)")
+    parser.set_defaults(autotest=True)
     parser.add_argument("--autotest", action="store_true",
-                        help="Unattended test: managed seats include the human seat (LLM plays it) and its turns end automatically")
+                        help="Unattended: LLM plays the local human seat and ends its turns (default on)")
+    parser.add_argument("--no-autotest", dest="autotest", action="store_false",
+                        help="You play the local human seat; only AI majors are model-driven")
     parser.add_argument("--stop-turn", type=int, default=0,
                         help="With --autotest: stop auto-ending turns after this game turn (default: mod default 20)")
     parser.add_argument("--mp-test", action="store_true",
@@ -422,8 +429,11 @@ def main(argv: list[str] | None = None) -> int:
         if backup is not None:
             print(f"runtime.json backup -> {backup}")
         print(
-            "Live config: managed_seats={managed_seats} session={session_id} "
-            "sidecar_timeout={sidecar_timeout_seconds}s repo={repo}".format(**settings)
+            "Live config: autotest={autotest} managed_seats={seats} session={session_id} "
+            "sidecar_timeout={sidecar_timeout_seconds}s repo={repo}".format(
+                seats=settings["managed_seats"] or "all",
+                **settings,
+            )
         )
         print(f"runtime.json -> {Path(settings['root']) / 'runtime.json'}")
     else:

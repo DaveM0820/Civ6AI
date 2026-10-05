@@ -23,11 +23,18 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         self.assertIn("optional", blob.lower())
         self.assertIn("1 to 4", blob)
 
-    def test_map_axes_civ6_y_south(self):
+    def test_map_axes_civ6_y_north_by_default(self):
         note = coaching.civ6_map_axes_wrap_guidance({"game": {"map_width": 80, "wrap_x": True}})
-        self.assertIn("y increases south", note.lower())
+        self.assertIn("y increases north", note.lower())
         self.assertIn("x=70", note)
         self.assertIn("x=10", note)
+
+    def test_map_axes_civ6_y_south_when_measured(self):
+        note = coaching.civ6_map_axes_wrap_guidance({
+            "game": {"map_width": 80, "wrap_x": True},
+            "civ6": {"map": {"coords_note": "grid x,y; Y increases south (measured north_dy=-1)"}},
+        })
+        self.assertIn("y increases south", note.lower())
 
     def test_hp_label_hides_full_health(self):
         self.assertIsNone(coaching.civ6_wounded_hp_label(100))
@@ -100,7 +107,7 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         self.assertIn("strategicmap.read", text)
         self.assertIn("thought.situation", text)
         self.assertIn("OPTIONAL COMMANDS are encouraged", text)
-        self.assertIn("y increases south", text.lower())
+        self.assertIn("y increases north", text.lower())
         self.assertIn("stacking", text.lower())
 
     def test_ranged_attack_wire_binds_to_attack_target(self):

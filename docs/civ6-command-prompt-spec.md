@@ -96,7 +96,7 @@ Not full unit micro. Matches Civ IV AdvCiv split ([`docs/civ6-llm-ai-research.md
 | Domain | Default | LLM override | Opt-out |
 |--------|---------|--------------|---------|
 | Units | Units left without orders stay where they are (builders, traders, religious units stay with the game's AI) | `moveTo`, `attackTo`, worker ops, etc. | `stance=fortify`, `sleep`, or `alert` |
-| Production | Auto/deterministic pick when LLM doesn't override | `{City}.changeProduction` | Omit — city keeps queue or gets auto-pick |
+| Production | Local seat: auto unless the model sets `{City}.changeProduction`. Queued AI seats: the engine AI builds; the model steers with `set_build_priority` (`queue_production` is not advertised, because that seat has no city-production screen) | `{City}.changeProduction` (local seat) / `priorities` (queued seats) | Omit — city keeps queue or the engine AI pick |
 
 **Apply order:** LLM commands → native AI unit phase → deterministic production for cities still empty → host ends turn.
 
@@ -142,10 +142,10 @@ Full JSON: [`config/civ6-command-capabilities.json`](config/civ6-command-capabil
 | `patronize_great_person` | `legal.gp.patronize = {id}` |
 | `reject_great_person` | `legal.gp.reject = {id}` |
 | `queue_wc_votes` | `legal.wc.votes = [{hash,option,target,votes}]` |
-| `send_diplomatic_action` | `legal.diplomacy.{Leader} = ACTION` |
+| `send_diplomatic_action` | `legal.diplomacy.{Leader} = DECLARE_WAR` (gameplay `Diplomacy:DeclareWarOn`, Firaxis scenarios) |
 | `form_alliance` | `legal.alliance.{Leader} = TYPE` |
 | `propose_trade` | `legal.trade.offer.{Leader} = offer:gold=100;request:gpt=3` |
-| `propose_peace` | `legal.peace.{Leader} = apply` |
+| `propose_peace` | `legal.peace.{Leader} = apply` (gameplay `Diplomacy:MakePeaceWith`, Pirates scenario) |
 | `respond_to_diplomacy` | `legal.diplomacy.respond.{Leader} = POSITIVE\|NEGATIVE` |
 | `respond_to_trade` | `legal.trade.respond.{Leader} = accept\|reject` |
 | `resolve_city_capture` | `legal.capture = keep\|reject\|raze\|liberate_founder\|liberate_previous` |
@@ -155,8 +155,8 @@ Full JSON: [`config/civ6-command-capabilities.json`](config/civ6-command-capabil
 | kind | Wire |
 |------|------|
 | `queue_production` | `{City}.changeProduction = UNIT_* \| BUILDING_* \| DISTRICT_*@(x,y) \| PROJECT_*@(x,y)` |
-| `purchase_item` | `{City}.purchase = UNIT_* \| BUILDING_*` (optional `:faith`) |
-| `purchase_tile` | `{City}.buyTile = (x,y)` |
+| `purchase_item` | `{City}.purchase = UNIT_* \| BUILDING_*` (optional `:faith`). Gameplay: gold/faith debit then `UnitManager.InitUnit` / `CreateIncompleteBuilding`. |
+| `purchase_tile` | `{City}.buyTile = (x,y)`. Gameplay: gold debit then `Plot:SetOwner` (Australia scenario). |
 | `set_city_focus` | `{City}.changeFocus = food\|production\|gold\|science\|culture\|faith\|default` |
 | `city_attack` | `{City}.attack = (x,y)` |
 
@@ -173,7 +173,8 @@ Full JSON: [`config/civ6-command-capabilities.json`](config/civ6-command-capabil
 | `promote_unit` | `{unit}.promote = PROMOTION_*` |
 | `delete_unit` | `{unit}.delete = apply` |
 | `found_city` | `{unit}.foundCity = apply` |
-| `worker_*` | `improve`, `repair`, `removeImprovement`, `removeFeature`, `buildRoute` |
+| `worker_improve` | `{unit}.improve = IMPROVEMENT_*`. Gameplay: `ImprovementBuilder.SetImprovementType` (Firaxis scenarios / TEST_IMPROVEMENT) then spend a build charge. |
+| `worker_*` (other) | `repair`, `removeImprovement`, `removeFeature`, `buildRoute` — not applied yet |
 | `sacrifice_charges` | `{unit}.sacrificeCharges = apply` |
 | `trade_route` | `{unit}.tradeRoute = (x,y)` |
 | `teleport_trader` | `{unit}.teleport = (x,y)` |

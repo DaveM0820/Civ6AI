@@ -94,6 +94,7 @@ _LUA_ARRAY_KEYS = frozenset({
     "convertible_religion_ids",
     "resources",
     "victory_progress",
+    "strategics",
 })
 
 
@@ -320,6 +321,7 @@ def normalize_civ6_snapshot(snapshot: dict[str, Any]) -> None:
     if not isinstance(civ6, dict):
         snapshot["civ6"] = {}
     normalize_civ6_diplomacy(snapshot)
+    normalize_civ6_late_game(snapshot)
     derive_known_other_cities(snapshot)
     validate_civ6_snapshot(snapshot)
 
@@ -379,7 +381,8 @@ def normalize_civ6_diplomacy(snapshot: dict[str, Any]) -> None:
         score = _as_schema_int(row.get("diplomatic_score"))
         if score is not None:
             major["diplomatic_score"] = score
-        for key in ("at_war", "denounced", "declared_friendship", "alliance", "open_borders", "defensive_pact"):
+        for key in ("at_war", "denounced", "declared_friendship", "alliance", "open_borders", "defensive_pact",
+                    "can_declare_war", "can_make_peace"):
             if isinstance(row.get(key), bool):
                 major[key] = row[key]
         major["at_war_with"] = [p for p in _as_list(row.get("at_war_with")) if isinstance(p, str)]
@@ -406,6 +409,9 @@ def normalize_civ6_diplomacy(snapshot: dict[str, Any]) -> None:
             cs["your_envoys"] = envoys
         if isinstance(row.get("at_war"), bool):
             cs["at_war"] = row["at_war"]
+        for key in ("can_declare_war", "can_make_peace"):
+            if isinstance(row.get(key), bool):
+                cs[key] = row[key]
         city_states.append(cs)
     out["city_states"] = city_states
     wars = []
@@ -421,6 +427,92 @@ def normalize_civ6_diplomacy(snapshot: dict[str, Any]) -> None:
     if envoys is not None:
         out["envoys_to_give"] = envoys
     civ6["diplomacy"] = out
+
+
+def _keep_late_game_numbers(row: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key in keys:
+        value = row.get(key)
+        if isinstance(value, bool):
+            out[key] = value
+        elif isinstance(value, (int, float)):
+            out[key] = value
+        elif isinstance(value, str) and value:
+            out[key] = value
+    return out
+
+
+def normalize_civ6_late_game(snapshot: dict[str, Any]) -> None:
+    """Shape optional Gathering Storm climate / power / stockpile blocks.
+
+    Absent (older mods, base game, or not yet relevant) is fine. Malformed
+    tables are dropped so they never fail schema validation.
+    """
+    civ6 = snapshot.get("civ6")
+    if not isinstance(civ6, dict):
+        return
+    climate = civ6.get("climate")
+    if "climate" in civ6:
+        if not isinstance(climate, dict):
+            civ6.pop("climate", None)
+        else:
+            kept = _keep_late_game_numbers(climate, (
+                "source", "co2_world", "co2_you", "level", "temperature_c_tenths",
+                "sea_rise_turns", "tiles_flooded", "tiles_submerged",
+                "storm_pct", "flood_pct", "drought_pct",
+            ))
+            if kept:
+                civ6["climate"] = kept
+            else:
+                civ6.pop("climate", None)
+    power = civ6.get("power")
+    if "power" in civ6:
+        if not isinstance(power, dict):
+            civ6.pop("power", None)
+        else:
+            cities = []
+            for row in _as_list(power.get("cities")):
+                if not isinstance(row, dict) or not isinstance(row.get("city_id"), str):
+                    continue
+                city = _keep_late_game_numbers(row, (
+                    "city_id", "name", "required", "free", "temporary",
+                    "powered", "powered_by_project",
+                ))
+                if city.get("city_id"):
+                    cities.append(city)
+            if cities:
+                out: dict[str, Any] = {"cities": cities}
+                if isinstance(power.get("source"), str) and power["source"]:
+                    out["source"] = power["source"]
+                for key in ("cities_powered", "cities_needing"):
+                    number = _as_schema_int(power.get(key))
+                    if number is not None:
+                        out[key] = number
+                civ6["power"] = out
+            else:
+                civ6.pop("power", None)
+    stock = civ6.get("stockpiles")
+    if "stockpiles" in civ6:
+        if not isinstance(stock, dict):
+            civ6.pop("stockpiles", None)
+        else:
+            rows = []
+            for row in _as_list(stock.get("strategics")):
+                if not isinstance(row, dict) or not isinstance(row.get("resource_id"), str):
+                    continue
+                item = _keep_late_game_numbers(row, (
+                    "resource_id", "amount", "cap", "reserved", "per_turn",
+                    "from_improvements", "import", "bonus", "unit_demand", "power_demand",
+                ))
+                if item.get("resource_id"):
+                    rows.append(item)
+            if rows:
+                out = {"strategics": rows}
+                if isinstance(stock.get("source"), str) and stock["source"]:
+                    out["source"] = stock["source"]
+                civ6["stockpiles"] = out
+            else:
+                civ6.pop("stockpiles", None)
 
 
 def _is_city_state_player(player: dict[str, Any]) -> bool:
