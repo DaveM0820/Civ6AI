@@ -229,6 +229,7 @@ function Civ6Ai_Autotest._CloseQueuedPopups()
     -- Research/civic chooser panels (CHOOSE RESEARCH / CHOOSE CIVIC).
     "ResearchChooser",
     "CivicsChooser",
+    "ProductionPanel",
   }
   local closed = 0
   for _, name in ipairs(names) do
@@ -450,6 +451,88 @@ function Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
       "autotest|auto_civic|player=" .. tostring(playerID)
       .. "|civic=" .. tostring(civicId) .. "|ok=" .. tostring(ok)
       .. "|reason=" .. tostring(reason or ""))
+  end
+  -- CHOOSE PRODUCTION: queue a safe default in any city with an empty build queue.
+  Civ6Ai_Autotest._ClearProductionBlockers(playerID)
+end
+
+function Civ6Ai_Autotest._CityNeedsProduction(city)
+  if city == nil or Civ6Ai_Production == nil then
+    return false
+  end
+  local state = nil
+  pcall(function() state = Civ6Ai_Production._GetCityProductionState(city) end)
+  if type(state) ~= "table" then
+    return true
+  end
+  local item = state.item_id or state.current or state.build_id
+  return item == nil or item == "" or item == "NONE"
+end
+
+function Civ6Ai_Autotest._ClearProductionBlockers(playerID)
+  if Civ6Ai_Production == nil or Civ6Ai_Production.FindExperimentTarget == nil then
+    return
+  end
+  -- Local-seat UI RequestOperation only; matches Apply._QueueProduction constraints.
+  local localPlayer = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or nil
+  if localPlayer == nil or playerID ~= localPlayer then
+    return
+  end
+  local player = Players ~= nil and Players[playerID] or nil
+  if player == nil or player.GetCities == nil then
+    return
+  end
+  local cities = player:GetCities()
+  if cities == nil then
+    return
+  end
+  local members = nil
+  pcall(function()
+    if cities.Members ~= nil then
+      members = cities:Members()
+    end
+  end)
+  local function consider(city)
+    if city == nil or not Civ6Ai_Autotest._CityNeedsProduction(city) then
+      return false
+    end
+    local cityWireId, buildId = Civ6Ai_Production.FindExperimentTarget(playerID)
+    -- Prefer this city's wire id when FindExperimentTarget returned capital.
+    if buildId == nil then
+      return false
+    end
+    local wire = cityWireId
+    pcall(function() wire = Civ6Ai_Production._WireCityId(city) or cityWireId end)
+    local ok, reason = Civ6Ai_Production.QueueBuild(playerID, wire, buildId)
+    Civ6Ai_Autotest._LogLine(
+      "auto_production|player=" .. tostring(playerID)
+      .. "|city=" .. tostring(wire) .. "|build=" .. tostring(buildId)
+      .. "|ok=" .. tostring(ok) .. "|reason=" .. tostring(reason or ""))
+    Civ6Ai_Util.Log(
+      "autotest|auto_production|player=" .. tostring(playerID)
+      .. "|city=" .. tostring(wire) .. "|build=" .. tostring(buildId)
+      .. "|ok=" .. tostring(ok) .. "|reason=" .. tostring(reason or ""))
+    return ok == true
+  end
+  if members ~= nil then
+    for _, city in members do
+      if consider(city) then
+        return
+      end
+    end
+  end
+  -- Fallback: experiment target alone.
+  local cityWireId, buildId = Civ6Ai_Production.FindExperimentTarget(playerID)
+  if cityWireId ~= nil and buildId ~= nil then
+    local ok, reason = Civ6Ai_Production.QueueBuild(playerID, cityWireId, buildId)
+    Civ6Ai_Autotest._LogLine(
+      "auto_production|player=" .. tostring(playerID)
+      .. "|city=" .. tostring(cityWireId) .. "|build=" .. tostring(buildId)
+      .. "|ok=" .. tostring(ok) .. "|reason=" .. tostring(reason or ""))
+    Civ6Ai_Util.Log(
+      "autotest|auto_production|player=" .. tostring(playerID)
+      .. "|city=" .. tostring(cityWireId) .. "|build=" .. tostring(buildId)
+      .. "|ok=" .. tostring(ok) .. "|reason=" .. tostring(reason or ""))
   end
 end
 
