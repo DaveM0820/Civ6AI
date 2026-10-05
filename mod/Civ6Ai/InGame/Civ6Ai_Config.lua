@@ -195,7 +195,7 @@ function Civ6Ai_Config.IsSidecarLive()
 end
 
 function Civ6Ai_Config.AutotestStopTurn()
-  return tonumber(setting("AutotestStopTurn")) or 20
+  return tonumber(setting("AutotestStopTurn")) or 50
 end
 
 function Civ6Ai_Config.PersonalityPath(playerID)

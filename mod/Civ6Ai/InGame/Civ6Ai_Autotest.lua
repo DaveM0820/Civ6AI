@@ -84,7 +84,14 @@ function Civ6Ai_Autotest.AfterPulse(playerID)
     return
   end
   if Civ6Ai_Autotest._stopped then
-    return
+    -- Resume when AutotestStopTurn was raised after a prior stop (no full restart).
+    if Game.GetCurrentGameTurn() < Civ6Ai_Autotest.StopTurn() then
+      Civ6Ai_Autotest._stopped = false
+      Civ6Ai_Util.Log("autotest|resume|turn=" .. tostring(Game.GetCurrentGameTurn())
+        .. "|stop_turn=" .. tostring(Civ6Ai_Autotest.StopTurn()))
+    else
+      return
+    end
   end
   local turn = Game.GetCurrentGameTurn()
   Civ6Ai_Autotest._LogLine("pulse|turn=" .. tostring(turn) .. "|player=" .. tostring(playerID))
