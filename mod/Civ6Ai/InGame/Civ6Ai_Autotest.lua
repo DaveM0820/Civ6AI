@@ -230,6 +230,8 @@ function Civ6Ai_Autotest._CloseQueuedPopups()
     "ResearchChooser",
     "CivicsChooser",
     "ProductionPanel",
+    -- Government / Change Policies (FILL_CIVIC_SLOT / CONSIDER_GOVERNMENT_CHANGE).
+    "GovernmentScreen",
   }
   local closed = 0
   for _, name in ipairs(names) do
@@ -454,6 +456,8 @@ function Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
   end
   -- CHOOSE PRODUCTION: queue a safe default in any city with an empty build queue.
   Civ6Ai_Autotest._ClearProductionBlockers(playerID)
+  -- FILL_CIVIC_SLOT / CONSIDER_GOVERNMENT_CHANGE: slot cards + pick a government.
+  Civ6Ai_Autotest._ClearPolicyGovernmentBlockers(playerID)
 end
 
 function Civ6Ai_Autotest._CityNeedsProduction(city)
@@ -535,6 +539,235 @@ function Civ6Ai_Autotest._ClearProductionBlockers(playerID)
       .. "|ok=" .. tostring(ok) .. "|reason=" .. tostring(reason or ""))
   end
 end
+
+-- Auto-fill empty policy slots / pick a government when FILL_CIVIC_SLOT or
+-- CONSIDER_GOVERNMENT_CHANGE would leave GovernmentScreen (Change Policies) up.
+-- Bare notification dismiss does not Confirm policies, so NEXT TURN stays blocked.
+local function _policySlotFits(slotType, policyRow)
+  local cardType = policyRow ~= nil and policyRow.GovernmentSlotType or nil
+  if slotType == cardType or slotType == "SLOT_WILDCARD" then
+    return true
+  end
+  return false
+end
+
+function Civ6Ai_Autotest._PickFallbackGovernment(playerID)
+  local player = Players ~= nil and Players[playerID] or nil
+  if player == nil or player.GetCulture == nil or GameInfo == nil or GameInfo.Governments == nil then
+    return nil
+  end
+  local culture = player:GetCulture()
+  if culture == nil then
+    return nil
+  end
+  local cur = nil
+  pcall(function() cur = culture:GetCurrentGovernment() end)
+  if cur ~= nil and cur >= 0 then
+    return nil
+  end
+  local can = nil
+  pcall(function() can = culture:CanChangeGovernmentAtAll() end)
+  if can ~= true then
+    return nil
+  end
+  local made = false
+  pcall(function() made = culture:GovernmentChangeMade() == true end)
+  if made then
+    return nil
+  end
+  -- Prefer Chiefdom when unlocked; else first unlocked government.
+  local prefer = GameInfo.Governments["GOVERNMENT_CHIEFDOM"]
+  if prefer ~= nil then
+    local ok, unlocked = pcall(function()
+      return culture:IsGovernmentUnlocked(prefer.Hash) == true
+        or culture:IsGovernmentUnlocked(prefer.Index) == true
+    end)
+    if ok and unlocked then
+      return prefer.GovernmentType
+    end
+  end
+  for row in GameInfo.Governments() do
+    local ok, unlocked = pcall(function()
+      return culture:IsGovernmentUnlocked(row.Hash) == true
+        or culture:IsGovernmentUnlocked(row.Index) == true
+    end)
+    if ok and unlocked then
+      return row.GovernmentType
+    end
+  end
+  return nil
+end
+
+function Civ6Ai_Autotest._BuildFallbackPolicySlots(playerID)
+  local player = Players ~= nil and Players[playerID] or nil
+  if player == nil or player.GetCulture == nil or GameInfo == nil or GameInfo.Policies == nil then
+    return nil, "no_culture"
+  end
+  local culture = player:GetCulture()
+  if culture == nil then
+    return nil, "no_culture"
+  end
+  local made = false
+  pcall(function() made = culture:PolicyChangeMade() == true end)
+  if made then
+    return nil, "already_changed"
+  end
+  local civicDone, openSlots = false, 0
+  pcall(function() civicDone = culture:CivicCompletedThisTurn() == true end)
+  pcall(function() openSlots = culture:GetNumPolicySlotsOpen() or 0 end)
+  if not civicDone and openSlots <= 0 then
+    return nil, "change_not_allowed"
+  end
+  local n = 0
+  pcall(function() n = culture:GetNumPolicySlots() or 0 end)
+  if n <= 0 then
+    return nil, "no_slots"
+  end
+  local used = {}
+  local parts = {}
+  local filledEmpty = 0
+  for i = 0, n - 1 do
+    local st, pid = nil, nil
+    pcall(function() st = culture:GetSlotType(i) end)
+    pcall(function() pid = culture:GetSlotPolicy(i) end)
+    local srow = st ~= nil and GameInfo.GovernmentSlots ~= nil and GameInfo.GovernmentSlots[st] or nil
+    local slotType = srow ~= nil and srow.GovernmentSlotType or "SLOT_UNKNOWN"
+    local policyId = nil
+    if pid ~= nil and pid >= 0 and GameInfo.Policies[pid] ~= nil then
+      policyId = GameInfo.Policies[pid].PolicyType
+      used[policyId] = true
+    else
+      for row in GameInfo.Policies() do
+        local ok, avail = pcall(function()
+          local unlocked = culture:IsPolicyUnlocked(row.Hash) == true
+            or culture:IsPolicyUnlocked(row.Index) == true
+          local obsolete = culture.IsPolicyObsolete ~= nil and culture:IsPolicyObsolete(row.Hash) == true
+          return unlocked and not obsolete and _policySlotFits(slotType, row)
+            and used[row.PolicyType] ~= true
+        end)
+        if ok and avail then
+          policyId = row.PolicyType
+          used[policyId] = true
+          filledEmpty = filledEmpty + 1
+          break
+        end
+      end
+      if policyId == nil then
+        policyId = "NONE"
+      end
+    end
+    parts[#parts + 1] = tostring(i) .. "=" .. tostring(policyId)
+  end
+  -- GovernmentScreen Confirm stays disabled while any slot is free; do not
+  -- submit a plan that still has NONE in an open slot.
+  for _, part in ipairs(parts) do
+    if string.match(part, "=%s*NONE%s*$") and openSlots > 0 then
+      return nil, "unfilled_slots"
+    end
+  end
+  return table.concat(parts, ";"), nil
+end
+
+function Civ6Ai_Autotest._ClearPolicyGovernmentBlockers(playerID)
+  local localPlayer = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or nil
+  -- GovernmentScreen / RequestPolicyChanges are local-seat UI routes (same as production).
+  if localPlayer == nil or playerID ~= localPlayer then
+    return
+  end
+  local player = Players ~= nil and Players[playerID] or nil
+  if player == nil or player.GetCulture == nil then
+    return
+  end
+  local culture = player:GetCulture()
+  if culture == nil then
+    return
+  end
+
+  local govId = Civ6Ai_Autotest._PickFallbackGovernment(playerID)
+  if govId ~= nil then
+    local ok, reason = false, "no_apply"
+    if Civ6Ai_Apply ~= nil and Civ6Ai_Apply._ChangeGovernment ~= nil then
+      ok, reason = Civ6Ai_Apply._ChangeGovernment(
+        playerID,
+        { kind = "change_government", id = "autotest_fallback" },
+        { government_id = govId })
+      if ok == Civ6Ai_Apply.DEFERRED then
+        ok = true
+        reason = reason or "deferred"
+      end
+    else
+      local row = GameInfo.Governments[govId]
+      if row ~= nil then
+        local okCall, okReq = pcall(function()
+          return culture:RequestChangeGovernment(row.Hash)
+        end)
+        ok = okCall and okReq == true
+        reason = ok and "" or tostring(okReq)
+      end
+    end
+    Civ6Ai_Autotest._LogLine(
+      "auto_government|player=" .. tostring(playerID)
+      .. "|government=" .. tostring(govId) .. "|ok=" .. tostring(ok)
+      .. "|reason=" .. tostring(reason or ""))
+    Civ6Ai_Util.Log(
+      "autotest|auto_government|player=" .. tostring(playerID)
+      .. "|government=" .. tostring(govId) .. "|ok=" .. tostring(ok)
+      .. "|reason=" .. tostring(reason or ""))
+  end
+
+  local slots, why = Civ6Ai_Autotest._BuildFallbackPolicySlots(playerID)
+  if slots == nil then
+    if why ~= nil and why ~= "already_changed" and why ~= "change_not_allowed" then
+      Civ6Ai_Autotest._LogLine(
+        "auto_policies|player=" .. tostring(playerID) .. "|skip=" .. tostring(why))
+    end
+    return
+  end
+  local ok, reason = false, "no_apply"
+  if Civ6Ai_Apply ~= nil and Civ6Ai_Apply._SetPolicies ~= nil then
+    ok, reason = Civ6Ai_Apply._SetPolicies(
+      playerID,
+      { kind = "set_policies", id = "autotest_fallback" },
+      { slots = slots })
+    if ok == Civ6Ai_Apply.DEFERRED then
+      ok = true
+      reason = reason or "deferred"
+    end
+  else
+    -- Direct fallback mirroring GovernmentScreen ConfirmPolicies.
+    local plan = {}
+    for part in string.gmatch(slots, "[^;]+") do
+      local slot, policy = string.match(part, "^(%d+)=([%w_]+)$")
+      if slot ~= nil then
+        plan[#plan + 1] = { slot = tonumber(slot), policy = policy }
+      end
+    end
+    local clearList, addList = {}, {}
+    for _, e in ipairs(plan) do
+      table.insert(clearList, e.slot)
+      if string.upper(e.policy) ~= "NONE" then
+        local prow = GameInfo.Policies[e.policy]
+        if prow ~= nil then
+          addList[e.slot] = prow.Hash
+        end
+      end
+    end
+    local okCall, okReq = pcall(function()
+      return culture:RequestPolicyChanges(clearList, addList)
+    end)
+    ok = okCall and okReq ~= false
+    reason = ok and "" or tostring(okReq)
+  end
+  Civ6Ai_Autotest._LogLine(
+    "auto_policies|player=" .. tostring(playerID)
+    .. "|slots=" .. tostring(slots) .. "|ok=" .. tostring(ok)
+    .. "|reason=" .. tostring(reason or ""))
+  Civ6Ai_Util.Log(
+    "autotest|auto_policies|player=" .. tostring(playerID)
+    .. "|slots=" .. tostring(slots) .. "|ok=" .. tostring(ok)
+    .. "|reason=" .. tostring(reason or ""))
+end
+
 
 function Civ6Ai_Autotest._DismissBlockers(playerID)
   -- Choose research/civic before dismissing notifications: bare Dismiss does not
