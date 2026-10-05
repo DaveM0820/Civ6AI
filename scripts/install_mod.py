@@ -35,10 +35,13 @@ DEFAULT_MANAGED_SEATS = ""  # empty = every AI major (and the local human when a
 
 
 def mods_targets() -> list[Path]:
+    # Local Documents first; still install into OneDrive Mods when present so
+    # whichever tree Civ6 loads gets the same generated Paths.lua (Civ6AiRoot
+    # itself always points at preferred_my_games_root / non-OneDrive).
     home = Path.home()
     return [
-        home / "OneDrive" / "Documents" / "My Games" / MEIER / "Mods" / "Civ6Ai",
         home / "Documents" / "My Games" / MEIER / "Mods" / "Civ6Ai",
+        home / "OneDrive" / "Documents" / "My Games" / MEIER / "Mods" / "Civ6Ai",
     ]
 
 
@@ -310,11 +313,11 @@ def rotate_session(
 
 
 def default_civ6ai_root() -> Path:
-    """Same root scripts/live_lua_bridge.py uses: first My Games root + /civ6ai."""
+    """Runtime/session root: local Documents My Games (never OneDrive when local exists)."""
     sys.path.insert(0, str(ROOT / "scripts"))
-    from civ6_paths import my_games_roots
+    from civ6_paths import preferred_my_games_root
 
-    return my_games_roots()[0] / "civ6ai"
+    return preferred_my_games_root() / "civ6ai"
 
 
 def default_log_dir() -> Path | None:

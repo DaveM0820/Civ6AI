@@ -26,8 +26,8 @@ def civ6_mod_in_game_dirs() -> list[Path]:
     home = Path.home()
     dirs: list[Path] = []
     for rel in (
-        "OneDrive/Documents/My Games/Sid Meier's Civilization VI/Mods/Civ6Ai/InGame",
         "Documents/My Games/Sid Meier's Civilization VI/Mods/Civ6Ai/InGame",
+        "OneDrive/Documents/My Games/Sid Meier's Civilization VI/Mods/Civ6Ai/InGame",
     ):
         candidate = home / rel
         if candidate.is_dir():
@@ -74,8 +74,8 @@ def _queue_state_path() -> Path:
     """Host-side queue mirror so multi-seat publishes survive bridge restarts."""
     home = Path.home()
     for rel in (
-        "OneDrive/Documents/My Games/Sid Meier's Civilization VI/civ6ai",
         "Documents/My Games/Sid Meier's Civilization VI/civ6ai",
+        "OneDrive/Documents/My Games/Sid Meier's Civilization VI/civ6ai",
     ):
         root = home / rel
         if root.is_dir() or root.parent.is_dir():

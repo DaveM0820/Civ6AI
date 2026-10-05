@@ -15,7 +15,7 @@ for path in (ROOT, TESTBED, ROOT / "scripts"):
         sys.path.insert(0, str(path))
 
 from civ6_lua_log_bridge import default_lua_log, log_civ6ai_root, process_host_io  # noqa: E402
-from civ6_paths import lua_log_candidates, my_games_roots  # noqa: E402
+from civ6_paths import lua_log_candidates  # noqa: E402
 from sidecar.civ6_config import apply_config_to_environ, load_local_config  # noqa: E402
 from windows_process import python_executable  # noqa: E402
 
@@ -41,16 +41,15 @@ def main() -> int:
         if lua_log is None:
             lua_log = default_lua_log()
 
-    civ6ai_root = None
-    for game in my_games_roots():
-        candidate = game / "civ6ai"
-        if candidate.is_dir() or True:
-            civ6ai_root = candidate
-            break
-    if civ6ai_root is None and lua_log is not None:
-        civ6ai_root = log_civ6ai_root(lua_log)
-    if civ6ai_root is None:
-        civ6ai_root = Path.home() / "Documents" / "My Games" / "Sid Meier's Civilization VI" / "civ6ai"
+    # Prefer local Documents civ6ai (never OneDrive when local exists). Paths.lua
+    # Civ6AiRoot must match so game + host write the same tree.
+    from civ6_paths import preferred_my_games_root, is_onedrive_path  # noqa: PLC0415
+
+    civ6ai_root = preferred_my_games_root() / "civ6ai"
+    if lua_log is not None:
+        logged = log_civ6ai_root(lua_log)
+        if logged is not None and not is_onedrive_path(logged):
+            civ6ai_root = logged
 
     civ6ai_root.mkdir(parents=True, exist_ok=True)
     python = python_executable(prefer_pythonw=True)

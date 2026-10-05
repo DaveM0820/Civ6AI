@@ -1,4 +1,4 @@
-"""Locate Civ6 install + My Games Mods / Logs / runtime folders."""
+﻿"""Locate Civ6 install + My Games Mods / Logs / runtime folders."""
 from __future__ import annotations
 
 import os
@@ -26,11 +26,22 @@ def _unique(paths: Iterable[Path]) -> list[Path]:
     return out
 
 
+def is_onedrive_path(path: Path | str) -> bool:
+    """True when path is under a OneDrive synced folder (file locking / failed Lua IO)."""
+    return "onedrive" in str(path).replace("\\", "/").lower()
+
+
 def my_games_roots() -> list[Path]:
+    """Candidate Civ6 My Games trees.
+
+    Local Documents is listed first. OneDrive Documents is still returned when
+    present (Civ6 may load Mods from either), but preferred_my_games_root() and
+    default civ6ai I/O skip OneDrive so session/runtime writes stay local.
+    """
     home = Path.home()
     candidates = [
-        home / "OneDrive" / "Documents" / "My Games" / MEIER,
         home / "Documents" / "My Games" / MEIER,
+        home / "OneDrive" / "Documents" / "My Games" / MEIER,
     ]
     local = os.environ.get("LOCALAPPDATA") or ""
     if local:
@@ -38,7 +49,21 @@ def my_games_roots() -> list[Path]:
     return _unique(candidates)
 
 
+def preferred_my_games_root() -> Path:
+    """My Games root for civ6ai runtime/session I/O: never OneDrive when a local tree exists."""
+    roots = my_games_roots()
+    local = [r for r in roots if ("My Games" in str(r)) and not is_onedrive_path(r)]
+    if local:
+        return local[0]
+    for root in roots:
+        if "My Games" in str(root):
+            return root
+    home = Path.home()
+    return home / "Documents" / "My Games" / MEIER
+
+
 def mods_targets() -> list[Path]:
+    # Local first, then OneDrive (install into both when present).
     return [root / "Mods" / "Civ6Ai" for root in my_games_roots() if "My Games" in str(root)]
 
 
