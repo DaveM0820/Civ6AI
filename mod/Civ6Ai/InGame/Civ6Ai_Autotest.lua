@@ -90,6 +90,10 @@ function Civ6Ai_Autotest.AfterPulse(playerID)
       Civ6Ai_Util.Log("autotest|resume|turn=" .. tostring(Game.GetCurrentGameTurn())
         .. "|stop_turn=" .. tostring(Civ6Ai_Autotest.StopTurn()))
     else
+      -- Still clear research/civic (and other) blockers so CHOOSE CIVIC/RESEARCH
+      -- cannot soft-lock the host after stop_turn.
+      Civ6Ai_Autotest._CloseQueuedPopups()
+      Civ6Ai_Autotest._DismissBlockers(playerID)
       return
     end
   end
@@ -222,6 +226,9 @@ function Civ6Ai_Autotest._CloseQueuedPopups()
     "WorldCrisisPopup",
     "NaturalWonderPopup",
     "WonderBuiltPopup",
+    -- Research/civic chooser panels (CHOOSE RESEARCH / CHOOSE CIVIC).
+    "ResearchChooser",
+    "CivicsChooser",
   }
   local closed = 0
   for _, name in ipairs(names) do
@@ -357,7 +364,100 @@ function Civ6Ai_Autotest._OnCityAddedToMap(playerID, cityID, x, y)
   end)
 end
 
+-- Auto-pick a researchable tech when ENDTURN_BLOCKING_RESEARCH would show
+-- CHOOSE RESEARCH (same idea as dismissing other autotest popups).
+function Civ6Ai_Autotest._PickFallbackTech(playerID)
+  local player = Players ~= nil and Players[playerID] or nil
+  if player == nil or player.GetTechs == nil or GameInfo == nil or GameInfo.Technologies == nil then
+    return nil
+  end
+  local techs = player:GetTechs()
+  if techs == nil then
+    return nil
+  end
+  local cur = nil
+  pcall(function() cur = techs:GetResearchingTech() end)
+  if cur ~= nil and cur >= 0 then
+    return nil
+  end
+  for row in GameInfo.Technologies() do
+    local ok, can = pcall(function()
+      return techs:CanResearch(row.Index) and not techs:HasTech(row.Index)
+    end)
+    if ok and can then
+      return row.TechnologyType
+    end
+  end
+  return nil
+end
+
+-- Auto-pick a progressable civic when ENDTURN_BLOCKING_CIVIC would show CHOOSE CIVIC.
+function Civ6Ai_Autotest._PickFallbackCivic(playerID)
+  local player = Players ~= nil and Players[playerID] or nil
+  if player == nil or player.GetCulture == nil or GameInfo == nil or GameInfo.Civics == nil then
+    return nil
+  end
+  local culture = player:GetCulture()
+  if culture == nil then
+    return nil
+  end
+  local cur = nil
+  pcall(function() cur = culture:GetProgressingCivic() end)
+  if cur ~= nil and cur >= 0 then
+    local done = false
+    pcall(function()
+      done = culture.CivicCompletedThisTurn ~= nil and culture:CivicCompletedThisTurn() == true
+    end)
+    if not done then
+      return nil
+    end
+  end
+  for row in GameInfo.Civics() do
+    local ok, can = pcall(function()
+      return culture:CanProgress(row.Index) and not culture:HasCivic(row.Index)
+    end)
+    if ok and can then
+      return row.CivicType
+    end
+  end
+  return nil
+end
+
+function Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
+  if Civ6Ai_Apply == nil then
+    return
+  end
+  local techId = Civ6Ai_Autotest._PickFallbackTech(playerID)
+  if techId ~= nil and Civ6Ai_Apply._SetResearchTech ~= nil then
+    local ok, reason = Civ6Ai_Apply._SetResearchTech(playerID, { tech_id = techId })
+    Civ6Ai_Autotest._LogLine(
+      "auto_research|player=" .. tostring(playerID)
+      .. "|tech=" .. tostring(techId) .. "|ok=" .. tostring(ok)
+      .. "|reason=" .. tostring(reason or ""))
+    Civ6Ai_Util.Log(
+      "autotest|auto_research|player=" .. tostring(playerID)
+      .. "|tech=" .. tostring(techId) .. "|ok=" .. tostring(ok)
+      .. "|reason=" .. tostring(reason or ""))
+  end
+  local civicId = Civ6Ai_Autotest._PickFallbackCivic(playerID)
+  if civicId ~= nil and Civ6Ai_Apply._SetResearchCivic ~= nil then
+    local ok, reason = Civ6Ai_Apply._SetResearchCivic(playerID, { civic_id = civicId })
+    Civ6Ai_Autotest._LogLine(
+      "auto_civic|player=" .. tostring(playerID)
+      .. "|civic=" .. tostring(civicId) .. "|ok=" .. tostring(ok)
+      .. "|reason=" .. tostring(reason or ""))
+    Civ6Ai_Util.Log(
+      "autotest|auto_civic|player=" .. tostring(playerID)
+      .. "|civic=" .. tostring(civicId) .. "|ok=" .. tostring(ok)
+      .. "|reason=" .. tostring(reason or ""))
+  end
+end
+
 function Civ6Ai_Autotest._DismissBlockers(playerID)
+  -- Choose research/civic before dismissing notifications: bare Dismiss does not
+  -- select a civic, so CHOOSE CIVIC stays up and blocks NEXT TURN.
+  Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
+
   local list = NotificationManager.GetList(playerID)
   if list == nil then
     return
