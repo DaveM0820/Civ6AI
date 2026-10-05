@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-  <Mod id="civ4ai-civ6ai-20260817" version="21">
+  <Mod id="civ4ai-civ6ai-20260817" version="22">
   <Properties>
     <Name>Civ6Ai</Name>
     <Teaser>LLM AI host (Civ4AI)</Teaser>
@@ -45,6 +45,7 @@
     <File>InGame/Civ6Ai_Chat.lua</File>
     <File>InGame/Civ6Ai_InGame.xml</File>
     <File>InGame/Civ6Ai_InGame.lua</File>
+    <File>InGame/Civ6Ai_DiplomacyRibbon.lua</File>
   </Files>
   <Components>
     <UpdateDatabase id="Civ6Ai_Strategies">
@@ -93,6 +94,7 @@
         <File>InGame/Civ6Ai_SeatExperiment.lua</File>
         <File>InGame/Civ6Ai_Autotest.lua</File>
         <File>InGame/Civ6Ai_Chat.lua</File>
+        <File>InGame/Civ6Ai_DiplomacyRibbon.lua</File>
       </Items>
     </ImportFiles>
     <UserInterface id="Civ6Ai_InGame_UI">
@@ -104,5 +106,12 @@
         <File>InGame/Civ6Ai_InGame.lua</File>
       </Items>
     </UserInterface>
+    <ReplaceUIScript id="Civ6Ai_DiplomacyRibbon">
+      <Properties>
+        <LoadOrder>500</LoadOrder>
+        <LuaContext>DiplomacyRibbon</LuaContext>
+        <LuaReplace>InGame/Civ6Ai_DiplomacyRibbon.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
   </Components>
 </Mod>
