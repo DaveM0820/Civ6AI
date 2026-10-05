@@ -16,11 +16,15 @@ UTIL = pathlib.Path(__file__).resolve().parents[2] / "mod" / "Civ6Ai" / "InGame"
 class LuaBase64Test(unittest.TestCase):
     def setUp(self):
         src = UTIL.read_bytes()
+        ws_start = src.index(b"-- Lua %s matches byte 0xA0")
+        ws_end = src.index(b"function Civ6Ai_Util.EscapeJson")
         a = src.index(b"-- Base64 via")
         b = src.index(b"function Civ6Ai_Util.DumpBlob(")
         self.lua = lupa.LuaRuntime(encoding=None)
         self.lua.execute(b"Civ6Ai_Util={}")
+        self.lua.execute(src[ws_start:ws_end])
         self.lua.execute(src[a:b])
+        self.collapse = self.lua.eval(b"Civ6Ai_Util.CollapseAsciiWS")
         self.enc = self.lua.eval(b"Civ6Ai_Util.Base64Encode")
         self.dec = self.lua.eval(b"Civ6Ai_Util.Base64Decode")
 
@@ -31,6 +35,13 @@ class LuaBase64Test(unittest.TestCase):
                 encoded = self.enc(data)
                 self.assertEqual(encoded, base64.b64encode(data))
                 self.assertEqual(self.dec(encoded), data)
+
+    def test_collapse_ascii_ws_preserves_utf8_pieta(self):
+        pieta = "Piet\u00e0 (Sculpture)"
+        collapsed = self.collapse(pieta)
+        self.assertEqual(pieta, collapsed)
+        spaced = "Piet\u00e0  (Sculpture)"
+        self.assertEqual("Piet\u00e0 (Sculpture)", self.collapse(spaced))
 
     def test_large_snapshot_is_fast(self):
         data = os.urandom(60000)

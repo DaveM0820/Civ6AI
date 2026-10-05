@@ -1381,7 +1381,8 @@ function Civ6Ai_Snapshot._AttitudeReasons(fromID, towardID, limit)
         if Locale ~= nil and Locale.Lookup ~= nil then
           text = Civ6Ai_Snapshot._Try(Locale.Lookup, text) or text
         end
-        text = text:gsub("%[[^%]]*%]", ""):gsub("%s+", " ")
+        text = text:gsub("%[[^%]]*%]", "")
+        text = Civ6Ai_Util.CollapseAsciiWS(text)
         table.insert(rows, { text = text:sub(1, 80), score = math.floor(score + 0.5) })
       end
     end
@@ -2798,12 +2799,12 @@ function Civ6Ai_Snapshot._GovText(key, maxLen)
   end)
   text = string.gsub(text, "%[NEWLINE%]", " ")
   text = string.gsub(text, "%[[^%]]*%]", "")
-  text = string.gsub(text, "%s+", " ")
+  text = Civ6Ai_Util.CollapseAsciiWS(text)
   text = string.gsub(text, "%( ", "(")
   text = string.gsub(text, " ([%),%.;:])", "%1")
-  text = string.gsub(text, "^%s+", "")
+  text = Civ6Ai_Util.TrimAsciiWSLeft(text)
   maxLen = maxLen or Civ6Ai_Snapshot.GOV_TEXT_MAX
-  text = string.gsub(text, "%s+$", "")
+  text = Civ6Ai_Util.TrimAsciiWSRight(text)
   if string.len(text) > maxLen then
     local cut = string.sub(text, 1, maxLen - 3)
     local space = string.find(cut, " [^ ]*$")

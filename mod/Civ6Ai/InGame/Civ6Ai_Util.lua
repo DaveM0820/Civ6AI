@@ -5,6 +5,31 @@ function Civ6Ai_Util.Log(message)
   print("CIV6AI|" .. tostring(message))
 end
 
+-- Lua %s matches byte 0xA0 (NBSP), which is a UTF-8 continuation byte in many
+-- localized strings (e.g. "à" is C3 A0). Never use %s on Locale.Lookup output.
+local _ASCII_WS = "[ \t\n\r\v\f]"
+
+function Civ6Ai_Util.CollapseAsciiWS(text)
+  if type(text) ~= "string" or text == "" then
+    return text
+  end
+  return text:gsub(_ASCII_WS .. "+", " ")
+end
+
+function Civ6Ai_Util.TrimAsciiWSLeft(text)
+  if type(text) ~= "string" or text == "" then
+    return text
+  end
+  return text:gsub("^" .. _ASCII_WS .. "+", "")
+end
+
+function Civ6Ai_Util.TrimAsciiWSRight(text)
+  if type(text) ~= "string" or text == "" then
+    return text
+  end
+  return text:gsub(_ASCII_WS .. "+$", "")
+end
+
 function Civ6Ai_Util.EscapeJson(value)
   if value == nil then
     return "null"

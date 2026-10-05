@@ -11,7 +11,7 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "testbed"))
-from civ6_lua_log_bridge import parse_blob_lines, process_lua_log_blobs
+from civ6_lua_log_bridge import _decode_blob_payload, parse_blob_lines, process_lua_log_blobs
 
 
 def _frame(payload: str, session: str = "autotest-1", player: int = 0, turn: int = 1, live: int = 0) -> str:
@@ -36,6 +36,44 @@ class Civ6LuaLogBridgeTests(unittest.TestCase):
         self.assertEqual("snapshot", blobs[0]["kind"])
         self.assertEqual(0, blobs[0]["player"])
         self.assertEqual(payload, blobs[0]["payload"])
+
+    def test_parse_utf8_great_work_name_pieta(self):
+        payload = json.dumps(
+            {
+                "governance": {
+                    "great_works": [
+                        {"work": "GREATWORK_PIETA", "kind": "GREATWORKOBJECT_SCULPTURE", "name": "Pietà (Sculpture)"}
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        blobs = parse_blob_lines(_frame(payload))
+        self.assertEqual(1, len(blobs))
+        self.assertIn("Pietà", blobs[0]["payload"])
+        self.assertEqual(payload, blobs[0]["payload"])
+
+    def test_parse_legacy_corrupt_utf8_blob_recovers(self):
+        """Lua %s+ used to drop 0xA0 continuation bytes (e.g. à in Pietà)."""
+        corrupt = b'{"name":"Piet\xc3 (Sculpture)"}'
+        encoded = base64.b64encode(corrupt).decode("ascii")
+        blob_id = "sess_0_1_snapshot"
+        lines = "\n".join(
+            [
+                f"Civ6Ai_InGame: CIV6AI|blob|begin|snapshot|{blob_id}|1|0|0|1|sess",
+                f"Civ6Ai_InGame: CIV6AI|blob|c|{blob_id}|0|{encoded}",
+                f"Civ6Ai_InGame: CIV6AI|blob|end|{blob_id}",
+            ]
+        )
+        blobs = parse_blob_lines(lines + "\n")
+        self.assertEqual(1, len(blobs))
+        self.assertIn("\ufffd", blobs[0]["payload"])
+
+    def test_decode_blob_payload_strict_then_replace(self):
+        good = "Pietà".encode("utf-8")
+        self.assertEqual("Pietà", _decode_blob_payload(good))
+        bad = b"Piet\xc3"
+        self.assertEqual("Piet\ufffd", _decode_blob_payload(bad))
 
     def test_process_writes_snapshot_and_runs_job(self):
         payload = '{"ok":true}'
