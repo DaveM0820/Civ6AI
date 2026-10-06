@@ -532,8 +532,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"runtime.json -> {Path(settings['root']) / 'runtime.json'}")
         print(f"build_stamp={settings.get('build_stamp') or ''} runtime_root={settings['root']} (local My Games; never OneDrive)")
-        print("Installed Lua is copied to every Mods/Civ6Ai tree (including OneDrive if present);")
-        print("session/PendingApply queue state stays under the local civ6ai root.")
+        print("Installed Lua is copied to local Mods/Civ6Ai first (OneDrive only as a mirror);")
+        print("session/PendingApply queue writes succeed if the local InGame copy is written.")
     else:
         print("Stub-only install (no live config).")
     return 0

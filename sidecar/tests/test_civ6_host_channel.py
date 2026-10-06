@@ -93,6 +93,26 @@ class Civ6HostChannelTests(unittest.TestCase):
         self.assertNotEqual(a, pending_apply_id("{}", "s", 2, 2))
         self.assertNotEqual(a, pending_apply_id("{}", "s", 1, 2, "chat"))
 
+    def test_onedrive_mirror_failure_does_not_fail_local_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            local = Path(tmp) / "local" / "InGame"
+            onedrive = Path(tmp) / "OneDrive" / "InGame"
+            local.mkdir(parents=True)
+            onedrive.mkdir(parents=True)
+            real_write = __import__("civ6_host_channel", fromlist=["_write_module"])._write_module
+
+            def write(path, content):
+                if "OneDrive" in str(path):
+                    return False
+                return real_write(path, content)
+
+            with mock.patch("civ6_host_channel.civ6_mod_in_game_dirs", return_value=[local, onedrive]), \
+                 mock.patch("civ6_host_channel._queue_state_path", return_value=Path(tmp) / "queue.json"), \
+                 mock.patch("civ6_host_channel._write_module", side_effect=write):
+                written = write_pending_apply_lua('{"commands":[]}', "sess", 1, 3)
+            self.assertGreaterEqual(written, 1)
+            self.assertIn("sess", (local / "Civ6Ai_PendingApply.lua").read_text(encoding="utf-8"))
+
     def test_inject_missing_module_logs_once_and_returns_false(self):
         import civ6_host_channel as channel
 

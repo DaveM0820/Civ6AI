@@ -75,8 +75,13 @@ function Civ6Ai_OrderChannel.Send(kind, fields, turnOverride)
     T = turnOverride or Game.GetCurrentGameTurn(),
     S = me * 1000000 + Civ6Ai_OrderChannel._counter,
   }
+  -- EXECUTE_SCRIPT params must be integers on every client. Drop strings/floats.
   for k, v in pairs(fields or {}) do
-    params[k] = v
+    if type(v) == "number" then
+      params[k] = math.floor(v)
+    elseif type(v) == "boolean" then
+      params[k] = v and 1 or 0
+    end
   end
   local ok, err = pcall(UI.RequestPlayerOperation, me, PlayerOperations.EXECUTE_SCRIPT, params)
   local line = "send|seq=" .. params.S .. "|kind=" .. tostring(kind) .. "|turn=" .. tostring(params.T)

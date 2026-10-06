@@ -25,13 +25,22 @@ Civ6Ai_Util = {
   WriteTextFile = function() return true end,
   AppendTextLine = function() return true end,
 }
+Civ6Ai_Bridge = {
+  _WallClock = function() return NOW end,
+  SessionId = function() return "s" end,
+  SetSessionId = function() end,
+  HostWaitSnapshotTurn = function() return TURN end,
+  HostEndTurnWaiting = function() return false end,
+  SeatAnswerOutstanding = function() return false end,
+}
 Civ6Ai_Config = {
   IsAutotest = function() return true end,
   RootDir = function() return "root" end,
   AutotestStopTurn = function() return 50 end,
   SessionId = function() return "s" end,
+  ManagedSeatsList = function() return {} end,
+  ShouldRunBridge = function() return true end,
 }
-Civ6Ai_Bridge = { _WallClock = function() return NOW end, SessionId = function() return "s" end, SetSessionId = function() end }
 Civ6Ai_Apply = { _SetResearchTech = function() return true, "" end, _SetResearchCivic = function() return true, "" end, ResolveAllUnitOrders = function() end }
 Civ6Ai_Production = nil
 Game = { GetCurrentGameTurn = function() return TURN end, GetLocalPlayer = function() return 0 end }
@@ -123,6 +132,21 @@ class BlockerTableTests(unittest.TestCase):
         log = self._log()
         self.assertTrue(any("stall_watch|" in l for l in log))
         self.assertTrue(any("stall|turn=" in l for l in log))
+
+    def test_stall_watchdog_does_not_end_turn_while_seats_pending(self):
+        self.lua.execute("END_TURN = 0; UI.RequestAction = function() END_TURN = END_TURN + 1 end")
+        self.lua.execute(
+            "Civ6Ai_Autotest._PendingSeats = function() return {1, 2} end"
+        )
+        self.g.Civ6Ai_Autotest.STALL_SECONDS = 4
+        self.g.Civ6Ai_Autotest.STALL_MAX_ATTEMPTS = 3
+        self.g.Civ6Ai_Autotest.StartStallWatchdog()
+        self.lua.execute("RUN_TICKS()")
+        for _ in range(4):
+            self.lua.execute("NOW = NOW + 5")
+            self.lua.execute("RUN_TICKS()")
+        self.assertEqual(int(self.g.END_TURN), 0)
+        self.assertTrue(any("same_turn_wait=true" in l for l in self._log()))
 
 
 if __name__ == "__main__":

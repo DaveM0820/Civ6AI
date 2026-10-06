@@ -385,7 +385,8 @@ function Civ6Ai_Orders._ArrivalAction(owner, unit, intent, extra, sender)
   elseif intent == Civ6Ai_Orders.INTENT.IMPROVE then
     return Civ6Ai_Orders.Gov.ImproveTile(owner, unit:GetID(), extra.I, unit:GetX(), unit:GetY())
   elseif intent == Civ6Ai_Orders.INTENT.RELIGION then
-    return Civ6Ai_Orders.Gov.FoundReligion(owner, extra.I, unit:GetID(), extra.V, extra.W, extra.X, extra.Y)
+    -- Belief indices live in I/V/W. X/Y on a MOVE are the plot, never beliefs.
+    return Civ6Ai_Orders.Gov.FoundReligion(owner, extra.I, unit:GetID(), extra.V, extra.W)
   elseif intent == Civ6Ai_Orders.INTENT.TRADE then
     return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, unit:GetID(), extra.I)
   end
@@ -421,7 +422,7 @@ function Civ6Ai_Orders._DoMove(sender, o)
       return Civ6Ai_Orders.Gov.ImproveTile(owner, o.U, o.I, x, y)
     end
     if intent == Civ6Ai_Orders.INTENT.RELIGION then
-      return Civ6Ai_Orders.Gov.FoundReligion(owner, o.I, o.U, o.V, o.W, o.X, o.Y)
+      return Civ6Ai_Orders.Gov.FoundReligion(owner, o.I, o.U, o.V, o.W)
     end
     if intent == Civ6Ai_Orders.INTENT.TRADE then
       return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, o.U, o.I)

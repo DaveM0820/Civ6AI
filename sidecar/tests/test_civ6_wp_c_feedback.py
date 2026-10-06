@@ -165,6 +165,17 @@ class ChatRobustnessTests(unittest.TestCase):
         self.assertEqual(kept, [])
         self.assertTrue(any("near-repeat" in note for note in dropped))
 
+    def test_missing_turn_does_not_treat_all_history_as_recent_chat(self):
+        snap = _snap(decision={"player_id": "PLAYER_1"})
+        snap["history"]["public_events"] = [
+            {"turn": 1, "kind": "CHAT_PUBLIC", "text": "Hello from the capital.",
+             "affected_ids": ["PLAYER_1"]},
+        ]
+        chats = [{"target": "all", "text": "Hello from the capital."}]
+        kept, dropped = results.filter_repeat_public_chat(snap, chats)
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(dropped, [])
+
 
 class PromptBoundAndSettleTests(unittest.TestCase):
     def test_journal_window_skips_milestones_for_civ6(self):

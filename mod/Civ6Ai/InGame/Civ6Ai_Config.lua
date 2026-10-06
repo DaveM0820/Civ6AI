@@ -46,7 +46,7 @@ function Civ6Ai_Config.Initialize()
     table.insert(managed, tostring(seat))
   end
   if Civ6Ai_Config._buildStamp ~= "" then
-    Civ6Ai_Util.Log("CIV6AI|build|" .. Civ6Ai_Config._buildStamp)
+    Civ6Ai_Util.Log("build|" .. Civ6Ai_Config._buildStamp)
   end
   Civ6Ai_Util.Log(
     "config|root=" .. tostring(Civ6Ai_Config._root)
