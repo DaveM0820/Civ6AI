@@ -188,6 +188,22 @@ class Civ6WirePromptTests(unittest.TestCase):
         rules = civ6_wire._civ6_chat_rules(snapshot)
         self.assertFalse(any(line.lstrip().startswith("EARLY TURN") for line in rules))
 
+    def test_chat_dm_examples_omit_non_majors(self):
+        from sidecar import civ6_wire
+        snapshot = {
+            "decision": {"turn": 2, "player_id": "PLAYER_1"},
+            "known_players": [
+                {"player_id": "PLAYER_0", "leader_name": "John Curtin", "leader_id": "LEADER_JOHN_CURTIN",
+                 "civilization_id": "CIVILIZATION_AUSTRALIA", "kind": "major", "relation": {"met": True}},
+                {"player_id": "PLAYER_61", "leader_name": "Free Cities", "leader_id": "LEADER_FREE_CITIES",
+                 "civilization_id": "CIVILIZATION_FREE_CITIES", "relation": {"met": True}},
+            ],
+        }
+        examples = civ6_wire.chat_dm_examples(snapshot)
+        self.assertIn("chat.John Curtin", examples)
+        self.assertNotIn("Free Cities", examples)
+
+
 
 if __name__ == "__main__":
     unittest.main()

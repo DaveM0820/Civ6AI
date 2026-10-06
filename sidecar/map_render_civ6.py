@@ -773,10 +773,13 @@ def _paste_ruins_marker(
     draw.ellipse((cx - r // 2, cy - r // 2, cx + r // 2, cy + r // 2), fill=outline)
 
 
-def collect_settle_markers(snapshot: dict[str, Any]) -> list[tuple[int, int, str]]:
-    """No ranked settle overlays (Civ5 policy): model reads the map itself."""
-    _ = snapshot
-    return []
+def collect_settle_markers(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Labeled legal settle tiles for the overlay (not part of the cached base layer)."""
+    if not vision_maps_enabled():
+        return []
+    from sidecar import civ6_command_wire as command_wire
+
+    return command_wire.labeled_settle_sites(snapshot)
 
 
 def _hex_coord_label_flags(vw: int, vh: int) -> tuple[bool, bool]:
@@ -787,6 +790,38 @@ def _hex_coord_label_flags(vw: int, vh: int) -> tuple[bool, bool]:
     if cells >= HEX_AXIS_ONLY_MIN_CELLS:
         return True, False
     return False, True
+
+
+def _draw_settle_site_marker(
+    draw: Any,
+    canvas: Any,
+    cx: float,
+    cy: float,
+    hex_radius: float,
+    tile_px: int,
+    site: dict[str, Any],
+) -> None:
+    corners = _flat_top_hex_corners(cx, cy, hex_radius)
+    _draw_hex_ring(draw, corners, SETTLE_LOOK_COLOR, max(2, tile_px // 8))
+    label = str(site.get("label") or "")
+    if label:
+        font = map_render._coord_label_font(max(8, tile_px // 3))
+        _draw_outlined_text(draw, (cx, cy - hex_radius * 0.12), label, font, fill="#fff4c0")
+    icon_r = max(2, int(hex_radius * 0.14))
+    if site.get("coastal"):
+        ox, oy = cx - hex_radius * 0.38, cy + hex_radius * 0.32
+        draw.polygon(
+            [(ox - icon_r, oy), (ox + icon_r, oy), (ox, oy + icon_r)],
+            fill=(64, 176, 220, 255),
+            outline=(20, 80, 120, 255),
+        )
+    if site.get("fresh_water"):
+        ox, oy = cx + hex_radius * 0.38, cy + hex_radius * 0.28
+        draw.ellipse(
+            (ox - icon_r, oy - icon_r, ox + icon_r, oy + icon_r),
+            fill=(80, 160, 255, 255),
+            outline=(20, 60, 140, 255),
+        )
 
 
 def _draw_hex_ring(
@@ -1165,10 +1200,8 @@ def render_civ6_map_png(
     ) if show_river_legend else ([], 0)
     settle_markers = collect_settle_markers(snapshot)
     settle_legend_rows: list[tuple[str, str]] = []
-    if any(role == "look" for _x, _y, role in settle_markers):
-        settle_legend_rows.append((SETTLE_LOOK_LABEL, SETTLE_LOOK_COLOR))
-    if any(role == "here" for _x, _y, role in settle_markers):
-        settle_legend_rows.append((SETTLE_HERE_LABEL, SETTLE_HERE_COLOR))
+    if settle_markers:
+        settle_legend_rows.append(("settle S1.. (coast / fresh)", SETTLE_LOOK_COLOR))
     settle_items, settle_strip_h = map_render._layout_legend_items(
         settle_legend_rows, map_w, legend_font, legend_swatch, legend_font_pil,
     ) if settle_legend_rows else ([], 0)
@@ -1373,15 +1406,12 @@ def render_civ6_map_png(
         _draw_civ6_nameplate(draw, *plate)
 
     settle_rings_drawn = 0
-    for wx, wy, role in settle_markers:
+    for site in settle_markers:
+        wx, wy = int(site["x"]), int(site["y"])
         if wx < x0 or wy < y0 or wx >= x0 + vw or wy >= y0 + vh:
             continue
         cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
-        corners = _flat_top_hex_corners(cx, cy, hex_radius)
-        if role == "look":
-            _draw_hex_ring(draw, corners, SETTLE_LOOK_COLOR, max(3, tile_px // 7))
-        else:
-            _draw_hex_ring(draw, corners, SETTLE_HERE_COLOR, max(2, tile_px // 10))
+        _draw_settle_site_marker(draw, canvas, cx, cy, hex_radius, tile_px, site)
         settle_rings_drawn += 1
 
     if rivers_trusted:
@@ -1499,6 +1529,7 @@ def render_civ6_map_png(
         "rendered_tiles": rendered_tiles,
         "river_edges_drawn": river_edges_drawn,
         "settle_rings_drawn": settle_rings_drawn,
+        "settle_labels": [str(site.get("label")) for site in settle_markers],
         "known_plot_tiles": len(plot_index),
         "hex_layout": "odd-r-flat-top",
         "show_axis_labels": show_axis,

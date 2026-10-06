@@ -198,6 +198,11 @@ def _build_approved_record(
     commands = pipeline.bind_approved_commands(private_copy, validated)
     commands, repeat_notes = civ6_apply_results.filter_repeat_failures(snapshot, commands)
     chats = validated.get("chat_messages") if isinstance(validated.get("chat_messages"), list) else []
+    raw_chats = normalized_response.get("chat_messages")
+    _, ineligible_raw = civ6_apply_results.filter_ineligible_chat_targets(
+        snapshot, raw_chats if isinstance(raw_chats, list) else []
+    )
+    chats, ineligible_notes = civ6_apply_results.filter_ineligible_chat_targets(snapshot, chats)
     chats, chat_notes = civ6_apply_results.filter_repeat_public_chat(snapshot, chats)
     validated = copy.deepcopy(validated)
     validated["chat_messages"] = chats
@@ -205,7 +210,7 @@ def _build_approved_record(
 
     commands = [civ6_command_wire.pack_apply_command(snapshot, item) for item in commands]
     unresolved = civ6_command_wire.take_unresolved()
-    dropped = list(repeat_notes) + list(chat_notes)
+    dropped = list(repeat_notes) + list(ineligible_raw) + list(ineligible_notes) + list(chat_notes)
     for token in unresolved:
         dropped.append(f"dropped: unresolved token {token}")
     civ6_apply_results.record_dropped(snapshot, dropped)

@@ -1489,11 +1489,15 @@ function Civ6Ai_Snapshot._BuildKnownPlayers(playerID)
   local out = {}
   for otherID = 0, 63 do
     if otherID ~= playerID and Players[otherID] ~= nil and Players[otherID]:IsAlive() then
-      if diplomacy.HasMet ~= nil and diplomacy:HasMet(otherID) then
+      -- Chat and rival keys are majors the seat has met. City-states, Free Cities
+      -- and Barbarians are not chat targets (they are not IsMajor).
+      if Civ6Ai_Snapshot._PlayerKind(otherID) == "major" and Civ6Ai_Snapshot._HasMet(playerID, otherID) then
         local other = Players[otherID]
         local facts = Civ6Ai_Snapshot._RelationFacts(playerID, otherID)
         table.insert(out, {
           player_id = Civ6Ai_Util.PlayerId(otherID),
+          kind = "major",
+          is_major = true,
           leader_id = Civ6Ai_Snapshot._LeaderId(otherID),
           leader_name = Civ6Ai_Snapshot._LeaderName(otherID),
           civilization_id = Civ6Ai_Snapshot._CivId(otherID),
@@ -2153,9 +2157,11 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   return Civ6Ai_Snapshot._UnitMoves(unit) > 0
 end
 
-Civ6Ai_Snapshot.SETTLE_RADIUS = 6
-Civ6Ai_Snapshot.SETTLE_SCAN_CAP = 40
-Civ6Ai_Snapshot.SETTLE_SITES_CAP = 6
+-- Hex rings around each settler (3–5 is what the map overlay draws; snapshot
+-- sends every legal revealed site in this radius, unranked).
+Civ6Ai_Snapshot.SETTLE_RADIUS = 5
+Civ6Ai_Snapshot.SETTLE_SCAN_CAP = 200
+Civ6Ai_Snapshot.SETTLE_SITES_CAP = 200
 Civ6Ai_Snapshot.COMMAND_RESULTS_CAP = 12
 Civ6Ai_Snapshot.BUILDER_OFFER_RADIUS = 3
 
@@ -2320,16 +2326,12 @@ function Civ6Ai_Snapshot._AddSettleFacts(unit)
     end
     return a.y < b.y
   end)
-  local capped = {}
-  for i = 1, math.min(#sites, Civ6Ai_Snapshot.SETTLE_SITES_CAP) do
-    capped[i] = sites[i]
-  end
   return {
     here_ok = hereOk == true,
     here_reason = hereReason,
     coastal = Civ6Ai_Snapshot._PlotIsCoastal(x, y),
     fresh_water = Civ6Ai_Snapshot._PlotFreshWater(herePlot),
-    sites = capped,
+    sites = sites,
   }
 end
 

@@ -578,6 +578,9 @@ function Civ6Ai_Chat._HasMet(otherID)
   if other.IsAlive ~= nil and not other:IsAlive() then
     return false
   end
+  if other.IsMajor ~= nil and other:IsMajor() ~= true then
+    return false
+  end
   if PlayerConfigurations ~= nil and PlayerConfigurations[otherID] ~= nil
       and PlayerConfigurations[otherID].GetCivilizationTypeName ~= nil then
     local civ = PlayerConfigurations[otherID]:GetCivilizationTypeName()
