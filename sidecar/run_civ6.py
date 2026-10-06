@@ -20,7 +20,7 @@ from sidecar import civ6_wire
 from sidecar import civ6_economy
 from sidecar import context_budget
 from sidecar import map_situational
-from sidecar.map_render_civ6 import render_civ6_map_for_model
+from sidecar.map_render_civ6 import render_civ6_map_for_model, vision_maps_enabled
 from sidecar.map_situational import prepare_civ6_situational_maps
 from sidecar import pipeline_v2 as pipeline
 from sidecar.pipeline_v2 import CircuitBreaker
@@ -283,6 +283,8 @@ def _prepare_map_image(
         archive_dir = civ6ai_root / "map_images" / session_id
         archive_path = archive_dir / f"{player_id}_turn_{turn:06d}_overview.png"
     should_attach = pipeline.map_image_attach_turn(snapshot) if attach is None else attach
+    if should_attach and not vision_maps_enabled():
+        should_attach = False
     memory = thought_memory if isinstance(thought_memory, dict) else {}
     memory = map_situational.resolve_tactical_viewport(memory, snapshot)
     map_viewport = memory.get("map_viewport")

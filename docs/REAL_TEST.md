@@ -184,14 +184,17 @@ next turn start:
   `Civ6Ai_Paths.lua`): the AI seats are snapshotted at P0's turn start, in
   parallel with P0's own decision (`seat_prepulse|...|mode=turn_start`). Same
   for_turn rule and barrier; faster, but the seats do not see P0's turn-N moves.
-- **Person playing the host seat (`--no-autotest`):** nothing triggers the
-  snapshot at the host's End Turn yet, so the AI seats keep the old timing:
-  snapshot at their own turn N start, answer queued for N+1, FINISH_SEAT after
-  the snapshot. Follow-up: gate the human End Turn (base
-  `Base/Assets/UI/ActionPanel.lua` `OnEndTurnClicked` / `DoEndTurn` call
-  `UI.RequestAction(ActionTypes.ACTION_ENDTURN)`; the mod already replaces
-  DiplomacyRibbon via ReplaceUIScript) so the host's End Turn first snapshots the
-  AI seats and waits for their answers.
+- **Person playing the host seat (`--no-autotest`):** End Turn is gated the same
+  way as the autotest barrier. `Civ6Ai_ActionPanel.lua` replaces the vanilla
+  ActionPanel (`OnEndTurnClicked` / `DoEndTurn`) and calls
+  `ExposedMembers.Civ6Ai.RequestHostEndTurn`, which snapshots AI seats
+  (`host_end`) and holds until their answers are in. The End Turn control shows
+  **Waiting for AI orders**. On timeout the remaining seats play on the native AI
+  and the turn is released (`bridge|host_end_turn_wait` /
+  `bridge|host_end_turn_release`). Runtime/session files stay under local
+  Documents `My Games/.../civ6ai`; the installed Lua is copied to every Mods
+  tree (including OneDrive if Civ6 loads that one). `BuildStamp` is written at
+  install; Lua logs `CIV6AI|build|<id>` and a mismatch is `build_mismatch`.
 - **No replays:** each entry carries session, player, turn, kind and an apply id.
   Lua applies an entry only for the matching session and player, only for the turn
   allowed above, and only once per apply id. The file stays on disk, so include()

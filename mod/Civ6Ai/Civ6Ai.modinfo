@@ -46,6 +46,7 @@
     <File>InGame/Civ6Ai_InGame.xml</File>
     <File>InGame/Civ6Ai_InGame.lua</File>
     <File>InGame/Civ6Ai_DiplomacyRibbon.lua</File>
+    <File>InGame/Civ6Ai_ActionPanel.lua</File>
   </Files>
   <Components>
     <UpdateDatabase id="Civ6Ai_Strategies">
@@ -95,6 +96,7 @@
         <File>InGame/Civ6Ai_Autotest.lua</File>
         <File>InGame/Civ6Ai_Chat.lua</File>
         <File>InGame/Civ6Ai_DiplomacyRibbon.lua</File>
+        <File>InGame/Civ6Ai_ActionPanel.lua</File>
       </Items>
     </ImportFiles>
     <UserInterface id="Civ6Ai_InGame_UI">
@@ -111,6 +113,13 @@
         <LoadOrder>500</LoadOrder>
         <LuaContext>DiplomacyRibbon</LuaContext>
         <LuaReplace>InGame/Civ6Ai_DiplomacyRibbon.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
+    <ReplaceUIScript id="Civ6Ai_ActionPanel">
+      <Properties>
+        <LoadOrder>500</LoadOrder>
+        <LuaContext>ActionPanel</LuaContext>
+        <LuaReplace>InGame/Civ6Ai_ActionPanel.lua</LuaReplace>
       </Properties>
     </ReplaceUIScript>
   </Components>
