@@ -1210,6 +1210,7 @@ def render_civ6_map_png(
 
     hasher = hashlib.sha1()
     hasher.update(f"{map_w}x{total_h}:{tile_px}:{int(flip_y)}:{int(prefer_civ5_sprites)}:{x0},{y0},{vw},{vh}".encode())
+    revealed_in_view = 0
     for vy in range(vh):
         wy = y0 + vy
         for vx in range(vw):
@@ -1219,6 +1220,8 @@ def render_civ6_map_png(
                 normalized, wx, wy, origin=map_render.visibility_grid_origin(known_map),
             )
             state = map_render._tile_terrain_state(plot, grid_char, has_visibility_grid)
+            if state == "revealed":
+                revealed_in_view += 1
             terrain = ""
             if isinstance(plot, dict):
                 terrain = str(plot.get("terrain") or plot.get("terrain_type") or "")
@@ -1318,6 +1321,8 @@ def render_civ6_map_png(
         _BASE_LAYER_CACHE[cache_key] = canvas.copy()
         if len(_BASE_LAYER_CACHE) > _BASE_LAYER_CACHE_LIMIT:
             _BASE_LAYER_CACHE.pop(next(iter(_BASE_LAYER_CACHE)))
+
+    rendered_tiles = revealed_in_view
 
     nameplates: list[tuple[Any, float, float, float, str, tuple[int, int, int]]] = []
     for (vx, vy), markers in sorted(tile_markers.items(), key=lambda item: (item[0][1], item[0][0])):
