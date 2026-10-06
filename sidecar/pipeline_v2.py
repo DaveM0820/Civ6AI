@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import base64
 import struct
 import time
@@ -2871,25 +2872,6 @@ def chat_target_rivals(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def looks_like_non_major_chat_target(value: Any) -> bool:
-    text = str(value or "").strip().lower()
-    if not text:
-        return False
-    for prefix in ("leadername.", "leader.", "player.", "civ.", "civilization.", "chat."):
-        if text.startswith(prefix):
-            text = text[len(prefix):]
-    compact = text.replace("_", " ").replace("-", " ")
-    if compact in _NON_MAJOR_CHAT_NAMES:
-        return True
-    if "barbarian" in compact:
-        return True
-    if compact in {"free cities", "free city"}:
-        return True
-    if compact.startswith("minor civ") or "city state" in compact:
-        return True
-    return False
-
-
 def first_self_intro_context(snapshot: dict[str, Any]) -> tuple[int | None, str]:
     """Turn of this seat's first public line, plus who it was aimed at (lobby / a leader)."""
     self_id = str(snapshot.get("decision", {}).get("player_id", ""))
@@ -5386,6 +5368,7 @@ def normalize_model_response(snapshot: dict[str, Any], response: dict[str, Any])
                 target_player_id = message.get("target_player_id")
                 resolved = _resolve_chat_recipient(target_player_id, snapshot)
                 if resolved is None:
+                    print(f"dropped chat {target_player_id}", file=sys.stderr)
                     continue
                 chat["target_player_id"] = resolved
             cleaned_chats.append(chat)

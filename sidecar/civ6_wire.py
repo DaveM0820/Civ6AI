@@ -680,7 +680,6 @@ def _civ6_chat_rules(snapshot: dict[str, Any]) -> list[str]:
     keep.append(
         f"Private DMs use a rival's name as the key ({chat_dm_examples(snapshot)}), "
         "or chat.player.PLAYER_n / chat.PLAYER_n. chat.all is public. "
-        "Address only major civilizations you have met — never Free Cities, Barbarians, or city-states. "
         f"Keep each line under {pipeline.CHAT_TEXT_MAX_LENGTH} characters."
     )
     return keep
