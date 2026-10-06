@@ -347,12 +347,25 @@ function Civ6Ai_Util._GetTickUpdateContext()
   return nil
 end
 
+-- Not re-entrant on purpose. A tick that schedules another tick (the host's
+-- apply tick ends its pulse, which schedules the seat-answer watchers and the
+-- end-turn barrier) used to pump the list again from inside the running pump;
+-- the outer pump then overwrote Civ6Ai_Util._ticks with its own survivors and
+-- the new ticks were silently lost (live: the barrier vanished, the host never
+-- ended turn 1). Ticks scheduled during a pump now wait for the next pump.
 function Civ6Ai_Util._PumpTicks()
+  if Civ6Ai_Util._inPump then
+    return #Civ6Ai_Util._ticks + (Civ6Ai_Util._pumpBatch or 0)
+  end
   if #Civ6Ai_Util._ticks == 0 then
     return 0
   end
+  local batch = Civ6Ai_Util._ticks
+  Civ6Ai_Util._ticks = {}
+  Civ6Ai_Util._inPump = true
+  Civ6Ai_Util._pumpBatch = #batch
   local remaining = {}
-  for _, tick in ipairs(Civ6Ai_Util._ticks) do
+  for _, tick in ipairs(batch) do
     local keep = false
     local ok, result = pcall(tick)
     if ok then
@@ -363,6 +376,11 @@ function Civ6Ai_Util._PumpTicks()
     if keep then
       table.insert(remaining, tick)
     end
+  end
+  Civ6Ai_Util._inPump = false
+  Civ6Ai_Util._pumpBatch = 0
+  for _, tick in ipairs(Civ6Ai_Util._ticks) do
+    table.insert(remaining, tick)
   end
   Civ6Ai_Util._ticks = remaining
   return #remaining
