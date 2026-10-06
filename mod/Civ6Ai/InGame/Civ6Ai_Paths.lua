@@ -13,4 +13,6 @@ Civ6Ai_Paths = {
   SessionId = "",
   -- 1 = host runs the scripted two-PC multiplayer test.
   MpTest = 0,
+  SeatSnapshotAt = "host_end",
+  BuildStamp = "",
 }

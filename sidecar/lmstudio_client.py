@@ -9,6 +9,7 @@ Lessons ported from Civ5 sidecar:
 """
 from __future__ import annotations
 
+import copy
 import json
 import threading
 import time
@@ -242,7 +243,26 @@ def call_lmstudio_chat(
                         raise pipeline.BoundaryError("oversized_output", "LM Studio body exceeds limit")
                     payload = json.loads(raw.decode("utf-8"))
                     text = _chat_message_text(payload)
-                    result = pipeline.parse_model_text(text)
+
+                    def _repair(repair_prompt: str) -> str:
+                        extra = copy.deepcopy(body)
+                        extra["messages"] = list(extra.get("messages") or []) + [
+                            {"role": "user", "content": repair_prompt},
+                        ]
+                        repair_request = urllib.request.Request(
+                            url,
+                            data=pipeline.canonical_json(extra).encode("utf-8"),
+                            method="POST",
+                            headers=request_headers(cfg),
+                        )
+                        with open_request(repair_request, timeout=cfg.timeout_seconds) as repair_response:
+                            repair_raw = repair_response.read(pipeline.MAX_RESPONSE_BYTES + 1)
+                            if len(repair_raw) > pipeline.MAX_RESPONSE_BYTES:
+                                raise pipeline.BoundaryError("oversized_output", "LM Studio body exceeds limit")
+                            repair_payload = json.loads(repair_raw.decode("utf-8"))
+                            return _chat_message_text(repair_payload)
+
+                    result, retried = pipeline.parse_model_text_with_repair(text, _repair)
                     usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
                     metadata = {
                         "status": getattr(response, "status", 200),
@@ -255,6 +275,7 @@ def call_lmstudio_chat(
                         "reasoning": body.get("reasoning"),
                         "endpoint": cfg.endpoint,
                         "attempts": attempt + 1,
+                        "parse_retry": retried,
                     }
                     return result, metadata
             except urllib.error.HTTPError as error:

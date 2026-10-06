@@ -13,21 +13,21 @@ function Civ6Ai_Util.CollapseAsciiWS(text)
   if type(text) ~= "string" or text == "" then
     return text
   end
-  return text:gsub(_ASCII_WS .. "+", " ")
+  return (text:gsub(_ASCII_WS .. "+", " "))
 end
 
 function Civ6Ai_Util.TrimAsciiWSLeft(text)
   if type(text) ~= "string" or text == "" then
     return text
   end
-  return text:gsub("^" .. _ASCII_WS .. "+", "")
+  return (text:gsub("^" .. _ASCII_WS .. "+", ""))
 end
 
 function Civ6Ai_Util.TrimAsciiWSRight(text)
   if type(text) ~= "string" or text == "" then
     return text
   end
-  return text:gsub(_ASCII_WS .. "+$", "")
+  return (text:gsub(_ASCII_WS .. "+$", ""))
 end
 
 function Civ6Ai_Util.EscapeJson(value)

@@ -11,12 +11,20 @@ import json
 import logging
 import os
 import re
+import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any
 
-from civ6_sidecar_jobs import _run_job, decision_suppresses_sidecar
+from civ6_sidecar_jobs import (
+    _pool,
+    _run_job,
+    claim_sidecar_slot,
+    decision_suppresses_sidecar,
+    parallel_seat_limit,
+    release_sidecar_slot,
+)
 
 log = logging.getLogger(__name__)
 
@@ -416,6 +424,29 @@ def latest_blob_per_seat(blobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [newest[k] for k in order]
 
 
+def _note_build_stamp(chunk: str, repo: Path) -> None:
+    match = re.search(r"CIV6AI\|build\|([^\s|]+)", chunk)
+    if not match:
+        return
+    seen = match.group(1).strip()
+    try:
+        from install_mod import compute_build_stamp
+    except Exception:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        try:
+            from install_mod import compute_build_stamp
+        except Exception:
+            return
+    expected = compute_build_stamp(repo)
+    if expected and seen and expected != seen:
+        _log_once(
+            f"build_mismatch|{seen}|{expected}",
+            "build_mismatch|installed=%s repo=%s — re-run scripts/install_mod.py",
+            seen,
+            expected,
+        )
+
+
 def process_lua_log_blobs(
     lua_log: Path | None,
     civ6ai_root: Path,
@@ -453,6 +484,9 @@ def process_lua_log_blobs(
     repo_path = Path(str(runtime.get("repo") or repo))
     active_session = str(runtime.get("session_id") or "").strip()
     record_apply_results(civ6ai_root, chunk, blobs, active_session)
+    _note_build_stamp(chunk, repo_path)
+    if "autotest|stall|" in chunk or "CIV6AI|autotest|stall|" in chunk:
+        log.warning("stall reported in Lua.log")
     blobs = latest_blob_per_seat(blobs)
     jobs: list[tuple[dict[str, Any], int, bool, Path]] = []
     for blob in blobs:
@@ -515,31 +549,37 @@ def process_lua_log_blobs(
 
     def _one(item: tuple[dict[str, Any], int, bool, Path]) -> bool:
         job, player, is_chat, player_dir = item
-        try:
-            _run_job(job, repo_path)
-        except Exception as error:
-            log.warning("Lua-log sidecar failed player=%s chat=%s: %s | %s", player, is_chat, error,
-                        getattr(error, "stderr", "") or "")
+        claim = claim_sidecar_slot(player_dir)
+        if claim is None:
             return False
-        with _PUBLISH_LOCK:
-            mirror_player_outputs(player_dir, log_path, session_id_of(player_dir), player)
+        try:
             try:
-                from civ6_pending_apply import publish_from_player_dir
-
-                time.sleep(1.0)
-                publish_from_player_dir(player_dir, chat=is_chat)
+                _run_job(job, repo_path)
             except Exception as error:
-                log.warning("Pending apply publish failed player=%s: %s", player, error)
-        return True
+                log.warning("Lua-log sidecar failed player=%s chat=%s: %s | %s", player, is_chat, error,
+                            getattr(error, "stderr", "") or "")
+                return False
+            with _PUBLISH_LOCK:
+                mirror_player_outputs(player_dir, log_path, session_id_of(player_dir), player)
+                try:
+                    from civ6_pending_apply import publish_from_player_dir
 
-    workers = max(1, min(len(jobs), _parallel_seats()))
+                    time.sleep(1.0)
+                    publish_from_player_dir(player_dir, chat=is_chat)
+                except Exception as error:
+                    log.warning("Pending apply publish failed player=%s: %s", player, error)
+            return True
+        finally:
+            release_sidecar_slot(claim)
+
+    workers = max(1, min(len(jobs), _parallel_seats(), parallel_seat_limit()))
     if workers <= 1:
         ran = sum(1 for item in jobs if _one(item))
     else:
-        from concurrent.futures import ThreadPoolExecutor
-
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            ran = sum(1 for ok in pool.map(_one, jobs) if ok)
+        # Persistent pool: a slow seat does not open/close a ThreadPoolExecutor
+        # around the whole batch (that serialized two-wave turns).
+        futures = [_pool(workers).submit(_one, item) for item in jobs]
+        ran = len(futures)
     return ran
 
 
@@ -551,6 +591,12 @@ def sync_session_files(civ6ai_root: Path, lua_log: Path | None = None) -> None:
 
 
 def _sync_session_trees(civ6ai_root: Path, lua_log: Path) -> None:
+    """One-way copy session -> Logs/civ6ai mirror, keeping mtime (copy2).
+
+    Two-way write_bytes ping-ponged files forever because mtime was not kept.
+    """
+    import shutil
+
     names = (
         "snapshot.json",
         "decision.json",
@@ -558,26 +604,22 @@ def _sync_session_trees(civ6ai_root: Path, lua_log: Path) -> None:
         "journal.jsonl",
         "sidecar_job.json",
     )
-    roots = [civ6ai_root, log_civ6ai_root(lua_log)]
-    for source_root in roots:
-        sessions = source_root / "sessions"
-        if not sessions.is_dir():
-            continue
-        for player_dir in sessions.glob("*/PLAYER_*"):
-            rel = player_dir.relative_to(source_root)
-            for dest_root in roots:
-                if dest_root == source_root:
-                    continue
-                dest_dir = dest_root / rel
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                for name in names:
-                    src = player_dir / name
-                    if not src.is_file():
-                        continue
-                    dst = dest_dir / name
-                    if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime and dst.stat().st_size > 0:
-                        continue
-                    dst.write_bytes(src.read_bytes())
+    dest_root = log_civ6ai_root(lua_log)
+    sessions = civ6ai_root / "sessions"
+    if not sessions.is_dir() or dest_root == civ6ai_root:
+        return
+    for player_dir in sessions.glob("*/PLAYER_*"):
+        rel = player_dir.relative_to(civ6ai_root)
+        dest_dir = dest_root / rel
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        for name in names:
+            src = player_dir / name
+            if not src.is_file():
+                continue
+            dst = dest_dir / name
+            if dst.is_file() and dst.stat().st_mtime >= src.stat().st_mtime and dst.stat().st_size == src.stat().st_size:
+                continue
+            shutil.copy2(src, dst)
 
 
 def process_pending_snapshots(

@@ -120,6 +120,47 @@ class Civ6LuaLogBridgeTests(unittest.TestCase):
             self.assertEqual([], published)
 
 
+    def test_parallel_jobs_overlap(self):
+        import os
+        import threading
+        import time
+        import civ6_lua_log_bridge as bridge
+
+        bridge._PROCESSED_BLOBS.clear()
+        started = []
+        entered = threading.Event()
+        release = threading.Event()
+
+        def fake_run(job, repo):
+            started.append(job)
+            entered.set()
+            release.wait(5)
+            player_dir = Path(job["args"][2])
+            (player_dir / "decision.json").write_text('{"commands":[]}\n', encoding="utf-8")
+            (player_dir / "apply_commands.json").write_text('{"commands":[]}\n', encoding="utf-8")
+
+        a = _frame('{"p":1}', session="sess", player=1, turn=3)
+        b = _frame('{"p":2}', session="sess", player=2, turn=3)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lua_log = root / "Lua.log"
+            civ6ai = root / "civ6ai"
+            civ6ai.mkdir()
+            lua_log.write_text(a + b, encoding="utf-8")
+            with mock.patch.dict(os.environ, {"CIV6AI_PARALLEL_SEATS": "2"}), \
+                    mock.patch.object(bridge, "_run_job", side_effect=fake_run), \
+                    mock.patch.object(bridge.time, "sleep"), \
+                    mock.patch("civ6_pending_apply.publish_from_player_dir", create=True):
+                started_count = process_lua_log_blobs(lua_log, civ6ai, ROOT, python="python")
+                self.assertEqual(2, started_count)
+                self.assertTrue(entered.wait(2))
+                deadline = time.time() + 2
+                while len(started) < 2 and time.time() < deadline:
+                    time.sleep(0.01)
+                self.assertEqual(2, len(started))
+                release.set()
+
+
 class BlobSplitAcrossReadsTests(unittest.TestCase):
     """A read ending mid-blob used to advance past the begin line and drop the snapshot."""
 

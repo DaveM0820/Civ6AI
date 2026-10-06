@@ -35,6 +35,8 @@ FOREIGN_RING = (255, 64, 64)
 # Feature sprite (forest/jungle/marsh) drawn over the base terrain at this scale,
 # so the terrain/hills underneath stays visible as a ring.
 FEATURE_OVERLAY_SCALE = 0.66
+_BASE_LAYER_CACHE: dict[str, Any] = {}
+_BASE_LAYER_CACHE_LIMIT = 8
 
 
 def civ6_map_north_up(snapshot: dict[str, Any] | None) -> bool:
@@ -1206,7 +1208,33 @@ def render_civ6_map_png(
     rendered_tiles = 0
     river_edges_drawn = 0
 
-    if show_axis:
+    hasher = hashlib.sha1()
+    hasher.update(f"{map_w}x{total_h}:{tile_px}:{int(flip_y)}:{int(prefer_civ5_sprites)}:{x0},{y0},{vw},{vh}".encode())
+    revealed_in_view = 0
+    for vy in range(vh):
+        wy = y0 + vy
+        for vx in range(vw):
+            wx = x0 + vx
+            plot = plot_index.get((wx, wy))
+            grid_char = map_render._grid_char_at(
+                normalized, wx, wy, origin=map_render.visibility_grid_origin(known_map),
+            )
+            state = map_render._tile_terrain_state(plot, grid_char, has_visibility_grid)
+            if state == "revealed":
+                revealed_in_view += 1
+            terrain = ""
+            if isinstance(plot, dict):
+                terrain = str(plot.get("terrain") or plot.get("terrain_type") or "")
+            hasher.update(f"{wx},{wy},{state},{terrain}".encode())
+    cache_key = hasher.hexdigest()
+    cached = _BASE_LAYER_CACHE.get(cache_key)
+    used_base_cache = False
+    if cached is not None and cached.size == canvas.size:
+        canvas.paste(cached)
+        draw = ImageDraw.Draw(canvas)
+        used_base_cache = True
+
+    if show_axis and not used_base_cache:
         y_even = y0 - (y0 & 1)
         y_odd = y_even + 1
         even_label_y = max(2, axis_font // 2 + 1)
@@ -1226,70 +1254,75 @@ def render_civ6_map_png(
             _, cy, _, _ = _odd_r_cell_center(x0, y0 + vy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
             draw.text((axis_gutter - 2, cy), str(wy), fill="#999999", font=axis_label_font, anchor="rm")
 
-    for vy in range(vh):
-        wy = y0 + vy
-        for vx in range(vw):
-            wx = x0 + vx
-            key = (wx, wy)
-            plot = plot_index.get(key)
-            grid_char = map_render._grid_char_at(
-                normalized, wx, wy, origin=map_render.visibility_grid_origin(known_map),
-            )
-            state = map_render._tile_terrain_state(plot, grid_char, has_visibility_grid)
-            territory_owner = owner_index.get(key) if state == "revealed" else None
-            fill = map_render._tile_fill(plot, grid_char, state, territory_owner)
-            cx, cy, lx, ly = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
-            corners = _flat_top_hex_corners(cx, cy, hex_radius)
-            if state == "revealed":
-                rendered_tiles += 1
-                used_sprite = _paste_strategic_hex(
-                    canvas, plot, cx, cy, hex_radius, prefer_civ5_sprites=prefer_civ5_sprites,
-                )
-                if not used_sprite:
-                    draw.polygon(corners, fill=map_render._rgb_tuple(fill), outline="#333333")
-                elif not prefer_civ5_sprites:
-                    draw.polygon(corners, outline="#333333")
-                if not prefer_civ5_sprites:
-                    if _plot_is_hills(plot):
-                        _draw_hills_glyph(draw, cx, cy, hex_radius)
-                    if not rivers_trusted and isinstance(plot, dict) and plot.get("river_edges"):
-                        _draw_river_tile_mark(draw, cx, cy, hex_radius)
-                _paste_resource_icon(canvas, plot, cx, cy, hex_radius, tile_px)
-                _paste_ruins_marker(canvas, plot, cx, cy, hex_radius)
-                if territory_owner is not None:
-                    owner_color = map_render._player_color(territory_owner)
-                    border_width = max(2, tile_px // 5) if prefer_civ5_sprites else max(2, tile_px // 7)
-                    for nx, ny, edge in _hex_neighbors_odd_r(wx, wy):
-                        neighbor_owner = owner_index.get((nx, ny))
-                        if neighbor_owner != territory_owner:
-                            inset = 0.0 if prefer_civ5_sprites else 0.15
-                            if flip_y:
-                                ncx, ncy, _, _ = _odd_r_cell_center(
-                                    nx, ny, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
-                                )
-                                edge = _edge_index_toward_neighbor(cx, cy, ncx, ncy, corners)
-                            seg = _hex_edge_segment(corners, edge, inset)
-                            draw.line(
-                                seg,
-                                fill=map_render._rgb_tuple(owner_color),
-                                width=border_width,
-                            )
-            else:
-                draw.polygon(corners, fill=map_render._rgb_tuple(fill))
-
-    if show_tile_coords:
+    if not used_base_cache:
         for vy in range(vh):
             wy = y0 + vy
             for vx in range(vw):
                 wx = x0 + vx
-                cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
-                coord_font = map_render._coord_font_size(tile_px, wx, wy)
-                _draw_outlined_text(
-                    draw,
-                    (cx, cy + hex_radius * 0.52),
-                    f"{wx},{wy}",
-                    map_render._coord_label_font(coord_font),
+                key = (wx, wy)
+                plot = plot_index.get(key)
+                grid_char = map_render._grid_char_at(
+                    normalized, wx, wy, origin=map_render.visibility_grid_origin(known_map),
                 )
+                state = map_render._tile_terrain_state(plot, grid_char, has_visibility_grid)
+                territory_owner = owner_index.get(key) if state == "revealed" else None
+                fill = map_render._tile_fill(plot, grid_char, state, territory_owner)
+                cx, cy, lx, ly = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
+                corners = _flat_top_hex_corners(cx, cy, hex_radius)
+                if state == "revealed":
+                    rendered_tiles += 1
+                    used_sprite = _paste_strategic_hex(
+                        canvas, plot, cx, cy, hex_radius, prefer_civ5_sprites=prefer_civ5_sprites,
+                    )
+                    if not used_sprite:
+                        draw.polygon(corners, fill=map_render._rgb_tuple(fill), outline="#333333")
+                    elif not prefer_civ5_sprites:
+                        draw.polygon(corners, outline="#333333")
+                    if not prefer_civ5_sprites:
+                        if _plot_is_hills(plot):
+                            _draw_hills_glyph(draw, cx, cy, hex_radius)
+                        if not rivers_trusted and isinstance(plot, dict) and plot.get("river_edges"):
+                            _draw_river_tile_mark(draw, cx, cy, hex_radius)
+                    _paste_resource_icon(canvas, plot, cx, cy, hex_radius, tile_px)
+                    _paste_ruins_marker(canvas, plot, cx, cy, hex_radius)
+                    if territory_owner is not None:
+                        owner_color = map_render._player_color(territory_owner)
+                        border_width = max(2, tile_px // 5) if prefer_civ5_sprites else max(2, tile_px // 7)
+                        for nx, ny, edge in _hex_neighbors_odd_r(wx, wy):
+                            neighbor_owner = owner_index.get((nx, ny))
+                            if neighbor_owner != territory_owner:
+                                inset = 0.0 if prefer_civ5_sprites else 0.15
+                                if flip_y:
+                                    ncx, ncy, _, _ = _odd_r_cell_center(
+                                        nx, ny, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
+                                    )
+                                    edge = _edge_index_toward_neighbor(cx, cy, ncx, ncy, corners)
+                                seg = _hex_edge_segment(corners, edge, inset)
+                                draw.line(
+                                    seg,
+                                    fill=map_render._rgb_tuple(owner_color),
+                                    width=border_width,
+                                )
+                else:
+                    draw.polygon(corners, fill=map_render._rgb_tuple(fill))
+        if show_tile_coords:
+            for vy in range(vh):
+                wy = y0 + vy
+                for vx in range(vw):
+                    wx = x0 + vx
+                    cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
+                    coord_font = map_render._coord_font_size(tile_px, wx, wy)
+                    _draw_outlined_text(
+                        draw,
+                        (cx, cy + hex_radius * 0.52),
+                        f"{wx},{wy}",
+                        map_render._coord_label_font(coord_font),
+                    )
+        _BASE_LAYER_CACHE[cache_key] = canvas.copy()
+        if len(_BASE_LAYER_CACHE) > _BASE_LAYER_CACHE_LIMIT:
+            _BASE_LAYER_CACHE.pop(next(iter(_BASE_LAYER_CACHE)))
+
+    rendered_tiles = revealed_in_view
 
     nameplates: list[tuple[Any, float, float, float, str, tuple[int, int, int]]] = []
     for (vx, vy), markers in sorted(tile_markers.items(), key=lambda item: (item[0][1], item[0][0])):
@@ -1480,3 +1513,13 @@ def render_civ6_map_png(
 def render_civ6_map_for_model(snapshot: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
     """Civ VI always uses flat-top odd-r hex minimap (square Civ IV renderer is wrong for hex grids)."""
     return render_civ6_map_png(snapshot, path)
+
+
+def vision_maps_enabled() -> bool:
+    """Qwen-flash default is text-only; skip rendering when vision is off (F9 / Q7)."""
+    try:
+        from sidecar.civ6_config import load_local_config
+
+        return bool(load_local_config().vision)
+    except Exception:
+        return True

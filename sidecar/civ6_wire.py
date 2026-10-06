@@ -46,6 +46,20 @@ def native_fallback_policy(snapshot: dict[str, Any] | None = None) -> str:
     return CIV6_NATIVE_FALLBACK_POLICY
 
 
+def chat_dm_examples(snapshot: dict[str, Any] | None) -> str:
+    names: list[str] = []
+    if isinstance(snapshot, dict):
+        for rival in snapshot.get("known_players") or []:
+            if not isinstance(rival, dict):
+                continue
+            name = pipeline._rival_leader_name(rival)
+            if name and name not in names:
+                names.append(name)
+    if names:
+        return ", ".join(f"chat.{name}" for name in names[:4])
+    return "chat.<rival leader name>"
+
+
 CIV6_EMPIRE_WIRE: dict[str, tuple[str, str]] = {
     "set_research_tech": ("legal.research.tech", "tech_id"),
     "set_research_civic": ("legal.research.civic", "civic_id"),
@@ -344,6 +358,7 @@ def _append_civ6_unit_situation_wire(lines: list[str], snapshot: dict[str, Any])
                 lines.append(pipeline._wire_line(f"{prefix}.moves", current))
         if unit.get("needs_orders"):
             lines.append(pipeline._wire_line(f"{prefix}.needsOrders", True))
+    lines.extend(command_wire.sitrep_offer_lines(snapshot))
 
 
 def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any]) -> None:
@@ -441,7 +456,8 @@ def _append_civ6_rival_wire(lines: list[str], rival: dict[str, Any]) -> None:
 # Orders use readable tokens from civ6_command_wire so prompt and parser match.
 # ---------------------------------------------------------------------------
 
-_CIV6_TOKEN_ORDER = ("MoveTo", "AttackTo", "FoundCity", "Automate", "Promote", "Upgrade",
+_CIV6_TOKEN_ORDER = ("MoveTo", "Settle", "Improve", "AttackTo", "FoundCity", "TradeRoute", "Automate",
+                     "Activate", "Promote", "Upgrade",
                      "Fortify", "Alert", "Heal", "Sleep", "Skip", "Delete")
 
 
@@ -657,6 +673,11 @@ def _civ6_chat_rules(snapshot: dict[str, Any]) -> list[str]:
         if line not in keep:
             keep.append(line)
     keep.append(coaching.CIV6_CHAT_VARIETY_COACHING)
+    keep.append(
+        f"Private DMs use a rival's name as the key ({chat_dm_examples(snapshot)}), "
+        "or chat.player.PLAYER_n / chat.PLAYER_n. chat.all is public. "
+        f"Keep each line under {pipeline.CHAT_TEXT_MAX_LENGTH} characters."
+    )
     return keep
 
 
@@ -690,7 +711,8 @@ def build_civ6_role_instruction(snapshot: dict[str, Any]) -> str:
         "alliances (or rivalries) aligned with your path to victory; every player is trying to win. "
         "Play to win using Civilization VI mechanics (districts, adjacency, amenities, housing, loyalty, "
         "civics and policy cards, one military unit per tile); personality colors prose, not the build queue. "
-        "Speak in the game: send chat.all and chat.LeaderName whenever it fits (opening, first contact, deals, "
+        "Speak in the game: send chat.all and "
+        f"{chat_dm_examples(snapshot)} whenever it fits (opening, first contact, deals, "
         "war, taunts, replies) — private DMs are expected on first meetings, war declarations, major deals, "
         f"and inbox replies. Use only facts from the prompt.{map_clause}"
         "After your response the host applies only your explicit orders; "
@@ -842,6 +864,8 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
                         lines.append(pipeline._wire_line(f"{prefix}.moves", movement["current"]))
                     if isinstance(movement.get("maximum"), int) and movement["maximum"] > 0:
                         lines.append(pipeline._wire_line(f"{prefix}.maxMovement", movement["maximum"]))
+                if "SETTLER" in str(unit.get("unit_type_id") or ""):
+                    lines.extend(coaching.settler_fact_lines(prefix, unit, context))
                 lines.append("")
             if lines[-1] == "":
                 lines.pop()
@@ -864,24 +888,27 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
            and isinstance(r.get("relation"), dict) and r["relation"].get("met")]
     lines = [
         "Model what rivals want and fear — trade, isolation, and alliances are tools, not filler.",
-        "HAGGLE IN DMs: highly encourage chat.LeaderName BEFORE any formal trade or alliance, and keep DMing "
+        "HAGGLE IN DMs: highly encourage "
+        f"{chat_dm_examples(context)} BEFORE any formal trade or alliance, and keep DMing "
         "WHILE a deal is pending (counter-offers, sweeteners, threats, flattery). Chat is where you bargain."
         + (" legal.diplomacy.Leader / legal.peace.Leader are the war and peace orders." if deal_rows else
            " There are no war or peace orders for you this turn, so agreements live in chat and in "
            "what you actually do on the map (remember them)."),
-        "Use private DMs (chat.LeaderName) on relationship milestones: first meeting, declaring war, deal talks, "
+        f"Use private DMs ({chat_dm_examples(context)}) on relationship milestones: first meeting, declaring war, deal talks, "
         "ultimatums, and replies to fresh inbox messages.",
         "Never reveal military plans, weak cities, or hidden ambitions in chat.all (those go in private DMs).",
         "Be original and occasionally funny — in-character wit beats generic filler.",
         "chat.all is public. Send it when you have something original to say (opening, taunt, deal, war). "
-        "If many turns pass with no chat.all, send one. Prefer chat.LeaderName for targeted talk.",
+        f"If many turns pass with no chat.all, send one. Prefer {chat_dm_examples(context)} for targeted talk.",
     ]
     if met:
         names = ", ".join(pipeline._rival_leader_name(r) for r in met)
-        lines.append(f"You have met {names} — send chat.LeaderName on first contact, war, and before/during deal talks.")
+        lines.append(
+            f"You have met {names} — send {chat_dm_examples(context)} on first contact, war, and before/during deal talks."
+        )
     lines.append(
         "In thought.strategy, name which rivals you are courting, isolating, or appeasing and why."
-        + (" Answer pending deals in OPTIONAL COMMANDS the same turn and send chat.LeaderName explaining your "
+        + (f" Answer pending deals in OPTIONAL COMMANDS the same turn and send {chat_dm_examples(context)} explaining your "
            "accept, reject, or counter." if deal_rows else "")
     )
     history = context.get("history", {})
@@ -899,7 +926,7 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
     for index, message in enumerate(pipeline._recent_history_events(inbox, pipeline.chat_history_max_messages())):
         if not isinstance(message, dict):
             continue
-        text = str(message.get("text", ""))[:240]
+        text = pipeline.trim_chat_text(str(message.get("text", "")))
         if text:
             from_id = str(message.get("from_player_id", ""))
             sender = pipeline._player_chat_name(context, from_id) if from_id else "Rival"
@@ -1255,18 +1282,28 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
         if isinstance(identity, str) and identity.strip():
             lines.append(pipeline._wire_line("identity", identity.strip()))
     history = context.get("history", {})
+    budget = pipeline.JOURNAL_WIRE_CHAR_BUDGET
+    used = 0
     if isinstance(history, dict):
         memory = history.get("memory_summary")
         if isinstance(memory, str) and memory.strip():
             lines.append(pipeline._wire_line("history.memory", memory.strip()[:400]))
-        for entry in history.get("thought_memory", []):
-            if not isinstance(entry, dict):
-                continue
+        thought_rows = [entry for entry in history.get("thought_memory", []) if isinstance(entry, dict)]
+        thought_rows = list(reversed(thought_rows))
+        kept_thoughts: list[str] = []
+        for entry in thought_rows:
             turn = int(entry.get("turn", 0))
+            chunk: list[str] = []
             for field in ("situation", "strategy"):
                 text = entry.get(field)
                 if isinstance(text, str) and text.strip():
-                    lines.append(pipeline._wire_line(f"T{turn}.{field}", pipeline._clip_thought(text)))
+                    chunk.append(pipeline._wire_line(f"T{turn}.{field}", pipeline._clip_thought(text)))
+            extra = sum(len(row) + 1 for row in chunk)
+            if used + extra > budget and kept_thoughts:
+                break
+            kept_thoughts.extend(chunk)
+            used += extra
+        lines.extend(reversed(kept_thoughts))
         for note in history.get("remembered", []):
             if not isinstance(note, dict) or not str(note.get("text", "")).strip():
                 continue
@@ -1287,6 +1324,9 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
         f"- {coaching.CIV6_EXPANSION_COACHING}",
         "- Before you finish: issue one command for each entry under REQUIRED COMMANDS.",
     ]
+    capital = coaching.capital_founding_coaching(context)
+    if capital:
+        lines.append(f"- {capital}")
     if coaching.settler_present(context):
         lines.append(
             "- Settlers are priority targets: when you have one, keep a military escort or nearby defender every "
@@ -1351,7 +1391,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "(one option per unit from its row; MoveTo(x,y) = any destination tile, the unit walks toward it).",
         "cityName.production = UNIT_* | BUILDING_* | PROJECT_* from that city's listed options (only when "
         "currentProduction is NONE, or to switch on purpose).",
-        "legal.research.tech, legal.research.civic, chat.all, chat.LeaderName — see OPTIONAL COMMANDS.",
+        f"legal.research.tech, legal.research.civic, chat.all, {chat_dm_examples(snapshot)} — see OPTIONAL COMMANDS.",
         "Do not use Skip when another option is listed.",
         "",
         "GOOD JSON (entire reply — row numbers on keys; host strips the prefix):",
@@ -1374,7 +1414,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "- Optional commands (chat, research, civics, remember) are encouraged when useful; chat.all only when you have an original line.",
     ]
     if any(isinstance(c, dict) and c.get("kind") == "found_city" for c in snapshot.get("legal_commands", [])):
-        resp.append("- FoundCity is available: prefer founding this turn on a decent tile (fresh water/coast, not "
+        resp.append("- FoundCity is optional: prefer founding this turn on a decent tile (fresh water/coast, not "
                     "cramped). Walking up to ~3 tiles for a clearly better site is fine; long treks are not.")
         if not snapshot.get("your_cities"):
             # Seats 1-4 read the line above as licence for 25-tile treks toward a far
@@ -1402,7 +1442,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     from sidecar import civ6_diplomacy as diplomacy_wire
 
     optional_keys.extend(diplomacy_wire.optional_key_hints(snapshot))
-    optional_keys.append(("chat", "chat.all | chat.LeaderName"))
+    optional_keys.append(("chat", f"chat.all | {chat_dm_examples(snapshot)}"))
     optional_keys.append(("remember", "text (duration N turns | forever)"))
     from sidecar import civ6_priorities
 
@@ -1433,7 +1473,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     opt = [
         "=== OPTIONAL COMMANDS ===",
         "OPTIONAL COMMANDS are encouraged every turn — not leftovers. Required rows are only the minimum.",
-        "Issue as many optional commands as you want this turn: chat.all, chat.LeaderName, research, civics, remember, "
+        f"Issue as many optional commands as you want this turn: chat.all, {chat_dm_examples(snapshot)}, research, civics, remember, "
         "extra unit/city orders, and any other listed shape.",
         "There is no cap. Use numbered JSON keys that continue after the last required row.",
         "Use only shapes listed here or on unit/city rows.",

@@ -40,9 +40,13 @@ function Civ6Ai_Config.Initialize()
   Civ6Ai_Config._enableSinglePlayerChat = setting("EnableSinglePlayerChat") == nil or flag("EnableSinglePlayerChat")
   Civ6Ai_Config._mpTest = flag("MpTest")
   Civ6Ai_Config._seatSnapshotAt = Civ6Ai_Config._ParseSeatSnapshotAt(setting("SeatSnapshotAt"))
+  Civ6Ai_Config._buildStamp = tostring(setting("BuildStamp") or "")
   local managed = {}
   for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
     table.insert(managed, tostring(seat))
+  end
+  if Civ6Ai_Config._buildStamp ~= "" then
+    Civ6Ai_Util.Log("build|" .. Civ6Ai_Config._buildStamp)
   end
   Civ6Ai_Util.Log(
     "config|root=" .. tostring(Civ6Ai_Config._root)
@@ -55,6 +59,7 @@ function Civ6Ai_Config.Initialize()
       .. "|sp_chat=" .. tostring(Civ6Ai_Config.EnableSinglePlayerChat())
       .. "|mp_test=" .. tostring(Civ6Ai_Config.IsMpTest())
       .. "|seat_snapshot_at=" .. tostring(Civ6Ai_Config.SeatSnapshotAt())
+      .. "|build=" .. tostring(Civ6Ai_Config._buildStamp)
       .. "|session=" .. tostring(Civ6Ai_Config.SessionId())
   )
 end
@@ -198,6 +203,19 @@ end
 
 function Civ6Ai_Config.SidecarTimeout()
   return tonumber(setting("SidecarTimeoutSeconds")) or 180
+end
+
+function Civ6Ai_Config.BuildStamp()
+  return Civ6Ai_Config._buildStamp or tostring(setting("BuildStamp") or "")
+end
+
+-- Seconds a single seat's sidecar may take before native AI plays it (F7).
+function Civ6Ai_Config.SeatTurnCapSeconds()
+  local cap = tonumber(setting("SeatTurnCapSeconds"))
+  if cap ~= nil and cap > 0 then
+    return cap
+  end
+  return Civ6Ai_Config.SidecarTimeout()
 end
 
 function Civ6Ai_Config.PythonExe()
