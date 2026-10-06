@@ -1117,7 +1117,9 @@ def _merge_known_players(runtime: list[Any], template: list[Any]) -> list[dict[s
         base = copy.deepcopy(template_by_id.get(player_id, default_tpl))
         _deep_merge_from_raw(base, item)
         merged.append(base)
-    return merged if merged else copy.deepcopy(template)
+    # No live players (nobody met yet) stays empty: the golden template's
+    # Cleopatra/Egypt must never reach a live prompt or the met-majors chat gate.
+    return merged
 
 
 def _optional_int(value: Any) -> int | None:
@@ -1232,7 +1234,7 @@ def _fill_civ6_schema_defaults(shell: dict[str, Any], template: dict[str, Any]) 
     if "your_units" not in shell:
         shell["your_units"] = []
     if "known_players" not in shell:
-        shell["known_players"] = copy.deepcopy(template.get("known_players", []))
+        shell["known_players"] = []
     if "known_map" not in shell:
         shell["known_map"] = copy.deepcopy(template.get("known_map", {}))
     if not isinstance(shell.get("diplomacy"), dict):

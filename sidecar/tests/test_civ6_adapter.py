@@ -104,6 +104,28 @@ class Civ6AdapterTests(unittest.TestCase):
         self.assertTrue(upgraded["known_map"]["plots"][0]["fresh_water"])
         self.assertEqual(10, upgraded["game"]["map_width"])
 
+    def test_upgrade_runtime_does_not_inject_golden_known_players(self):
+        for players in ([], {}, None):
+            raw = {
+                "schema_version": "civ6ai-input/1",
+                "decision": {"turn": 1, "player_id": "PLAYER_0", "phase": "strategic_decision", "reason": "turn_start"},
+                "your_units": [],
+                "your_cities": [],
+                "legal_commands": [],
+                "civ6": {
+                    "session_id": "live-test",
+                    "map": {"width": 44, "height": 26, "hex_layout": "odd-r", "coords_note": "grid"},
+                },
+                "personality": {"leader_name": "Montezuma"},
+            }
+            raw["your_units"] = [civ6_adapter._empty_unit("UNIT_65536", "UNIT_SETTLER", 10, 10, 2, True)]
+            if players is not None:
+                raw["known_players"] = players
+            upgraded = civ6_adapter.upgrade_runtime_snapshot(raw)
+            self.assertEqual([], upgraded["known_players"])
+            self.assertNotIn("Cleopatra", json.dumps(upgraded["known_players"]))
+            civ6_adapter.validate_civ6_snapshot(upgraded)
+
     def test_upgrade_runtime_preserves_live_units_not_golden_cities(self):
         raw = {
             "schema_version": "civ6ai-input/1",
