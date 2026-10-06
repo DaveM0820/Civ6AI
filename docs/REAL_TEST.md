@@ -138,33 +138,60 @@ synced order channel. Humans are never managed seats in a network game.
 
 Only after SP works: try LAN.
 
-## Seat timing (single player, model-driven AI seats)
+## Seat timing (model-driven AI seats)
 
 Civ6 single player runs seats one after another: P0 (the local seat) plays turn N,
-ends it, then AI seats 1..4 run their turn N, then P0 turn N+1 starts. The mod
-snapshots every managed seat at its own activation, but the host (lua log bridge
--> sidecar -> LM Studio) answers seat by seat, so an AI seat's answer for turn N
-arrives while P0 is on turn N+1. The rule:
+ends it, then AI seats 1..4 run their turn N one at a time, then city-states, the
+roll, and P0 turn N+1. Network MP runs every seat's turn N at once.
+
+**Same-turn timing (default in autotest, `seat_snapshot_at = host_end`).** The AI
+seats decide on the state after the host's turn-N moves and play at their own
+next turn start:
 
 - **Local seat (P0):** the snapshot, the answer and the apply all happen inside
   P0's turn N (PendingApply entry turn must equal the current game turn). Orders use
   the UI operations path.
-- **AI seats (1..4):** snapshot at the turn-N start, after the seat's queued
-  orders ran (the seat does not wait there, `bridge|seat_async`). The answer is
-  published as a PendingApply entry `"<player>:turn"` with `turn = N`; the bridge
-  sends it as soon as it lands (`bridge|seat_decision_sent|...|snapshot_turn=N`)
-  as one batch on the synced order channel for turn N+1. Every PC keeps it as the
-  seat's order queue (`orders|queued|player=P|for_turn=N+1`) and plays it at the
-  seat's turn N+1 start with full movement, with retry passes
-  (`orders|queue_apply`), then ends the turn of the units the model left in place
-  (builders, traders and religious units stay with the game's AI). Only then is
-  the turn N+1 snapshot taken. Commands without a gameplay route (city production,
-  policies, governors) fail one by one with a plain reason.
-- **Barrier (autotest):** before P0 ends turn N+1, autotest waits until every AI
+- **AI seats (1..4):** when P0's own orders for turn N are applied
+  (`Civ6Ai_Autotest.AfterPulse`, before the barrier), every managed AI seat is
+  snapshotted at once (`bridge|seat_prepulse|player=K|turn=N|mode=host_end`, then
+  `bridge|pulse|player=K|prepulse=1|turn=N`) and the host runs their sidecars in
+  parallel (`parallel_seats`). The seat is not active, so its pulse does not end
+  its turn (`bridge|seat_end_deferred|player=K|turn=N`). The answer is sent as soon
+  as it lands (`bridge|seat_decision_sent|player=K|snapshot_turn=N|for_turn=...`)
+  as one batch on the synced order channel for the seat's **next turn start**:
+  single player `for_turn=N` (its turn N has not started yet), network MP
+  `for_turn=N+1` (`Civ6Ai_Bridge.SeatForTurn`). Every PC keeps it as the seat's
+  order queue (`orders|queued|player=K|for_turn=...`). At the seat's turn start
+  the gameplay side plays it with full movement, with retry passes
+  (`orders|queue_apply|player=K|turn=N`, `orders|queue_units|...` lists the
+  seat's model-commanded units and their moves as the queue starts), ends the
+  turn of the units the model left in place (builders, traders and religious
+  units stay with the game's AI), and only then does the interface end the seat's
+  turn (`bridge|seat_end_after_queue|player=K|turn=N|prepulsed=...|answer=...`;
+  autotest SP requests ENDTURN for the seat as before). The seat's own turn-start
+  hooks no longer snapshot it.
+- **No answer:** a seat whose answer timed out has no queue; the game's AI plays
+  it and its turn still ends (`seat_end_after_queue|...|answer=missing`). An
+  answer that lands after the seat's turn already started is queued for its
+  following turn (`bridge|seat_answer_late`).
+- **Barrier (autotest):** before P0 ends turn N, autotest waits until every AI
   seat's turn-N answer has been sent or given up on (`autotest|seat_barrier_wait`
-  ... `seat_barrier_done`), bounded by sidecar timeout x (pending seats + 1). The
-  host's AI chat panel says the same thing to a human player ("All AI orders are
-  in"). A seat with no orders when its turn starts is played by the game's AI.
+  ... `seat_barrier_done`; `Civ6Ai_Bridge.HostWaitSnapshotTurn` is the current
+  turn), bounded by sidecar timeout x (pending seats + 1). Per-turn wall time is
+  P0's decision plus the slowest AI seat's decision.
+- **`seat_snapshot_at = turn_start`** (`python scripts\install_mod.py
+  --seat-snapshot-at turn_start`, written as `SeatSnapshotAt` in the installed
+  `Civ6Ai_Paths.lua`): the AI seats are snapshotted at P0's turn start, in
+  parallel with P0's own decision (`seat_prepulse|...|mode=turn_start`). Same
+  for_turn rule and barrier; faster, but the seats do not see P0's turn-N moves.
+- **Person playing the host seat (`--no-autotest`):** nothing triggers the
+  snapshot at the host's End Turn yet, so the AI seats keep the old timing:
+  snapshot at their own turn N start, answer queued for N+1, FINISH_SEAT after
+  the snapshot. Follow-up: gate the human End Turn (base
+  `Base/Assets/UI/ActionPanel.lua` `OnEndTurnClicked` / `DoEndTurn` call
+  `UI.RequestAction(ActionTypes.ACTION_ENDTURN)`; the mod already replaces
+  DiplomacyRibbon via ReplaceUIScript) so the host's End Turn first snapshots the
+  AI seats and waits for their answers.
 - **No replays:** each entry carries session, player, turn, kind and an apply id.
   Lua applies an entry only for the matching session and player, only for the turn
   allowed above, and only once per apply id. The file stays on disk, so include()
@@ -176,7 +203,7 @@ arrives while P0 is on turn N+1. The rule:
   the end. Start it **before** starting the new game. Use `--keep-session` only
   to restart helpers for the game already running.
 
-**Planning with full movement.** Because an AI seat's orders play at its next turn start, its snapshot reports every unit's full movement (`UnitMovesForPlayer(..., planning)`), and `legal_commands` are checked against full movement too. Untested: whether the game's AI can still move a seat's units between `PlayerTurnStartComplete` and the queue running.
+**Planning with full movement.** Because an AI seat's orders play at its next turn start (and under same-turn timing the seat's units have 0 moves while the host plays), its snapshot reports every unit's full movement (`UnitMovesForPlayer(..., planning)`), and `legal_commands` are checked against full movement too. `orders|queue_units|...|below_full=` shows whether any model-commanded unit had less than full movement when its queue started (the game's AI moving it first).
 
 **Turn timer must be off.** In Advanced Setup set the MP_helper "Smart-Timer" option to off/None. With "Smart-Timer: Classic" the game ends the local seat's turn after ~60 s regardless of the model, so answers (1-2 min per seat) arrive stale (`pending_apply_stale_turn`, `inbox_wait_abandoned`). `start_live --keep-session` no longer clears queued PendingApply answers, and Enter nudges are only sent while the local seat's turn is still active.
 

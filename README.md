@@ -50,8 +50,11 @@ See `docs/GOALS.md` (M0 SP → M1 same mod → M2 move sync → M3 LAN soak → 
 
 Every model order for an AI seat goes out as a synced player operation and runs
 on every PC (`Civ6Ai_OrderChannel.lua` -> `Gameplay/Civ6Ai_Orders.lua`). A seat's
-decision for its turn-N snapshot is played at the start of its turn N+1 with full
-movement; the host's AI chat panel says when every AI seat's orders are in. The
+decision is played at its next turn start with full movement. In autotest the AI
+seats are snapshotted during the host's turn N (after the host's orders,
+`seat_snapshot_at = host_end`), so in single player they play turn N itself (see
+`docs/REAL_TEST.md` "Seat timing"); the host's AI chat panel says when every AI
+seat's orders are in. The
 network-game path has **not been verified on two PCs yet**.
 
 LAN probe: `docs/civ6_lan_probe.md`. Pass = no new OOS, identical unit plots,
