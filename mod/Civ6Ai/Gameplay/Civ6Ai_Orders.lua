@@ -1020,7 +1020,8 @@ function Civ6Ai_Orders._Deliver(sender, batch)
   local why = Civ6Ai_Orders._Authorize(sender, owner)
   if why == nil and (t == nil or t < turn or t > turn + 1) then
     why = "stale_turn:" .. tostring(t)
-  elseif why == nil and started and call(Players[owner], "IsTurnActive") ~= true then
+  elseif why == nil and started and t ~= turn
+      and call(Players[owner], "IsTurnActive") ~= true then
     why = "seat_turn_over:" .. tostring(t)
   end
   if why ~= nil then

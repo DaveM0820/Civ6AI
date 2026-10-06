@@ -709,17 +709,7 @@ function Civ6Ai_Bridge._DeliverSeatDecision(playerID, snapshotTurn)
       .. "|game_turn=" .. tostring(Game.GetCurrentGameTurn()) .. "|commands=" .. tostring(#decision.commands)
       .. "|chats=" .. tostring(#chats) .. "|id=" .. applyId
   )
-  -- T1: orders are for this turn (late_batch). Settle after one tick so
-  -- EXECUTE_SCRIPT can apply while the seat is still held; settling now lets
-  -- _OnSeatTurnStart FINISH_SEAT first and every order gets seat_turn_over.
-  if snapshotTurn <= 1 and Game.GetCurrentGameTurn() <= 1 then
-    Civ6Ai_Util.ScheduleTick(function()
-      Civ6Ai_Bridge._SettleSeat(playerID, snapshotTurn, true)
-      return false
-    end)
-  else
-    Civ6Ai_Bridge._SettleSeat(playerID, snapshotTurn, true)
-  end
+  Civ6Ai_Bridge._SettleSeat(playerID, snapshotTurn, true)
   return true
 end
 

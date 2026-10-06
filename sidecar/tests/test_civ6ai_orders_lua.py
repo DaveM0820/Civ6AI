@@ -264,8 +264,13 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertTrue(self.last()["ok"])
         self.assertEqual(self.rt.eval("Players[2].tech"), 4)
         self.rt.execute("Players[2].active = false")
+        # Same turn still applies (T1 LAN: FINISH_SEAT can race EXECUTE_SCRIPT).
         self.order(0, K=2, P=2, I=5, S=8, B=2, J=1, N=1)
-        self.assertEqual(self.last()["reason"], "seat_turn_over:5")
+        self.assertTrue(self.last()["ok"])
+        self.assertEqual(self.rt.eval("Players[2].tech"), 5)
+        # A batch for a past turn after the seat ended is still rejected.
+        self.order(0, K=2, P=2, I=6, S=9, B=3, J=1, N=1, T=4)
+        self.assertEqual(self.last()["reason"], "stale_turn:4")
 
     def test_same_turn_batch_queued_for_this_turn_plays_at_seat_turn_start(self):
         # Same-turn timing (SP): the seat is snapshotted during the host's turn 5
