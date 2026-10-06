@@ -186,7 +186,7 @@
       "kind": "found_city",
       "tier": "v1",
       "wire_scope": "unit",
-      "wire": "{unit}.foundCity",
+      "wire": "{unit}.foundCity|{unit}.settle=(x,y)",
       "mcp_action": "found_city",
       "mcp_tool": "unit_action"
     },
@@ -201,7 +201,7 @@
       "kind": "move_unit",
       "tier": "v1",
       "wire_scope": "unit",
-      "wire": "{unit}.moveTo",
+      "wire": "{unit}.moveTo=(x,y)",
       "mcp_action": "move",
       "mcp_tool": "unit_action"
     },
@@ -444,7 +444,7 @@
       "kind": "trade_route",
       "tier": "v1",
       "wire_scope": "unit",
-      "wire": "{unit}.tradeRoute",
+      "wire": "{unit}.trade_route=<city>",
       "mcp_action": "trade_route",
       "mcp_tool": "unit_action"
     },
@@ -514,7 +514,7 @@
       "kind": "worker_improve",
       "tier": "v1",
       "wire_scope": "unit",
-      "wire": "{unit}.improve",
+      "wire": "{unit}.improve=(x,y):IMPROVEMENT",
       "mcp_action": "improve",
       "mcp_tool": "unit_action"
     },

@@ -310,6 +310,11 @@ def attention_items(snapshot: dict) -> list[str]:
         out.append("You have enough faith for a pantheon: pick a belief with the \"pantheon\" key.")
     if not r.get("religion") and any(isinstance(x, dict) and x.get("on_holy_site") for x in _lst(r.get("prophets"))):
         out.append("Your Great Prophet is on a Holy Site: found a religion with the \"religion\" key.")
+    elif not r.get("religion") and any(isinstance(x, dict) for x in _lst(r.get("prophets"))):
+        out.append(
+            "Your Great Prophet can walk to your nearest Holy Site (unitId.command = MoveTo of that tile, "
+            "intent found_religion) then found with the \"religion\" key."
+        )
     gv = _dct(gov.get("governors"))
     if routes.get("governors", True) and gv.get("can_appoint"):
         out.append("A governor title is available: appoint a governor (\"governor.appoint\").")
