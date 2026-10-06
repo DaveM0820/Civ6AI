@@ -16,7 +16,7 @@ Civ6Ai_OrderChannel.K = {
   MOVE = 1, RESEARCH = 2, CIVIC = 3, FOUND = 4, SKIP = 5, FORTIFY = 6, ATTACK = 7, PRIORITY = 9,
   GOVERNMENT = 10, POLICY = 11, PANTHEON = 12, RELIGION = 13, GP_RECRUIT = 14, GP_PATRONIZE = 15, GOVERNOR = 16,
   WAR = 17, PEACE = 18, BUY = 19, BUY_TILE = 20, IMPROVE = 21, PILLAGE = 22,
-  FINISH_SEAT = 23,
+  FINISH_SEAT = 23, TRADE = 24, EXPLORE = 25, ACTIVATE_GP = 26,
   REPORT = 30, PING = 40, TEST_MODE = 49, TEST_INTROSPECT = 50, TEST_SPAWN_ENEMY = 51,
   TEST_MELEE_MOVE = 52, TEST_SCRIPTED_COMBAT = 53, TEST_SCRIPTED_PRODUCTION = 54, TEST_IMPROVEMENT = 55,
   TEST_EXPERIENCE = 56, TEST_FAR_MOVE = 57, TEST_COMBAT_PROBE = 58, TEST_DAMAGE_CHECK = 59,
@@ -30,6 +30,7 @@ Civ6Ai_OrderChannel.KIND_BY_COMMAND = {
   recruit_great_person = 14, patronize_great_person = 15,
   send_diplomatic_action = 17, propose_peace = 18, purchase_item = 19, purchase_tile = 20,
   worker_improve = 21, pillage_improvement = 22,
+  trade_route = 24, explore = 25, activate_great_person = 26,
 }
 Civ6Ai_OrderChannel.REPORT_DELAY_SECONDS = 5
 Civ6Ai_OrderChannel._counter = Civ6Ai_OrderChannel._counter or 0
@@ -79,7 +80,7 @@ function Civ6Ai_OrderChannel.Send(kind, fields, turnOverride)
   end
   local ok, err = pcall(UI.RequestPlayerOperation, me, PlayerOperations.EXECUTE_SCRIPT, params)
   local line = "send|seq=" .. params.S .. "|kind=" .. tostring(kind) .. "|turn=" .. tostring(params.T)
-  for _, key in ipairs({ "P", "U", "X", "Y", "I", "V", "B", "J", "N" }) do
+  for _, key in ipairs({ "P", "U", "X", "Y", "I", "V", "W", "B", "J", "N", "G", "A", "I2", "I3", "D" }) do
     if params[key] ~= nil then
       line = line .. "|" .. key .. "=" .. tostring(params[key])
     end
@@ -105,7 +106,8 @@ end
 function Civ6Ai_OrderChannel._CityNum(id)
   local n = tonumber((tostring(id or "")):match("CITY_(%d+)"))
   if n ~= nil then
-    return n % 65536
+    -- Full city id: gameplay cityById compares c:GetID() == cityId (ids are > 65536).
+    return n
   end
   return tonumber(id)
 end
@@ -150,12 +152,31 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
       return nil, "missing_unit_or_target"
     end
     f.X, f.Y = x, y
+    if kind == 1 then
+      -- G = persistent goal. A = arrival intent (plan field N; N is batch length).
+      local intent = tonumber(args.intent)
+      if args.found == true or args.intent == "found" then intent = 1 end
+      if args.improve == true or args.intent == "improve" then intent = 2 end
+      if args.intent == "found_religion" then intent = 3 end
+      if args.intent == "trade" then intent = 4 end
+      f.A = intent or 0
+      local persist = args.goal == true or args.goal == 1 or tonumber(args.G) == 1 or (f.A ~= nil and f.A > 0)
+      f.G = persist and 1 or 0
+      if args.improvement_id ~= nil and GameInfo.Improvements ~= nil then
+        local irow = GameInfo.Improvements[args.improvement_id]
+        if irow ~= nil then f.I = irow.Index end
+      end
+    end
   elseif kind == 2 then
     local row = args.tech_id ~= nil and GameInfo.Technologies[args.tech_id] or nil
     if row == nil then
       return nil, args.tech_id == nil and "missing_tech_id" or "invalid_tech"
     end
     f.I = row.Index
+    local r2 = args.tech_id_2 ~= nil and GameInfo.Technologies[args.tech_id_2] or nil
+    local r3 = args.tech_id_3 ~= nil and GameInfo.Technologies[args.tech_id_3] or nil
+    if r2 ~= nil then f.I2 = r2.Index end
+    if r3 ~= nil then f.I3 = r3.Index end
   elseif kind == 3 then
     local id = args.civic_id or args.tech_id
     local row = id ~= nil and GameInfo.Civics[id] or nil
@@ -163,6 +184,11 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
       return nil, id == nil and "missing_civic_id" or "invalid_civic"
     end
     f.I = row.Index
+    local id2, id3 = args.civic_id_2, args.civic_id_3
+    local r2 = id2 ~= nil and GameInfo.Civics[id2] or nil
+    local r3 = id3 ~= nil and GameInfo.Civics[id3] or nil
+    if r2 ~= nil then f.I2 = r2.Index end
+    if r3 ~= nil then f.I3 = r3.Index end
   elseif kind == 9 then
     local id, level = tonumber(args.priority_id), tonumber(args.priority_level)
     if id == nil or level == nil then
@@ -271,12 +297,29 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
     f.I = row.Index
     local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
     f.X, f.Y = x or -1, y or -1
+    if x ~= nil and y ~= nil then
+      f.G, f.A = 1, 2
+    end
   elseif kind == 22 then
     if f.U == nil then
       return nil, "missing_unit_id"
     end
     local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
     f.X, f.Y = x or -1, y or -1
+  elseif kind == 24 then
+    if f.U == nil then
+      return nil, "missing_unit_id"
+    end
+    local dest = Civ6Ai_OrderChannel._CityNum(args.city_id or args.dest_city_id)
+    if dest == nil then
+      return nil, "missing_dest_city"
+    end
+    f.I = dest
+    f.G, f.A = 1, 4
+  elseif kind == 25 or kind == 26 then
+    if f.U == nil then
+      return nil, "missing_unit_id"
+    end
   elseif f.U == nil then
     return nil, "missing_unit_id"
   end
@@ -285,7 +328,7 @@ end
 
 -- Send a whole model decision for one seat as one batch of orders for turn
 -- forTurn. Returns the number of orders sent.
-function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn)
+function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn, snapshotTurn)
   local orders = {}
   for _, command in ipairs(decision.commands or {}) do
     local f, why, many = Civ6Ai_OrderChannel._Fields(playerID, command)
@@ -306,8 +349,10 @@ function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn)
   Civ6Ai_OrderChannel._batch = Civ6Ai_OrderChannel._batch + 1
   local batch = Game.GetLocalPlayer() * 100000 + Civ6Ai_OrderChannel._batch
   local sent = 0
+  local decisionTurn = snapshotTurn or forTurn
   for j, entry in ipairs(orders) do
     local f = entry.fields
+    f.D = decisionTurn
     f.B, f.J, f.N = batch, j, #orders
     local kind = f.K
     f.K = nil

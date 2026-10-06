@@ -23,7 +23,7 @@
 -- sync reports) goes into ExposedMembers.Civ6Ai, which each PC keeps for itself
 -- and never feeds back into game state.
 Civ6Ai_Orders = Civ6Ai_Orders or {}
-Civ6Ai_Orders.VERSION = 1
+Civ6Ai_Orders.VERSION = 2
 Civ6Ai_Orders.TAG = "CIV6AI|orders|"
 
 -- Order kinds (param K).
@@ -50,6 +50,9 @@ Civ6Ai_Orders.K = {
   IMPROVE = 21,
   PILLAGE = 22,
   FINISH_SEAT = 23,
+  TRADE = 24,
+  EXPLORE = 25,
+  ACTIVATE_GP = 26,
   REPORT = 30,
   PING = 40,
   TEST_MODE = 49,
@@ -74,10 +77,16 @@ Civ6Ai_Orders.DECISION_KINDS = {
   [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [9] = true,
   [10] = true, [11] = true, [12] = true, [13] = true, [14] = true, [15] = true, [16] = true,
   [17] = true, [18] = true, [19] = true, [20] = true, [21] = true, [22] = true,
+  [24] = true, [25] = true, [26] = true,
 }
+-- Intent on a MOVE (param A). N is the batch count on the wire, so intent is A.
+Civ6Ai_Orders.INTENT = { MOVE = 0, FOUND = 1, IMPROVE = 2, RELIGION = 3, TRADE = 4 }
+Civ6Ai_Orders.GOAL_MAX_AGE = 10
 -- Order fields kept in the queue (P is the seat itself). A missing field is
 -- stored as -1, which every kind that reads the field treats as "none".
-Civ6Ai_Orders.QUEUE_FIELDS = { "K", "U", "X", "Y", "I", "V", "W", "S" }
+-- G = persistent goal, A = arrival intent, I2/I3 = research/civic fallbacks,
+-- D = snapshot/decision turn.
+Civ6Ai_Orders.QUEUE_FIELDS = { "K", "U", "X", "Y", "I", "V", "W", "S", "G", "A", "I2", "I3", "D" }
 Civ6Ai_Orders.MAX_PASSES = 4
 Civ6Ai_Orders._batches = Civ6Ai_Orders._batches or {}
 
@@ -185,6 +194,332 @@ function Civ6Ai_Orders._Unit(owner, unitId)
   return call(units, "FindID", unitId)
 end
 
+function Civ6Ai_Orders._GoalKey(owner, unitId, field)
+  return "CIV6AI_GOAL_" .. tostring(owner) .. "_" .. tostring(unitId) .. "_" .. field
+end
+
+function Civ6Ai_Orders._ClearGoal(owner, unitId)
+  if owner == nil or unitId == nil then
+    return
+  end
+  for _, f in ipairs({ "X", "Y", "A", "T", "I", "V", "W" }) do
+    Game:SetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, f), -1)
+  end
+end
+
+function Civ6Ai_Orders._ReadGoal(owner, unitId)
+  local x = num(Game:GetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "X")))
+  if x == nil or x < 0 then
+    return nil
+  end
+  local y = num(Game:GetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "Y")))
+  if y == nil or y < 0 then
+    return nil
+  end
+  return {
+    x = x,
+    y = y,
+    intent = num(Game:GetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "A"))) or 0,
+    setTurn = num(Game:GetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "T"))) or 0,
+    I = num(Game:GetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "I"))),
+    V = num(Game:GetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "V"))),
+    W = num(Game:GetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "W"))),
+  }
+end
+
+function Civ6Ai_Orders._StoreGoal(owner, unitId, x, y, intent, extra)
+  extra = extra or {}
+  Game:SetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "X"), x)
+  Game:SetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "Y"), y)
+  Game:SetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "A"), intent or 0)
+  Game:SetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "T"), Game.GetCurrentGameTurn())
+  Game:SetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "I"), extra.I or -1)
+  Game:SetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "V"), extra.V or -1)
+  Game:SetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "W"), extra.W or -1)
+  log("goal_set|player=" .. tostring(owner) .. "|unit=" .. tostring(unitId)
+    .. "|xy=" .. tostring(x) .. "," .. tostring(y) .. "|intent=" .. tostring(intent or 0))
+end
+
+function Civ6Ai_Orders._IsSettler(unit)
+  local row = GameInfo.Units[unit:GetType()]
+  return row ~= nil and (row.FoundCity == true or row.FoundCity == 1)
+end
+
+function Civ6Ai_Orders._PlotEnterOk(owner, unit, x, y)
+  local plot = Map.GetPlot(x, y)
+  if plot == nil then
+    return false, "plot_not_found"
+  end
+  local plotOwner = call(plot, "GetOwner")
+  if plotOwner ~= nil and plotOwner >= 0 and plotOwner ~= owner then
+    if Civ6Ai_Orders._AtWar(owner, plotOwner) then
+      return true, ""
+    end
+    local them = Players[plotOwner]
+    local diplo = them ~= nil and call(them, "GetDiplomacy") or nil
+    if diplo ~= nil and call(diplo, "HasOpenBordersFrom", owner) == true then
+      return true, ""
+    end
+    return false, "foreign_territory"
+  end
+  return true, ""
+end
+
+function Civ6Ai_Orders._SameDomain(unit, plot)
+  local row = GameInfo.Units[unit:GetType()]
+  local domain = row ~= nil and row.Domain or "DOMAIN_LAND"
+  local water = call(plot, "IsWater") == true
+  if domain == "DOMAIN_SEA" then
+    return water or call(plot, "IsCity") == true
+  end
+  return not water
+end
+
+function Civ6Ai_Orders._SameLandmass(a, b)
+  if a == nil or b == nil then
+    return false
+  end
+  local aid = call(a, "GetAreaID") or call(a, "GetContinentType")
+  local bid = call(b, "GetAreaID") or call(b, "GetContinentType")
+  if aid == nil or bid == nil then
+    return true
+  end
+  return aid == bid
+end
+
+-- Neighbours in a stable (x,y) order. Uses GetPlotDistance so odd-r hexes work.
+function Civ6Ai_Orders._Ring1(x, y)
+  local list = {}
+  for dx = -1, 1 do
+    for dy = -1, 1 do
+      if not (dx == 0 and dy == 0) then
+        local px, py = x + dx, y + dy
+        local d = Map.GetPlotDistance(x, y, px, py)
+        if d == 1 then
+          list[#list + 1] = { x = px, y = py }
+        end
+      end
+    end
+  end
+  table.sort(list, function(a, b)
+    if a.x ~= b.x then
+      return a.x < b.x
+    end
+    return a.y < b.y
+  end)
+  return list
+end
+
+function Civ6Ai_Orders._OccupiedReason(reason)
+  local text = tostring(reason or "")
+  return string.find(text, "occupied", 1, true) ~= nil or string.find(text, "stack_limit", 1, true) ~= nil
+end
+
+function Civ6Ai_Orders._RetargetPlot(owner, unit, x, y)
+  local origin = Map.GetPlot(unit:GetX(), unit:GetY())
+  local candidates = Civ6Ai_Orders._Ring1(x, y)
+  for _, c in ipairs(candidates) do
+    local plot = Map.GetPlot(c.x, c.y)
+    if plot ~= nil and not (c.x == unit:GetX() and c.y == unit:GetY())
+        and Civ6Ai_Orders._SameDomain(unit, plot)
+        and Civ6Ai_Orders._SameLandmass(origin, plot) then
+      local okEnter, whyEnter = Civ6Ai_Orders._PlotEnterOk(owner, unit, c.x, c.y)
+      if okEnter then
+        local skip = false
+        local can, why = Civ6Ai_Orders._Route("CanMoveUnitToForPlayer", owner, unit:GetID(), c.x, c.y)
+        if not can then
+          local w = tostring(why)
+          if w == "impassable" or w == "land" or w == "occupied_foreign" or w == "stack_limit"
+              or string.find(w, "illegal", 1, true) then
+            skip = true
+          end
+        end
+        if not skip then
+          local occupied = false
+          if Units ~= nil and Units.GetUnitsInPlot ~= nil then
+            for _, other in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+              if other:GetID() ~= unit:GetID() then
+                occupied = true
+                break
+              end
+            end
+          end
+          if not occupied then
+            return c.x, c.y
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
+function Civ6Ai_Orders._MoveOnce(owner, unitId, x, y)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  if unit == nil then
+    return false, "stale_unit_id"
+  end
+  local dist = Map.GetPlotDistance(unit:GetX(), unit:GetY(), x, y)
+  if dist > 1 then
+    return Civ6Ai_Orders._Route("MoveUnitAlongPathForPlayer", owner, unitId, x, y)
+  end
+  return Civ6Ai_Orders._Route("MoveUnitForPlayer", owner, unitId, x, y)
+end
+
+function Civ6Ai_Orders._MoveWithRetarget(owner, unit, x, y)
+  local okEnter, whyEnter = Civ6Ai_Orders._PlotEnterOk(owner, unit, x, y)
+  if not okEnter then
+    return false, whyEnter
+  end
+  return Civ6Ai_Orders._MoveOnce(owner, unit:GetID(), x, y)
+end
+
+function Civ6Ai_Orders._ArrivalAction(owner, unit, intent, extra, sender)
+  extra = extra or {}
+  if intent == Civ6Ai_Orders.INTENT.FOUND then
+    local ok, reason = Civ6Ai_Orders._Route("FoundCityForPlayer", owner, unit:GetID())
+    if not ok then
+      return false, "site_no_longer_legal:" .. tostring(reason)
+    end
+    return true, "found_on_arrival:" .. tostring(reason)
+  elseif intent == Civ6Ai_Orders.INTENT.IMPROVE then
+    return Civ6Ai_Orders.Gov.ImproveTile(owner, unit:GetID(), extra.I, unit:GetX(), unit:GetY())
+  elseif intent == Civ6Ai_Orders.INTENT.RELIGION then
+    return Civ6Ai_Orders.Gov.FoundReligion(owner, extra.I, unit:GetID(), extra.V, extra.W, extra.X, extra.Y)
+  elseif intent == Civ6Ai_Orders.INTENT.TRADE then
+    return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, unit:GetID(), extra.I)
+  end
+  return true, "arrived"
+end
+
+function Civ6Ai_Orders._DoMove(sender, o)
+  local owner = o.P
+  local unit = Civ6Ai_Orders._Unit(owner, o.U)
+  if unit == nil then
+    return false, "stale_unit_id"
+  end
+  local intent = o.A or Civ6Ai_Orders.INTENT.MOVE
+  if intent < 0 then
+    intent = Civ6Ai_Orders.INTENT.MOVE
+  end
+  local x, y = o.X, o.Y
+  if x == nil or y == nil or x < 0 or y < 0 then
+    return false, "missing_target"
+  end
+  if unit:GetX() == x and unit:GetY() == y then
+    Civ6Ai_Orders._ClearGoal(owner, o.U)
+    if intent == Civ6Ai_Orders.INTENT.FOUND or Civ6Ai_Orders._IsSettler(unit) then
+      local can, why = Civ6Ai_Orders._Route("CanFoundCityForPlayer", owner, o.U)
+      if can then
+        return Civ6Ai_Orders._Route("FoundCityForPlayer", owner, o.U)
+      end
+      if intent == Civ6Ai_Orders.INTENT.FOUND then
+        return false, "site_no_longer_legal:" .. tostring(why)
+      end
+    end
+    if intent == Civ6Ai_Orders.INTENT.IMPROVE then
+      return Civ6Ai_Orders.Gov.ImproveTile(owner, o.U, o.I, x, y)
+    end
+    if intent == Civ6Ai_Orders.INTENT.RELIGION then
+      return Civ6Ai_Orders.Gov.FoundReligion(owner, o.I, o.U, o.V, o.W, o.X, o.Y)
+    end
+    if intent == Civ6Ai_Orders.INTENT.TRADE then
+      return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, o.U, o.I)
+    end
+    local ok, reason = Civ6Ai_Orders._Route("FinishMovesForPlayer", owner, o.U)
+    return ok, "self_target_hold:" .. tostring(reason)
+  end
+  local persist = o.G == 1 or intent ~= Civ6Ai_Orders.INTENT.MOVE
+    or Map.GetPlotDistance(unit:GetX(), unit:GetY(), x, y) > 1
+  local ok, reason = Civ6Ai_Orders._MoveWithRetarget(owner, unit, x, y)
+  unit = Civ6Ai_Orders._Unit(owner, o.U)
+  if unit ~= nil and unit:GetX() == x and unit:GetY() == y then
+    Civ6Ai_Orders._ClearGoal(owner, o.U)
+    if intent ~= Civ6Ai_Orders.INTENT.MOVE then
+      local aok, awhy = Civ6Ai_Orders._ArrivalAction(owner, unit, intent, o, sender)
+      return aok, tostring(reason) .. ":" .. tostring(awhy)
+    end
+    return ok, reason
+  end
+  if persist and unit ~= nil then
+    Civ6Ai_Orders._StoreGoal(owner, o.U, x, y, intent, o)
+  else
+    Civ6Ai_Orders._ClearGoal(owner, o.U)
+  end
+  return ok, reason
+end
+
+function Civ6Ai_Orders._TechKnown(owner, idx)
+  local techs = call(Players[owner], "GetTechs")
+  return techs ~= nil and call(techs, "HasTech", idx) == true
+end
+
+function Civ6Ai_Orders._CivicKnown(owner, idx)
+  local culture = call(Players[owner], "GetCulture")
+  return culture ~= nil and call(culture, "HasCivic", idx) == true
+end
+
+function Civ6Ai_Orders._CurrentTech(owner)
+  local techs = call(Players[owner], "GetTechs")
+  return techs ~= nil and call(techs, "GetResearchingTech") or nil
+end
+
+function Civ6Ai_Orders._CurrentCivic(owner)
+  local culture = call(Players[owner], "GetCulture")
+  return culture ~= nil and call(culture, "GetProgressingCivic") or nil
+end
+
+function Civ6Ai_Orders._PickFallback(owner, primary, a, b, knownFn, currentFn)
+  local list = { primary, a, b }
+  local current = currentFn(owner)
+  for _, idx in ipairs(list) do
+    if idx ~= nil and idx >= 0 then
+      if current ~= nil and current == idx then
+        return idx, idx == primary and "already_researching" or "ok_superseded"
+      end
+      if not knownFn(owner, idx) then
+        if idx == primary then
+          return idx, "primary"
+        end
+        return idx, "ok_superseded"
+      end
+    end
+  end
+  return nil, "already_known"
+end
+
+function Civ6Ai_Orders._DoResearch(owner, o)
+  local idx, tag = Civ6Ai_Orders._PickFallback(
+    owner, o.I, o.I2, o.I3, Civ6Ai_Orders._TechKnown, Civ6Ai_Orders._CurrentTech)
+  if idx == nil then
+    return false, "tech_already_known"
+  end
+  if tag == "already_researching" then
+    return true, "ok_already_researching:" .. tostring(idx)
+  end
+  local ok, reason = Civ6Ai_Orders._Route("SetResearchForPlayer", owner, idx)
+  if ok and tag == "ok_superseded" then
+    return true, "ok_superseded:" .. tostring(o.I) .. ">" .. tostring(idx) .. ":" .. tostring(reason)
+  end
+  return ok, reason
+end
+
+function Civ6Ai_Orders._DoCivic(owner, o)
+  local idx, tag = Civ6Ai_Orders._PickFallback(
+    owner, o.I, o.I2, o.I3, Civ6Ai_Orders._CivicKnown, Civ6Ai_Orders._CurrentCivic)
+  if idx == nil then
+    return false, "civic_already_known"
+  end
+  if tag == "already_researching" then
+    return true, "ok_already_researching:" .. tostring(idx)
+  end
+  local ok, reason = Civ6Ai_Orders._Route("SetCivicForPlayer", owner, idx)
+  if ok and tag == "ok_superseded" then
+    return true, "ok_superseded:" .. tostring(o.I) .. ">" .. tostring(idx) .. ":" .. tostring(reason)
+  end
+  return ok, reason
+end
+
 function Civ6Ai_Orders._DoCommand(sender, o)
   local k = o.K
   local owner = o.P
@@ -193,21 +528,36 @@ function Civ6Ai_Orders._DoCommand(sender, o)
     return false, why
   end
   if k == Civ6Ai_Orders.K.MOVE then
-    local unit = Civ6Ai_Orders._Unit(owner, o.U)
-    if unit ~= nil and Map.GetPlotDistance(unit:GetX(), unit:GetY(), o.X, o.Y) > 1 then
-      return Civ6Ai_Orders._Route("MoveUnitAlongPathForPlayer", owner, o.U, o.X, o.Y)
-    end
-    return Civ6Ai_Orders._Route("MoveUnitForPlayer", owner, o.U, o.X, o.Y)
+    return Civ6Ai_Orders._DoMove(sender, o)
   elseif k == Civ6Ai_Orders.K.RESEARCH then
-    return Civ6Ai_Orders._Route("SetResearchForPlayer", owner, o.I)
+    return Civ6Ai_Orders._DoResearch(owner, o)
   elseif k == Civ6Ai_Orders.K.CIVIC then
-    return Civ6Ai_Orders._Route("SetCivicForPlayer", owner, o.I)
+    return Civ6Ai_Orders._DoCivic(owner, o)
   elseif k == Civ6Ai_Orders.K.FOUND then
+    local unit = Civ6Ai_Orders._Unit(owner, o.U)
+    if unit == nil then
+      return false, "stale_unit_id"
+    end
     return Civ6Ai_Orders._Route("FoundCityForPlayer", owner, o.U)
   elseif k == Civ6Ai_Orders.K.SKIP or k == Civ6Ai_Orders.K.FORTIFY then
+    Civ6Ai_Orders._ClearGoal(owner, o.U)
+    local unit = Civ6Ai_Orders._Unit(owner, o.U)
+    if unit == nil then
+      return false, "stale_unit_id"
+    end
     return Civ6Ai_Orders._Route("FinishMovesForPlayer", owner, o.U)
   elseif k == Civ6Ai_Orders.K.ATTACK then
+    local unit = Civ6Ai_Orders._Unit(owner, o.U)
+    if unit == nil then
+      return false, "stale_unit_id"
+    end
     return Civ6Ai_Orders._Attack(owner, o)
+  elseif k == Civ6Ai_Orders.K.TRADE then
+    return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, o.U, o.I)
+  elseif k == Civ6Ai_Orders.K.EXPLORE then
+    return Civ6Ai_Orders.Gov.Explore(owner, o.U)
+  elseif k == Civ6Ai_Orders.K.ACTIVATE_GP then
+    return Civ6Ai_Orders.Gov.ActivateGreatPerson(owner, o.U)
   end
   return false, "unknown_kind"
 end
@@ -445,6 +795,13 @@ end
 -- Play one seat's orders with retry passes and record each result, then end
 -- the turn of the seat's units the model left in place.
 function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
+  local ordered = {}
+  for _, o in ipairs(orders) do
+    if o.U ~= nil and o.U >= 0 then
+      ordered[o.U] = true
+      Civ6Ai_Orders._ClearGoal(owner, o.U)
+    end
+  end
   local pending = orders
   for pass = 1, Civ6Ai_Orders.MAX_PASSES do
     if #pending == 0 then
@@ -464,42 +821,115 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
     end
     if not progress then
       for _, o in ipairs(nextPending) do
-        Civ6Ai_Orders._Record(sender, o, false, "plot_occupied_exhausted")
+        local unit = Civ6Ai_Orders._Unit(owner, o.U)
+        if o.K == Civ6Ai_Orders.K.MOVE and unit ~= nil then
+          local nx, ny = Civ6Ai_Orders._RetargetPlot(owner, unit, o.X, o.Y)
+          if nx ~= nil then
+            local rok, rreason = Civ6Ai_Orders._MoveOnce(owner, o.U, nx, ny)
+            Civ6Ai_Orders._Record(sender, o, rok, (rok and "retargeted:" or "plot_occupied_exhausted:")
+              .. tostring(o.X) .. "," .. tostring(o.Y) .. ">" .. tostring(nx) .. "," .. tostring(ny)
+              .. ":" .. tostring(rreason))
+          else
+            Civ6Ai_Orders._Record(sender, o, false, "plot_occupied_exhausted")
+          end
+        else
+          Civ6Ai_Orders._Record(sender, o, false, "plot_occupied_exhausted")
+        end
       end
       break
     end
     pending = nextPending
   end
-  Civ6Ai_Orders._FinishIdleUnits(owner)
+  Civ6Ai_Orders._ContinueGoals(owner, ordered)
+  Civ6Ai_Orders._FinishIdleUnits(owner, ordered)
 end
 
 -- Units the model commands. Traders and religious units stay with the game's
--- AI. Builders stay with it unless this file applies an improve order.
-function Civ6Ai_Orders._ModelCommandsUnit(unit)
+-- AI until this file applies an order (or a standing goal) for them. Builders
+-- stay with it unless this file applies an improve order.
+function Civ6Ai_Orders._ModelCommandsUnit(unit, ordered)
   local info = GameInfo.Units[unit:GetType()]
   if info == nil then
     return false
   end
-  return not ((num(info.BuildCharges) or 0) > 0 or info.MakeTradeRoute == true or (num(info.ReligiousStrength) or 0) > 0)
+  local builder = (num(info.BuildCharges) or 0) > 0
+  local trader = info.MakeTradeRoute == true
+  local religious = (num(info.ReligiousStrength) or 0) > 0
+  if builder or trader or religious then
+    if ordered ~= nil and ordered[unit:GetID()] then
+      return true
+    end
+    return Civ6Ai_Orders._ReadGoal(unit:GetOwner(), unit:GetID()) ~= nil
+  end
+  return true
 end
 
 -- An AI seat's model-commanded units end their turn after its orders, so the
 -- game's AI does not move the units the model left in place. A human seat
 -- finishes its own units.
-function Civ6Ai_Orders._FinishIdleUnits(owner)
+function Civ6Ai_Orders._FinishIdleUnits(owner, ordered)
   local p = Players[owner]
   if p == nil or call(p, "IsHuman") then
     return 0
   end
   local count = 0
   for _, u in ipairs(sortedMembers(call(p, "GetUnits"))) do
-    if (call(u, "GetMovesRemaining") or 0) > 0 and Civ6Ai_Orders._ModelCommandsUnit(u)
+    if (call(u, "GetMovesRemaining") or 0) > 0 and Civ6Ai_Orders._ModelCommandsUnit(u, ordered)
+        and Civ6Ai_Orders._ReadGoal(owner, u:GetID()) == nil
         and pcall(UnitManager.FinishMoves, u) then
       count = count + 1
     end
   end
   log("finish_idle|player=" .. tostring(owner) .. "|units=" .. count)
   return count
+end
+
+function Civ6Ai_Orders._ContinueGoals(owner, ordered)
+  local p = Players[owner]
+  if p == nil then
+    return 0
+  end
+  local turn = Game.GetCurrentGameTurn()
+  local n = 0
+  for _, u in ipairs(sortedMembers(call(p, "GetUnits"))) do
+    local uid = u:GetID()
+    if ordered == nil or not ordered[uid] then
+      local goal = Civ6Ai_Orders._ReadGoal(owner, uid)
+      if goal ~= nil then
+        if turn - (goal.setTurn or 0) >= Civ6Ai_Orders.GOAL_MAX_AGE then
+          Civ6Ai_Orders._ClearGoal(owner, uid)
+          log("goal_expired|player=" .. tostring(owner) .. "|unit=" .. tostring(uid))
+        else
+          n = n + 1
+          local ok, reason = Civ6Ai_Orders._MoveWithRetarget(owner, u, goal.x, goal.y)
+          u = Civ6Ai_Orders._Unit(owner, uid)
+          if u == nil then
+            Civ6Ai_Orders._ClearGoal(owner, uid)
+          elseif u:GetX() == goal.x and u:GetY() == goal.y then
+            local aok, awhy = Civ6Ai_Orders._ArrivalAction(owner, u, goal.intent, goal)
+            log("goal_arrive|player=" .. tostring(owner) .. "|unit=" .. tostring(uid)
+              .. "|ok=" .. tostring(aok) .. "|reason=" .. tostring(awhy))
+            Civ6Ai_Orders._ClearGoal(owner, uid)
+            local shared = Civ6Ai_Orders._Shared()
+            shared.OrderResults = shared.OrderResults or {}
+            table.insert(shared.OrderResults, {
+              sender = -1, seq = -1, kind = Civ6Ai_Orders.K.MOVE, player = owner, unit = uid,
+              turn = turn, decision_turn = goal.setTurn, apply_turn = turn,
+              ok = aok, reason = "goal_arrive:" .. tostring(awhy),
+            })
+          elseif not ok and not Civ6Ai_Orders._OccupiedReason(reason) then
+            log("goal_drop|player=" .. tostring(owner) .. "|unit=" .. tostring(uid)
+              .. "|reason=" .. tostring(reason))
+            Civ6Ai_Orders._ClearGoal(owner, uid)
+          end
+        end
+      end
+    end
+  end
+  if n > 0 then
+    log("goals_continue|player=" .. tostring(owner) .. "|units=" .. n)
+  end
+  return n
 end
 
 -- Every unit with movement left. Used when a managed AI seat has dumped its
@@ -614,6 +1044,9 @@ function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
     for _, o in ipairs(orders) do
       Civ6Ai_Orders._Record(sender, o, false, "stale_turn:" .. tostring(t))
     end
+    Civ6Ai_Orders._ContinueGoals(owner, {})
+  else
+    Civ6Ai_Orders._ContinueGoals(owner, {})
   end
 end
 
@@ -673,7 +1106,9 @@ function Civ6Ai_Orders._Record(sender, o, ok, reason)
   shared.OrderCount = (shared.OrderCount or 0) + 1
   shared.OrderResults = shared.OrderResults or {}
   table.insert(shared.OrderResults, {
-    sender = sender, seq = o.S, kind = o.K, player = o.P, turn = turn, ok = ok, reason = tostring(reason or ""),
+    sender = sender, seq = o.S, kind = o.K, player = o.P, unit = o.U, turn = turn,
+    apply_turn = turn, decision_turn = o.D ~= nil and o.D >= 0 and o.D or turn,
+    ok = ok, reason = tostring(reason or ""),
   })
   while #shared.OrderResults > 512 do
     table.remove(shared.OrderResults, 1)
@@ -790,6 +1225,8 @@ local function readOrder(params)
   return {
     K = num(params.K), P = num(params.P), U = num(params.U), X = num(params.X), Y = num(params.Y),
     I = num(params.I), V = num(params.V), W = num(params.W), S = num(params.S) or -1,
+    G = num(params.G), A = num(params.A), I2 = num(params.I2), I3 = num(params.I3),
+    D = num(params.D),
   }
 end
 
@@ -1214,6 +1651,128 @@ function Gov.Governor(owner)
     .. "(the game only offers that to the local player's screen); the game's own AI manages this seat's governors"
 end
 
+local function startOperation(unit, typeName, extras)
+  local ops = GameInfo ~= nil and GameInfo.UnitOperations or nil
+  local row = ops ~= nil and ops[typeName] or nil
+  if row == nil then
+    return false, "no_operation:" .. tostring(typeName)
+  end
+  if UnitManager == nil or UnitManager.RequestOperation == nil then
+    return false, "request_operation_unavailable:" .. tostring(typeName)
+  end
+  local params = extras or {}
+  if UnitOperationTypes ~= nil and UnitOperationTypes.PARAM_X ~= nil then
+    if extras ~= nil and extras.x ~= nil then
+      params[UnitOperationTypes.PARAM_X] = extras.x
+      params[UnitOperationTypes.PARAM_Y] = extras.y
+    end
+  end
+  local ok, err = pcall(UnitManager.RequestOperation, unit, row.Hash, params)
+  if not ok then
+    return false, "operation_error:" .. tostring(typeName) .. ":" .. tostring(err)
+  end
+  return true, "operation=" .. tostring(typeName)
+end
+
+local function findCityById(cityId)
+  for id = 0, 63 do
+    local p = Players[id]
+    if p ~= nil then
+      for _, c in ipairs(sortedMembers(call(p, "GetCities"))) do
+        if c:GetID() == cityId then
+          return c, id
+        end
+      end
+    end
+  end
+  return nil
+end
+
+-- Trade route: gameplay TradeManager when present, else a guarded unit
+-- operation. Destination is a city id (I).
+function Gov.MakeTradeRoute(owner, unitId, destCityId)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  if unit == nil then
+    return false, "stale_unit_id"
+  end
+  local dest = destCityId ~= nil and destCityId >= 0 and findCityById(destCityId) or nil
+  if dest == nil then
+    return false, "stale_city_id:" .. tostring(destCityId)
+  end
+  local tm = Game.GetTradeManager ~= nil and Game.GetTradeManager() or nil
+  if tm ~= nil then
+    local origin = Map.GetPlot(unit:GetX(), unit:GetY())
+    local destPlot = Map.GetPlot(dest:GetX(), dest:GetY())
+    local fromIdx = origin ~= nil and call(origin, "GetIndex") or nil
+    local toIdx = destPlot ~= nil and call(destPlot, "GetIndex") or nil
+    if fromIdx ~= nil and toIdx ~= nil and tm.CanCreateTradeRoute ~= nil then
+      local okCan, can = pcall(tm.CanCreateTradeRoute, tm, owner, fromIdx, toIdx)
+      if okCan and can == false then
+        return false, "cannot_start_trade_route"
+      end
+    end
+    if fromIdx ~= nil and toIdx ~= nil and tm.CreateTradeRoute ~= nil then
+      local okMake, made = pcall(tm.CreateTradeRoute, tm, owner, fromIdx, toIdx)
+      if okMake and made ~= false then
+        pcall(UnitManager.FinishMoves, unit)
+        return true, "trade_route:city=" .. tostring(destCityId)
+      end
+      log("trade_fallback|CreateTradeRoute|" .. tostring(made))
+    end
+  end
+  local okOp, whyOp = startOperation(unit, "UNITOPERATION_MAKE_TRADE_ROUTE", { x = dest:GetX(), y = dest:GetY() })
+  if okOp then
+    return true, whyOp .. ":city=" .. tostring(destCityId)
+  end
+  log("trade_unavailable|" .. tostring(whyOp))
+  return false, "trade_route_unavailable:" .. tostring(whyOp)
+end
+
+function Gov.Explore(owner, unitId)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  if unit == nil then
+    return false, "stale_unit_id"
+  end
+  for _, name in ipairs({ "UNITOPERATION_AUTOMATION", "UNITOPERATION_EXPLORE", "UNITOPERATION_AUTO_EXPLORE" }) do
+    local okOp, whyOp = startOperation(unit, name, {})
+    if okOp then
+      return true, whyOp
+    end
+    log("explore_fallback|" .. name .. "|" .. tostring(whyOp))
+  end
+  return false, "explore_unavailable"
+end
+
+function Gov.ActivateGreatPerson(owner, unitId)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  if unit == nil then
+    return false, "stale_unit_id"
+  end
+  local gp = call(unit, "GetGreatPerson")
+  if gp ~= nil and gp.Activate ~= nil then
+    local ok, err = pcall(gp.Activate, gp)
+    if ok then
+      return true, "activate_gp"
+    end
+    log("activate_fallback|GreatPerson.Activate|" .. tostring(err))
+  end
+  if UnitManager ~= nil and UnitManager.RequestCommand ~= nil and UnitCommandTypes ~= nil then
+    local cmd = UnitCommandTypes.UNITCOMMAND_ACTIVATE or UnitCommandTypes.ACTIVATE
+    if cmd ~= nil then
+      local ok, err = pcall(UnitManager.RequestCommand, unit, cmd)
+      if ok then
+        return true, "activate_gp:command"
+      end
+      log("activate_fallback|RequestCommand|" .. tostring(err))
+    end
+  end
+  local okOp, whyOp = startOperation(unit, "UNITOPERATION_GREAT_PERSON_HEAL", {})
+  if okOp then
+    return true, whyOp
+  end
+  return false, "activate_unavailable:" .. tostring(whyOp)
+end
+
 local function cityById(owner, cityId)
   for _, c in ipairs(sortedMembers(call(Players[owner], "GetCities"))) do
     if c:GetID() == cityId then
@@ -1346,7 +1905,7 @@ end
 function Gov.PurchaseItem(owner, cityId, itemIndex, isBuilding, useFaith)
   local city = cityById(owner, cityId)
   if city == nil then
-    return false, "you have no city " .. tostring(cityId)
+    return false, "stale_city_id:" .. tostring(cityId)
   end
   local row, hash, typeName
   if isBuilding then
@@ -1406,7 +1965,7 @@ function Gov.PurchaseTile(owner, cityId, x, y)
   local city = cityById(owner, cityId)
   local plot = Map.GetPlot(x, y)
   if city == nil then
-    return false, "you have no city " .. tostring(cityId)
+    return false, "stale_city_id:" .. tostring(cityId)
   end
   if plot == nil then
     return false, "there is no tile at " .. tostring(x) .. "," .. tostring(y)
@@ -1588,6 +2147,17 @@ function Civ6Ai_Orders._DoWork(sender, o)
   end
   if o.K == Civ6Ai_Orders.K.PILLAGE then
     return Gov.PillageImprovement(o.P, o.U, o.X, o.Y)
+  end
+  local unit = Civ6Ai_Orders._Unit(o.P, o.U)
+  if unit == nil then
+    return false, "stale_unit_id"
+  end
+  local x, y = o.X, o.Y
+  if type(x) == "number" and x >= 0 and type(y) == "number" and y >= 0 then
+    if unit:GetX() ~= x or unit:GetY() ~= y then
+      o.G, o.A = 1, Civ6Ai_Orders.INTENT.IMPROVE
+      return Civ6Ai_Orders._DoMove(sender, o)
+    end
   end
   return Gov.ImproveTile(o.P, o.U, o.I, o.X, o.Y)
 end
@@ -2682,6 +3252,7 @@ function Civ6Ai_Orders.Init()
   shared.OrderChecksum = Civ6Ai_Orders.Checksum
   shared.PriorityLevels = Civ6Ai_Orders.PriorityLevels
   shared.Gov = Civ6Ai_Orders.Gov
+  shared.ReadUnitGoal = Civ6Ai_Orders._ReadGoal
   pcall(Civ6Ai_Orders.Gov.Probe)
   log("load|version=" .. Civ6Ai_Orders.VERSION .. "|prio_conditions=" .. tostring(nPrio) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))
 end

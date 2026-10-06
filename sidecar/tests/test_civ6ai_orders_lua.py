@@ -93,6 +93,23 @@ local function mkPlayer(id,human,units)
       MakePeaceWith=function(_, o) me.war[o] = nil end,
     }
   end
+  function p:GetTechs()
+    local me=self
+    me.knownTech = me.knownTech or {}
+    return {
+      HasTech=function(_, i) return me.knownTech[i] == true end,
+      GetResearchingTech=function() return me.researching end,
+      SetResearchingTech=function(_, i) me.researching = i end,
+    }
+  end
+  function p:GetCulture()
+    local me=self
+    me.knownCivic = me.knownCivic or {}
+    return {
+      HasCivic=function(_, i) return me.knownCivic[i] == true end,
+      GetProgressingCivic=function() return me.progressingCivic end,
+    }
+  end
   return p
 end
 GameInfo = {Units={[0]={Combat=20,UnitType="UNIT_WARRIOR",Hash=100},[1]={Combat=15,RangedCombat=25,Range=2},
@@ -133,7 +150,18 @@ ExposedMembers.Civ6Ai = {
     for _,u in ipairs(Players[p].units) do if u.id==uid then u.x=x; u.y=y; u.moves=0; return true, "moved" end end
     return false, "unit_not_found" end,
   SetResearchForPlayer=function(p,i) Players[p].tech=i; return true, "tech="..i end,
+  SetCivicForPlayer=function(p,i) Players[p].civic=i; return true, "civic="..i end,
   FinishMovesForPlayer=function(p,uid) return true, "finished" end,
+  CanFoundCityForPlayer=function(p,uid)
+    for _,u in ipairs(Players[p].units) do if u.id==uid then
+      if GameInfo.Units[u.typ] and GameInfo.Units[u.typ].FoundCity then return true, "" end
+    end end
+    return false, "unit_cannot_found_city" end,
+  FoundCityForPlayer=function(p,uid)
+    for i,u in ipairs(Players[p].units) do if u.id==uid then
+      Players[p].founded = {x=u.x, y=u.y}; table.remove(Players[p].units, i); return true, "founded"
+    end end
+    return false, "stale_unit_id" end,
 }
 published = {}
 LuaEvents = {Civ6Ai_PlayerTurnStartComplete=function(p)
@@ -731,6 +759,164 @@ class PriorityOrderTests(unittest.TestCase):
         before = self.rt.eval("ExposedMembers.Civ6Ai.OrderHash")
         self.order(0, K=9, P=2, I=5, X=3, S=1)
         self.assertNotEqual(self.rt.eval("ExposedMembers.Civ6Ai.OrderHash"), before)
+
+
+@unittest.skipIf(lupa is None, "lupa not installed")
+class WpAApplyCoreTests(unittest.TestCase):
+    def setUp(self):
+        self.rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+        self.rt.execute(FAKE_ENV)
+        self.rt.execute((MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text())
+
+    def order(self, sender, **params):
+        params.setdefault("T", 5)
+        self.rt.globals().Civ6Ai_Orders.OnOrder(sender, self.rt.table_from(params))
+
+    def results(self):
+        return [dict(r.items()) for r in _vals(self.rt.eval("ExposedMembers.Civ6Ai.OrderResults"))]
+
+    def last(self):
+        return self.results()[-1]
+
+    def turn_start(self, owner, turn=None):
+        if turn is not None:
+            self.rt.globals().SetTurn(turn)
+        self.rt.eval("GameEvents.PlayerTurnStartComplete.fns[1]")(owner)
+    def test_city_num_sends_full_id(self):
+        rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+        rt.execute(CHANNEL_ENV)
+        rt.execute((MOD / "InGame" / "Civ6Ai_OrderChannel.lua").read_text())
+        self.assertEqual(rt.eval('Civ6Ai_OrderChannel._CityNum("CITY_65536")'), 65536)
+        self.assertEqual(rt.eval('Civ6Ai_OrderChannel._CityNum("CITY_3")'), 3)
+
+    def test_self_target_move_holds(self):
+        self.order(0, K=1, P=2, U=7, X=10, Y=10, S=90)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertTrue(self.last()["reason"].startswith("self_target_hold"))
+        self.assertEqual(self.last()["decision_turn"], 5)
+
+    def test_stale_unit_id(self):
+        self.order(0, K=1, P=2, U=999, X=10, Y=11, S=91)
+        self.assertEqual(self.last()["reason"], "stale_unit_id")
+        self.assertFalse(self.last()["ok"])
+
+    def test_research_fallback_when_primary_known(self):
+        self.rt.execute("Players[2].knownTech = {[3]=true}")
+        self.order(0, K=2, P=2, I=3, I2=4, I3=5, S=92)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertTrue(self.last()["reason"].startswith("ok_superseded:3>4"))
+        self.assertEqual(self.rt.eval("Players[2].tech"), 4)
+
+    def test_research_all_known_fails(self):
+        self.rt.execute("Players[2].knownTech = {[3]=true, [4]=true, [5]=true}")
+        self.order(0, K=2, P=2, I=3, I2=4, I3=5, S=93)
+        self.assertEqual(self.last()["reason"], "tech_already_known")
+
+    def test_move_retargets_occupied_neighbour(self):
+        # Unit 8 sits on 11,10 and is not ordered, so retries cannot free the tile.
+        self.order(0, K=1, P=2, U=7, X=11, Y=10, S=94, B=1, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertIn("retargeted", self.last()["reason"])
+        self.assertNotEqual((self.rt.eval("Players[2].units[1].x"), self.rt.eval("Players[2].units[1].y")), (10, 10))
+        self.assertNotEqual((self.rt.eval("Players[2].units[1].x"), self.rt.eval("Players[2].units[1].y")), (11, 10))
+
+    def test_persistent_goal_continues_next_turn(self):
+        self.rt.execute(
+            "path_n = 0; ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = function(p,u,x,y) "
+            "path_n = path_n + 1; local unit; for _,z in ipairs(Players[p].units) do if z.id==u then unit=z end end; "
+            "if unit then unit.x = unit.x + 1 end; return true, 'partial_path' end"
+        )
+        self.order(0, K=1, P=2, U=7, X=14, Y=10, G=1, S=95, B=1, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_GOAL_2_7_X')"), 14)
+        self.assertEqual(self.rt.eval("path_n"), 1)
+        self.turn_start(2, turn=7)
+        self.assertEqual(self.rt.eval("path_n"), 2)
+        self.assertEqual(self.rt.eval("Players[2].units[1].x"), 12)
+
+    def test_found_on_arrival_at_target(self):
+        self.rt.execute("GameInfo.Units[0].FoundCity = true")
+        self.order(0, K=1, P=2, U=7, X=10, Y=11, G=1, A=1, S=96)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertIn("found_on_arrival", self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[2].founded.y"), 11)
+
+    def test_self_target_settler_founds_when_legal(self):
+        self.rt.execute("GameInfo.Units[0].FoundCity = true")
+        self.order(0, K=1, P=2, U=7, X=10, Y=10, S=97)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertEqual(self.rt.eval("Players[2].founded.x"), 10)
+
+    def test_improve_walks_then_builds(self):
+        self.rt.execute("Players[2].units[1].charges=3")
+        self.order(0, K=21, P=2, U=7, I=0, X=10, Y=11, S=98)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertEqual(self.rt.eval("Map.GetPlot(10,11).improvement"), 0)
+        self.assertEqual(self.rt.eval("Players[2].units[1].charges"), 2)
+
+    def test_channel_packs_goal_fallbacks_and_new_kinds(self):
+        rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+        rt.execute(CHANNEL_ENV)
+        rt.execute((MOD / "InGame" / "Civ6Ai_OrderChannel.lua").read_text())
+        d = rt.execute(
+            'return {commands={'
+            '{kind="move_unit", arguments={unit_id="UNIT_2_7", x=30, y=12, goal=1, intent="found"}},'
+            '{kind="set_research_tech", arguments={tech_id="TECH_MINING", tech_id_2="TECH_MINING"}},'
+            '{kind="explore", arguments={unit_id="UNIT_2_8"}},'
+            '{kind="trade_route", arguments={unit_id="UNIT_2_9", city_id="CITY_131072"}},'
+            '{kind="activate_great_person", arguments={unit_id="UNIT_2_10"}},'
+            '}}'
+        )
+        self.assertEqual(rt.globals().Civ6Ai_OrderChannel.SendDecision(2, d, 6, 5), 5)
+        sent = [dict(p.items()) for p in _vals(rt.eval("sent"))]
+        self.assertEqual([p["K"] for p in sent], [1, 2, 25, 24, 26])
+        self.assertEqual(sent[0]["G"], 1)
+        self.assertEqual(sent[0]["A"], 1)
+        self.assertEqual(sent[1]["I2"], 3)
+        self.assertEqual(sent[3]["I"], 131072)
+        self.assertEqual({p["D"] for p in sent}, {5})
+
+    def test_purchase_uses_full_city_id(self):
+        self.rt.execute(r"""
+          local c = {id=131072, x=4, y=5, buildings={}}
+          function c:GetID() return self.id end
+          function c:GetX() return self.x end
+          function c:GetY() return self.y end
+          function c:GetGold()
+            return {GetPurchaseCost=function() return 40 end, GetPlotPurchaseCost=function() return 25 end}
+          end
+          function c:GetBuildings()
+            local me=self
+            return {HasBuilding=function(_, i) return me.buildings[i]==true end}
+          end
+          function c:GetBuildQueue()
+            local me=self
+            return {CreateIncompleteBuilding=function(_, idx) me.buildings[idx]=true end}
+          end
+          local p=Players[2]
+          function p:GetCities()
+            local cities={c}
+            return {Members=function()
+              local i=0
+              return function() i=i+1; if cities[i] then return i, cities[i] end end
+            end, FindID=function(_, id) if id==c.id then return c end end}
+          end
+        """)
+        self.rt.execute("Players[2]:GetTreasury()")
+        self.order(0, K=19, P=2, U=0, X=131072, Y=0, I=0, S=99)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+
+    def test_trade_explore_activate_guarded_fallback(self):
+        self.order(0, K=25, P=2, U=7, S=100)
+        self.assertFalse(self.last()["ok"])
+        self.assertIn("explore_unavailable", self.last()["reason"])
+        self.order(0, K=26, P=2, U=7, S=101)
+        self.assertFalse(self.last()["ok"])
+        self.assertIn("activate_unavailable", self.last()["reason"])
+        self.order(0, K=24, P=2, U=7, I=3, S=102)
+        self.assertFalse(self.last()["ok"])
+        self.assertTrue("stale_city_id" in self.last()["reason"] or "trade" in self.last()["reason"])
 
 
 @unittest.skipIf(lupa is None, "lupa not installed")
