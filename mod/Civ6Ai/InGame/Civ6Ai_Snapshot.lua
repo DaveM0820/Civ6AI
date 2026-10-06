@@ -2613,6 +2613,36 @@ function Civ6Ai_Snapshot._HasImprovementPrereqs(playerID, row)
   return true
 end
 
+-- Improvement_ValidBuildUnits restricts some Buildable improvements to one unit
+-- type (IMPROVEMENT_ROMAN_FORT -> UNIT_ROMAN_LEGION, forts -> military
+-- engineer). ImprovementBuilder.CanHaveImprovement does not check the unit, so
+-- the owned-tile scan must: an improvement with ValidBuildUnits rows is offered
+-- only to a unit listed there. No rows (or no table) = no restriction.
+function Civ6Ai_Snapshot._UnitCanBuildImprovement(unit, row)
+  if row == nil or GameInfo == nil or GameInfo.Improvement_ValidBuildUnits == nil then
+    return true
+  end
+  local unitType = nil
+  pcall(function()
+    local info = GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+    unitType = info ~= nil and info.UnitType or nil
+  end)
+  local restricted = false
+  local allowed = false
+  pcall(function()
+    for r in GameInfo.Improvement_ValidBuildUnits() do
+      if r.ImprovementType == row.ImprovementType then
+        restricted = true
+        if unitType ~= nil and r.UnitType == unitType then
+          allowed = true
+          return
+        end
+      end
+    end
+  end)
+  return (not restricted) or allowed
+end
+
 -- Improvements this builder can place on the current tile and owned tiles within
 -- 3. Current tile: UnitManager.CanStartOperation(BUILD_IMPROVEMENT). Other owned
 -- tiles: ImprovementBuilder.CanHaveImprovement + tech/civic, and not already
@@ -2706,6 +2736,7 @@ function Civ6Ai_Snapshot._AddBuilderCommands(commands, playerID, unit, unitId)
               if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then return end
               if row.Buildable == true and (row.TraitType == nil or row.TraitType == "")
                   and Civ6Ai_Snapshot._HasImprovementPrereqs(playerID, row)
+                  and Civ6Ai_Snapshot._UnitCanBuildImprovement(unit, row)
                   and not plotHasImprovement(plot, row) then
                 local can = false
                 if ImprovementBuilder ~= nil and ImprovementBuilder.CanHaveImprovement ~= nil then

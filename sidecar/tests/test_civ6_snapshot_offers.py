@@ -232,6 +232,52 @@ class SnapshotLuaOffersTests(unittest.TestCase):
         snap._AddBuilderCommands(cmds, 1, self.lua.globals().UNIT, "UNIT_3")
         self.assertEqual(0, len(cmds))
 
+    def test_builder_skips_improvement_reserved_for_other_unit(self):
+        # Live T8-T11: an Australian builder was offered only
+        # Improve(IMPROVEMENT_ROMAN_FORT), which Improvement_ValidBuildUnits
+        # reserves for UNIT_ROMAN_LEGION; gameplay rejected it every turn.
+        self.lua.execute(
+            r"""
+            local rows = {
+              [0] = { ImprovementType='IMPROVEMENT_FARM', Index=0, Buildable=true },
+              [1] = { ImprovementType='IMPROVEMENT_ROMAN_FORT', Index=1, Buildable=true },
+            }
+            GameInfo = { Improvements = rows, Units = { [4] = { UnitType='UNIT_BUILDER' } } }
+            function GameInfo.Improvements()
+              local n=-1
+              return function() n=n+1 return rows[n] end
+            end
+            local valid = {
+              { ImprovementType='IMPROVEMENT_FARM', UnitType='UNIT_BUILDER' },
+              { ImprovementType='IMPROVEMENT_ROMAN_FORT', UnitType='UNIT_ROMAN_LEGION' },
+            }
+            GameInfo.Improvement_ValidBuildUnits = function()
+              local i=0
+              return function() i=i+1 return valid[i] end
+            end
+            Map = { GetPlot = function(x,y)
+              return {
+                GetX=function() return x end, GetY=function() return y end,
+                GetOwner=function() return (x==5 and y==5) and 1 or -1 end,
+                GetImprovementType=function() return -1 end,
+              }
+            end, GetPlotDistance = function(a,b,c,d) return math.max(math.abs(a-c), math.abs(b-d)) end }
+            Players = { [1] = { GetTeam = function() return 1 end } }
+            ImprovementBuilder = { CanHaveImprovement = function() return true end }
+            UnitManager = nil
+            UNIT = {
+              GetBuildCharges=function() return 3 end, GetType=function() return 4 end,
+              GetX=function() return 5 end, GetY=function() return 5 end,
+            }
+            CMDS = {}
+            """
+        )
+        snap = self.lua.globals().Civ6Ai_Snapshot
+        cmds = self.lua.globals().CMDS
+        snap._AddBuilderCommands(cmds, 1, self.lua.globals().UNIT, "UNIT_3")
+        offered = [cmds[i].fixed_arguments.improvement_id for i in range(1, len(cmds) + 1)]
+        self.assertEqual(["IMPROVEMENT_FARM"], offered)
+
     def test_adjacent_moves_only_when_combat_next_to_enemy(self):
         self.lua.execute(
             r"""
