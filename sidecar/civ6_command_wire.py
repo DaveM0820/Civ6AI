@@ -407,3 +407,10 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
             out[f"cmd.{index}"] = cmd_id
     LAST_UNRESOLVED[:] = unresolved
     return out
+
+
+def take_unresolved() -> list[str]:
+    """Copy and clear tokens the last expand_civ6_command_wire call could not bind."""
+    items = list(LAST_UNRESOLVED)
+    LAST_UNRESOLVED.clear()
+    return items

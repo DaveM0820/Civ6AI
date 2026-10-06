@@ -81,12 +81,12 @@ settler_1.maxMovement = 2
 
 === DIPLOMACY ===
 Model what rivals want and fear — trade, isolation, and alliances are tools, not filler.
-HAGGLE IN DMs: highly encourage chat.LeaderName BEFORE any formal trade or alliance, and keep DMing WHILE a deal is pending (counter-offers, sweeteners, threats, flattery). Chat is where you bargain. There are no war or peace orders for you this turn, so agreements live in chat and in what you actually do on the map (remember them).
-Use private DMs (chat.LeaderName) on relationship milestones: first meeting, declaring war, deal talks, ultimatums, and replies to fresh inbox messages.
+HAGGLE IN DMs: highly encourage chat.Cleopatra BEFORE any formal trade or alliance, and keep DMing WHILE a deal is pending (counter-offers, sweeteners, threats, flattery). Chat is where you bargain. There are no war or peace orders for you this turn, so agreements live in chat and in what you actually do on the map (remember them).
+Use private DMs (chat.Cleopatra) on relationship milestones: first meeting, declaring war, deal talks, ultimatums, and replies to fresh inbox messages.
 Never reveal military plans, weak cities, or hidden ambitions in chat.all (those go in private DMs).
 Be original and occasionally funny — in-character wit beats generic filler.
-chat.all is public. Send it when you have something original to say (opening, taunt, deal, war). If many turns pass with no chat.all, send one. Prefer chat.LeaderName for targeted talk.
-You have met Cleopatra — send chat.LeaderName on first contact, war, and before/during deal talks.
+chat.all is public. Send it when you have something original to say (opening, taunt, deal, war). If many turns pass with no chat.all, send one. Prefer chat.Cleopatra for targeted talk.
+You have met Cleopatra — send chat.Cleopatra on first contact, war, and before/during deal talks.
 In thought.strategy, name which rivals you are courting, isolating, or appeasing and why.
 # == Chat Log ==
 (no messages yet)
@@ -110,10 +110,13 @@ history.memory = Expand to third city after Pottery; scout eastern coast.
 === ADVICE ===
 - In peacetime, scouts and warriors explore fog. Do not fortify the whole army, because units left without orders stay where they are.
 - Settlers should found or walk toward a settle tile; do not sleep on your own city.
+- Expansion: a Settler that sits idle wastes growth. Prefer FoundCity this turn when the tile is legal and decent (fresh water or coast, not cramped by another city). If the best site is a few tiles away, MoveTo that tile and FoundCity as soon as FoundCity is legal — do not park the Settler on your capital or wander the map for ten-plus turns.
 - Before you finish: issue one command for each entry under REQUIRED COMMANDS.
 - Settlers are priority targets: when you have one, keep a military escort or nearby defender every turn until it founds or reaches safety.
 - Settler: Carefully observe the attached map to choose a settle location, and remember it for as many turns as the walk takes. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold).
+- Chat: do not repeat your opening introduction every turn. After first contact, send a fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or silence via no chat). Prefer a private chat.<rival leader> key for one rival; use chat.all sparingly. A near-copy of your own recent public line is dropped, not sent. thought.strategy is planning prose — do not paste it into chat.
 - Pick research and civics before they run out so science and culture are never wasted.
+- For legal.research.tech / legal.research.civic, pick only from the listed options — never re-pick a tech or civic you already finished.
 - Do not queue production that is already building.
 
 === RESPONSE INSTRUCTIONS ===
@@ -138,7 +141,7 @@ Required Event.* logs this turn: 1 (numbered under REQUIRED COMMANDS).
 Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):
 unitId.command = MoveTo(x,y) | AttackTo(x,y) | FoundCity | Fortify | Skip (one option per unit from its row; MoveTo(x,y) = any destination tile, the unit walks toward it).
 cityName.production = UNIT_* | BUILDING_* | PROJECT_* from that city's listed options (only when currentProduction is NONE, or to switch on purpose).
-legal.research.tech, legal.research.civic, chat.all, chat.LeaderName — see OPTIONAL COMMANDS.
+legal.research.tech, legal.research.civic, chat.all, chat.Cleopatra — see OPTIONAL COMMANDS.
 Do not use Skip when another option is listed.
 
 GOOD JSON (entire reply — row numbers on keys; host strips the prefix):
@@ -156,10 +159,12 @@ Command rules:
 - Private messages are tagged by turn (chat.private.tN.*); reply only to DMs from this turn, not older lines.
 - DM recipients: Cleopatra
 - You have not spoken publicly yet — an optional punchy opener is fine; skip solemn welcomes.
+- Chat: do not repeat your opening introduction every turn. After first contact, send a fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or silence via no chat). Prefer a private chat.<rival leader> key for one rival; use chat.all sparingly. A near-copy of your own recent public line is dropped, not sent. thought.strategy is planning prose — do not paste it into chat.
+- Private DMs use a rival's name as the key (chat.Cleopatra), or chat.player.PLAYER_n / chat.PLAYER_n. chat.all is public. Keep each line under 800 characters.
 
 === OPTIONAL COMMANDS ===
 OPTIONAL COMMANDS are encouraged every turn — not leftovers. Required rows are only the minimum.
-Issue as many optional commands as you want this turn: chat.all, chat.LeaderName, research, civics, remember, extra unit/city orders, and any other listed shape.
+Issue as many optional commands as you want this turn: chat.all, chat.Cleopatra, research, civics, remember, extra unit/city orders, and any other listed shape.
 There is no cap. Use numbered JSON keys that continue after the last required row.
 Use only shapes listed here or on unit/city rows.
 There are 8 required commands. You must respond with every required command, enumerated from 1 to 8.
@@ -169,7 +174,7 @@ Required rows are the minimum, not the whole turn. After row 8, add as many opti
 Optional JSON keys:
 
   "9.legal.research.tech": "TECH_POTTERY",
-  "10.chat": "chat.all | chat.LeaderName",
+  "10.chat": "chat.all | chat.Cleopatra",
   "11.remember": "text (duration N turns | forever)",
   "12.Athens.production": "UNIT_SETTLER | BUILDING_MONUMENT",
 
