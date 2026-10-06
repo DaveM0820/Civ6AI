@@ -49,9 +49,7 @@ def native_fallback_policy(snapshot: dict[str, Any] | None = None) -> str:
 def chat_dm_examples(snapshot: dict[str, Any] | None) -> str:
     names: list[str] = []
     if isinstance(snapshot, dict):
-        for rival in snapshot.get("known_players") or []:
-            if not isinstance(rival, dict):
-                continue
+        for rival in pipeline.chat_target_rivals(snapshot):
             name = pipeline._rival_leader_name(rival)
             if name and name not in names:
                 names.append(name)
@@ -673,9 +671,16 @@ def _civ6_chat_rules(snapshot: dict[str, Any]) -> list[str]:
         if line not in keep:
             keep.append(line)
     keep.append(coaching.CIV6_CHAT_VARIETY_COACHING)
+    intro_turn, intro_who = pipeline.first_self_intro_context(snapshot)
+    if intro_turn is not None:
+        keep.append(
+            f"You already introduced yourself to {intro_who} on turn {intro_turn}; don't repeat it, "
+            "respond to what they said or say something new."
+        )
     keep.append(
         f"Private DMs use a rival's name as the key ({chat_dm_examples(snapshot)}), "
         "or chat.player.PLAYER_n / chat.PLAYER_n. chat.all is public. "
+        "Address only major civilizations you have met — never Free Cities, Barbarians, or city-states. "
         f"Keep each line under {pipeline.CHAT_TEXT_MAX_LENGTH} characters."
     )
     return keep

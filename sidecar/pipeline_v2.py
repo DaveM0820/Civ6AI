@@ -367,6 +367,12 @@ def early_turn_intro_chat_lines(snapshot: dict[str, Any]) -> list[str]:
     civ_id = personality.get("civilization_id")
     civ_label = _readable_id(civ_id, "CIVILIZATION_") if civ_id else ""
     who = f"{leader}" + (f" of {civ_label}" if civ_label else "")
+    intro_turn, intro_who = first_self_intro_context(snapshot)
+    if intro_turn is not None:
+        return [
+            f"You already introduced yourself to {intro_who} on turn {intro_turn}; don't repeat it, "
+            "respond to what they said or say something new."
+        ]
     if turn == 1:
         return [
             f"EARLY TURN {turn}: send chat.all introducing yourself as {who} - a short "
@@ -2797,6 +2803,125 @@ def _player_chat_name(snapshot: dict[str, Any], player_id: str) -> str:
     return player_id
 
 
+_NON_MAJOR_CHAT_NAMES = frozenset({
+    "barbarians", "barbarian", "free cities", "free city", "city-state", "city state",
+    "citystates", "minor civ",
+})
+_NON_MAJOR_CIV_IDS = frozenset({"CIVILIZATION_BARBARIAN", "CIVILIZATION_FREE_CITIES"})
+_NON_MAJOR_LEADER_IDS = frozenset({"LEADER_BARBARIAN", "LEADER_FREE_CITIES"})
+_NON_MAJOR_KINDS = frozenset({
+    "city_state", "city-state", "city state", "barbarian", "barbarians",
+    "free_cities", "free cities", "minor",
+})
+
+
+def player_is_major_civ(player: dict[str, Any] | None) -> bool:
+    """True for major civilizations only (not city-states, Free Cities, or Barbarians)."""
+    if not isinstance(player, dict):
+        return False
+    if player.get("is_major") is False:
+        return False
+    kind = str(player.get("kind") or "").strip().lower().replace("-", " ").replace("_", " ")
+    if kind in _NON_MAJOR_KINDS:
+        return False
+    civ = str(player.get("civilization_id") or "").upper()
+    if civ in _NON_MAJOR_CIV_IDS:
+        return False
+    leader = str(player.get("leader_id") or "").upper()
+    if leader in _NON_MAJOR_LEADER_IDS or leader.startswith("LEADER_MINOR_CIV"):
+        return False
+    names = (
+        str(player.get("leader_name") or ""),
+        _rival_leader_name(player),
+        _readable_id(player.get("civilization_id", ""), "CIVILIZATION_"),
+    )
+    for name in names:
+        lowered = name.strip().lower()
+        if lowered in _NON_MAJOR_CHAT_NAMES:
+            return False
+    if player.get("is_major") is True or kind == "major":
+        return True
+    return True
+
+
+def rival_has_met(player: dict[str, Any] | None) -> bool:
+    if not isinstance(player, dict):
+        return False
+    relation = player.get("relation")
+    if isinstance(relation, dict) and "met" in relation:
+        return relation.get("met") is True
+    return True
+
+
+def chat_target_rivals(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Met major civilizations the speaking seat may address (excludes self)."""
+    self_id = str(snapshot.get("decision", {}).get("player_id", ""))
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for rival in snapshot.get("known_players", []) or []:
+        if not isinstance(rival, dict):
+            continue
+        player_id = str(rival.get("player_id") or "")
+        if not player_id or player_id == self_id or player_id in seen:
+            continue
+        if not player_is_major_civ(rival) or not rival_has_met(rival):
+            continue
+        seen.add(player_id)
+        out.append(rival)
+    return out
+
+
+def looks_like_non_major_chat_target(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    for prefix in ("leadername.", "leader.", "player.", "civ.", "civilization.", "chat."):
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+    compact = text.replace("_", " ").replace("-", " ")
+    if compact in _NON_MAJOR_CHAT_NAMES:
+        return True
+    if "barbarian" in compact:
+        return True
+    if compact in {"free cities", "free city"}:
+        return True
+    if compact.startswith("minor civ") or "city state" in compact:
+        return True
+    return False
+
+
+def first_self_intro_context(snapshot: dict[str, Any]) -> tuple[int | None, str]:
+    """Turn of this seat's first public line, plus who it was aimed at (lobby / a leader)."""
+    self_id = str(snapshot.get("decision", {}).get("player_id", ""))
+    history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
+    first_turn: int | None = None
+    for event in history.get("public_events", []) or []:
+        if not isinstance(event, dict):
+            continue
+        kind = str(event.get("kind") or "").upper()
+        if kind and kind != "CHAT_PUBLIC":
+            continue
+        affected = event.get("affected_ids", [])
+        sender = str(affected[0]) if isinstance(affected, list) and affected else ""
+        if sender != self_id:
+            continue
+        text = str(event.get("text") or event.get("summary") or "").strip()
+        if not text:
+            continue
+        try:
+            turn = int(event.get("turn") or 0)
+        except (TypeError, ValueError):
+            continue
+        if first_turn is None or turn < first_turn:
+            first_turn = turn
+    if first_turn is None:
+        return None, "the lobby"
+    names = [_rival_leader_name(r) for r in chat_target_rivals(snapshot)]
+    if len(names) == 1:
+        return first_turn, names[0]
+    return first_turn, "the lobby"
+
+
 def _resolve_chat_recipient(value: Any, snapshot: dict[str, Any]) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
@@ -2814,10 +2939,11 @@ def _resolve_chat_recipient(value: Any, snapshot: dict[str, Any]) -> str | None:
             text = text[len(prefix):]
             lowered = text.lower()
             break
+    rivals = chat_target_rivals(snapshot)
     known_players = {
         str(item.get("player_id"))
-        for item in snapshot.get("known_players", [])
-        if isinstance(item, dict) and item.get("player_id")
+        for item in rivals
+        if item.get("player_id")
     }
     if text in known_players:
         return text
@@ -2830,9 +2956,7 @@ def _resolve_chat_recipient(value: Any, snapshot: dict[str, Any]) -> str | None:
         ids = sorted(known_players)
         return ids[0] if len(ids) == 1 else None
     needle = text.lower()
-    for rival in snapshot.get("known_players", []):
-        if not isinstance(rival, dict):
-            continue
+    for rival in rivals:
         player_id = str(rival.get("player_id", ""))
         if not player_id:
             continue
@@ -2981,12 +3105,7 @@ def _chat_format_guidance(snapshot: dict[str, Any]) -> list[str]:
         "Proactively DM rivals when you have trade bait, probes, or taunts worth sending.",
     ]
     rivals: list[str] = []
-    for rival in snapshot.get("known_players", [])[:12]:
-        if not isinstance(rival, dict):
-            continue
-        player_id = str(rival.get("player_id", ""))
-        if not player_id:
-            continue
+    for rival in chat_target_rivals(snapshot)[:12]:
         rivals.append(_rival_leader_name(rival))
     if rivals:
         lines.append("DM recipients: " + "; ".join(rivals))

@@ -61,6 +61,28 @@ class ChatWireTextTests(unittest.TestCase):
         self.assertEqual("PLAYER_1", sender)
         self.assertEqual("trade routes", body)
 
+    def test_chat_has_met_requires_major(self):
+        self.lua.execute(
+            r"""
+            Game = { GetLocalPlayer = function() return 0 end }
+            Players = {
+              [0] = {
+                GetDiplomacy = function()
+                  return { HasMet = function(_, other) return true end }
+                end,
+              },
+              [1] = { IsAlive = function() return true end, IsMajor = function() return true end },
+              [61] = { IsAlive = function() return true end, IsMajor = function() return false end },
+            }
+            PlayerConfigurations = {
+              [1] = { GetCivilizationTypeName = function() return "CIVILIZATION_SCOTLAND" end },
+              [61] = { GetCivilizationTypeName = function() return "CIVILIZATION_FREE_CITIES" end },
+            }
+            """
+        )
+        self.assertTrue(self.lua.eval("Civ6Ai_Chat._HasMet(1)"))
+        self.assertFalse(self.lua.eval("Civ6Ai_Chat._HasMet(61)"))
+
     def test_plain_human_line_stays_the_network_sender(self):
         self.lua.eval('Civ6Ai_Chat._OnHumanChat(0, -1, "hello", 1)')
         sender = self.lua.eval("Civ6Ai_Chat.GetPublicEvents()[1].affected_ids[1]")

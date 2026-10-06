@@ -44,8 +44,20 @@ NON_TRANSIENT_FAILURES = (
     "plot_occupied_exhausted",
     "site_no_longer_legal",
 )
-CHAT_NEAR_DUPE_THRESHOLD = 0.9
-CHAT_NEAR_DUPE_LOOKBACK_TURNS = 3
+CHAT_NEAR_DUPE_THRESHOLD = 0.6
+CHAT_NEAR_DUPE_LOOKBACK_TURNS = 8
+CHAT_INTRO_PATTERNS = re.compile(
+    r"\b(i am|i'm|im|my name is|greetings from|let history remember|"
+    r"stands firm|allow me to introduce|i introduce)\b",
+    re.I,
+)
+CHAT_STOPWORDS = frozenset(
+    "a an the and or but if to of in on for with from as at by is are was were be been "
+    "being this that these those it its you your yours we our ours they their them me my "
+    "mine i he she his her him who whom what which when where why how not no nor so than "
+    "then too very can could should would will just also only own let may might shall "
+    "do does did done have has had having before after all".split()
+)
 
 _PATH_RE = re.compile(
     r"^(?P<partial>partial_)?path:(?P<fx>-?\d+),(?P<fy>-?\d+)>(?P<tx>-?\d+),(?P<ty>-?\d+)"
@@ -632,6 +644,170 @@ def token_jaccard(left: str, right: str) -> float:
     return len(ta & tb) / len(ta | tb)
 
 
+def content_tokens(text: str) -> set[str]:
+    tokens = set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+    return {tok for tok in tokens if tok not in CHAT_STOPWORDS and len(tok) > 2}
+
+
+def content_jaccard(left: str, right: str) -> float:
+    ta, tb = content_tokens(left), content_tokens(right)
+    if not ta and not tb:
+        return 1.0
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def _speaker_identity_needles(snapshot: dict[str, Any]) -> list[str]:
+    personality = snapshot.get("personality") if isinstance(snapshot.get("personality"), dict) else {}
+    names: list[str] = []
+    for raw in (
+        personality.get("leader_name"),
+        pipeline._leader_id_display_name(str(personality.get("leader_id") or "")),
+        pipeline._readable_id(personality.get("civilization_id"), "CIVILIZATION_"),
+    ):
+        text = str(raw or "").strip().lower()
+        if text:
+            names.append(text)
+    return names
+
+
+def is_self_reintroduction(text: str, snapshot: dict[str, Any]) -> bool:
+    body = (text or "").strip()
+    if not body:
+        return False
+    lowered = body.lower()
+    has_intro = bool(CHAT_INTRO_PATTERNS.search(body))
+    has_identity = any(needle and needle in lowered for needle in _speaker_identity_needles(snapshot))
+    return has_intro and has_identity
+
+
+def chat_target_key(message: dict[str, Any]) -> str:
+    target = str(message.get("target") or "all")
+    if target == "player":
+        return f"player:{message.get('target_player_id') or ''}"
+    return target
+
+
+def recent_self_chats_by_target(
+    snapshot: dict[str, Any], lookback: int = CHAT_NEAR_DUPE_LOOKBACK_TURNS
+) -> dict[str, list[tuple[int, str]]]:
+    decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
+    self_id = str(decision.get("player_id") or "")
+    try:
+        current_turn = int(decision.get("turn") or 0)
+    except (TypeError, ValueError):
+        current_turn = 0
+    history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
+    by_target: dict[str, list[tuple[int, str]]] = {}
+    for event in history.get("public_events", []) or []:
+        if not isinstance(event, dict):
+            continue
+        kind = str(event.get("kind") or "").upper()
+        if kind and kind != "CHAT_PUBLIC":
+            continue
+        affected = event.get("affected_ids", [])
+        sender = str(affected[0]) if isinstance(affected, list) and affected else ""
+        if sender != self_id:
+            continue
+        try:
+            turn = int(event.get("turn") or 0)
+        except (TypeError, ValueError):
+            continue
+        if current_turn - lookback <= turn < current_turn:
+            text = str(event.get("text") or event.get("summary") or "").strip()
+            if text:
+                by_target.setdefault("all", []).append((turn, text))
+    return by_target
+
+
+def recent_self_public_chats(snapshot: dict[str, Any], lookback: int = CHAT_NEAR_DUPE_LOOKBACK_TURNS) -> list[str]:
+    return [text for _turn, text in recent_self_chats_by_target(snapshot, lookback).get("all", [])]
+
+
+def is_near_duplicate_chat(text: str, recent: list[str], threshold: float = CHAT_NEAR_DUPE_THRESHOLD) -> bool:
+    from difflib import SequenceMatcher
+
+    needle = (text or "").strip()
+    if not needle:
+        return False
+    for prior in recent:
+        ratio = SequenceMatcher(None, needle.lower(), prior.lower()).ratio()
+        overlap = max(ratio, token_jaccard(needle, prior), content_jaccard(needle, prior))
+        if overlap >= threshold:
+            return True
+    return False
+
+
+def filter_ineligible_chat_targets(
+    snapshot: dict[str, Any],
+    chat_messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    kept: list[dict[str, Any]] = []
+    dropped: list[str] = []
+    eligible = {str(r.get("player_id")) for r in pipeline.chat_target_rivals(snapshot)}
+    self_id = str((snapshot.get("decision") or {}).get("player_id") or "")
+    for message in chat_messages or []:
+        if not isinstance(message, dict):
+            continue
+        target = message.get("target")
+        if target in {"all", "team"}:
+            kept.append(message)
+            continue
+        raw_id = message.get("target_player_id")
+        resolved = pipeline._resolve_chat_recipient(raw_id, snapshot)
+        banned = pipeline.looks_like_non_major_chat_target(raw_id)
+        if resolved == self_id or str(raw_id or "") == self_id:
+            dropped.append(
+                f"dropped.chat.self: chat addressed to this seat ({raw_id}) was not sent"
+            )
+            continue
+        if banned or resolved is None or resolved not in eligible:
+            dropped.append(
+                f"dropped.chat.non_major: {raw_id} is not a met major civilization and was not sent"
+            )
+            continue
+        kept.append({**message, "target_player_id": resolved})
+    return kept, dropped
+
+
+def filter_repeat_public_chat(
+    snapshot: dict[str, Any],
+    chat_messages: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    recent_map = recent_self_chats_by_target(snapshot)
+    kept: list[dict[str, Any]] = []
+    dropped: list[str] = []
+    for message in chat_messages:
+        if not isinstance(message, dict):
+            continue
+        text = str(message.get("text") or "")
+        key = chat_target_key(message)
+        prior_rows = recent_map.get(key, [])
+        prior_texts = [row[1] for row in prior_rows]
+        if key == "all":
+            prior_texts = prior_texts + [row[1] for row in recent_map.get("all", [])]
+            prior_texts = list(dict.fromkeys(prior_texts))
+        if prior_texts and is_self_reintroduction(text, snapshot):
+            dropped.append(
+                "dropped: public chat re-introduced you after a prior line to that civilization and was not sent"
+            )
+            continue
+        if prior_texts and is_near_duplicate_chat(text, prior_texts):
+            dropped.append(
+                "dropped: public chat was a near-repeat of your own recent line and was not sent"
+            )
+            continue
+        kept.append(message)
+        if text.strip():
+            try:
+                turn = int((snapshot.get("decision") or {}).get("turn") or 0)
+            except (TypeError, ValueError):
+                turn = 0
+            recent_map.setdefault(key, []).append((turn, text))
+    return kept, dropped
+
+
 def _reason_is_non_transient(reason: str) -> bool:
     text = (reason or "").lower()
     return any(token in text for token in NON_TRANSIENT_FAILURES)
@@ -697,70 +873,5 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
             )
             continue
         kept.append(command)
-    return kept, dropped
-
-
-def recent_self_public_chats(snapshot: dict[str, Any], lookback: int = CHAT_NEAR_DUPE_LOOKBACK_TURNS) -> list[str]:
-    decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
-    self_id = str(decision.get("player_id") or "")
-    try:
-        current_turn = int(decision.get("turn") or 0)
-    except (TypeError, ValueError):
-        current_turn = 0
-    history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
-    lines: list[str] = []
-    for event in history.get("public_events", []) or []:
-        if not isinstance(event, dict):
-            continue
-        kind = str(event.get("kind") or "").upper()
-        if kind and kind != "CHAT_PUBLIC":
-            continue
-        affected = event.get("affected_ids", [])
-        sender = str(affected[0]) if isinstance(affected, list) and affected else ""
-        if sender != self_id:
-            continue
-        try:
-            turn = int(event.get("turn") or 0)
-        except (TypeError, ValueError):
-            continue
-        if current_turn - lookback <= turn < current_turn:
-            text = str(event.get("text") or event.get("summary") or "").strip()
-            if text:
-                lines.append(text)
-    return lines
-
-
-def is_near_duplicate_chat(text: str, recent: list[str], threshold: float = CHAT_NEAR_DUPE_THRESHOLD) -> bool:
-    from difflib import SequenceMatcher
-
-    needle = (text or "").strip()
-    if not needle:
-        return False
-    for prior in recent:
-        ratio = SequenceMatcher(None, needle.lower(), prior.lower()).ratio()
-        if max(ratio, token_jaccard(needle, prior)) >= threshold:
-            return True
-    return False
-
-
-def filter_repeat_public_chat(
-    snapshot: dict[str, Any],
-    chat_messages: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[str]]:
-    recent = recent_self_public_chats(snapshot)
-    kept: list[dict[str, Any]] = []
-    dropped: list[str] = []
-    for message in chat_messages:
-        if not isinstance(message, dict):
-            continue
-        text = str(message.get("text") or "")
-        if message.get("target") == "all" and is_near_duplicate_chat(text, recent):
-            dropped.append(
-                "dropped: public chat was a near-repeat of your own recent line and was not sent"
-            )
-            continue
-        kept.append(message)
-        if message.get("target") == "all" and text.strip():
-            recent.append(text)
     return kept, dropped
 

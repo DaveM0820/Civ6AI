@@ -117,6 +117,34 @@ class ChatRobustnessTests(unittest.TestCase):
         self.assertEqual(pipeline._resolve_chat_recipient("Sumeria", snap), "PLAYER_0")
         self.assertEqual(pipeline._resolve_chat_recipient("player.PLAYER_0", snap), "PLAYER_0")
         self.assertEqual(pipeline._resolve_chat_recipient("LeaderName.Gilgamesh", snap), "PLAYER_0")
+        self.assertIsNone(pipeline._resolve_chat_recipient("Barbarians", snap))
+        self.assertIsNone(pipeline._resolve_chat_recipient("Free Cities", snap))
+
+    def test_non_major_chat_targets_are_dropped(self):
+        snap = _snap()
+        snap["known_players"].extend([
+            {"player_id": "PLAYER_61", "leader_id": "LEADER_FREE_CITIES", "leader_name": "Free Cities",
+             "civilization_id": "CIVILIZATION_FREE_CITIES", "kind": "free_cities", "is_major": False,
+             "relation": {"met": True}},
+            {"player_id": "PLAYER_62", "leader_id": "LEADER_BARBARIAN", "leader_name": "Barbarians",
+             "civilization_id": "CIVILIZATION_BARBARIAN", "kind": "barbarian", "is_major": False,
+             "relation": {"met": True}},
+        ])
+        wire = civ6_wire.build_civ6_model_wire_text(snap)
+        self.assertNotIn("chat.Free Cities", wire)
+        self.assertNotIn("chat.Barbarians", wire)
+        self.assertIn("chat.Gilgamesh", wire)
+        chats = [
+            {"target": "player", "target_player_id": "Free Cities", "text": "Why war?"},
+            {"target": "player", "target_player_id": "Barbarians", "text": "Raids end here."},
+            {"target": "player", "target_player_id": "Gilgamesh", "text": "A private word."},
+        ]
+        kept, dropped = results.filter_ineligible_chat_targets(snap, chats)
+        self.assertEqual(1, len(kept))
+        self.assertEqual("PLAYER_0", kept[0]["target_player_id"])
+        self.assertTrue(any("dropped.chat.non_major" in note and "Free Cities" in note for note in dropped))
+        self.assertTrue(any("dropped.chat.non_major" in note and "Barbarians" in note for note in dropped))
+
 
     def test_chat_leadername_dot_key_expands(self):
         snap = _snap()
@@ -164,6 +192,63 @@ class ChatRobustnessTests(unittest.TestCase):
         kept, dropped = results.filter_repeat_public_chat(snap, chats)
         self.assertEqual(kept, [])
         self.assertTrue(any("near-repeat" in note for note in dropped))
+
+    def test_paraphrased_reintroduction_is_dropped(self):
+        snap = _snap(decision={"turn": 2, "player_id": "PLAYER_1"})
+        snap["personality"] = {
+            "leader_name": "Robert the Bruce",
+            "leader_id": "LEADER_ROBERT_THE_BRUCE",
+            "civilization_id": "CIVILIZATION_SCOTLAND",
+        }
+        snap["history"]["public_events"] = [
+            {"turn": 1, "kind": "CHAT_PUBLIC",
+             "text": "I am Robert the Bruce of SCOTLAND — may your lands tremble before my banner, and your rivers run red with the blood of those who dare oppose me. Let history remember this day.",
+             "affected_ids": ["PLAYER_1"]},
+        ]
+        paraphrase = {
+            "target": "all",
+            "text": "Robert the Bruce of SCOTLAND stands firm — your rivers may run red, but mine flow with steel. Let history judge who bends first.",
+        }
+        kept, dropped = results.filter_repeat_public_chat(snap, [paraphrase])
+        self.assertEqual(kept, [])
+        self.assertTrue(dropped)
+
+    def test_distinct_reply_is_not_treated_as_repeat_intro(self):
+        snap = _snap(decision={"turn": 2, "player_id": "PLAYER_1"})
+        snap["personality"] = {
+            "leader_name": "Robert the Bruce",
+            "leader_id": "LEADER_ROBERT_THE_BRUCE",
+            "civilization_id": "CIVILIZATION_SCOTLAND",
+        }
+        snap["history"]["public_events"] = [
+            {"turn": 1, "kind": "CHAT_PUBLIC",
+             "text": "I am Robert the Bruce of SCOTLAND — may your lands tremble before my banner.",
+             "affected_ids": ["PLAYER_1"]},
+        ]
+        reply = {
+            "target": "all",
+            "text": "Curtin, keep your Pacific swell. I will found on the highlands and trade when the sheep are fat.",
+        }
+        kept, dropped = results.filter_repeat_public_chat(snap, [reply])
+        self.assertEqual(1, len(kept))
+        self.assertEqual(dropped, [])
+
+    def test_intro_coaching_after_first_public_line(self):
+        snap = _snap(decision={"turn": 2, "player_id": "PLAYER_1"})
+        snap["personality"] = {
+            "leader_name": "Robert the Bruce",
+            "civilization_id": "CIVILIZATION_SCOTLAND",
+        }
+        snap["history"]["public_events"] = [
+            {"turn": 1, "kind": "CHAT_PUBLIC", "text": "I am Robert the Bruce of SCOTLAND.",
+             "affected_ids": ["PLAYER_1"]},
+        ]
+        lines = pipeline.early_turn_intro_chat_lines(snap)
+        self.assertTrue(lines)
+        self.assertIn("already introduced yourself", lines[0])
+        self.assertIn("turn 1", lines[0])
+        self.assertNotIn("EARLY TURN 2", lines[0])
+
 
     def test_missing_turn_does_not_treat_all_history_as_recent_chat(self):
         snap = _snap(decision={"player_id": "PLAYER_1"})

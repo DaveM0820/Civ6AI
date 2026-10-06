@@ -21,7 +21,7 @@ SNAP_LUA = ROOT / "mod/Civ6Ai/InGame/Civ6Ai_Snapshot.lua"
 class SnapshotLuaOffersTests(unittest.TestCase):
     def setUp(self) -> None:
         self.lua = LuaRuntime(unpack_returned_tuples=True)
-        self.lua.execute("Civ6Ai_Util = { Log = function() end, PlotId = function(x,y) return 'PLOT_'..x..'_'..y end, JsonArrayList = function() return {} end, PlayerId = function(p) return 'PLAYER_'..p end }")
+        self.lua.execute("Civ6Ai_Util = { Log = function() end, PlotId = function(x,y) return 'PLOT_'..x..'_'..y end, JsonArrayList = function() return {} end, JsonNull = function() return nil end, PlayerId = function(p) return 'PLAYER_'..p end }")
         self.lua.execute(SNAP_LUA.read_text(encoding="utf-8"))
 
     def test_settle_facts_unranked_legal_sites_and_here_reason(self):
@@ -71,6 +71,94 @@ class SnapshotLuaOffersTests(unittest.TestCase):
         self.assertEqual(sorted(dists), dists)
         coords = [(sites[i].x, sites[i].y) for i in range(1, len(sites) + 1)]
         self.assertNotIn((10, 10), coords)
+        self.assertGreater(len(coords), 6)
+
+    def test_known_players_are_met_majors_only(self):
+        self.lua.execute(
+            r"""
+            Players = {}
+            PlayerConfigurations = {}
+            local function major(id, leader, civ)
+              Players[id] = {
+                IsAlive = function() return true end,
+                IsMajor = function() return true end,
+                IsBarbarian = function() return false end,
+                GetTeam = function() return id end,
+                GetScore = function() return 10 end,
+                GetDiplomacy = function()
+                  return { HasMet = function() return true end,
+                           IsAtWarWith = function() return false end,
+                           HasOpenBordersFrom = function() return false end,
+                           HasDefensivePact = function() return false end,
+                           HasDeclaredFriendship = function() return false end,
+                           HasAllied = function() return false end }
+                end,
+                GetDiplomaticAI = function() return { GetDiplomaticStateIndex = function() return nil end } end,
+              }
+              PlayerConfigurations[id] = {
+                GetLeaderTypeName = function() return leader end,
+                GetLeaderName = function() return leader end,
+                GetCivilizationTypeName = function() return civ end,
+              }
+            end
+            major(0, "LEADER_JOHN_CURTIN", "CIVILIZATION_AUSTRALIA")
+            major(1, "LEADER_ROBERT_THE_BRUCE", "CIVILIZATION_SCOTLAND")
+            Players[62] = {
+              IsAlive = function() return true end,
+              IsMajor = function() return false end,
+              IsBarbarian = function() return true end,
+              GetTeam = function() return 62 end,
+              GetScore = function() return 0 end,
+              GetDiplomacy = function()
+                return { HasMet = function() return true end, IsAtWarWith = function() return false end }
+              end,
+            }
+            PlayerConfigurations[62] = {
+              GetLeaderTypeName = function() return "LEADER_BARBARIAN" end,
+              GetLeaderName = function() return "Barbarians" end,
+              GetCivilizationTypeName = function() return "CIVILIZATION_BARBARIAN" end,
+            }
+            Players[61] = {
+              IsAlive = function() return true end,
+              IsMajor = function() return false end,
+              IsBarbarian = function() return false end,
+              GetTeam = function() return 61 end,
+              GetScore = function() return 0 end,
+              GetDiplomacy = function()
+                return { HasMet = function() return true end, IsAtWarWith = function() return false end }
+              end,
+            }
+            PlayerConfigurations[61] = {
+              GetLeaderTypeName = function() return "LEADER_FREE_CITIES" end,
+              GetLeaderName = function() return "Free Cities" end,
+              GetCivilizationTypeName = function() return "CIVILIZATION_FREE_CITIES" end,
+            }
+            Players[3] = {
+              IsAlive = function() return true end,
+              IsMajor = function() return false end,
+              IsBarbarian = function() return false end,
+              GetTeam = function() return 3 end,
+              GetScore = function() return 0 end,
+              GetDiplomacy = function()
+                return { HasMet = function() return true end, IsAtWarWith = function() return false end }
+              end,
+            }
+            PlayerConfigurations[3] = {
+              GetLeaderTypeName = function() return "LEADER_MINOR_CIV_AMSTERDAM" end,
+              GetLeaderName = function() return "Amsterdam" end,
+              GetCivilizationTypeName = function() return "CIVILIZATION_AMSTERDAM" end,
+            }
+            Locale = { Lookup = function(s) return s end }
+            """
+        )
+        rows = self.lua.globals().Civ6Ai_Snapshot._BuildKnownPlayers(1)
+        ids = [rows[i].player_id for i in range(1, len(rows) + 1)]
+        kinds = [bool(rows[i].is_major) for i in range(1, len(rows) + 1)]
+        self.assertEqual(["PLAYER_0"], ids)
+        self.assertEqual([True], kinds)
+        self.assertNotIn("PLAYER_62", ids)
+        self.assertNotIn("PLAYER_61", ids)
+        self.assertNotIn("PLAYER_3", ids)
 
     def test_goal_reads_split_civ6ai_goal_properties(self):
         self.lua.execute(
@@ -266,7 +354,8 @@ class CommandWireVocabTests(unittest.TestCase):
         self.assertIn("coastal", lines)
         self.assertIn("too_close_to_city", lines)
         self.assertIn("settler_1.settle.sites", lines)
-        self.assertIn("(20,19)+2", lines)
+        self.assertIn("S1 (20,19)", lines)
+        self.assertIn("dist 2", lines)
         prompt = civ6_wire._append_civ6_unit_situation_wire
         buf: list[str] = []
         prompt(buf, snap)

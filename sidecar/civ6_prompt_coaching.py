@@ -29,8 +29,9 @@ CIV6_EXPANSION_COACHING = (
 CIV6_CHAT_VARIETY_COACHING = (
     "Chat: do not repeat your opening introduction every turn. After first contact, send a "
     "fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or "
-    "silence via no chat). Prefer a private chat.<rival leader> key for one rival; use chat.all "
-    "sparingly. A near-copy of your own recent public line is dropped, not sent. "
+    "silence via no chat). Prefer a private chat.<rival leader> key for one met major rival; "
+    "use chat.all sparingly. Never address Free Cities, Barbarians, or city-states. "
+    "A near-copy or re-introduction after your first public line is dropped, not sent. "
     "thought.strategy is planning prose — do not paste it into chat."
 )
 
@@ -510,8 +511,14 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
         lines.append(pipeline._wire_line(f"{prefix}.settle.here", ", ".join(bits)))
     sites = settle.get("sites") if settle else None
     if isinstance(sites, list):
+        from sidecar import civ6_command_wire as command_wire
+
+        labeled = {
+            (row["x"], row["y"]): row["label"]
+            for row in command_wire.labeled_settle_sites(snapshot)
+        }
         labels: list[str] = []
-        for site in sites[:6]:
+        for site in sites:
             if not isinstance(site, dict):
                 continue
             try:
@@ -519,7 +526,15 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
             except (KeyError, TypeError, ValueError):
                 continue
             dist = site.get("dist")
-            labels.append(f"({x},{y})" + (f" dist {dist}" if dist is not None else ""))
+            tag = labeled.get((x, y), "")
+            bits = [f"{tag} ({x},{y})".strip() if tag else f"({x},{y})"]
+            if site.get("coastal") or site.get("coast"):
+                bits.append("coastal")
+            if site.get("fresh_water"):
+                bits.append("fresh water")
+            if dist is not None:
+                bits.append(f"dist {dist}")
+            labels.append(", ".join(bits) if len(bits) > 1 else bits[0])
         if labels:
             lines.append(pipeline._wire_line(f"{prefix}.settle.nearby", "; ".join(labels)))
     return lines

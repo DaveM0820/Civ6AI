@@ -8,6 +8,7 @@ object whose keys carry the REQUIRED COMMANDS row number (``"6.scout_1.command":
 """
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -36,6 +37,119 @@ CITY_PROPS = ("production", "buy", "purchase", "buyTile", "focus", "rangeStrike"
 LAST_UNRESOLVED: list[str] = []
 
 PROSE_KEYS = {"strategicmap.read", "tacticalmap.read", "map.read", "remember", "decision_summary"}
+
+SETTLE_MARKER_RADIUS_DEFAULT = 4
+MIN_CITY_FOUND_DISTANCE = 4  # engine: cannot found within 3 tiles (distance < 4)
+
+
+def settle_marker_radius() -> int:
+    raw = os.environ.get("CIV6_SETTLE_MARKER_RADIUS", "").strip()
+    try:
+        value = int(raw) if raw else SETTLE_MARKER_RADIUS_DEFAULT
+    except ValueError:
+        value = SETTLE_MARKER_RADIUS_DEFAULT
+    return max(3, min(5, value))
+
+
+def _plot_xy(plot_id: Any) -> tuple[int, int] | None:
+    text = str(plot_id or "")
+    match = re.match(r"^PLOT_(-?\d+)_(-?\d+)$", text)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _city_plot_coords(city: dict[str, Any]) -> tuple[int, int] | None:
+    if not isinstance(city, dict):
+        return None
+    for key in ("x", "y"):
+        if key not in city and "plot_id" not in city:
+            break
+    if isinstance(city.get("x"), int) and isinstance(city.get("y"), int):
+        return int(city["x"]), int(city["y"])
+    return _plot_xy(city.get("plot_id"))
+
+
+def _known_plot_at(snapshot: dict[str, Any], x: int, y: int) -> dict[str, Any] | None:
+    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    for plot in known.get("plots") or []:
+        if not isinstance(plot, dict):
+            continue
+        if plot.get("x") == x and plot.get("y") == y:
+            return plot
+        if str(plot.get("plot_id") or "") == f"PLOT_{x}_{y}":
+            return plot
+    return None
+
+
+def site_obeys_founding_rules(snapshot: dict[str, Any], x: int, y: int) -> bool:
+    """No water/mountain tiles; not within 3 tiles of an existing city."""
+    from sidecar import civ6_wire
+
+    plot = _known_plot_at(snapshot, x, y)
+    if isinstance(plot, dict):
+        if plot.get("water") is True or plot.get("peak") is True:
+            return False
+        terrain = str(plot.get("terrain_id") or plot.get("terrain") or "").upper()
+        if "COAST" in terrain or terrain.endswith("_OCEAN") or "MOUNTAIN" in terrain:
+            return False
+        if plot.get("city_id"):
+            return False
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    width = game.get("map_width")
+    wrap_x = game.get("wrap_x") is not False
+    cities = list(snapshot.get("your_cities") or []) + list(snapshot.get("known_other_cities") or [])
+    for city in cities:
+        coords = _city_plot_coords(city) if isinstance(city, dict) else None
+        if coords is None:
+            continue
+        if civ6_wire._odd_r_distance((x, y), coords, width, wrap_x) < MIN_CITY_FOUND_DISTANCE:
+            return False
+    return True
+
+
+def labeled_settle_sites(snapshot: dict[str, Any], radius: int | None = None) -> list[dict[str, Any]]:
+    """Stable S1..Sn labels for legal nearby settle tiles (unranked; overlay + prompt)."""
+    if radius is None:
+        radius = settle_marker_radius()
+    units = [u for u in snapshot.get("your_units", []) or [] if isinstance(u, dict)]
+    collected: list[dict[str, Any]] = []
+    seen: set[tuple[int, int]] = set()
+    for unit in units:
+        settle = unit.get("settle")
+        if not isinstance(settle, dict):
+            continue
+        unit_id = str(unit.get("unit_id") or "")
+        for site in settle.get("sites") or []:
+            if not isinstance(site, dict):
+                continue
+            try:
+                x, y = int(site["x"]), int(site["y"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            try:
+                dist = int(site.get("dist")) if site.get("dist") is not None else None
+            except (TypeError, ValueError):
+                dist = None
+            if dist is not None and dist > radius:
+                continue
+            if (x, y) in seen:
+                continue
+            if not site_obeys_founding_rules(snapshot, x, y):
+                continue
+            seen.add((x, y))
+            collected.append({
+                "x": x,
+                "y": y,
+                "dist": dist,
+                "coastal": bool(site.get("coastal") or site.get("coast")),
+                "fresh_water": bool(site.get("fresh_water")),
+                "unit_id": unit_id,
+            })
+    collected.sort(key=lambda row: (row.get("dist") is None, row.get("dist") or 0, row["x"], row["y"]))
+    for index, row in enumerate(collected, start=1):
+        row["label"] = f"S{index}"
+    return collected
 
 
 def extract_remember(response: dict[str, Any]) -> list[str]:
@@ -841,17 +955,25 @@ def sitrep_offer_lines(snapshot: dict[str, Any]) -> list[str]:
         if not here_ok and reason:
             lines.append(pipeline_mod._wire_line(f"{prefix}.settle.cannotFound", str(reason)))
         sites = [s for s in (settle.get("sites") or []) if isinstance(s, dict)]
+        labeled = {(row["x"], row["y"]): row["label"] for row in labeled_settle_sites(snapshot)}
         if sites:
             site_bits = []
             for site in sites:
-                bit = f"({site.get('x')},{site.get('y')})+{site.get('dist')}"
+                try:
+                    sx, sy = int(site["x"]), int(site["y"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                tag = labeled.get((sx, sy), "")
+                bit = f"{tag} ({sx},{sy})".strip() if tag else f"({sx},{sy})"
                 flags = []
-                if site.get("coastal"):
-                    flags.append("coast")
+                if site.get("coastal") or site.get("coast"):
+                    flags.append("coastal")
                 if site.get("fresh_water"):
-                    flags.append("fresh")
+                    flags.append("fresh water")
+                if site.get("dist") is not None:
+                    flags.append(f"dist {site.get('dist')}")
                 if flags:
-                    bit += " " + " ".join(flags)
+                    bit += " " + ", ".join(flags)
                 site_bits.append(bit)
             lines.append(pipeline_mod._wire_line(f"{prefix}.settle.sites", " | ".join(site_bits)))
     history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}

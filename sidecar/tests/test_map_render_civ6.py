@@ -200,6 +200,65 @@ class Civ6MapRenderTests(unittest.TestCase):
             self.assertEqual("odd-r-flat-top", meta.get("hex_layout"))
             self.assertGreater(meta.get("image_bytes", 0), 1000)
 
+    def test_settle_site_overlay_draws_labels_and_skips_illegal_tiles(self):
+        snapshot = civ6_adapter.load_golden_snapshot(GOLDEN)
+        snapshot["your_units"] = [{
+            "unit_id": "UNIT_SETTLER_1",
+            "unit_type_id": "UNIT_SETTLER",
+            "plot_id": "PLOT_15_23",
+            "settle": {
+                "here_ok": False,
+                "sites": [
+                    {"x": 16, "y": 23, "dist": 1, "coastal": True, "fresh_water": True},
+                    {"x": 17, "y": 23, "dist": 2, "coastal": False, "fresh_water": False},
+                    {"x": 18, "y": 23, "dist": 1, "coastal": False, "fresh_water": False},
+                ],
+            },
+        }]
+        snapshot["your_cities"] = []
+        snapshot["known_other_cities"] = []
+        snapshot["known_map"]["viewport"] = {"x0": 14, "y0": 21, "width": 6, "height": 5}
+        snapshot["known_map"]["visibility_grid"] = ["......"] * 5
+        snapshot["known_map"]["plots"] = [
+            {"plot_id": f"PLOT_{x}_{y}", "x": x, "y": y, "knowledge": "visible",
+             "terrain_id": "TERRAIN_GRASS" if not (x == 18 and y == 23) else "TERRAIN_COAST",
+             "water": x == 18 and y == 23, "peak": False}
+            for y in range(21, 26) for x in range(14, 20)
+        ]
+        from sidecar.map_render_civ6 import _BASE_LAYER_CACHE, collect_settle_markers, render_civ6_map_png
+        _BASE_LAYER_CACHE.clear()
+        markers = collect_settle_markers(snapshot)
+        labels = {row["label"] for row in markers}
+        coords = {(row["x"], row["y"]) for row in markers}
+        self.assertIn("S1", labels)
+        self.assertIn((16, 23), coords)
+        self.assertNotIn((18, 23), coords)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settle.png"
+            meta = render_civ6_map_png(snapshot, path)
+            self.assertGreaterEqual(meta.get("settle_rings_drawn", 0), 1)
+            self.assertIn("S1", meta.get("settle_labels") or [])
+            from PIL import Image
+            img = Image.open(path)
+            pixels = list(img.getdata())
+            yellow = sum(1 for px in pixels if px[0] > 200 and 140 < px[1] < 230 and px[2] < 120)
+            self.assertGreater(yellow, 20)
+
+    def test_settle_overlay_skipped_when_vision_off(self):
+        from unittest import mock
+        from sidecar.map_render_civ6 import collect_settle_markers
+        snap = {
+            "your_units": [{
+                "unit_id": "UNIT_SETTLER_1", "unit_type_id": "UNIT_SETTLER",
+                "settle": {"sites": [{"x": 4, "y": 4, "dist": 1, "coastal": True}]},
+            }],
+            "your_cities": [],
+            "known_other_cities": [],
+        }
+        with mock.patch("sidecar.map_render_civ6.vision_maps_enabled", return_value=False):
+            self.assertEqual([], collect_settle_markers(snap))
+
+
 
 if __name__ == "__main__":
     unittest.main()

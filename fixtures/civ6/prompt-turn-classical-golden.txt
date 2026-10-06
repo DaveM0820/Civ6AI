@@ -114,7 +114,7 @@ history.memory = Expand to third city after Pottery; scout eastern coast.
 - Before you finish: issue one command for each entry under REQUIRED COMMANDS.
 - Settlers are priority targets: when you have one, keep a military escort or nearby defender every turn until it founds or reaches safety.
 - Settler: Carefully observe the attached map to choose a settle location, and remember it for as many turns as the walk takes. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold).
-- Chat: do not repeat your opening introduction every turn. After first contact, send a fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or silence via no chat). Prefer a private chat.<rival leader> key for one rival; use chat.all sparingly. A near-copy of your own recent public line is dropped, not sent. thought.strategy is planning prose — do not paste it into chat.
+- Chat: do not repeat your opening introduction every turn. After first contact, send a fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or silence via no chat). Prefer a private chat.<rival leader> key for one met major rival; use chat.all sparingly. Never address Free Cities, Barbarians, or city-states. A near-copy or re-introduction after your first public line is dropped, not sent. thought.strategy is planning prose — do not paste it into chat.
 - Pick research and civics before they run out so science and culture are never wasted.
 - For legal.research.tech / legal.research.civic, pick only from the listed options — never re-pick a tech or civic you already finished.
 - Do not queue production that is already building.
@@ -159,8 +159,8 @@ Command rules:
 - Private messages are tagged by turn (chat.private.tN.*); reply only to DMs from this turn, not older lines.
 - DM recipients: Cleopatra
 - You have not spoken publicly yet — an optional punchy opener is fine; skip solemn welcomes.
-- Chat: do not repeat your opening introduction every turn. After first contact, send a fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or silence via no chat). Prefer a private chat.<rival leader> key for one rival; use chat.all sparingly. A near-copy of your own recent public line is dropped, not sent. thought.strategy is planning prose — do not paste it into chat.
-- Private DMs use a rival's name as the key (chat.Cleopatra), or chat.player.PLAYER_n / chat.PLAYER_n. chat.all is public. Keep each line under 800 characters.
+- Chat: do not repeat your opening introduction every turn. After first contact, send a fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or silence via no chat). Prefer a private chat.<rival leader> key for one met major rival; use chat.all sparingly. Never address Free Cities, Barbarians, or city-states. A near-copy or re-introduction after your first public line is dropped, not sent. thought.strategy is planning prose — do not paste it into chat.
+- Private DMs use a rival's name as the key (chat.Cleopatra), or chat.player.PLAYER_n / chat.PLAYER_n. chat.all is public. Address only major civilizations you have met — never Free Cities, Barbarians, or city-states. Keep each line under 800 characters.
 
 === OPTIONAL COMMANDS ===
 OPTIONAL COMMANDS are encouraged every turn — not leftovers. Required rows are only the minimum.
