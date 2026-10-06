@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -71,19 +72,23 @@ def pending_apply_id(payload: str, session_id: str, player: int, turn: int, kind
 
 
 def _queue_state_path() -> Path:
-    """Host-side queue mirror so multi-seat publishes survive bridge restarts."""
-    home = Path.home()
-    for rel in (
-        "Documents/My Games/Sid Meier's Civilization VI/civ6ai",
-        "OneDrive/Documents/My Games/Sid Meier's Civilization VI/civ6ai",
-    ):
-        root = home / rel
-        if root.is_dir() or root.parent.is_dir():
-            try:
-                root.mkdir(parents=True, exist_ok=True)
-            except OSError:
-                continue
-            return root / _QUEUE_STATE_NAME
+    """Host-side queue mirror so multi-seat publishes survive bridge restarts.
+
+    Runtime I/O stays under local Documents My Games (never OneDrive). The
+    PendingApply Lua module is still written into every installed Mods/Civ6Ai
+    InGame folder because Civ6 may load the OneDrive Mods tree.
+    """
+    scripts = Path(__file__).resolve().parents[1]
+    if str(scripts) not in sys.path:
+        sys.path.insert(0, str(scripts))
+    try:
+        from civ6_paths import preferred_my_games_root
+
+        root = preferred_my_games_root() / "civ6ai"
+        root.mkdir(parents=True, exist_ok=True)
+        return root / _QUEUE_STATE_NAME
+    except Exception:
+        pass
     repo = Path(__file__).resolve().parents[2]
     runtime = repo / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)

@@ -4,6 +4,7 @@ Civ6Ai_Autotest = Civ6Ai_Autotest or {}
 Civ6Ai_Autotest._stopped = false
 
 function Civ6Ai_Autotest.Initialize()
+  Civ6Ai_Autotest.StartStallWatchdog()
   if not Civ6Ai_Config.IsAutotest() then
     return
   end
@@ -464,10 +465,6 @@ function Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
       .. "|civic=" .. tostring(civicId) .. "|ok=" .. tostring(ok)
       .. "|reason=" .. tostring(reason or ""))
   end
-  -- CHOOSE PRODUCTION: queue a safe default in any city with an empty build queue.
-  Civ6Ai_Autotest._ClearProductionBlockers(playerID)
-  -- FILL_CIVIC_SLOT / CONSIDER_GOVERNMENT_CHANGE: slot cards + pick a government.
-  Civ6Ai_Autotest._ClearPolicyGovernmentBlockers(playerID)
 end
 
 function Civ6Ai_Autotest._CityNeedsProduction(city)
@@ -791,30 +788,277 @@ function Civ6Ai_Autotest._ClearPolicyGovernmentBlockers(playerID)
 end
 
 
-function Civ6Ai_Autotest._DismissBlockers(playerID)
-  -- Choose research/civic before dismissing notifications: bare Dismiss does not
-  -- select a civic, so CHOOSE CIVIC stays up and blocks NEXT TURN.
-  Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
+-- Names used by the dispatch table. Keys are suffixes of EndTurnBlockingTypes
+-- (ENDTURN_BLOCKING_<NAME>) from base ActionPanel.lua. Looked up at runtime;
+-- missing types log blocker_unhandled and get one Activate/Dismiss.
+Civ6Ai_Autotest.BLOCKER_HANDLERS = {
+  RESEARCH = function(playerID)
+    Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
+  end,
+  CIVIC = function(playerID)
+    Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
+  end,
+  PRODUCTION = function(playerID)
+    Civ6Ai_Autotest._ClearProductionBlockers(playerID)
+  end,
+  CITIES = function(playerID)
+    Civ6Ai_Autotest._ClearProductionBlockers(playerID)
+  end,
+  FILL_CIVIC_SLOT = function(playerID)
+    Civ6Ai_Autotest._ClearPolicyGovernmentBlockers(playerID)
+  end,
+  CONSIDER_GOVERNMENT_CHANGE = function(playerID)
+    Civ6Ai_Autotest._ClearPolicyGovernmentBlockers(playerID)
+  end,
+  UNITS = function(playerID)
+    Civ6Ai_Autotest._SkipUnitMoves(playerID)
+  end,
+  UNIT_NEEDS_ORDERS = function(playerID)
+    Civ6Ai_Autotest._SkipUnitMoves(playerID)
+  end,
+  STACKED_UNITS = function(playerID)
+    Civ6Ai_Autotest._SkipUnitMoves(playerID)
+  end,
+  PANTHEON = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+  FOUND_PANTHEON = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+  RELIGION = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+  BELIEFS = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+  FOUND_RELIGION = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+  CHOOSE_RELIGION = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+  GOVERNOR = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+  PROMOTION = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+  ENVOYS = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+  GREAT_PERSON = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+  SPIES = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+  CONSIDER_GOLDEN_AGE_DEDICATION = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
+}
 
+function Civ6Ai_Autotest._BlockingTypeName(blocking)
+  if blocking == nil or blocking == 0 then
+    return "NONE"
+  end
+  local t = EndTurnBlockingTypes
+  if type(t) == "table" then
+    for key, value in pairs(t) do
+      if value == blocking then
+        local name = string.match(tostring(key), "ENDTURN_BLOCKING_(.+)$")
+        return name or tostring(key)
+      end
+    end
+  end
+  return "unknown:" .. tostring(blocking)
+end
+
+function Civ6Ai_Autotest._FirstBlockingType(playerID)
+  if UI ~= nil and UI.GetEndTurnBlockingType ~= nil then
+    local ok, value = pcall(function() return UI.GetEndTurnBlockingType() end)
+    if ok and value ~= nil and value ~= 0 then
+      return value
+    end
+  end
+  if NotificationManager == nil or NotificationManager.GetList == nil then
+    return 0
+  end
   local list = NotificationManager.GetList(playerID)
   if list == nil then
-    return
+    return 0
+  end
+  for _, nid in ipairs(list) do
+    local entry = NotificationManager.Find(playerID, nid)
+    if entry ~= nil then
+      local dismissed = false
+      pcall(function() dismissed = entry:IsDismissed() == true end)
+      if not dismissed and entry.GetEndTurnBlocking ~= nil then
+        local blocking = nil
+        pcall(function() blocking = entry:GetEndTurnBlocking() end)
+        if blocking ~= nil and blocking ~= 0 then
+          return blocking
+        end
+      end
+    end
+  end
+  return 0
+end
+
+function Civ6Ai_Autotest._HandlerForBlocking(blocking)
+  local name = Civ6Ai_Autotest._BlockingTypeName(blocking)
+  return Civ6Ai_Autotest.BLOCKER_HANDLERS[name], name
+end
+
+function Civ6Ai_Autotest._SweepCommonBlockers(playerID)
+  Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
+  Civ6Ai_Autotest._ClearProductionBlockers(playerID)
+  Civ6Ai_Autotest._ClearPolicyGovernmentBlockers(playerID)
+end
+
+function Civ6Ai_Autotest._ResolveEndTurnBlocking(playerID)
+  local blocking = Civ6Ai_Autotest._FirstBlockingType(playerID)
+  local handler, name = Civ6Ai_Autotest._HandlerForBlocking(blocking)
+  if blocking == nil or blocking == 0 then
+    Civ6Ai_Autotest._SweepCommonBlockers(playerID)
+    return "NONE", true
+  end
+  if handler == nil then
+    Civ6Ai_Util.Log("autotest|blocker_unhandled|type=" .. tostring(name)
+      .. "|player=" .. tostring(playerID))
+    Civ6Ai_Autotest._LogLine("blocker_unhandled|type=" .. tostring(name))
+    Civ6Ai_Autotest._SweepCommonBlockers(playerID)
+    return name, false
+  end
+  local ok, err = pcall(handler, playerID, blocking)
+  if not ok then
+    Civ6Ai_Util.Log("autotest|blocker_handler_error|type=" .. tostring(name)
+      .. "|err=" .. tostring(err))
+    return name, false
+  end
+  Civ6Ai_Util.Log("autotest|blocker_handled|type=" .. tostring(name)
+    .. "|player=" .. tostring(playerID))
+  return name, true
+end
+
+function Civ6Ai_Autotest._DismissBlockingNotifications(playerID)
+  if NotificationManager == nil or NotificationManager.GetList == nil then
+    return 0
+  end
+  local list = NotificationManager.GetList(playerID)
+  if list == nil then
+    return 0
   end
   local count = 0
   for _, nid in ipairs(list) do
     local entry = NotificationManager.Find(playerID, nid)
-    if entry ~= nil and not entry:IsDismissed() then
-      local blocking = entry:GetEndTurnBlocking()
-      if blocking ~= nil and blocking ~= 0 then
-        pcall(function() NotificationManager.SendActivated(playerID, nid) end)
-        pcall(function() NotificationManager.Dismiss(playerID, nid) end)
-        count = count + 1
+    if entry ~= nil then
+      local dismissed = false
+      pcall(function() dismissed = entry:IsDismissed() == true end)
+      if not dismissed then
+        local blocking = 0
+        pcall(function() blocking = entry:GetEndTurnBlocking() end)
+        if blocking ~= nil and blocking ~= 0 then
+          pcall(function() NotificationManager.SendActivated(playerID, nid) end)
+          pcall(function() NotificationManager.Dismiss(playerID, nid) end)
+          count = count + 1
+        end
       end
     end
   end
-  if count > 0 then
-    Civ6Ai_Autotest._LogLine("blockers|player=" .. tostring(playerID) .. "|count=" .. tostring(count))
+  return count
+end
+
+function Civ6Ai_Autotest._DismissBlockers(playerID)
+  local ok, nameOrErr, handled = pcall(function()
+    return Civ6Ai_Autotest._ResolveEndTurnBlocking(playerID)
+  end)
+  if not ok then
+    Civ6Ai_Util.Log("autotest|resolve_blockers_error|player=" .. tostring(playerID)
+      .. "|err=" .. tostring(nameOrErr))
   end
+  local count = 0
+  pcall(function() count = Civ6Ai_Autotest._DismissBlockingNotifications(playerID) end)
+  if count > 0 then
+    Civ6Ai_Autotest._LogLine("blockers|player=" .. tostring(playerID) .. "|count=" .. tostring(count)
+      .. "|type=" .. tostring(ok and nameOrErr or ""))
+  end
+end
+
+-- If the local turn has not advanced for STALL_SECONDS, clear blockers and
+-- retry end turn. After STALL_MAX_ATTEMPTS, log stall| so the bridge can raise it.
+Civ6Ai_Autotest.STALL_SECONDS = 240
+Civ6Ai_Autotest.STALL_MAX_ATTEMPTS = 3
+
+function Civ6Ai_Autotest.StartStallWatchdog()
+  if Civ6Ai_Autotest._stallWatching then
+    return
+  end
+  Civ6Ai_Autotest._stallWatching = true
+  Civ6Ai_Autotest._stallTurn = nil
+  Civ6Ai_Autotest._stallSince = nil
+  Civ6Ai_Autotest._stallAttempts = 0
+  local lastTickClock = nil
+  Civ6Ai_Util.ScheduleTick(function()
+    if Game == nil or Game.GetCurrentGameTurn == nil then
+      return true
+    end
+    local turn = Game.GetCurrentGameTurn()
+    local now = Civ6Ai_Bridge ~= nil and Civ6Ai_Bridge._WallClock ~= nil and Civ6Ai_Bridge._WallClock() or nil
+    if Civ6Ai_Autotest._stallTurn ~= turn then
+      Civ6Ai_Autotest._stallTurn = turn
+      Civ6Ai_Autotest._stallSince = now
+      Civ6Ai_Autotest._stallAttempts = 0
+      lastTickClock = now
+      return true
+    end
+    if now == nil then
+      return true
+    end
+    if lastTickClock == now then
+      return true
+    end
+    lastTickClock = now
+    local since = Civ6Ai_Autotest._stallSince
+    if since == nil then
+      Civ6Ai_Autotest._stallSince = now
+      return true
+    end
+    if (now - since) < Civ6Ai_Autotest.STALL_SECONDS then
+      return true
+    end
+    local playerID = Game.GetLocalPlayer and Game.GetLocalPlayer() or 0
+    Civ6Ai_Autotest._stallAttempts = (Civ6Ai_Autotest._stallAttempts or 0) + 1
+    Civ6Ai_Util.Log("autotest|stall_watch|turn=" .. tostring(turn)
+      .. "|seconds=" .. tostring(now - since)
+      .. "|attempt=" .. tostring(Civ6Ai_Autotest._stallAttempts))
+    pcall(function()
+      Civ6Ai_Autotest._CloseQueuedPopups()
+      Civ6Ai_Autotest._DismissBlockers(playerID)
+      if Civ6Ai_Apply ~= nil and Civ6Ai_Apply.ResolveAllUnitOrders ~= nil then
+        Civ6Ai_Apply.ResolveAllUnitOrders(playerID)
+      end
+      if Civ6Ai_Autotest._TryEndTurnNow ~= nil then
+        Civ6Ai_Autotest._TryEndTurnNow(playerID)
+      end
+    end)
+    if Civ6Ai_Autotest._stallAttempts >= Civ6Ai_Autotest.STALL_MAX_ATTEMPTS then
+      local line = "stall|turn=" .. tostring(turn) .. "|seconds=" .. tostring(now - since)
+        .. "|attempts=" .. tostring(Civ6Ai_Autotest._stallAttempts)
+      Civ6Ai_Util.Log("autotest|" .. line)
+      Civ6Ai_Autotest._LogLine(line)
+      if Civ6Ai_Bridge ~= nil and Civ6Ai_Bridge.SessionId ~= nil then
+        local root = Civ6Ai_Config ~= nil and Civ6Ai_Config.RootDir() or "civ6ai"
+        local sid = Civ6Ai_Bridge.SessionId()
+        local journal = Civ6Ai_Util.JoinPath(root, "sessions", sid, "stall.txt")
+        pcall(function() Civ6Ai_Util.WriteTextFile(journal, line .. "\n") end)
+      end
+      Civ6Ai_Autotest._stallSince = now
+      Civ6Ai_Autotest._stallAttempts = 0
+    else
+      Civ6Ai_Autotest._stallSince = now
+    end
+    return true
+  end)
 end
 
 function Civ6Ai_Autotest._SkipUnitMoves(playerID)

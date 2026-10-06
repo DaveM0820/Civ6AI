@@ -78,6 +78,8 @@ class LiveConfigRenderTests(unittest.TestCase):
             s = _settings(Path(tmp))
             t = _settings(Path(tmp), seat_snapshot_at="turn_start")
         self.assertIn('SeatSnapshotAt = "host_end"', install_mod.render_paths_lua(s))
+        self.assertIn("BuildStamp =", install_mod.render_paths_lua(s))
+        self.assertTrue(install_mod.compute_build_stamp())
         self.assertIn('SeatSnapshotAt = "turn_start"', install_mod.render_paths_lua(t))
         self.assertEqual("host_end", install_mod.parse_args([]).seat_snapshot_at)
         self.assertEqual("turn_start", install_mod.parse_args(["--seat-snapshot-at", "turn_start"]).seat_snapshot_at)

@@ -112,6 +112,17 @@ _POOL_SIZE = 0
 _IN_FLIGHT: set[str] = set()
 
 
+def claim_sidecar_slot(player_dir: Path) -> Path | None:
+    """Cross-process claim so the poller and the Lua bridge never run one seat twice."""
+    return _try_claim(player_dir)
+
+
+def release_sidecar_slot(claim: Path | None) -> None:
+    if claim is None:
+        return
+    claim.unlink(missing_ok=True)
+
+
 def parallel_seat_limit() -> int:
     """Seats that may call the model at once (OpenRouter runs them side by side)."""
     raw = os.environ.get("CIV6AI_PARALLEL_SEATS", "").strip()

@@ -20,10 +20,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -166,10 +168,35 @@ def live_settings(
         "fast_end_turn": 0,
         "mp_test": 1 if mp_test else 0,
         "seat_snapshot_at": normalize_seat_snapshot_at(seat_snapshot_at),
+        "build_stamp": compute_build_stamp(),
+        "seat_turn_cap_seconds": max(30, int(sidecar_timeout)),
     }
 
 
 SEAT_SNAPSHOT_AT = ("host_end", "turn_start")
+
+
+def compute_build_stamp(repo: Path | None = None) -> str:
+    """Git short SHA plus a dirty-tree hash so a stale installed Lua copy is visible."""
+    root = repo or ROOT
+    sha = "unknown"
+    try:
+        sha = subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip() or "unknown"
+        dirty = subprocess.check_output(
+            ["git", "-C", str(root), "status", "--porcelain"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return sha
+    if not dirty.strip():
+        return sha
+    digest = hashlib.sha1(dirty.encode("utf-8", errors="replace")).hexdigest()[:8]
+    return f"{sha}-dirty-{digest}"
 
 
 def normalize_seat_snapshot_at(value: str | None) -> str:
@@ -204,12 +231,17 @@ def render_paths_lua(s: dict) -> str:
         f"  MpTest = {int(s.get('mp_test', 0))},\n"
         "  -- When AI seats are snapshotted: host_end (after the host seat's turn) or turn_start.\n"
         f"  SeatSnapshotAt = {_lua_str(s.get('seat_snapshot_at') or 'host_end')},\n"
+        f"  BuildStamp = {_lua_str(s.get('build_stamp') or '')},\n"
+        f"  SeatTurnCapSeconds = {int(s.get('seat_turn_cap_seconds') or s.get('sidecar_timeout_seconds') or 180)},\n"
         "}\n"
     )
 
 
 def write_mod_live_config(mod_dir: Path, settings: dict) -> None:
     (mod_dir / "InGame" / "Civ6Ai_Paths.lua").write_text(render_paths_lua(settings), encoding="utf-8")
+    stamp = str(settings.get("build_stamp") or "")
+    if stamp:
+        (mod_dir / "BUILD_STAMP.txt").write_text(stamp + "\n", encoding="utf-8")
 
 
 def write_runtime_json(civ6ai_root: Path, settings: dict, extra_session_roots: list[Path] | None = None) -> Path | None:
@@ -232,8 +264,13 @@ def write_runtime_json(civ6ai_root: Path, settings: dict, extra_session_roots: l
         "fast_end_turn": settings["fast_end_turn"],
         "mp_test": settings.get("mp_test", 0),
         "seat_snapshot_at": settings.get("seat_snapshot_at") or "host_end",
+        "build_stamp": settings.get("build_stamp") or "",
+        "seat_turn_cap_seconds": int(settings.get("seat_turn_cap_seconds") or settings.get("sidecar_timeout_seconds") or 180),
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    stamp = str(settings.get("build_stamp") or "")
+    if stamp:
+        (civ6ai_root / "BUILD_STAMP.txt").write_text(stamp + "\n", encoding="utf-8")
     for root in [civ6ai_root] + list(extra_session_roots or []):
         session = root / "sessions" / settings["session_id"]
         session.mkdir(parents=True, exist_ok=True)
@@ -494,6 +531,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         print(f"runtime.json -> {Path(settings['root']) / 'runtime.json'}")
+        print(f"build_stamp={settings.get('build_stamp') or ''} runtime_root={settings['root']} (local My Games; never OneDrive)")
+        print("Installed Lua is copied to every Mods/Civ6Ai tree (including OneDrive if present);")
+        print("session/PendingApply queue state stays under the local civ6ai root.")
     else:
         print("Stub-only install (no live config).")
     return 0

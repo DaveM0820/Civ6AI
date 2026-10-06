@@ -176,6 +176,9 @@ function Civ6Ai_InitializeInGame()
   ExposedMembers.Civ6Ai = ExposedMembers.Civ6Ai or {}
   ExposedMembers.Civ6Ai.RunTurnPulse = Civ6Ai_Bridge.RunTurnPulse
   ExposedMembers.Civ6Ai.RunChatPulse = Civ6Ai_Bridge.RunChatPulse
+  ExposedMembers.Civ6Ai.RequestHostEndTurn = Civ6Ai_Bridge.RequestHostEndTurn
+  ExposedMembers.Civ6Ai.HostEndTurnWaiting = Civ6Ai_Bridge.HostEndTurnWaiting
+  ExposedMembers.Civ6Ai.HostEndTurnStatus = Civ6Ai_Bridge.HostEndTurnStatus
   if Civ6Ai_MpTest ~= nil then
     Civ6Ai_MpTest.Initialize()
   end

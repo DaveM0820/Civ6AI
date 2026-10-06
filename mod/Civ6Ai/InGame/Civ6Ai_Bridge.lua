@@ -740,7 +740,7 @@ end
 -- for is over, or the host's wait for all seats runs out.
 function Civ6Ai_Bridge._ScheduleSeatDelivery(playerID, snapshotTurn)
   Civ6Ai_Bridge._deliveryKeys[tostring(playerID) .. "|" .. tostring(snapshotTurn)] = true
-  local waitSeconds = Civ6Ai_Bridge._InboxWaitSeconds()
+  local waitSeconds = Civ6Ai_Bridge._SeatDecisionWaitSeconds()
   local deadline = Civ6Ai_Bridge._WaitDeadline(waitSeconds)
   local maxAttempts = Civ6Ai_Bridge._PollMaxAttempts(waitSeconds)
   local attempts = 0
@@ -751,7 +751,8 @@ function Civ6Ai_Bridge._ScheduleSeatDelivery(playerID, snapshotTurn)
     end
     if Game.GetCurrentGameTurn() > snapshotTurn + 1 or Civ6Ai_Bridge._WaitExpired(deadline, attempts, maxAttempts) then
       Civ6Ai_Util.Log("bridge|seat_decision_missing|player=" .. tostring(playerID) .. "|snapshot_turn="
-        .. tostring(snapshotTurn) .. "|game_turn=" .. tostring(Game.GetCurrentGameTurn()))
+        .. tostring(snapshotTurn) .. "|game_turn=" .. tostring(Game.GetCurrentGameTurn())
+        .. "|reason=seat_turn_cap")
       Civ6Ai_Bridge._SettleSeat(playerID, snapshotTurn, false)
       return false
     end
@@ -786,13 +787,12 @@ end
 -- ---------------------------------------------------------------------------
 -- Same-turn seat timing (docs/REAL_TEST.md "Seat timing")
 -- ---------------------------------------------------------------------------
--- Active when the model drives the local seat (autotest) on the host PC: the
--- host's own pulse is the trigger that snapshots every managed AI seat
--- (Civ6Ai_Config.SeatSnapshotAt: host_end or turn_start). A person playing the
--- host seat has no such trigger yet (End Turn gate is a follow-up), so the AI
--- seats keep the old timing there (snapshot at their own turn start).
+-- Active on the host PC when AI seats should snapshot during the local seat's
+-- turn (docs/REAL_TEST.md "Seat timing"). Autotest uses the host pulse as the
+-- trigger. A person playing the host seat uses the ActionPanel End Turn gate
+-- (Civ6Ai_Bridge.RequestHostEndTurn) with the same PrepulseSeats path.
 function Civ6Ai_Bridge.SameTurnSeats()
-  if Civ6Ai_Config == nil or not Civ6Ai_Config.IsAutotest() then
+  if Civ6Ai_Config == nil then
     return false
   end
   if Civ6Ai_Config.IsFastEndTurn ~= nil and Civ6Ai_Config.IsFastEndTurn() then
@@ -805,7 +805,10 @@ function Civ6Ai_Bridge.SameTurnSeats()
   if localId == nil or localId < 0 then
     return false
   end
-  return Civ6Ai_Config.IsManagedSeat(localId) == true
+  if Civ6Ai_Config.IsAutotest() then
+    return Civ6Ai_Config.IsManagedSeat(localId) == true
+  end
+  return Civ6Ai_Config.IsSidecarLive() == true
 end
 
 function Civ6Ai_Bridge._SeatSnapshotAt()
@@ -1015,6 +1018,117 @@ function Civ6Ai_Bridge._InboxWaitSeconds()
     seats = math.max(1, #Civ6Ai_Config.ManagedSeatsList())
   end
   return Civ6Ai_Config.SidecarTimeout() * seats
+end
+
+-- One seat's sidecar, not the whole batch: seats now run in parallel (F7/F9).
+function Civ6Ai_Bridge._SeatDecisionWaitSeconds()
+  if Civ6Ai_Config ~= nil and Civ6Ai_Config.SeatTurnCapSeconds ~= nil then
+    return Civ6Ai_Config.SeatTurnCapSeconds()
+  end
+  return Civ6Ai_Config.SidecarTimeout()
+end
+
+-- Human host End Turn: snapshot AI seats and hold until their answers are in
+-- (same barrier as autotest). Returns true when the click was consumed.
+function Civ6Ai_Bridge.RequestHostEndTurn()
+  if Civ6Ai_Config ~= nil and Civ6Ai_Config.IsAutotest() then
+    return false
+  end
+  if not Civ6Ai_Bridge.SameTurnSeats() then
+    return false
+  end
+  local playerID = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or nil
+  if playerID == nil or playerID < 0 then
+    return false
+  end
+  if Civ6Ai_Bridge._hostEndTurnWaiting == true then
+    Civ6Ai_Bridge._LogOnce(
+      "host_end_turn_already_waiting|" .. tostring(Game.GetCurrentGameTurn()),
+      "bridge|host_end_turn_waiting|turn=" .. tostring(Game.GetCurrentGameTurn())
+    )
+    return true
+  end
+  Civ6Ai_Bridge.PrepulseSeats("host_end")
+  local pending = {}
+  if Civ6Ai_Autotest ~= nil and Civ6Ai_Autotest._PendingSeats ~= nil then
+    pending = Civ6Ai_Autotest._PendingSeats(playerID)
+  end
+  if #pending == 0 then
+    return false
+  end
+  Civ6Ai_Bridge._BeginHostEndTurnWait(playerID, pending)
+  return true
+end
+
+function Civ6Ai_Bridge.HostEndTurnWaiting()
+  return Civ6Ai_Bridge._hostEndTurnWaiting == true
+end
+
+function Civ6Ai_Bridge.HostEndTurnStatus()
+  return Civ6Ai_Bridge._hostEndTurnStatus or ""
+end
+
+function Civ6Ai_Bridge._BeginHostEndTurnWait(playerID, pending)
+  local turn = Game.GetCurrentGameTurn()
+  Civ6Ai_Bridge._hostEndTurnWaiting = true
+  Civ6Ai_Bridge._hostEndTurnStatus = "Waiting for AI orders"
+  local line = "Waiting for AI orders (" .. table.concat(pending, ",") .. ")."
+  if Civ6Ai_Chat ~= nil and Civ6Ai_Chat.PanelAdd ~= nil then
+    Civ6Ai_Chat.PanelAdd("T" .. tostring(turn) .. "  " .. line)
+  end
+  Civ6Ai_Util.Log("bridge|host_end_turn_wait|turn=" .. tostring(turn)
+    .. "|pending=" .. table.concat(pending, ","))
+  local started = Civ6Ai_Bridge._WallClock()
+  local waitSeconds = Civ6Ai_Config.SidecarTimeout() * (#pending + 1)
+  local deadline = started ~= nil and (started + waitSeconds) or nil
+  local lastCheck = nil
+  local attempts = 0
+  Civ6Ai_Util.ScheduleTick(function()
+    attempts = attempts + 1
+    if Game.GetCurrentGameTurn() ~= turn then
+      Civ6Ai_Bridge._hostEndTurnWaiting = false
+      Civ6Ai_Bridge._hostEndTurnStatus = ""
+      return false
+    end
+    local now = Civ6Ai_Bridge._WallClock()
+    if now ~= nil then
+      if now == lastCheck then
+        return true
+      end
+      lastCheck = now
+    elseif attempts % 30 ~= 0 then
+      return true
+    end
+    local still = {}
+    if Civ6Ai_Autotest ~= nil and Civ6Ai_Autotest._PendingSeats ~= nil then
+      still = Civ6Ai_Autotest._PendingSeats(playerID)
+    end
+    local expired = (deadline ~= nil and now ~= nil and now >= deadline)
+      or (deadline == nil and attempts >= 60000)
+    if #still > 0 and not expired then
+      Civ6Ai_Bridge._hostEndTurnStatus = "Waiting for AI orders (" .. table.concat(still, ",") .. ")"
+      return true
+    end
+    Civ6Ai_Bridge._hostEndTurnWaiting = false
+    if expired and #still > 0 then
+      Civ6Ai_Bridge._hostEndTurnStatus = "AI orders timed out; native AI plays remaining seats"
+      Civ6Ai_Util.Log("bridge|host_end_turn_timeout|turn=" .. tostring(turn)
+        .. "|pending=" .. table.concat(still, ","))
+      for _, seat in ipairs(still) do
+        Civ6Ai_Bridge._SettleSeat(seat, turn, false)
+      end
+    else
+      Civ6Ai_Bridge._hostEndTurnStatus = ""
+    end
+    Civ6Ai_Util.Log("bridge|host_end_turn_release|turn=" .. tostring(turn)
+      .. "|timed_out=" .. tostring(expired and #still > 0))
+    if Civ6Ai_Autotest ~= nil and Civ6Ai_Autotest._RequestEndTurn ~= nil then
+      Civ6Ai_Autotest._RequestEndTurn()
+    elseif UI ~= nil and UI.RequestAction ~= nil and ActionTypes ~= nil then
+      pcall(function() UI.RequestAction(ActionTypes.ACTION_ENDTURN) end)
+    end
+    return false
+  end)
 end
 
 function Civ6Ai_Bridge._WaitForInboxApply(playerID)
