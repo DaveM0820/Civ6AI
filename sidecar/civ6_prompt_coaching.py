@@ -29,7 +29,15 @@ CIV6_EXPANSION_COACHING = (
 CIV6_CHAT_VARIETY_COACHING = (
     "Chat: do not repeat your opening introduction every turn. After first contact, send a "
     "fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or "
-    "silence via no chat). Prefer chat.LeaderName for one rival; use chat.all sparingly."
+    "silence via no chat). Prefer a private chat.<rival leader> key for one rival; use chat.all "
+    "sparingly. A near-copy of your own recent public line is dropped, not sent. "
+    "thought.strategy is planning prose — do not paste it into chat."
+)
+
+CIV6_CAPITAL_T1_COACHING = (
+    "Founding: unless this start tile is clearly bad (no fresh water or coast, or FoundCity is "
+    "illegal here), found the capital this turn. Walking inland for a 'high-yield' tile delays "
+    "science, culture and production. Prefer coast and fresh water when they are legal."
 )
 
 CIV6_MOVE_THEN_ATTACK_GUIDANCE = (
@@ -99,7 +107,7 @@ def civ6_required_thought_rows(snapshot: dict[str, Any] | None) -> list[str]:
 def civ6_optional_commands_preamble_lines(required_count: int | None = None) -> list[str]:
     lines = [
         "OPTIONAL COMMANDS are encouraged every turn — not leftovers. Required rows are only the minimum.",
-        "Issue as many optional commands as you want this turn: chat.all, chat.LeaderName, diplomacy deals, "
+        "Issue as many optional commands as you want this turn: chat.all, chat.<rival leader>, diplomacy deals, "
         "research, map.viewport, extra unit/city orders, and any other listed shape.",
         "There is no cap. Models often emit only required rows — you may keep going with useful optionals.",
         "thought.freethinking = ... is optional free-form reflection (not counted as required).",
@@ -354,7 +362,7 @@ def civ6_diplomacy_guidance(snapshot: dict[str, Any]) -> list[str]:
     lines = [
         "Diplomacy: when legal.trade / deal rows list a rival, prefer a clear propose line "
         "(legal.trade.offer.Leader = ...) and answer pending deals with accept/reject/counter shapes.",
-        "Soft advice: haggle in private DMs (chat.LeaderName) before or with a formal deal — "
+        "Soft advice: haggle in private DMs (chat.<rival leader>) before or with a formal deal — "
         "explain what you want and what you offer.",
         "chat.all is broadcast posture — funny/original tone is welcome; skip spam when the lobby "
         "is already noisy every turn; keep military secrets in DMs.",
@@ -443,3 +451,85 @@ def settler_present(snapshot: dict[str, Any]) -> bool:
         if "SETTLER" in type_id:
             return True
     return False
+
+
+def _plot_fresh_coast(snapshot: dict[str, Any], plot_id: str) -> tuple[bool | None, bool | None]:
+    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    plots = known.get("plots") if isinstance(known, dict) else None
+    if not isinstance(plots, list):
+        return None, None
+    for plot in plots:
+        if not isinstance(plot, dict) or str(plot.get("plot_id") or "") != plot_id:
+            continue
+        fresh = plot.get("fresh_water")
+        coast = plot.get("is_coastal")
+        if coast is None:
+            coast = plot.get("coastal")
+        if coast is None and plot.get("water") is False:
+            coast = None
+        return (bool(fresh) if isinstance(fresh, bool) else None,
+                bool(coast) if isinstance(coast, bool) else None)
+    return None, None
+
+
+def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, Any]) -> list[str]:
+    """Unranked settle facts from WP-B `unit.settle` when present; otherwise plot flags."""
+    from sidecar import pipeline_v2 as pipeline
+
+    lines: list[str] = []
+    settle = unit.get("settle") if isinstance(unit.get("settle"), dict) else {}
+    plot_id = str(unit.get("plot_id") or "")
+    here_ok = settle.get("here_ok") if settle else None
+    here_reason = settle.get("here_reason") if settle else None
+    coast = settle.get("coast") if settle else None
+    if coast is None:
+        coast = settle.get("is_coastal") if settle else None
+    fresh = settle.get("fresh_water") if settle else None
+    if coast is None or fresh is None:
+        plot_fresh, plot_coast = _plot_fresh_coast(snapshot, plot_id)
+        if fresh is None:
+            fresh = plot_fresh
+        if coast is None:
+            coast = plot_coast
+    bits: list[str] = []
+    if here_ok is True:
+        bits.append("FoundCity legal here")
+    elif here_ok is False:
+        bits.append("FoundCity illegal here" + (f" ({here_reason})" if here_reason else ""))
+    elif here_reason:
+        bits.append(str(here_reason))
+    if fresh is True:
+        bits.append("fresh water")
+    elif fresh is False:
+        bits.append("no fresh water")
+    if coast is True:
+        bits.append("coast")
+    elif coast is False:
+        bits.append("inland")
+    if bits:
+        lines.append(pipeline._wire_line(f"{prefix}.settle.here", ", ".join(bits)))
+    sites = settle.get("sites") if settle else None
+    if isinstance(sites, list):
+        labels: list[str] = []
+        for site in sites[:6]:
+            if not isinstance(site, dict):
+                continue
+            try:
+                x, y = int(site["x"]), int(site["y"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            dist = site.get("dist")
+            labels.append(f"({x},{y})" + (f" dist {dist}" if dist is not None else ""))
+        if labels:
+            lines.append(pipeline._wire_line(f"{prefix}.settle.nearby", "; ".join(labels)))
+    return lines
+
+
+def capital_founding_coaching(snapshot: dict[str, Any]) -> str | None:
+    if not settler_present(snapshot):
+        return None
+    cities = snapshot.get("your_cities") or []
+    has_city = any(isinstance(c, dict) for c in cities)
+    if has_city:
+        return None
+    return CIV6_CAPITAL_T1_COACHING

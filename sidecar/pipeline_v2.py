@@ -39,6 +39,9 @@ MAP_IMAGE_CADENCE_TURNS = 1
 THOUGHT_MEMORY_RECENT_TURNS = 5
 THOUGHT_MEMORY_MILESTONE_INTERVAL = 10
 THOUGHT_MAX_CHARS_DEFAULT = 8000
+JOURNAL_WIRE_CHAR_BUDGET = 2500
+CHAT_TEXT_MAX_LENGTH = 800
+CIV6_REMEMBER_MAX_NOTES = 6
 WIRE_COMPACT_UNITS_THRESHOLD = 6
 WIRE_COMPACT_CITIES_THRESHOLD = 10
 ADVCIV_FALLBACK_POLICY = (
@@ -548,6 +551,45 @@ def parse_model_text(text: str) -> dict[str, Any]:
             if key.startswith(("cmd.", "chat.")) and key not in merged:
                 merged[key] = item
     return merged
+
+
+def reply_has_game_orders(parsed: dict[str, Any]) -> bool:
+    if not isinstance(parsed, dict):
+        return False
+    commands = parsed.get("commands")
+    if isinstance(commands, list) and commands:
+        return True
+    for key in parsed:
+        text = str(key).lower()
+        if text.startswith("cmd.") or ".command" in text:
+            return True
+        if text.endswith(".production") or text.startswith("legal."):
+            return True
+    return False
+
+
+def parse_model_text_with_repair(
+    text: str,
+    retry_fn: Callable[[str], str] | None = None,
+) -> tuple[dict[str, Any], bool]:
+    """Parse model output; optionally one repair retry on malformed JSON or empty orders."""
+    stripped = text if isinstance(text, str) else ""
+    try:
+        parsed = parse_model_text(stripped)
+        if reply_has_game_orders(parsed) or retry_fn is None:
+            return parsed, False
+    except BoundaryError as error:
+        if error.category not in {"malformed_json", "trailing_content"} or retry_fn is None:
+            raise
+        parsed = None
+    snippet = stripped.strip()[:400]
+    repair = (
+        "Your previous reply was not valid JSON. Reply with ONE JSON object only — "
+        "no code fences, no text outside the object. Start of your previous reply:\n"
+        + snippet
+    )
+    repaired = retry_fn(repair)
+    return parse_model_text(repaired), True
 
 
 def _normalize_trade_inventory(rows: list[Any]) -> list[dict[str, Any]]:
@@ -2276,12 +2318,29 @@ def resolve_city_property_wire(snapshot: dict[str, Any], flat: dict[str, Any]) -
     return resolve_property_wire(snapshot, flat)
 
 
-def thought_turns_for_prompt(current_turn: int) -> list[int]:
-    """Turn numbers for strategic memory: last 5 turns plus every 10th turn before that."""
+def trim_chat_text(text: str, limit: int = CHAT_TEXT_MAX_LENGTH) -> str:
+    cleaned = "".join(character for character in str(text or "") if ord(character) >= 32).strip()
+    if len(cleaned) <= limit:
+        return cleaned
+    cut = cleaned[:limit]
+    for sep in (". ", "! ", "? ", "; "):
+        idx = cut.rfind(sep)
+        if idx >= max(40, limit // 2):
+            return cut[: idx + 1].strip()
+    return cut.rstrip()
+
+
+def thought_turns_for_prompt(current_turn: int, include_milestones: bool | None = None) -> list[int]:
+    """Turn numbers for strategic memory: last 5 turns; optional every-10th milestone."""
     if current_turn <= 0:
         return []
     recent_start = max(1, current_turn - THOUGHT_MEMORY_RECENT_TURNS)
     recent = list(range(recent_start, current_turn))
+    if include_milestones is None:
+        raw = os.environ.get("CIV4AI_THOUGHT_MILESTONES", "1").strip().lower()
+        include_milestones = raw not in {"0", "false", "no", "off"}
+    if not include_milestones:
+        return recent
     milestone = [
         turn for turn in range(THOUGHT_MEMORY_MILESTONE_INTERVAL, recent_start, THOUGHT_MEMORY_MILESTONE_INTERVAL)
     ]
@@ -2408,7 +2467,8 @@ def inject_thought_history(snapshot: dict[str, Any], memory: dict[str, Any]) -> 
         snapshot["history"] = {}
         history = snapshot["history"]
     current_turn = int(snapshot["decision"]["turn"])
-    turns = thought_turns_for_prompt(current_turn)
+    civ6 = str(snapshot.get("schema_version", "")).startswith("civ6ai-input/")
+    turns = thought_turns_for_prompt(current_turn, include_milestones=not civ6)
     by_turn: dict[int, dict[str, Any]] = {}
     for item in memory.get("thoughts", []):
         if not isinstance(item, dict) or "turn" not in item:
@@ -2435,7 +2495,7 @@ def inject_thought_history(snapshot: dict[str, Any], memory: dict[str, Any]) -> 
             if isinstance(expires, int) and expires < current_turn:
                 continue
             active.append(copy.deepcopy(item))
-    history["remembered"] = active[-REMEMBER_MAX_NOTES:]
+    history["remembered"] = active[-(CIV6_REMEMBER_MAX_NOTES if civ6 else REMEMBER_MAX_NOTES):]
 
 
 REMEMBER_MAX_NOTES = 12
@@ -2446,14 +2506,26 @@ _REMEMBER_DURATION_RE = re.compile(
 )
 
 
-def append_remembered(memory: dict[str, Any], turn: int, notes: list[str]) -> dict[str, Any]:
+def append_remembered(
+    memory: dict[str, Any],
+    turn: int,
+    notes: list[str],
+    *,
+    max_notes: int | None = None,
+    max_new: int | None = None,
+    near_dupe: float | None = None,
+) -> dict[str, Any]:
     """Store model `remember` notes with an expiry turn (default 20 turns, or forever)."""
+    cap = REMEMBER_MAX_NOTES if max_notes is None else max(1, int(max_notes))
     stored = [item for item in memory.get("remembered", []) if isinstance(item, dict)]
     stored = [
         item for item in stored
         if not (isinstance(item.get("expires_turn"), int) and item["expires_turn"] < turn)
     ]
+    added = 0
     for raw in notes:
+        if max_new is not None and added >= max_new:
+            break
         text = str(raw).strip()
         if not text:
             continue
@@ -2468,8 +2540,23 @@ def append_remembered(memory: dict[str, Any], turn: int, notes: list[str]) -> di
         text = text[:300]
         if any(item.get("text") == text for item in stored):
             continue
+        if near_dupe is not None:
+            from sidecar.civ6_apply_results import token_jaccard
+
+            replaced = False
+            for item in stored:
+                if token_jaccard(str(item.get("text") or ""), text) >= near_dupe:
+                    item["text"] = text
+                    item["turn"] = int(turn)
+                    item["expires_turn"] = expires
+                    replaced = True
+                    break
+            if replaced:
+                added += 1
+                continue
         stored.append({"turn": int(turn), "text": text, "expires_turn": expires})
-    memory["remembered"] = stored[-REMEMBER_MAX_NOTES:]
+        added += 1
+    memory["remembered"] = stored[-cap:]
     return memory
 
 
@@ -2714,6 +2801,19 @@ def _resolve_chat_recipient(value: Any, snapshot: dict[str, Any]) -> str | None:
     if not isinstance(value, str) or not value.strip():
         return None
     text = value.strip()
+    lowered = text.lower()
+    for prefix in (
+        "leadername.",
+        "leader.",
+        "player.",
+        "civ.",
+        "civilization.",
+        "chat.",
+    ):
+        if lowered.startswith(prefix):
+            text = text[len(prefix):]
+            lowered = text.lower()
+            break
     known_players = {
         str(item.get("player_id"))
         for item in snapshot.get("known_players", [])
@@ -2721,6 +2821,14 @@ def _resolve_chat_recipient(value: Any, snapshot: dict[str, Any]) -> str | None:
     }
     if text in known_players:
         return text
+    player_alias = re.match(r"^(?:player[_ ]?)(\d+)$", lowered)
+    if player_alias:
+        candidate = f"PLAYER_{int(player_alias.group(1))}"
+        if candidate in known_players:
+            return candidate
+    if lowered in {"leadername", "leader", "rival"}:
+        ids = sorted(known_players)
+        return ids[0] if len(ids) == 1 else None
     needle = text.lower()
     for rival in snapshot.get("known_players", []):
         if not isinstance(rival, dict):
@@ -2730,7 +2838,16 @@ def _resolve_chat_recipient(value: Any, snapshot: dict[str, Any]) -> str | None:
             continue
         leader_name = _rival_leader_name(rival).lower()
         leader_id = str(rival.get("leader_id", "")).lower()
-        if needle in {player_id.lower(), leader_name, leader_id, _leader_id_display_name(leader_id).lower()}:
+        civ_name = _readable_id(rival.get("civilization_id", ""), "CIVILIZATION_").lower()
+        aliases = {
+            player_id.lower(),
+            leader_name,
+            leader_id,
+            _leader_id_display_name(leader_id).lower(),
+            civ_name,
+            civ_name.replace(" ", ""),
+        }
+        if needle in aliases or needle.replace(" ", "") in aliases:
             return player_id
     return None
 
@@ -2963,7 +3080,8 @@ def _lobby_chat_cadence_guidance(snapshot: dict[str, Any]) -> list[str]:
 
 
 def _format_public_chat_line(snapshot: dict[str, Any], event: dict[str, Any]) -> str:
-    text = str(event.get("text") or event.get("summary") or "").strip()[:240]
+    text = str(event.get("text") or event.get("summary") or "").strip()
+    text = trim_chat_text(text)
     if not text:
         return ""
     affected = event.get("affected_ids", [])
@@ -3371,7 +3489,7 @@ def build_flat_wire_prompt(context: dict[str, Any], map_stats: list[str] | None 
             if not isinstance(message, dict):
                 continue
             turn = int(message.get("turn", 0))
-            text = str(message.get("text", ""))[:240]
+            text = trim_chat_text(str(message.get("text", "")))
             if text:
                 from_id = str(message.get("from_player_id", ""))
                 sender = _player_chat_name(context, from_id) if from_id else "Rival"
@@ -3630,6 +3748,9 @@ def expand_flat_response(response: dict[str, Any], snapshot: dict[str, Any] | No
             try:
                 index = int(index_text)
             except ValueError:
+                text = str(value).strip() if value is not None else ""
+                if text:
+                    chats_by_index[len(chats_by_index)] = _chat_shortcut_entry(remainder, text)
                 continue
             entry = chats_by_index.setdefault(index, {})
             if field == "to":
@@ -3729,7 +3850,7 @@ def _private_inbox_from_history(history: dict[str, Any], player_id: str) -> list
         inbox.append({"message_id": str(message.get("message_id", "CHAT_UNKNOWN")),
             "from_player_id": str(message.get("from_player_id", "PLAYER_0")),
             "turn": int(message.get("turn", 0)),
-            "text": str(message.get("text", ""))[:240]})
+            "text": trim_chat_text(str(message.get("text", "")))})
     return inbox
 
 
@@ -5133,7 +5254,7 @@ def normalize_model_response(snapshot: dict[str, Any], response: dict[str, Any])
             text = message.get("text")
             if not isinstance(text, str) or not text.strip():
                 continue
-            text = "".join(character for character in text if ord(character) >= 32).strip()[:240]
+            text = trim_chat_text(message.get("text"))
             if not text:
                 continue
             grounding = message.get("grounding_ids")
@@ -5345,7 +5466,7 @@ def validate_model_response(snapshot: dict[str, Any], response: dict[str, Any]) 
             })
             continue
         cleaned = copy.deepcopy(message)
-        cleaned["text"] = text[:240]
+        cleaned["text"] = trim_chat_text(text)
         sanitized_chat.append(cleaned)
     thought = response.get("thought", {})
     if not isinstance(thought, dict):

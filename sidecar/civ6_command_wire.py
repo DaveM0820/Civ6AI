@@ -16,6 +16,10 @@ from sidecar import pipeline_v2 as pipeline
 ROW_PREFIX_RE = re.compile(r"^\s*\d+\s*[.):]\s*")
 _TOKEN_RE = re.compile(r"^\s*(?P<verb>[A-Za-z][A-Za-z0-9_]*)\s*(?:\((?P<args>.*)\))?\s*$")
 _COORD_RE = re.compile(r"\(?\s*(-?\d+)\s*,\s*(-?\d+)\s*\)?")
+_SETTLE_EQ_RE = re.compile(
+    r"^\s*settle\s*=\s*\(?\s*(-?\d+)\s*,\s*(-?\d+)\s*\)?\s*$",
+    re.IGNORECASE,
+)
 
 UNIT_POSTURE_TOKENS = {
     "unit_posture_fortify": "Fortify",
@@ -217,6 +221,11 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
     """Return the legal command_id for ``unitId.command = <token>`` or None."""
     if isinstance(value, str) and value.strip().startswith("CMD_"):
         return value.strip()
+    settle_eq = _SETTLE_EQ_RE.match(str(value or ""))
+    if settle_eq:
+        return _synthesize_goal_move(
+            snapshot, unit_id, int(settle_eq.group(1)), int(settle_eq.group(2)), intent=INTENT_FOUND,
+        )
     wanted = _norm(value)
     if not wanted or "|" in wanted:
         return None
@@ -261,24 +270,37 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
             continue
         if not coord:
             return cmd_id
+    if verb == "settle" and coord:
+        return _synthesize_goal_move(
+            snapshot, unit_id, int(coord.group(1)), int(coord.group(2)), intent="found",
+        )
     if verb == "moveto" and coord:
         return _synthesize_far_move(snapshot, unit_id, int(coord.group(1)), int(coord.group(2)))
     return None
 
 
-INTENT_MOVE = 0
-INTENT_FOUND = 1
-INTENT_IMPROVE = 2
-INTENT_RELIGION = 3
-INTENT_TRADE = 4
+# WP-A OrderChannel: A=0 move, 1 found, 2 improve, 3 found_religion, 4 trade. N is batch count.
+INTENT_MOVE = "move"
+INTENT_FOUND = "found"
+INTENT_IMPROVE = "improve"
+INTENT_FOUND_RELIGION = "found_religion"
+INTENT_TRADE = "trade"
+INTENT_A_CODES = {
+    INTENT_MOVE: 0,
+    INTENT_FOUND: 1,
+    INTENT_IMPROVE: 2,
+    INTENT_FOUND_RELIGION: 3,
+    INTENT_TRADE: 4,
+}
 
 
-def _arrival_fields(intent: str = "move", a: int = 0) -> dict[str, Any]:
+def _arrival_fields(intent: str = INTENT_MOVE, a: int | None = None) -> dict[str, Any]:
     """WP-A batch: G = persistent goal, A = arrival intent (N is batch length)."""
     persist = 1
+    code = INTENT_A_CODES.get(intent, 0) if a is None else int(a)
     return {
         "G": persist,
-        "A": a,
+        "A": code,
         "goal": persist,
         "intent": intent,
     }
@@ -377,8 +399,8 @@ def _synthesize_far_move(
     x: int,
     y: int,
     *,
-    intent: str = "move",
-    A: int = INTENT_MOVE,
+    intent: str = INTENT_MOVE,
+    A: int | None = None,
 ) -> str | None:
     """Civ5-style destination order: ``MoveTo(x,y)`` to any on-map plot.
 
@@ -428,7 +450,7 @@ def _synthesize_settle(snapshot: dict[str, Any], unit_id: str, x: int, y: int) -
             "affected_ids": [unit_id],
             "runtime_status": "tested",
         })
-    return _synthesize_far_move(snapshot, unit_id, x, y, intent="found", A=INTENT_FOUND)
+    return _synthesize_far_move(snapshot, unit_id, x, y, intent=INTENT_FOUND)
 
 
 def _improve_id_from_value(value: Any) -> str | None:
@@ -473,7 +495,7 @@ def _synthesize_improve(
         "target_y": y,
     }
     if away:
-        fixed.update(_arrival_fields("improve", INTENT_IMPROVE))
+        fixed.update(_arrival_fields(INTENT_IMPROVE))
     return _append_legal(snapshot, {
         "command_id": f"CMD_improve_{unit_id}_{improvement_id}_{x}_{y}",
         "kind": "worker_improve",
@@ -509,6 +531,101 @@ def _synthesize_trade_route(snapshot: dict[str, Any], unit_id: str, value: Any) 
             return str(cmd_id) if isinstance(cmd_id, str) else None
     LAST_UNRESOLVED.append(f"dropped: trade_route={value} for {unit_id} is not a listed destination")
     return None
+
+
+def _in_map_bounds(snapshot: dict[str, Any], x: int, y: int) -> bool:
+    if x < 0 or y < 0:
+        return False
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    width, height = game.get("map_width"), game.get("map_height")
+    if isinstance(width, int) and width > 0 and not 0 <= x < width:
+        return False
+    if isinstance(height, int) and height > 0 and not 0 <= y < height:
+        return False
+    return True
+
+
+def _synthesize_goal_move(
+    snapshot: dict[str, Any],
+    unit_id: str,
+    x: int,
+    y: int,
+    *,
+    intent: str,
+) -> str | None:
+    """Pack settle=(x,y) (and other on-arrival intents) as MOVE with goal+intent.
+
+    WP-A reads arguments.goal / arguments.intent and maps them to batch fields G and A
+    (not N). Own-tile targets are allowed so Lua can found-here or self_target_hold.
+    """
+    legal = snapshot.get("legal_commands")
+    if not isinstance(legal, list) or not _in_map_bounds(snapshot, x, y):
+        return None
+    cmd_id = f"CMD_{unit_id}_settle_{x}_{y}" if intent == INTENT_FOUND else f"CMD_{unit_id}_{intent}_{x}_{y}"
+    for command in legal:
+        if not isinstance(command, dict) or command.get("command_id") != cmd_id:
+            continue
+        fixed = command.setdefault("fixed_arguments", {})
+        if isinstance(fixed, dict):
+            fixed.update(_arrival_fields(intent))
+        return cmd_id
+    legal.append({
+        "command_id": cmd_id,
+        "kind": "move_unit",
+        "description": f"Persistent {intent} goal",
+        "fixed_arguments": {
+            "unit_id": unit_id,
+            "target_x": x,
+            "target_y": y,
+            **_arrival_fields(intent),
+        },
+        "parameter_domains": {},
+        "affected_ids": [unit_id],
+        "runtime_status": "tested",
+    })
+    return cmd_id
+
+
+def pack_apply_command(snapshot: dict[str, Any] | None, command: dict[str, Any]) -> dict[str, Any]:
+    """Stamp WP-A goal/intent (G/A) and research fallbacks onto one bound command."""
+    if not isinstance(command, dict):
+        return command
+    args = dict(command.get("arguments") or {})
+    kind = str(command.get("kind") or "")
+    intent = args.get("intent")
+    if args.get("found") is True:
+        intent = INTENT_FOUND
+    if args.get("improve") is True and kind in ("move_unit", "worker_improve"):
+        intent = INTENT_IMPROVE
+    if intent in INTENT_A_CODES:
+        args["intent"] = intent
+        args["goal"] = True
+        args.pop("N", None)
+    if kind == "worker_improve" and (args.get("target_x") is not None or args.get("x") is not None):
+        args["goal"] = True
+        args["intent"] = INTENT_IMPROVE
+    if kind == "trade_route":
+        args["goal"] = True
+        args["intent"] = INTENT_TRADE
+    if kind in ("set_research_tech", "set_research_civic") and isinstance(snapshot, dict):
+        field = "tech_id" if kind == "set_research_tech" else "civic_id"
+        chosen = args.get(field)
+        extras = []
+        for item in snapshot.get("legal_commands") or []:
+            if not isinstance(item, dict) or item.get("kind") != kind:
+                continue
+            fixed = item.get("fixed_arguments") if isinstance(item.get("fixed_arguments"), dict) else {}
+            value = fixed.get(field)
+            if isinstance(value, str) and value and value != chosen and value not in extras:
+                extras.append(value)
+            if len(extras) >= 2:
+                break
+        if extras:
+            args[f"{field}_2"] = extras[0]
+        if len(extras) > 1:
+            args[f"{field}_3"] = extras[1]
+    command["arguments"] = args
+    return command
 
 
 def resolve_city_token(snapshot: dict[str, Any], city_id: str, prop: str, value: Any) -> str | None:
@@ -589,6 +706,17 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
             unresolved.extend(diplo_notes)
             continue
         head, _, prop = key.partition(".")
+        if prop.lower() in ("settle",) and head in units:
+            coord = _COORD_RE.search(str(value))
+            if coord:
+                cmd_id = _synthesize_goal_move(
+                    snapshot, units[head], int(coord.group(1)), int(coord.group(2)), intent=INTENT_FOUND,
+                )
+                if cmd_id:
+                    bound.append(cmd_id)
+                    continue
+            unresolved.append(f"{key}={value}")
+            continue
         if prop.lower() in ("moveto", "move") and head in units:
             cmd_id = resolve_unit_token(snapshot, units[head], f"MoveTo{value}" if str(value).strip().startswith("(") else f"MoveTo({value})")
             if cmd_id:
@@ -660,6 +788,13 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
 def dropped_orders() -> list[str]:
     """Orders the sidecar discarded this bind (unresolved tokens, off-map, self-tile)."""
     return list(LAST_UNRESOLVED)
+
+
+def take_unresolved() -> list[str]:
+    """Copy and clear tokens the last expand_civ6_command_wire call could not bind."""
+    items = list(LAST_UNRESOLVED)
+    LAST_UNRESOLVED.clear()
+    return items
 
 
 def sitrep_offer_lines(snapshot: dict[str, Any]) -> list[str]:

@@ -18,6 +18,7 @@ from sidecar import civ6_apply_results
 from sidecar import civ6_priorities
 from sidecar import civ6_wire
 from sidecar import civ6_economy
+from sidecar import civ6_turn_report
 from sidecar import context_budget
 from sidecar import map_situational
 from sidecar.map_render_civ6 import render_civ6_map_for_model
@@ -28,6 +29,29 @@ from sidecar.pipeline_v2 import CircuitBreaker
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SNAPSHOT = ROOT / "fixtures" / "civ6" / "snapshot-turn-classical-golden.json"
 DEFAULT_JOURNAL = ROOT / "artifacts" / "civ6-ai-result-journal.jsonl"
+
+
+def configure_stdio() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+def emit_json_line(record: dict) -> None:
+    payload = pipeline.canonical_json(record) + "\n"
+    buf = getattr(sys.stdout, "buffer", None)
+    if buf is not None:
+        buf.write(payload.encode("utf-8", errors="replace"))
+        try:
+            buf.flush()
+        except Exception:
+            pass
+        return
+    sys.stdout.write(payload)
 
 
 def _read(path: Path | None) -> dict:
@@ -172,6 +196,19 @@ def _build_approved_record(
     private_copy = copy.deepcopy(private)
     private_copy["legal_commands"] = {item["command_id"]: item for item in snapshot["legal_commands"]}
     commands = pipeline.bind_approved_commands(private_copy, validated)
+    commands, repeat_notes = civ6_apply_results.filter_repeat_failures(snapshot, commands)
+    chats = validated.get("chat_messages") if isinstance(validated.get("chat_messages"), list) else []
+    chats, chat_notes = civ6_apply_results.filter_repeat_public_chat(snapshot, chats)
+    validated = copy.deepcopy(validated)
+    validated["chat_messages"] = chats
+    from sidecar import civ6_command_wire
+
+    commands = [civ6_command_wire.pack_apply_command(snapshot, item) for item in commands]
+    unresolved = civ6_command_wire.take_unresolved()
+    dropped = list(repeat_notes) + list(chat_notes)
+    for token in unresolved:
+        dropped.append(f"dropped: unresolved token {token}")
+    civ6_apply_results.record_dropped(snapshot, dropped)
     return {
         "status": "approved",
         "private": private_copy,
@@ -181,6 +218,7 @@ def _build_approved_record(
         "commands": commands,
         "model": model,
         "io": {"input_path": str(input_log)},
+        "dropped": dropped,
     }
 
 
@@ -237,6 +275,9 @@ def _persist_thought_memory(
             thought_memory,
             int(snapshot["decision"]["turn"]),
             remembered,
+            max_notes=pipeline.CIV6_REMEMBER_MAX_NOTES,
+            max_new=1,
+            near_dupe=0.7,
         )
     histories = normalized_response.get("player_histories", {})
     if isinstance(histories, dict) and histories:
@@ -500,6 +541,8 @@ def _write_decision_outputs(session_dir: Path | None, record: dict, output_path:
 
 
 def main() -> None:
+    configure_stdio()
+    wall_started = time.monotonic()
     parser = argparse.ArgumentParser(description="Civ VI LLM AI sidecar")
     parser.add_argument("--state", type=Path, default=None, help="Civ VI snapshot JSON")
     parser.add_argument("--snapshot", type=Path, help="Alias for --state")
@@ -552,6 +595,9 @@ def main() -> None:
     thought_path = _thought_memory_path(civ6ai_root, game_uuid, player_id)
     thought_memory = pipeline.load_thought_memory(thought_path, session_key, snapshot)
     pipeline.inject_thought_history(snapshot, thought_memory)
+    prior_dropped = thought_memory.get("dropped") if isinstance(thought_memory, dict) else None
+    if isinstance(prior_dropped, list) and prior_dropped:
+        civ6_apply_results.record_dropped(snapshot, [str(item) for item in prior_dropped])
     try:  # idle-unit streaks + notification first-seen turns (prompt economy panel)
         civ6_economy.update_tracking(snapshot, args.session_dir)
     except Exception:
@@ -567,13 +613,14 @@ def main() -> None:
         context_budget.apply_plan_to_snapshot(snapshot, plan, limit_info)
         return civ6_wire.build_civ6_model_wire_text(snapshot)
 
+    budget_started = time.monotonic()
     budget_plan, wire_text, estimated_prompt_tokens = context_budget.choose_budget_plan(
         info=limit_info,
         build_wire=_wire_for_plan,
         attach_images=attach_maps,
     )
     context_budget.apply_plan_to_snapshot(snapshot, budget_plan, limit_info)
-    wire_text = civ6_wire.build_civ6_model_wire_text(snapshot)
+    budget_ms = int((time.monotonic() - budget_started) * 1000)
 
     if args.wire_only:
         sys.stdout.write(wire_text)
@@ -606,7 +653,7 @@ def main() -> None:
         snapshot, _read_last_record(args.journal),
     )
 
-    sidecar_started = time.monotonic()
+    map_started = time.monotonic()
     image_attachments, image_path, archive_path, render_meta = _prepare_map_image(
         snapshot,
         args.journal,
@@ -620,6 +667,7 @@ def main() -> None:
         focus_size=0,
         omit_focus=True,
     )
+    map_ms = int((time.monotonic() - map_started) * 1000)
     advciv = snapshot.setdefault("advciv", {})
     if isinstance(advciv, dict):
         # Record what was really attached so map-read rows match the images
@@ -627,7 +675,13 @@ def main() -> None:
         advciv["map_images"] = render_meta.get("manifest") or [
             {"role": "overview" if image_attachments else "none"}
         ]
+        wire_started = time.monotonic()
         wire_text = civ6_wire.build_civ6_model_wire_text(snapshot)
+        wire_ms = int((time.monotonic() - wire_started) * 1000)
+    else:
+        wire_started = time.monotonic()
+        wire_text = civ6_wire.build_civ6_model_wire_text(snapshot)
+        wire_ms = int((time.monotonic() - wire_started) * 1000)
 
     actual_sizes: list[int] = []
     for item in render_meta.get("images") or []:
@@ -672,7 +726,10 @@ def main() -> None:
     raw_model_response = None
     model = None
     normalized_response = None
+    llm_ms = 0
+    parse_ms = 0
     try:
+        llm_started = time.monotonic()
         if args.live:
             response, model = pipeline.call_model(
                 snapshot,
@@ -684,8 +741,11 @@ def main() -> None:
             response, model = _seat_experiment_response(snapshot), {"model": "seat_experiment", "usage": {}}
         else:
             response, model = _fake_response(snapshot, from_game=args.from_game), {"model": "fixture", "usage": {}}
+        llm_ms = int((time.monotonic() - llm_started) * 1000)
         raw_model_response = copy.deepcopy(response)
+        parse_started = time.monotonic()
         normalized_response = pipeline.normalize_model_response(snapshot, response)
+        parse_ms = int((time.monotonic() - parse_started) * 1000)
         record = _build_approved_record(snapshot, private, normalized_response, model, input_log)
         thought_memory = _persist_thought_memory(
             snapshot, normalized_response, model, thought_memory, thought_path,
@@ -725,9 +785,16 @@ def main() -> None:
         })
         record["io"]["raw_output_path"] = str(output_log)
 
-    wall_ms = int((time.monotonic() - sidecar_started) * 1000)
+    wall_ms = int((time.monotonic() - wall_started) * 1000)
     model_meta = record.get("model") if isinstance(record.get("model"), dict) else {}
     usage = model_meta.get("usage", {}) if isinstance(model_meta.get("usage"), dict) else {}
+    dropped = record.get("dropped") if isinstance(record.get("dropped"), list) else []
+    if isinstance(thought_memory, dict):
+        thought_memory["dropped"] = dropped
+        try:
+            pipeline.save_thought_memory(thought_path, thought_memory)
+        except OSError:
+            pass
     metrics = {
         "game_uuid": game_uuid,
         "turn": int(snapshot["decision"]["turn"]),
@@ -738,6 +805,12 @@ def main() -> None:
         "latency_ms": model_meta.get("latency_ms"),
         "usage": usage,
         "wall_ms": wall_ms,
+        "map_ms": map_ms,
+        "wire_ms": wire_ms,
+        "budget_ms": budget_ms,
+        "llm_ms": llm_ms,
+        "parse_ms": parse_ms,
+        "parse_retry": bool((model_meta or {}).get("parse_retry")),
         "context_chars": len(wire_text),
         "legal_commands": len(snapshot.get("legal_commands", [])),
         "known_plots": len(snapshot.get("known_map", {}).get("plots", [])),
@@ -748,14 +821,30 @@ def main() -> None:
         "map_image_bytes": render_meta.get("image_bytes"),
         "category": record.get("category"),
         "message": record.get("message"),
+        "dropped": dropped,
     }
     pipeline.append_turn_metrics(metrics_dir, metrics)
     record["metrics"] = metrics
+    report = civ6_turn_report.build_turn_report(
+        snapshot=snapshot,
+        record=record,
+        timings={
+            "wall_ms": wall_ms,
+            "map_ms": map_ms,
+            "wire_ms": wire_ms,
+            "budget_ms": budget_ms,
+            "llm_ms": llm_ms,
+            "parse_ms": parse_ms,
+        },
+        wire_text=wire_text,
+        dropped=dropped,
+    )
+    civ6_turn_report.write_turn_report(args.session_dir, report)
     if not args.no_circuit_breaker:
         _save_circuit_breaker(breaker_path, breaker)
     pipeline.append_audit(args.journal, record)
     _write_decision_outputs(args.session_dir, record, args.output)
-    print(pipeline.canonical_json(record))
+    emit_json_line(record)
 
 
 if __name__ == "__main__":
