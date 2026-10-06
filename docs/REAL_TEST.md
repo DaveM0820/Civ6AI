@@ -167,7 +167,7 @@ next turn start:
   seat's model-commanded units and their moves as the queue starts), ends the
   turn of the units the model left in place (builders, traders and religious
   units stay with the game's AI), and only then does the interface end the seat's
-  turn (`bridge|seat_end_after_queue|player=K|turn=N|prepulsed=...|answer=...`;
+  turn (`bridge|seat_end_after_queue|player=K|turn=N|snapshot_turn=S|prepulsed=...|answer=...`, S = N in single player, N-1 on LAN;
   autotest SP requests ENDTURN for the seat as before). The seat's own turn-start
   hooks no longer snapshot it.
 - **No answer:** a seat whose answer timed out has no queue; the game's AI plays

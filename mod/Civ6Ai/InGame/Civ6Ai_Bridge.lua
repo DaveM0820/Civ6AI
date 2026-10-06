@@ -891,16 +891,24 @@ function Civ6Ai_Bridge._OnSeatTurnStart(playerID)
     return true
   end
   Civ6Ai_Bridge._seatEndKeys[key] = true
+  -- The snapshot whose answer this turn start played: this turn's in single
+  -- player, the previous turn's on LAN (answers are queued for snapshot + 1).
+  local snapTurn = turn
+  if Civ6Ai_Apply ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer() then
+    snapTurn = turn - 1
+  end
+  local snapKey = tostring(playerID) .. "|" .. tostring(snapTurn)
   local answer = "none"
-  if Civ6Ai_Bridge._delivered[key] == true then
+  if Civ6Ai_Bridge._delivered[snapKey] == true then
     answer = "sent"
-  elseif Civ6Ai_Bridge._delivered[key] == false then
+  elseif Civ6Ai_Bridge._delivered[snapKey] == false then
     answer = "missing"
-  elseif Civ6Ai_Bridge._pulseKeys[key] then
+  elseif Civ6Ai_Bridge._pulseKeys[snapKey] then
     answer = "outstanding"
   end
   Civ6Ai_Util.Log("bridge|seat_end_after_queue|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
-    .. "|prepulsed=" .. tostring(Civ6Ai_Bridge._prepulseKeys[key] == true) .. "|answer=" .. answer)
+    .. "|snapshot_turn=" .. tostring(snapTurn)
+    .. "|prepulsed=" .. tostring(Civ6Ai_Bridge._prepulseKeys[snapKey] == true) .. "|answer=" .. answer)
   Civ6Ai_Bridge._EndSeatTurn(playerID)
   return true
 end
