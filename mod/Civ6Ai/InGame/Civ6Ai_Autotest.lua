@@ -99,9 +99,17 @@ function Civ6Ai_Autotest.AfterPulse(playerID)
   end
   local turn = Game.GetCurrentGameTurn()
   Civ6Ai_Autotest._LogLine("pulse|turn=" .. tostring(turn) .. "|player=" .. tostring(playerID))
-  Civ6Ai_Autotest._DisableBoostPopups()
-  Civ6Ai_Autotest._CloseQueuedPopups()
-  Civ6Ai_Autotest._DismissBlockers(playerID)
+  -- Blocker clearing is best effort: an error in it must not skip the seat
+  -- snapshots and the end turn below (that stalled the host on turn 1).
+  local okBlockers, blockersErr = pcall(function()
+    Civ6Ai_Autotest._DisableBoostPopups()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+    Civ6Ai_Autotest._DismissBlockers(playerID)
+  end)
+  if not okBlockers then
+    Civ6Ai_Util.Log("autotest|dismiss_blockers_error|player=" .. tostring(playerID)
+      .. "|turn=" .. tostring(turn) .. "|err=" .. tostring(blockersErr))
+  end
   -- Ending the turn is what the diplomacy ribbon uses to drop a portrait
   -- (RemotePlayerTurnEnd / IsTurnActive). Humans wait until every AI seat's
   -- answer is in. AI seats end once their pulse is done (old timing) or once
@@ -492,12 +500,24 @@ function Civ6Ai_Autotest._ClearProductionBlockers(playerID)
   if cities == nil then
     return
   end
+  -- Copy the cities out under pcall: iterating Members() right after this
+  -- pulse founded a city raised "Not a valid instance" (lMembersAux), which
+  -- aborted AfterPulse before the seat snapshots and the end turn.
   local members = nil
-  pcall(function()
+  local okList, listErr = pcall(function()
     if cities.Members ~= nil then
-      members = cities:Members()
+      local list = {}
+      for _, city in cities:Members() do
+        table.insert(list, city)
+      end
+      members = list
     end
   end)
+  if not okList then
+    Civ6Ai_Util.Log("autotest|auto_production_skip|player=" .. tostring(playerID)
+      .. "|reason=" .. tostring(listErr))
+    members = nil
+  end
   local function consider(city)
     if city == nil or not Civ6Ai_Autotest._CityNeedsProduction(city) then
       return false
@@ -521,7 +541,7 @@ function Civ6Ai_Autotest._ClearProductionBlockers(playerID)
     return ok == true
   end
   if members ~= nil then
-    for _, city in members do
+    for _, city in ipairs(members) do
       if consider(city) then
         return
       end
