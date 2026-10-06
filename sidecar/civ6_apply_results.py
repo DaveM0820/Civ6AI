@@ -43,7 +43,7 @@ NON_TRANSIENT_FAILURES = (
     "site_no_longer_legal",
 )
 CHAT_NEAR_DUPE_THRESHOLD = 0.6
-CHAT_NEAR_DUPE_LOOKBACK_TURNS = 8
+CHAT_NEAR_DUPE_LOOKBACK_TURNS = 16
 CHAT_INTRO_PATTERNS = re.compile(
     r"\b(i am|i'm|im|my name is|greetings from|let history remember|"
     r"stands firm|allow me to introduce|i introduce)\b",
