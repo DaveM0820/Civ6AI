@@ -30,7 +30,7 @@ CIV6_CHAT_VARIETY_COACHING = (
     "Chat: do not repeat your opening introduction every turn. After first contact, send a "
     "fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or "
     "silence via no chat). Prefer a private chat.<rival leader> key for one met major rival; "
-    "use chat.all sparingly. Never address Free Cities, Barbarians, or city-states. "
+    "use chat.all sparingly. "
     "A near-copy or re-introduction after your first public line is dropped, not sent. "
     "thought.strategy is planning prose — do not paste it into chat."
 )

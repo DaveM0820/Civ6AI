@@ -739,38 +739,6 @@ def is_near_duplicate_chat(text: str, recent: list[str], threshold: float = CHAT
     return False
 
 
-def filter_ineligible_chat_targets(
-    snapshot: dict[str, Any],
-    chat_messages: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[str]]:
-    kept: list[dict[str, Any]] = []
-    dropped: list[str] = []
-    eligible = {str(r.get("player_id")) for r in pipeline.chat_target_rivals(snapshot)}
-    self_id = str((snapshot.get("decision") or {}).get("player_id") or "")
-    for message in chat_messages or []:
-        if not isinstance(message, dict):
-            continue
-        target = message.get("target")
-        if target in {"all", "team"}:
-            kept.append(message)
-            continue
-        raw_id = message.get("target_player_id")
-        resolved = pipeline._resolve_chat_recipient(raw_id, snapshot)
-        banned = pipeline.looks_like_non_major_chat_target(raw_id)
-        if resolved == self_id or str(raw_id or "") == self_id:
-            dropped.append(
-                f"dropped.chat.self: chat addressed to this seat ({raw_id}) was not sent"
-            )
-            continue
-        if banned or resolved is None or resolved not in eligible:
-            dropped.append(
-                f"dropped.chat.non_major: {raw_id} is not a met major civilization and was not sent"
-            )
-            continue
-        kept.append({**message, "target_player_id": resolved})
-    return kept, dropped
-
-
 def filter_repeat_public_chat(
     snapshot: dict[str, Any],
     chat_messages: list[dict[str, Any]],

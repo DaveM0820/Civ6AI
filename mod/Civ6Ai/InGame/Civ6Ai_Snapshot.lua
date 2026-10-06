@@ -1489,8 +1489,6 @@ function Civ6Ai_Snapshot._BuildKnownPlayers(playerID)
   local out = {}
   for otherID = 0, 63 do
     if otherID ~= playerID and Players[otherID] ~= nil and Players[otherID]:IsAlive() then
-      -- Chat and rival keys are majors the seat has met. City-states, Free Cities
-      -- and Barbarians are not chat targets (they are not IsMajor).
       if Civ6Ai_Snapshot._PlayerKind(otherID) == "major" and Civ6Ai_Snapshot._HasMet(playerID, otherID) then
         local other = Players[otherID]
         local facts = Civ6Ai_Snapshot._RelationFacts(playerID, otherID)

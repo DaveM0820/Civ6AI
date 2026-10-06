@@ -120,32 +120,6 @@ class ChatRobustnessTests(unittest.TestCase):
         self.assertIsNone(pipeline._resolve_chat_recipient("Barbarians", snap))
         self.assertIsNone(pipeline._resolve_chat_recipient("Free Cities", snap))
 
-    def test_non_major_chat_targets_are_dropped(self):
-        snap = _snap()
-        snap["known_players"].extend([
-            {"player_id": "PLAYER_61", "leader_id": "LEADER_FREE_CITIES", "leader_name": "Free Cities",
-             "civilization_id": "CIVILIZATION_FREE_CITIES", "kind": "free_cities", "is_major": False,
-             "relation": {"met": True}},
-            {"player_id": "PLAYER_62", "leader_id": "LEADER_BARBARIAN", "leader_name": "Barbarians",
-             "civilization_id": "CIVILIZATION_BARBARIAN", "kind": "barbarian", "is_major": False,
-             "relation": {"met": True}},
-        ])
-        wire = civ6_wire.build_civ6_model_wire_text(snap)
-        self.assertNotIn("chat.Free Cities", wire)
-        self.assertNotIn("chat.Barbarians", wire)
-        self.assertIn("chat.Gilgamesh", wire)
-        chats = [
-            {"target": "player", "target_player_id": "Free Cities", "text": "Why war?"},
-            {"target": "player", "target_player_id": "Barbarians", "text": "Raids end here."},
-            {"target": "player", "target_player_id": "Gilgamesh", "text": "A private word."},
-        ]
-        kept, dropped = results.filter_ineligible_chat_targets(snap, chats)
-        self.assertEqual(1, len(kept))
-        self.assertEqual("PLAYER_0", kept[0]["target_player_id"])
-        self.assertTrue(any("dropped.chat.non_major" in note and "Free Cities" in note for note in dropped))
-        self.assertTrue(any("dropped.chat.non_major" in note and "Barbarians" in note for note in dropped))
-
-
     def test_chat_leadername_dot_key_expands(self):
         snap = _snap()
         nested = pipeline.expand_flat_response({"chat.LeaderName.Gilgamesh": "A private word."}, snap)
