@@ -203,6 +203,7 @@ def _build_approved_record(
     validated["chat_messages"] = chats
     from sidecar import civ6_command_wire
 
+    commands = [civ6_command_wire.pack_apply_command(snapshot, item) for item in commands]
     unresolved = civ6_command_wire.take_unresolved()
     dropped = list(repeat_notes) + list(chat_notes)
     for token in unresolved:

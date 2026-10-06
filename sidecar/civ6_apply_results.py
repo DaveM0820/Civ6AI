@@ -41,6 +41,8 @@ NON_TRANSIENT_FAILURES = (
     "stale_unit_id",
     "stale_city_id",
     "unit_not_found",
+    "plot_occupied_exhausted",
+    "site_no_longer_legal",
 )
 CHAT_NEAR_DUPE_THRESHOLD = 0.9
 CHAT_NEAR_DUPE_LOOKBACK_TURNS = 3
@@ -51,6 +53,9 @@ _PATH_RE = re.compile(
 )
 _INSUFFICIENT_RE = re.compile(r"^insufficient_moves:(?P<cost>-?[\d.]+)>(?P<moves>-?[\d.]+)$")
 _PARTIAL_MOVE_RE = re.compile(r"^partial_move_to_(?P<x>-?\d+)_(?P<y>-?\d+)$")
+_RETARGET_RE = re.compile(
+    r"^retargeted:(?P<ox>-?\d+),(?P<oy>-?\d+)>(?P<nx>-?\d+),(?P<ny>-?\d+)$"
+)
 
 _SIMPLE_REASONS = {
     "no_path": "the game found no route to that tile (water, mountains, or closed borders in the way)",
@@ -90,6 +95,16 @@ _SIMPLE_REASONS = {
     "unsupported_kind": "the host does not support that order yet",
     "missing_unit_or_target": "the order had no unit or target",
     "local_player_swap_blocked_mp": "the host could not act for this seat in multiplayer",
+    "stale_unit_id": "that unit no longer exists (stale id)",
+    "stale_city_id": "that city no longer exists (stale id)",
+    "self_target_hold": "the destination was this unit's own tile, so it held",
+    "plot_occupied_exhausted": "the destination stayed occupied after retries, and no neighbour was free",
+    "ok_superseded": "the chosen research/civic was already done, so a fallback was used",
+    "ok_already_researching": "that technology or civic was already in progress",
+    "site_no_longer_legal": "that tile is no longer a legal city site",
+    "trade_unavailable": "the game has no trade-route operation for this unit",
+    "explore_unavailable": "the game has no explore operation for this unit",
+    "activate_unavailable": "the game could not activate that great person",
 }
 
 
@@ -119,6 +134,12 @@ def describe_reason(reason: Any) -> str:
     match = _PARTIAL_MOVE_RE.match(text)
     if match:
         return f"moved partway, now at ({match.group('x')},{match.group('y')})"
+    match = _RETARGET_RE.match(text)
+    if match:
+        return (f"destination ({match.group('ox')},{match.group('oy')}) was occupied; "
+                f"moved toward ({match.group('nx')},{match.group('ny')}) instead")
+    if text.startswith("retargeted:"):
+        return "destination occupied; the game picked a free neighbouring tile"
     if text.startswith("gamecore_error:") or text.startswith("move_unit_error:"):
         return "the game raised a script error on that order"
     if text.startswith("gamecore_unavailable:"):
@@ -254,6 +275,12 @@ def _order_label(row: dict[str, Any], wire_ids: dict[str, str], city_names: dict
         return f"{city_names.get(city, city or 'city')}.buyTile", _coords(fixed) or "tile"
     if kind == "worker_improve":
         return actor or "builder", str(fixed.get("improvement_id") or "improve")
+    if kind == "trade_route":
+        return actor or "trader", f"TradeRoute({fixed.get('city_id') or fixed.get('dest_city_id') or '?'})"
+    if kind == "explore":
+        return actor or "scout", "Explore"
+    if kind == "activate_great_person":
+        return actor or "greatperson", "Activate"
     return actor or "order", kind or "command"
 
 
@@ -267,6 +294,10 @@ def _success_text(row: dict[str, Any]) -> str:
         arrived = path is not None and path.group("stop") == "arrived" and not path.group("partial")
         if reason in NO_EFFECT_REASONS:
             return f"no effect — already on {_coords(fixed) or 'that tile'}"
+        if reason == "self_target_hold":
+            return "ok — held on this tile (MoveTo was the unit's own plot)"
+        if reason.startswith("retargeted:"):
+            return f"ok — retargeted; {detail}"
         if not reason or arrived:
             return f"ok — moved to {_coords(fixed) or 'the target'}"
         if reason.startswith("first_step:"):
@@ -277,8 +308,16 @@ def _success_text(row: dict[str, Any]) -> str:
     if kind == "found_city":
         return "ok — city founded"
     if kind == "set_research_tech":
+        if reason == "ok_superseded":
+            return f"ok — first choice already known; researching {_readable(fixed.get('tech_id'), 'TECH_')}"
+        if reason == "ok_already_researching":
+            return "ok — already researching that technology"
         return f"ok — researching {_readable(fixed.get('tech_id'), 'TECH_')}"
     if kind == "set_research_civic":
+        if reason == "ok_superseded":
+            return f"ok — first choice already known; studying {_readable(fixed.get('civic_id'), 'CIVIC_')}"
+        if reason == "ok_already_researching":
+            return "ok — already studying that civic"
         return f"ok — studying {_readable(fixed.get('civic_id'), 'CIVIC_')}"
     if kind == "queue_production":
         return f"ok — now building {fixed.get('build_id') or 'it'}"
@@ -312,7 +351,7 @@ def build_command_results(snapshot: dict[str, Any], rows: list[dict[str, Any]], 
     for row in rows:
         actor, order = _order_label(row, wire_ids, city_names)
         reason = str(row.get("reason") or "")
-        ok = row.get("ok") is True
+        ok = row.get("ok") is True or reason.startswith("ok_") or reason.startswith("retargeted:") or reason == "self_target_hold"
         no_effect = reason in NO_EFFECT_REASONS
         if no_effect:
             outcome = _success_text(row)

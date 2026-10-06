@@ -250,5 +250,57 @@ class PromptBoundAndSettleTests(unittest.TestCase):
             self.assertEqual(loaded["timings"]["llm_ms"], 8)
 
 
+class WpAPackingAndResultsTests(unittest.TestCase):
+    def test_settle_eq_packs_move_goal_found_intent(self):
+        from sidecar import civ6_command_wire as wire
+
+        snap = _snap()
+        snap["legal_commands"] = []
+        cmd_id = wire.resolve_unit_token(snap, "UNIT_SETTLER_1", "settle=(30,12)")
+        self.assertIsNotNone(cmd_id)
+        command = next(c for c in snap["legal_commands"] if c["command_id"] == cmd_id)
+        packed = wire.pack_apply_command(snap, {
+            "kind": command["kind"],
+            "command_id": cmd_id,
+            "arguments": dict(command["fixed_arguments"]),
+        })
+        self.assertEqual(packed["kind"], "move_unit")
+        self.assertEqual(packed["arguments"]["target_x"], 30)
+        self.assertEqual(packed["arguments"]["target_y"], 12)
+        self.assertTrue(packed["arguments"]["goal"])
+        self.assertEqual(packed["arguments"]["intent"], "found")
+        self.assertNotIn("N", packed["arguments"])
+        self.assertEqual(wire.INTENT_A_CODES["found"], 1)
+
+    def test_settler_dot_settle_key_binds(self):
+        from sidecar import civ6_command_wire as wire
+
+        snap = _snap()
+        snap["legal_commands"] = []
+        out = wire.expand_civ6_command_wire(snap, {"settler_1.settle": "(18,16)"})
+        self.assertTrue(any(str(k).startswith("cmd.") for k in out))
+        command = snap["legal_commands"][0]
+        self.assertEqual(command["fixed_arguments"]["intent"], "found")
+        self.assertTrue(command["fixed_arguments"]["goal"])
+
+    def test_new_result_codes_are_readable(self):
+        self.assertIn("stale", results.describe_reason("stale_unit_id").lower())
+        self.assertIn("stale", results.describe_reason("stale_city_id").lower())
+        self.assertIn("held", results.describe_reason("self_target_hold").lower())
+        self.assertIn("(6,7)", results.describe_reason("retargeted:5,5>6,7"))
+        self.assertIn("occupied", results.describe_reason("plot_occupied_exhausted").lower())
+        snap = _snap()
+        hold = results.build_command_results(snap, [{
+            "kind": "move_unit", "ok": True, "reason": "self_target_hold",
+            "fixed_arguments": {"unit_id": "UNIT_WARRIOR_1", "target_x": 6, "target_y": 10},
+        }], 36)[0]
+        self.assertEqual(hold["kind"], results.KIND_OK)
+        superceded = results.build_command_results(snap, [{
+            "kind": "set_research_tech", "ok": True, "reason": "ok_superseded",
+            "fixed_arguments": {"tech_id": "TECH_POTTERY"},
+        }], 36)[0]
+        self.assertIn("already known", superceded["summary"].lower())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -27,6 +27,20 @@ def build_turn_report(
         required = 0
     given = len(commands)
     chats = validated.get("chat_messages") if isinstance(validated.get("chat_messages"), list) else []
+    history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
+    last_results = []
+    for item in history.get("command_results") or []:
+        if not isinstance(item, dict):
+            continue
+        last_results.append({
+            "kind": item.get("kind") or item.get("order_kind"),
+            "reason": item.get("reason"),
+            "ok": item.get("kind") != "APPLY_FAILED" if item.get("kind") else item.get("ok"),
+            "summary": str(item.get("summary") or "")[:200],
+            "decision_turn": item.get("turn"),
+            "apply_turn": item.get("apply_turn"),
+            "unit": item.get("unit"),
+        })
     return {
         "turn": int(decision.get("turn") or 0),
         "player_id": str(decision.get("player_id") or ""),
@@ -37,6 +51,7 @@ def build_turn_report(
         "commands_given": given,
         "chat_messages": len(chats),
         "dropped": list(dropped or []),
+        "last_order_results": last_results[:24],
         "category": record.get("category"),
     }
 
