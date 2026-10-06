@@ -54,6 +54,13 @@ class ManagedSeatDefaultsTests(unittest.TestCase):
         self.assertTrue(self.lua.eval("Civ6Ai_Config.IsManagedSeat(1)"))
         self.assertTrue(self.lua.eval("Civ6Ai_Config.IsManagedSeat(2)"))
 
+    def test_seat_snapshot_at_defaults_to_host_end(self):
+        self.assertEqual("host_end", self.lua.eval("Civ6Ai_Config.SeatSnapshotAt()"))
+        self.lua.execute('Civ6Ai_Paths.SeatSnapshotAt = "turn_start"; Civ6Ai_Config.Initialize()')
+        self.assertEqual("turn_start", self.lua.eval("Civ6Ai_Config.SeatSnapshotAt()"))
+        self.lua.execute('Civ6Ai_Paths.SeatSnapshotAt = "bogus"; Civ6Ai_Config.Initialize()')
+        self.assertEqual("host_end", self.lua.eval("Civ6Ai_Config.SeatSnapshotAt()"))
+
     def test_lan_without_autotest_drives_ais_not_human(self):
         self.lua.execute("network = true; Civ6Ai_Paths.Autotest = 0; Civ6Ai_Config.Initialize()")
         self.assertFalse(self.lua.eval("Civ6Ai_Config.IsAutotest()"))

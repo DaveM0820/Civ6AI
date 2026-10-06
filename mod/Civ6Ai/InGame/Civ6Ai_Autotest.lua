@@ -104,10 +104,14 @@ function Civ6Ai_Autotest.AfterPulse(playerID)
   Civ6Ai_Autotest._DismissBlockers(playerID)
   -- Ending the turn is what the diplomacy ribbon uses to drop a portrait
   -- (RemotePlayerTurnEnd / IsTurnActive). Humans wait until every AI seat's
-  -- answer is in. AI seats end as soon as this pulse is done, the same request
+  -- answer is in. AI seats end once their pulse is done (old timing) or once
+  -- their queue ran at their turn start (same-turn timing), the same request
   -- the human uses, so their portrait shows completed.
   local p = Players[playerID]
   if p ~= nil and p:IsHuman() then
+    -- host_end: the host's own orders are applied now, so snapshot every
+    -- managed AI seat from this state before the barrier waits for them.
+    Civ6Ai_Bridge.PrepulseSeats("host_end")
     Civ6Ai_Autotest._EndTurnAfterSeats(playerID)
   elseif p ~= nil and not (Civ6Ai_Apply._IsNetworkMultiplayer ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer()) then
     Civ6Ai_Autotest._EndManagedTurn(playerID)
@@ -120,18 +124,16 @@ function Civ6Ai_Autotest.AfterPulse(playerID)
 end
 
 -- Seat-timing barrier (docs/REAL_TEST.md "Seat timing").
--- Single player plays the local seat's turn N first; the AI seats play their turn
--- N after it ends (same game turn number) and each dumps a snapshot then. The host
--- asks the model for one seat at a time, so the AI answers for turn N arrive while
--- the local seat plays turn N+1; each is sent on the order channel as it lands and
--- played at that seat's turn N+1 start (Civ6Ai_Bridge._DeliverSeatDecision). The
--- local seat therefore holds its end-turn until every AI seat that dumped a turn N
--- snapshot has had its answer sent (or given up on); otherwise the AI turn N+1 would start without
--- it and the native AI would play the seat. Bounded by a wall-clock deadline of
--- sidecar timeout x (pending seats + 1).
--- Sequential SP: hold end-turn until every AI seat's turn N-1 snapshot has an
--- answer (those answers play at turn N). Simultaneous LAN: hold until this
--- turn's dumps are sent, otherwise the year rolls and Firaxis plays the seats.
+-- Same-turn timing (autotest default, seat_snapshot_at host_end/turn_start):
+-- every managed AI seat is snapshotted during the local seat's turn N
+-- (Civ6Ai_Bridge.PrepulseSeats) and its answer is sent for the seat's next turn
+-- start (single player: its turn N, which starts after the local seat ends N;
+-- LAN: N+1). The local seat holds its end-turn until every AI seat's turn N
+-- answer has been sent (or given up on); otherwise the seat's turn would start
+-- without it and the native AI would play the seat. Bounded by a wall-clock
+-- deadline of sidecar timeout x (pending seats + 1).
+-- Old sequential SP timing (no same-turn): hold until every AI seat's turn N-1
+-- snapshot has an answer (Civ6Ai_Bridge.HostWaitSnapshotTurn).
 function Civ6Ai_Autotest._PendingSeats(localPlayer)
   local pending = {}
   local snapshotTurn = Civ6Ai_Bridge.HostWaitSnapshotTurn()

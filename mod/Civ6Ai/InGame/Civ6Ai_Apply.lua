@@ -66,7 +66,9 @@ end
 -- snapshotTurn: the turn of the snapshot the decision answers (default: now).
 -- A seat other than the local one plays it at its next turn start: the orders
 -- go out on the synced channel (every PC makes the same change) for turn
--- snapshotTurn + 1, and results are recorded when they come back.
+-- forTurn, and results are recorded when they come back. forTurn defaults to
+-- Civ6Ai_Bridge.SeatForTurn: snapshotTurn in single player when the seat's
+-- turn snapshotTurn has not started yet (same-turn timing), else snapshotTurn + 1.
 -- DiplomacyManager is the leader screen's own session call (RequestSession /
 -- AddResponse). It is the network diplomacy path, so the host answers once
 -- when the model replies instead of queueing it for the seat's next turn.
@@ -94,7 +96,7 @@ function Civ6Ai_Apply._ApplySessions(playerID, commands)
   end
 end
 
-function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn)
+function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   if decision == nil or decision.commands == nil then
     Civ6Ai_Util.Log("apply|no_commands|player=" .. tostring(playerID))
     return
@@ -106,7 +108,13 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn)
     return
   end
   if playerID ~= Game.GetLocalPlayer() then
-    local forTurn = (snapshotTurn or Game.GetCurrentGameTurn()) + 1
+    if forTurn == nil then
+      if Civ6Ai_Bridge ~= nil and Civ6Ai_Bridge.SeatForTurn ~= nil then
+        forTurn = Civ6Ai_Bridge.SeatForTurn(playerID, snapshotTurn)
+      else
+        forTurn = (snapshotTurn or Game.GetCurrentGameTurn()) + 1
+      end
+    end
     local sent = Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn)
     Civ6Ai_Util.Log("apply|order_channel|player=" .. tostring(playerID) .. "|for_turn=" .. tostring(forTurn)
       .. "|sent=" .. tostring(sent))

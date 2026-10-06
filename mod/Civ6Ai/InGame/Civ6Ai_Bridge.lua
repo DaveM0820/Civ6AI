@@ -14,6 +14,13 @@ Civ6Ai_Bridge._logOnceKeys = {}
 Civ6Ai_Bridge._consumedApplyIds = {}
 Civ6Ai_Bridge._dumpedKeys = {}
 Civ6Ai_Bridge._delivered = {}
+-- Same-turn seat timing (docs/REAL_TEST.md "Seat timing"), keyed seat|turn:
+-- pulses taken while the seat's turn had not started yet (host_end/turn_start),
+-- pulses whose answer delivery is scheduled, and seats whose turn was ended
+-- after their queue ran.
+Civ6Ai_Bridge._prepulseKeys = {}
+Civ6Ai_Bridge._deliveryKeys = {}
+Civ6Ai_Bridge._seatEndKeys = {}
 
 -- Log a line only the first time `key` is seen. Wait loops run every frame, so
 -- any status line inside them must go through here (or a wall-clock throttle).
@@ -228,7 +235,7 @@ function Civ6Ai_Bridge._PreviousJournalResponseId(playerID)
   return id or ""
 end
 
-function Civ6Ai_Bridge._SchedulePulseRetry(playerID)
+function Civ6Ai_Bridge._SchedulePulseRetry(playerID, opts)
   if not Civ6Ai_Bridge._IsBridgeSeat(playerID) then
     return
   end
@@ -247,7 +254,7 @@ function Civ6Ai_Bridge._SchedulePulseRetry(playerID)
         and not Civ6Ai_Bridge._AlreadyPulsed(playerID) then
       Civ6Ai_Bridge._retryKeys[key] = nil
       Civ6Ai_Util.Log("bridge|retry_pulse|player=" .. tostring(playerID) .. "|attempts=" .. tostring(attempts))
-      Civ6Ai_Bridge.RunTurnPulse(playerID)
+      Civ6Ai_Bridge.RunTurnPulse(playerID, opts)
       return false
     end
     if attempts == 1 or attempts % 50 == 0 then
@@ -282,6 +289,25 @@ function Civ6Ai_Bridge._FinishTurnPulse(playerID)
   if Civ6Ai_Bridge._IsLocalSeat(playerID) then
     Civ6Ai_Apply.ResolveAllUnitOrders(playerID)
   end
+  -- An AI seat snapshotted before its turn started (same-turn timing) is not
+  -- active now: its turn is ended after its queue ran at its turn start
+  -- (_OnSeatTurnStart). A pulse that failed before scheduling its answer
+  -- delivery is settled now so the host's barrier does not wait for it.
+  if Civ6Ai_Bridge._prepulseKeys[key] then
+    local turn = Game.GetCurrentGameTurn()
+    Civ6Ai_Util.Log("bridge|seat_end_deferred|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
+      .. "|delivery=" .. tostring(Civ6Ai_Bridge._deliveryKeys[key] == true))
+    if not Civ6Ai_Bridge._deliveryKeys[key] then
+      Civ6Ai_Bridge._SettleSeat(playerID, turn, false)
+    end
+    return
+  end
+  Civ6Ai_Bridge._EndSeatTurn(playerID)
+end
+
+-- End a seat's turn after its pulse (old timing) or after its queue ran at its
+-- turn start (same-turn timing).
+function Civ6Ai_Bridge._EndSeatTurn(playerID)
   if Civ6Ai_Autotest ~= nil then
     Civ6Ai_Autotest.AfterPulse(playerID)
   end
@@ -670,14 +696,16 @@ function Civ6Ai_Bridge._DeliverSeatDecision(playerID, snapshotTurn)
   local applyId = Civ6Ai_Bridge._ConsumeApplyId(entry)
   local decision = Civ6Ai_Bridge._ParseDecision(entry.json)
   local chats = Civ6Ai_Bridge._ParseChatMessages(entry.json)
+  local forTurn = Civ6Ai_Bridge.SeatForTurn(playerID, snapshotTurn)
   if #decision.commands > 0 then
-    Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn)
+    Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   end
   if Civ6Ai_Chat ~= nil and #chats > 0 then
     Civ6Ai_Chat.SendMessages(playerID, chats)
   end
   Civ6Ai_Util.Log(
     "bridge|seat_decision_sent|player=" .. tostring(playerID) .. "|snapshot_turn=" .. tostring(snapshotTurn)
+      .. "|for_turn=" .. tostring(forTurn)
       .. "|game_turn=" .. tostring(Game.GetCurrentGameTurn()) .. "|commands=" .. tostring(#decision.commands)
       .. "|chats=" .. tostring(#chats) .. "|id=" .. applyId
   )
@@ -711,6 +739,7 @@ end
 -- Watch for the answer to a seat's snapshot until it is sent, the turn it was
 -- for is over, or the host's wait for all seats runs out.
 function Civ6Ai_Bridge._ScheduleSeatDelivery(playerID, snapshotTurn)
+  Civ6Ai_Bridge._deliveryKeys[tostring(playerID) .. "|" .. tostring(snapshotTurn)] = true
   local waitSeconds = Civ6Ai_Bridge._InboxWaitSeconds()
   local deadline = Civ6Ai_Bridge._WaitDeadline(waitSeconds)
   local maxAttempts = Civ6Ai_Bridge._PollMaxAttempts(waitSeconds)
@@ -739,13 +768,141 @@ function Civ6Ai_Bridge.SeatDecisionSettled(playerID, turn)
 end
 
 -- Simultaneous LAN: the host must wait for this turn's dumps (queues for N+1).
--- Sequential SP: AI dump turn N while the local seat plays N+1, so wait for N-1.
+-- Same-turn timing (SP and LAN): the AI seats are snapshotted during the host's
+-- turn N, so wait for this turn's answers too.
+-- Old sequential SP timing (no same-turn): AI dump turn N while the local seat
+-- plays N+1, so wait for N-1.
 function Civ6Ai_Bridge.HostWaitSnapshotTurn()
   local turn = Game.GetCurrentGameTurn()
   if Civ6Ai_Apply ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer() then
     return turn
   end
+  if Civ6Ai_Bridge.SameTurnSeats() then
+    return turn
+  end
   return turn - 1
+end
+
+-- ---------------------------------------------------------------------------
+-- Same-turn seat timing (docs/REAL_TEST.md "Seat timing")
+-- ---------------------------------------------------------------------------
+-- Active when the model drives the local seat (autotest) on the host PC: the
+-- host's own pulse is the trigger that snapshots every managed AI seat
+-- (Civ6Ai_Config.SeatSnapshotAt: host_end or turn_start). A person playing the
+-- host seat has no such trigger yet (End Turn gate is a follow-up), so the AI
+-- seats keep the old timing there (snapshot at their own turn start).
+function Civ6Ai_Bridge.SameTurnSeats()
+  if Civ6Ai_Config == nil or not Civ6Ai_Config.IsAutotest() then
+    return false
+  end
+  if Civ6Ai_Config.IsFastEndTurn ~= nil and Civ6Ai_Config.IsFastEndTurn() then
+    return false
+  end
+  if Civ6Ai_Config.IsHostPc ~= nil and not Civ6Ai_Config.IsHostPc() then
+    return false
+  end
+  local localId = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or nil
+  if localId == nil or localId < 0 then
+    return false
+  end
+  return Civ6Ai_Config.IsManagedSeat(localId) == true
+end
+
+function Civ6Ai_Bridge._SeatSnapshotAt()
+  if Civ6Ai_Config ~= nil and Civ6Ai_Config.SeatSnapshotAt ~= nil then
+    return Civ6Ai_Config.SeatSnapshotAt()
+  end
+  return "host_end"
+end
+
+-- Highest turn whose start (queue applied) the gameplay side has reported for
+-- the seat (Civ6Ai_Orders._PublishTurnStart), or -1.
+function Civ6Ai_Bridge._SeatStartedTurn(playerID)
+  local shared = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+  local marks = shared ~= nil and shared.TurnStartComplete or nil
+  local mark = marks ~= nil and tonumber(marks[playerID]) or nil
+  return mark or -1
+end
+
+-- The turn an AI seat's answer to its snapshot of snapshotTurn is played: the
+-- seat's next turn start. Network MP: every seat already started snapshotTurn
+-- with everyone, so snapshotTurn + 1. Single player: snapshotTurn while the
+-- seat's turn snapshotTurn has not started (same-turn timing), otherwise
+-- snapshotTurn + 1 (old timing, or an answer that arrived after the seat's turn).
+function Civ6Ai_Bridge.SeatForTurn(playerID, snapshotTurn)
+  local t = tonumber(snapshotTurn) or Game.GetCurrentGameTurn()
+  if Civ6Ai_Apply ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer() then
+    return t + 1
+  end
+  if Civ6Ai_Bridge._SeatStartedTurn(playerID) >= t then
+    if Civ6Ai_Bridge._prepulseKeys[tostring(playerID) .. "|" .. tostring(t)] then
+      Civ6Ai_Bridge._LogOnce("seat_answer_late|" .. tostring(playerID) .. "|" .. tostring(t),
+        "bridge|seat_answer_late|player=" .. tostring(playerID) .. "|snapshot_turn=" .. tostring(t)
+          .. "|for_turn=" .. tostring(t + 1))
+    end
+    return t + 1
+  end
+  return t
+end
+
+-- Snapshot every managed AI seat now (trigger "host_end": the host seat is
+-- done with this turn; "turn_start": the host seat's turn just started). Only
+-- the trigger that matches seat_snapshot_at runs. Each seat's sidecar runs in
+-- parallel on the host; the pulse key is seat|turn, so the seat's own turn
+-- start later only ends its turn (_OnSeatTurnStart). Returns seats pulsed.
+function Civ6Ai_Bridge.PrepulseSeats(trigger)
+  if not Civ6Ai_Bridge.SameTurnSeats() then
+    return 0
+  end
+  local mode = Civ6Ai_Bridge._SeatSnapshotAt()
+  if trigger ~= mode then
+    return 0
+  end
+  local turn = Game.GetCurrentGameTurn()
+  local localId = Game.GetLocalPlayer()
+  local count = 0
+  for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
+    if seat ~= localId and Civ6Ai_Config.ShouldRunBridge(seat) then
+      local key = tostring(seat) .. "|" .. tostring(turn)
+      if not Civ6Ai_Bridge._pulseKeys[key] then
+        Civ6Ai_Util.Log("bridge|seat_prepulse|player=" .. tostring(seat) .. "|turn=" .. tostring(turn)
+          .. "|mode=" .. tostring(mode) .. "|seat_started=" .. tostring(Civ6Ai_Bridge._SeatStartedTurn(seat)))
+        Civ6Ai_Bridge.RunTurnPulse(seat, { prepulse = true })
+        count = count + 1
+      end
+    end
+  end
+  return count
+end
+
+-- A managed AI seat's turn start under same-turn timing (called through
+-- RunTurnPulse by the turn-start hooks in Civ6Ai_InGame). Its snapshot was
+-- already taken during the host's turn; once the gameplay side reports that
+-- its queue ran (TurnStartComplete mark), end its turn the same way the old
+-- timing did right after the snapshot. No answer (timeout, no queue): the
+-- game's AI played the seat, and its turn still ends here.
+function Civ6Ai_Bridge._OnSeatTurnStart(playerID)
+  local turn = Game.GetCurrentGameTurn()
+  if Civ6Ai_Bridge._SeatStartedTurn(playerID) < turn then
+    return false
+  end
+  local key = tostring(playerID) .. "|" .. tostring(turn)
+  if Civ6Ai_Bridge._seatEndKeys[key] then
+    return true
+  end
+  Civ6Ai_Bridge._seatEndKeys[key] = true
+  local answer = "none"
+  if Civ6Ai_Bridge._delivered[key] == true then
+    answer = "sent"
+  elseif Civ6Ai_Bridge._delivered[key] == false then
+    answer = "missing"
+  elseif Civ6Ai_Bridge._pulseKeys[key] then
+    answer = "outstanding"
+  end
+  Civ6Ai_Util.Log("bridge|seat_end_after_queue|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
+    .. "|prepulsed=" .. tostring(Civ6Ai_Bridge._prepulseKeys[key] == true) .. "|answer=" .. answer)
+  Civ6Ai_Bridge._EndSeatTurn(playerID)
+  return true
 end
 
 -- True until this seat's snapshot of `turn` is sent or given up. Not dumped yet
@@ -960,14 +1117,22 @@ function Civ6Ai_Bridge._ScheduleSidecarPoll(playerID, decisionPath, playerDir, d
   end)
 end
 
-function Civ6Ai_Bridge.RunTurnPulse(playerID)
+-- opts.prepulse: an AI seat snapshotted by PrepulseSeats before its own turn
+-- start (same-turn timing). Without it, a managed AI seat's call under
+-- same-turn timing comes from its turn start and only ends its turn.
+function Civ6Ai_Bridge.RunTurnPulse(playerID, opts)
   -- STABLE through snapshot dump + sidecar queue — apply fixes go in HostChannel/Apply, not here.
+  opts = opts or {}
   if not Civ6Ai_Bridge._IsBridgeSeat(playerID) then
     return
   end
   if not Civ6Ai_Bridge._IsGameplayReady(playerID) then
     Civ6Ai_Util.Log("bridge|not_ready|player=" .. tostring(playerID))
-    Civ6Ai_Bridge._SchedulePulseRetry(playerID)
+    Civ6Ai_Bridge._SchedulePulseRetry(playerID, opts)
+    return
+  end
+  if not opts.prepulse and not Civ6Ai_Bridge._IsLocalSeat(playerID) and Civ6Ai_Bridge.SameTurnSeats() then
+    Civ6Ai_Bridge._OnSeatTurnStart(playerID)
     return
   end
   if not Civ6Ai_Bridge._CanStartAutotestPulse(playerID) then
@@ -979,7 +1144,7 @@ function Civ6Ai_Bridge.RunTurnPulse(playerID)
         .. "|pieces="
         .. tostring(Civ6Ai_Bridge._HasActablePieces(playerID))
     )
-    Civ6Ai_Bridge._SchedulePulseRetry(playerID)
+    Civ6Ai_Bridge._SchedulePulseRetry(playerID, opts)
     return
   end
   if Civ6Ai_Bridge._AlreadyPulsed(playerID) then
@@ -998,7 +1163,23 @@ function Civ6Ai_Bridge.RunTurnPulse(playerID)
     return
   end
   Civ6Ai_Bridge._MarkPulse(playerID)
-  Civ6Ai_Util.Log("bridge|pulse|player=" .. tostring(playerID))
+  if opts.prepulse then
+    Civ6Ai_Bridge._prepulseKeys[Civ6Ai_Bridge._PulseKey(playerID)] = true
+  end
+  Civ6Ai_Util.Log("bridge|pulse|player=" .. tostring(playerID)
+    .. (opts.prepulse and ("|prepulse=1|turn=" .. tostring(Game.GetCurrentGameTurn())) or ""))
+  if Civ6Ai_Bridge._IsLocalSeat(playerID) and Civ6Ai_Bridge.SameTurnSeats()
+      and Civ6Ai_Bridge._SeatSnapshotAt() == "turn_start" then
+    -- turn_start: the AI seats are snapshotted next tick, in parallel with
+    -- the host's own decision (the host's snapshot is dumped first).
+    local turn = Game.GetCurrentGameTurn()
+    Civ6Ai_Util.ScheduleTick(function()
+      if Game.GetCurrentGameTurn() == turn then
+        Civ6Ai_Bridge.PrepulseSeats("turn_start")
+      end
+      return false
+    end)
+  end
   local breaker = Civ6Ai_Bridge._ReadCircuitBreaker(playerID)
   if breaker == "open" then
     Civ6Ai_Util.Log("bridge|circuit_breaker_open|player=" .. tostring(playerID))
@@ -1027,7 +1208,7 @@ function Civ6Ai_Bridge.RunTurnPulse(playerID)
     else
       Civ6Ai_Util.Log("bridge|snapshot_write_failed|player=" .. tostring(playerID))
       Civ6Ai_Bridge._ClearPulse(playerID)
-      Civ6Ai_Bridge._SchedulePulseRetry(playerID)
+      Civ6Ai_Bridge._SchedulePulseRetry(playerID, opts)
       return
     end
   end
@@ -1077,7 +1258,8 @@ function Civ6Ai_Bridge.RunTurnPulse(playerID)
   end
   if not Civ6Ai_Bridge._IsLocalSeat(playerID) then
     -- The answer is sent when the host writes it and played at this seat's
-    -- next turn start; this turn's pulse is done.
+    -- next turn start (SeatForTurn); this pulse is done. Under same-turn
+    -- timing _FinishTurnPulse leaves the seat's turn running until its queue ran.
     Civ6Ai_Util.Log("bridge|seat_async|player=" .. tostring(playerID) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))
     Civ6Ai_Bridge._ScheduleSeatDelivery(playerID, Game.GetCurrentGameTurn())
     Civ6Ai_Bridge._FinishTurnPulse(playerID)

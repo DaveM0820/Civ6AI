@@ -249,6 +249,118 @@ class BridgePendingApplyLuaTests(unittest.TestCase):
         self.assertTrue(any("apply_replace_empty|player=0" in line for line in self._log()))
 
 
+SAME_TURN_STUBS = r"""
+AFTER = {}
+ExposedMembers = { Civ6Ai = { TurnStartComplete = {} } }
+Civ6Ai_Config.IsAutotest = function() return AUTOTEST end
+Civ6Ai_Config.IsFastEndTurn = function() return false end
+Civ6Ai_Config.IsHostPc = function() return true end
+Civ6Ai_Config.IsManagedSeat = function(p) return p >= 0 and p <= 4 end
+Civ6Ai_Config.IsSidecarLive = function() return true end
+Civ6Ai_Config.PersonalityPath = function() return "" end
+Civ6Ai_Config.RootDir = function() return "root" end
+Civ6Ai_Config.SeatSnapshotAt = function() return SNAPSHOT_AT end
+AUTOTEST = true
+SNAPSHOT_AT = "host_end"
+Civ6Ai_Util.JoinPath = function(...) return table.concat({...}, "/") end
+Civ6Ai_Util.WriteTextFile = function() return false end
+Civ6Ai_Util.ReadTextFile = function() return nil end
+Civ6Ai_Util.DumpBlob = function() return true end
+Civ6Ai_Snapshot = { Build = function(p) return "{}", {} end }
+Civ6Ai_Autotest = { AfterPulse = function(p) table.insert(AFTER, p) end }
+"""
+
+
+@unittest.skipIf(LuaRuntime is None, "lupa not installed")
+class SameTurnSeatTimingLuaTests(unittest.TestCase):
+    """AI seats snapshotted during the host's turn, played at their own turn start."""
+
+    def setUp(self):
+        self.lua = LuaRuntime()
+        self.lua.execute(LUA_STUBS)
+        self.lua.execute(SAME_TURN_STUBS)
+        self.lua.execute(BRIDGE.read_text(encoding="utf-8"))
+        self.g = self.lua.globals()
+        self.g.Civ6Ai_Bridge._IsGameplayReady = lambda p: True
+        self.g.Civ6Ai_Bridge._HasActablePieces = lambda p: True
+        self.g.Civ6Ai_Bridge._loadScreenClosed = True
+        self.g.CURRENT_TURN = 5
+        self.lua.execute("for p = 1, 4 do ExposedMembers.Civ6Ai.TurnStartComplete[p] = 4 end")
+
+    def _log(self):
+        return [self.g.LOG[i] for i in range(1, len(self.g.LOG) + 1)]
+
+    def test_host_end_prepulses_every_ai_seat_without_ending_their_turn(self):
+        self.assertEqual(0, self.g.Civ6Ai_Bridge.PrepulseSeats("turn_start"))
+        self.assertEqual(4, self.g.Civ6Ai_Bridge.PrepulseSeats("host_end"))
+        log = self._log()
+        for seat in (1, 2, 3, 4):
+            self.assertIn(f"bridge|seat_prepulse|player={seat}|turn=5|mode=host_end|seat_started=4", log)
+            self.assertTrue(any(f"seat_end_deferred|player={seat}|turn=5|delivery=true" in l for l in log))
+        self.assertEqual(0, len(self.g.AFTER))  # no seat ended while not active
+        self.assertEqual(5, int(self.g.Civ6Ai_Bridge.HostWaitSnapshotTurn()))
+        self.assertTrue(self.g.Civ6Ai_Bridge.SeatAnswerOutstanding(1, 5))
+        # A second trigger in the same turn does not pulse again.
+        self.assertEqual(0, self.g.Civ6Ai_Bridge.PrepulseSeats("host_end"))
+
+    def test_sp_answer_is_for_this_turn_until_the_seat_turn_started(self):
+        self.assertEqual(5, int(self.g.Civ6Ai_Bridge.SeatForTurn(1, 5)))
+        self.lua.execute("ExposedMembers.Civ6Ai.TurnStartComplete[1] = 5")
+        self.assertEqual(6, int(self.g.Civ6Ai_Bridge.SeatForTurn(1, 5)))
+        self.g.Civ6Ai_Apply._IsNetworkMultiplayer = lambda: True
+        self.assertEqual(6, int(self.g.Civ6Ai_Bridge.SeatForTurn(2, 5)))
+
+    def test_prepulsed_answer_is_sent_for_this_turn(self):
+        self.g.Civ6Ai_Bridge.PrepulseSeats("host_end")
+        payload = '{"commands":[{"kind":"move_unit","command_id":"CMD_1","arguments":{"unit_id":"UNIT_1"}}]}'
+        self.g.PENDING_SRC = _lua_queue_content({"1:turn": {
+            "session_id": "sess", "player": 1, "turn": 5, "kind": "turn", "apply_id": "a1", "json": payload}})
+        self.lua.execute("Civ6Ai_Apply.ApplyDecision = function(p, d, t, f) table.insert(APPLIED, {player=p, turn=t, for_turn=f}) end")
+        self.lua.execute("RUN_TICKS()")
+        self.assertEqual(1, len(self.g.APPLIED))
+        self.assertEqual((1, 5, 5), (self.g.APPLIED[1].player, self.g.APPLIED[1].turn, self.g.APPLIED[1].for_turn))
+        self.assertTrue(any("seat_decision_sent|player=1|snapshot_turn=5|for_turn=5" in l for l in self._log()))
+        self.assertFalse(self.g.Civ6Ai_Bridge.SeatAnswerOutstanding(1, 5))
+
+    def test_seat_turn_start_ends_turn_once_after_its_queue_ran(self):
+        self.g.Civ6Ai_Bridge.PrepulseSeats("host_end")
+        self.g.Civ6Ai_Bridge.RunTurnPulse(1)  # PlayerTurnActivated before the queue ran
+        self.assertEqual(0, len(self.g.AFTER))
+        self.lua.execute("ExposedMembers.Civ6Ai.TurnStartComplete[1] = 5")
+        self.g.Civ6Ai_Bridge.RunTurnPulse(1)
+        self.g.Civ6Ai_Bridge.RunTurnPulse(1)
+        self.assertEqual([1], list(self.g.AFTER.values()))
+        self.assertTrue(any("seat_end_after_queue|player=1|turn=5|prepulsed=true|answer=outstanding" in l
+                            for l in self._log()))
+        self.assertFalse(any("already_pulsed|player=1" in l for l in self._log()))
+
+    def test_seat_without_answer_still_ends_its_turn(self):
+        self.lua.execute("ExposedMembers.Civ6Ai.TurnStartComplete[2] = 5")
+        self.g.Civ6Ai_Bridge.RunTurnPulse(2)
+        self.assertEqual([2], list(self.g.AFTER.values()))
+        self.assertTrue(any("seat_end_after_queue|player=2|turn=5|prepulsed=false|answer=none" in l
+                            for l in self._log()))
+
+    def test_failed_prepulse_is_settled_so_the_barrier_does_not_wait(self):
+        self.g.Civ6Ai_Snapshot.Build = lambda p: None
+        self.g.Civ6Ai_Bridge.PrepulseSeats("host_end")
+        self.assertFalse(self.g.Civ6Ai_Bridge.SeatAnswerOutstanding(3, 5))
+        self.assertEqual(0, len(self.g.AFTER))
+
+    def test_turn_start_mode_prepulses_after_the_host_pulse(self):
+        self.g.SNAPSHOT_AT = "turn_start"
+        self.g.Civ6Ai_Bridge.RunTurnPulse(0)
+        self.assertFalse(any("seat_prepulse" in l for l in self._log()))
+        self.lua.execute("RUN_TICKS()")
+        self.assertTrue(any("seat_prepulse|player=4|turn=5|mode=turn_start" in l for l in self._log()))
+        self.assertEqual(0, self.g.Civ6Ai_Bridge.PrepulseSeats("host_end"))
+
+    def test_human_host_keeps_old_timing(self):
+        self.g.AUTOTEST = False
+        self.assertEqual(0, self.g.Civ6Ai_Bridge.PrepulseSeats("host_end"))
+        self.assertEqual(4, int(self.g.Civ6Ai_Bridge.HostWaitSnapshotTurn()))
+
+
 class SidecarJobStderrTests(unittest.TestCase):
     def test_failed_sidecar_reports_stderr_and_writes_file(self):
         import subprocess

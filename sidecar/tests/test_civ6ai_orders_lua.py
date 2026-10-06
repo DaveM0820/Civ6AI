@@ -239,6 +239,27 @@ class OrdersGameplayTests(unittest.TestCase):
         self.order(0, K=2, P=2, I=5, S=8, B=2, J=1, N=1)
         self.assertEqual(self.last()["reason"], "seat_turn_over:5")
 
+    def test_same_turn_batch_queued_for_this_turn_plays_at_seat_turn_start(self):
+        # Same-turn timing (SP): the seat is snapshotted during the host's turn 5
+        # before its own turn 5 started, so the answer is a batch for turn 5.
+        self.turn_start(2, turn=4)
+        self.rt.globals().SetTurn(5)
+        self.rt.execute("for _, u in ipairs(Players[2].units) do u.GetMaxMoves = function() return 2 end end")
+        self.order(0, K=1, P=2, U=7, X=10, Y=11, S=5, B=9, J=1, N=1, T=5)
+        self.assertIsNone(self.rt.eval("ExposedMembers.Civ6Ai.OrderResults"))
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_Q_2_T')"), 5)
+        logs = list(self.rt.eval("logs").values())
+        self.assertTrue(any("queued|player=2|for_turn=5" in line for line in logs))
+        self.turn_start(2)
+        self.assertTrue(self.last()["ok"])
+        self.assertEqual(self.rt.eval("Players[2].units[1].y"), 11)
+        logs = list(self.rt.eval("logs").values())
+        self.assertTrue(any("queue_apply|player=2|turn=5|orders=1" in line for line in logs))
+        units = [line for line in logs if "queue_units|player=2|turn=5" in line]
+        self.assertEqual(1, len(units))
+        self.assertIn("below_full=0", units[0])
+        self.assertIn("7@10,10:2/2", units[0])
+
     def test_batch_for_a_past_or_far_turn_is_refused(self):
         self.order(0, K=2, P=2, I=4, S=7, B=1, J=1, N=1, T=4)
         self.assertEqual(self.last()["reason"], "stale_turn:4")

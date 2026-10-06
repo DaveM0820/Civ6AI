@@ -608,12 +608,38 @@ function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
   local t, sender, orders = Civ6Ai_Orders._Take(owner)
   if t == turn then
     log("queue_apply|player=" .. tostring(owner) .. "|turn=" .. turn .. "|orders=" .. #orders)
+    Civ6Ai_Orders._LogQueueUnits(owner, turn)
     Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
   elseif t ~= nil then
     for _, o in ipairs(orders) do
       Civ6Ai_Orders._Record(sender, o, false, "stale_turn:" .. tostring(t))
     end
   end
+end
+
+-- Log-only (no game state): the seat's model-commanded units as the queue is
+-- about to run, so the log shows whether the game's AI moved any of them first
+-- (moves below full) and where they stand compared with the seat's snapshot.
+function Civ6Ai_Orders._LogQueueUnits(owner, turn)
+  local p = Players[owner]
+  if p == nil then
+    return
+  end
+  local total, partial, parts = 0, 0, {}
+  for _, u in ipairs(sortedMembers(call(p, "GetUnits"))) do
+    if Civ6Ai_Orders._ModelCommandsUnit(u) then
+      local moves = call(u, "GetMovesRemaining") or 0
+      local maxMoves = call(u, "GetMaxMoves") or 0
+      total = total + 1
+      if moves < maxMoves then
+        partial = partial + 1
+      end
+      parts[#parts + 1] = tostring(u:GetID()) .. "@" .. tostring(u:GetX()) .. "," .. tostring(u:GetY())
+        .. ":" .. tostring(moves) .. "/" .. tostring(maxMoves)
+    end
+  end
+  log("queue_units|player=" .. tostring(owner) .. "|turn=" .. tostring(turn) .. "|units=" .. total
+    .. "|below_full=" .. partial .. "|list=" .. table.concat(parts, ";"))
 end
 
 -- Tell the interface the seat's turn has started (after its queue ran, so the

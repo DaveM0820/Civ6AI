@@ -39,6 +39,7 @@ function Civ6Ai_Config.Initialize()
   Civ6Ai_Config._sessionId = setting("SessionId") or ""
   Civ6Ai_Config._enableSinglePlayerChat = setting("EnableSinglePlayerChat") == nil or flag("EnableSinglePlayerChat")
   Civ6Ai_Config._mpTest = flag("MpTest")
+  Civ6Ai_Config._seatSnapshotAt = Civ6Ai_Config._ParseSeatSnapshotAt(setting("SeatSnapshotAt"))
   local managed = {}
   for _, seat in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
     table.insert(managed, tostring(seat))
@@ -53,6 +54,7 @@ function Civ6Ai_Config.Initialize()
       .. "|fast_end_turn=" .. tostring(Civ6Ai_Config.IsFastEndTurn())
       .. "|sp_chat=" .. tostring(Civ6Ai_Config.EnableSinglePlayerChat())
       .. "|mp_test=" .. tostring(Civ6Ai_Config.IsMpTest())
+      .. "|seat_snapshot_at=" .. tostring(Civ6Ai_Config.SeatSnapshotAt())
       .. "|session=" .. tostring(Civ6Ai_Config.SessionId())
   )
 end
@@ -69,6 +71,26 @@ function Civ6Ai_Config._ParseSeatList(raw)
     end
   end
   return seats
+end
+
+-- When managed AI seats are snapshotted (docs/REAL_TEST.md "Seat timing"):
+--   host_end   (default) when the host seat is done with its turn, so the AI
+--              seats see the host's moves; their orders play at their next
+--              turn start (single player: the same game turn).
+--   turn_start at the host seat's turn start, in parallel with the host's own
+--              decision (faster; the host's moves of this turn are not seen).
+Civ6Ai_Config.SEAT_SNAPSHOT_AT = { host_end = true, turn_start = true }
+
+function Civ6Ai_Config._ParseSeatSnapshotAt(raw)
+  local value = string.lower(tostring(raw or ""))
+  if Civ6Ai_Config.SEAT_SNAPSHOT_AT[value] then
+    return value
+  end
+  return "host_end"
+end
+
+function Civ6Ai_Config.SeatSnapshotAt()
+  return Civ6Ai_Config._seatSnapshotAt or Civ6Ai_Config._ParseSeatSnapshotAt(setting("SeatSnapshotAt"))
 end
 
 function Civ6Ai_Config.IsAutotest()

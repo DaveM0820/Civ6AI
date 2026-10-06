@@ -134,6 +134,7 @@ def live_settings(
     mp_test: bool = False,
     python: str | None = None,
     repo: Path | None = None,
+    seat_snapshot_at: str = "host_end",
 ) -> dict:
     return {
         "python": _fwd(python or Path(sys.executable).resolve()),
@@ -148,7 +149,21 @@ def live_settings(
         "autotest_stop_turn": max(1, int(stop_turn)) if stop_turn else 0,
         "fast_end_turn": 0,
         "mp_test": 1 if mp_test else 0,
+        "seat_snapshot_at": normalize_seat_snapshot_at(seat_snapshot_at),
     }
+
+
+SEAT_SNAPSHOT_AT = ("host_end", "turn_start")
+
+
+def normalize_seat_snapshot_at(value: str | None) -> str:
+    """When AI seats are snapshotted: host_end (default) or turn_start (docs/REAL_TEST.md)."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return "host_end"
+    if text not in SEAT_SNAPSHOT_AT:
+        raise ValueError(f"seat_snapshot_at must be one of {', '.join(SEAT_SNAPSHOT_AT)} (got {value!r})")
+    return text
 
 
 def render_paths_lua(s: dict) -> str:
@@ -171,6 +186,8 @@ def render_paths_lua(s: dict) -> str:
         "  EnableSinglePlayerChat = 1,\n"
         "  -- 1 = host runs the scripted two-PC multiplayer test (docs/MP_TEST_MODE.md).\n"
         f"  MpTest = {int(s.get('mp_test', 0))},\n"
+        "  -- When AI seats are snapshotted: host_end (after the host seat's turn) or turn_start.\n"
+        f"  SeatSnapshotAt = {_lua_str(s.get('seat_snapshot_at') or 'host_end')},\n"
         "}\n"
     )
 
@@ -198,6 +215,7 @@ def write_runtime_json(civ6ai_root: Path, settings: dict, extra_session_roots: l
         "autotest": settings["autotest"],
         "fast_end_turn": settings["fast_end_turn"],
         "mp_test": settings.get("mp_test", 0),
+        "seat_snapshot_at": settings.get("seat_snapshot_at") or "host_end",
     }
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     for root in [civ6ai_root] + list(extra_session_roots or []):
@@ -358,6 +376,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                         help="You play the local human seat; only AI majors are model-driven")
     parser.add_argument("--stop-turn", type=int, default=0,
                         help="With --autotest: stop auto-ending turns after this game turn (default: mod default 20)")
+    parser.add_argument("--seat-snapshot-at", choices=SEAT_SNAPSHOT_AT, default="host_end",
+                        help="When AI seats are snapshotted (autotest): host_end = after the host seat's own "
+                             "orders (default), turn_start = at the host seat's turn start, in parallel with it")
     parser.add_argument("--mp-test", action="store_true",
                         help="Host PC only: run the scripted two-PC multiplayer test in the next network game")
     parser.add_argument("--stub-only", action="store_true", help="Install plain stubs; no live config / runtime.json")
@@ -381,6 +402,7 @@ def main(argv: list[str] | None = None) -> int:
                 autotest=args.autotest,
                 stop_turn=args.stop_turn,
                 mp_test=args.mp_test,
+                seat_snapshot_at=args.seat_snapshot_at,
             )
         except ValueError as error:
             print(f"ERROR: --managed-seats: {error}", file=sys.stderr)

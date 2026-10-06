@@ -73,6 +73,17 @@ class LiveConfigRenderTests(unittest.TestCase):
         args = install_mod.parse_args(["--no-autotest"])
         self.assertFalse(args.autotest)
 
+    def test_seat_snapshot_at_default_and_turn_start(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            s = _settings(Path(tmp))
+            t = _settings(Path(tmp), seat_snapshot_at="turn_start")
+        self.assertIn('SeatSnapshotAt = "host_end"', install_mod.render_paths_lua(s))
+        self.assertIn('SeatSnapshotAt = "turn_start"', install_mod.render_paths_lua(t))
+        self.assertEqual("host_end", install_mod.parse_args([]).seat_snapshot_at)
+        self.assertEqual("turn_start", install_mod.parse_args(["--seat-snapshot-at", "turn_start"]).seat_snapshot_at)
+        with self.assertRaises(ValueError):
+            install_mod.normalize_seat_snapshot_at("whenever")
+
 
 class LiveConfigWriteTests(unittest.TestCase):
     def test_runtime_json_written_with_backup_and_session_dirs(self):
