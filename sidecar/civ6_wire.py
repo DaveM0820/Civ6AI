@@ -344,6 +344,7 @@ def _append_civ6_unit_situation_wire(lines: list[str], snapshot: dict[str, Any])
                 lines.append(pipeline._wire_line(f"{prefix}.moves", current))
         if unit.get("needs_orders"):
             lines.append(pipeline._wire_line(f"{prefix}.needsOrders", True))
+    lines.extend(command_wire.sitrep_offer_lines(snapshot))
 
 
 def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any]) -> None:
@@ -441,7 +442,8 @@ def _append_civ6_rival_wire(lines: list[str], rival: dict[str, Any]) -> None:
 # Orders use readable tokens from civ6_command_wire so prompt and parser match.
 # ---------------------------------------------------------------------------
 
-_CIV6_TOKEN_ORDER = ("MoveTo", "AttackTo", "FoundCity", "Automate", "Promote", "Upgrade",
+_CIV6_TOKEN_ORDER = ("MoveTo", "Settle", "Improve", "AttackTo", "FoundCity", "TradeRoute", "Automate",
+                     "Activate", "Promote", "Upgrade",
                      "Fortify", "Alert", "Heal", "Sleep", "Skip", "Delete")
 
 

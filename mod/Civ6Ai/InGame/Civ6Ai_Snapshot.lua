@@ -1995,7 +1995,7 @@ function Civ6Ai_Snapshot._DeriveStrategicSummary(playerID, yourCities, yourUnits
         table.insert(summary.city_alerts, Civ6Ai_Snapshot._MakeAlert(
           "city", "critical",
           wireId .. " cannot found a city on its tile (" .. why
-            .. "). FoundCity is not listed until the settler stands on a legal site; cities must be 4 tiles apart, on land you own or that nobody owns.",
+            .. "). See that settler's settle.here / settle.sites facts (legal tiles only, unranked).",
           { wireId }))
       end
     end
@@ -2146,7 +2146,324 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   if unit == nil or unit:GetX() == -9999 then
     return false
   end
+  local goal = Civ6Ai_Snapshot._UnitGoal(unit:GetOwner(), unit:GetID())
+  if goal ~= nil then
+    return false
+  end
   return Civ6Ai_Snapshot._UnitMoves(unit) > 0
+end
+
+Civ6Ai_Snapshot.SETTLE_RADIUS = 6
+Civ6Ai_Snapshot.SETTLE_SCAN_CAP = 40
+Civ6Ai_Snapshot.SETTLE_SITES_CAP = 6
+Civ6Ai_Snapshot.COMMAND_RESULTS_CAP = 12
+Civ6Ai_Snapshot.BUILDER_OFFER_RADIUS = 3
+
+Civ6Ai_Snapshot.KIND_NAMES = {
+  [1] = "move_unit", [2] = "set_research_tech", [3] = "set_research_civic", [4] = "found_city",
+  [5] = "unit_skip", [6] = "unit_posture_fortify", [7] = "attack_target", [9] = "set_build_priority",
+  [10] = "change_government", [11] = "set_policies", [12] = "found_pantheon", [13] = "found_religion",
+  [14] = "recruit_great_person", [15] = "patronize_great_person", [16] = "governor",
+  [17] = "send_diplomatic_action", [18] = "propose_peace", [19] = "purchase_item",
+  [20] = "purchase_tile", [21] = "worker_improve", [22] = "pillage_improvement",
+  [24] = "trade_route", [25] = "automate_explore", [26] = "activate_great_person",
+}
+
+-- Persistent destination from WP-A (Game property CIV6AI_GOAL_<owner>_<unitId>).
+-- Table or "x|y|intent|setTurn". Missing API / missing key -> no goal.
+function Civ6Ai_Snapshot._UnitGoal(playerID, unitNumericId)
+  if Game == nil then
+    return nil
+  end
+  local key = "CIV6AI_GOAL_" .. tostring(playerID) .. "_" .. tostring(unitNumericId)
+  local ok, raw = false, nil
+  if Game.GetProperty ~= nil then
+    ok, raw = pcall(function() return Game:GetProperty(key) end)
+  elseif Game.GetProperty == nil then
+    Civ6Ai_Util.Log("snapshot|goal_api_missing|GetProperty")
+    return nil
+  end
+  if not ok then
+    Civ6Ai_Util.Log("snapshot|goal_read_failed|" .. tostring(raw))
+    return nil
+  end
+  if raw == nil or raw == "" then
+    return nil
+  end
+  if type(raw) == "table" then
+    local x, y = tonumber(raw.x), tonumber(raw.y)
+    if x == nil or y == nil then
+      return nil
+    end
+    return {
+      x = x, y = y,
+      intent = tostring(raw.intent or raw.N or "move"),
+      eta = tonumber(raw.eta),
+    }
+  end
+  local x, y, intent, setTurn = string.match(tostring(raw), "^(-?%d+)|(-?%d+)|([^|]*)|(-?%d+)$")
+  if x == nil then
+    x, y = string.match(tostring(raw), "^(-?%d+)[,|](-?%d+)")
+  end
+  if x == nil then
+    return nil
+  end
+  return {
+    x = tonumber(x), y = tonumber(y),
+    intent = (intent ~= nil and intent ~= "") and intent or "move",
+    eta = tonumber(setTurn),
+  }
+end
+
+function Civ6Ai_Snapshot._PlotFreshWater(plot)
+  if plot == nil then
+    return false
+  end
+  local ok, fresh = pcall(function() return plot:IsFreshWater() == true or plot:IsRiver() == true end)
+  return ok and fresh == true
+end
+
+-- Same site rules as Civ6Ai_GameCore._CitySiteProblem (UI scan; no gameplay mutation).
+function Civ6Ai_Snapshot._PlotCitySiteProblem(playerID, x, y)
+  local plot = Map.GetPlot(x, y)
+  if plot == nil then
+    return "plot_not_found"
+  end
+  if (plot.IsWater ~= nil and plot:IsWater()) or (plot.IsImpassable ~= nil and plot:IsImpassable()) then
+    return "invalid_city_site"
+  end
+  if Map.GetPlotDistance == nil then
+    return nil
+  end
+  local tooClose = false
+  pcall(function()
+    for pid = 0, 63 do
+      local other = Players[pid]
+      local otherCities = other ~= nil and other:GetCities() or nil
+      if otherCities ~= nil and otherCities.Members ~= nil then
+        for _, city in otherCities:Members() do
+          if Map.GetPlotDistance(x, y, city:GetX(), city:GetY()) < 4 then
+            tooClose = true
+            return
+          end
+        end
+      end
+    end
+  end)
+  if tooClose then
+    return "too_close_to_city"
+  end
+  local owner = plot.GetOwner ~= nil and plot:GetOwner() or -1
+  if owner ~= nil and owner >= 0 and owner ~= playerID then
+    return "foreign_territory"
+  end
+  return nil
+end
+
+function Civ6Ai_Snapshot._AddSettleFacts(unit)
+  local typeName = nil
+  pcall(function() typeName = Civ6Ai_Snapshot._UnitTypeName(unit) end)
+  local row = nil
+  pcall(function()
+    row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+  end)
+  local canFoundUnit = typeName == "UNIT_SETTLER" or (row ~= nil and (row.FoundCity == true or row.FoundCity == 1))
+  if not canFoundUnit then
+    return nil
+  end
+  local x, y = unit:GetX(), unit:GetY()
+  local playerID = unit:GetOwner()
+  local hereReason = Civ6Ai_Snapshot._FoundBlockReason(unit)
+  local hereOk = Civ6Ai_Snapshot._GameCoreCanFound(unit)
+  if hereReason == nil and hereOk ~= true then
+    hereReason = Civ6Ai_Snapshot._PlotCitySiteProblem(playerID, x, y)
+  end
+  local herePlot = Map.GetPlot(x, y)
+  local sites = {}
+  local scanned = 0
+  local vis = PlayersVisibility ~= nil and PlayersVisibility[playerID] or nil
+  for dy = -Civ6Ai_Snapshot.SETTLE_RADIUS, Civ6Ai_Snapshot.SETTLE_RADIUS do
+    for dx = -Civ6Ai_Snapshot.SETTLE_RADIUS, Civ6Ai_Snapshot.SETTLE_RADIUS do
+      if scanned >= Civ6Ai_Snapshot.SETTLE_SCAN_CAP then
+        break
+      end
+      local tx, ty = x + dx, y + dy
+      local dist = nil
+      if Map.GetPlotDistance ~= nil then
+        dist = Map.GetPlotDistance(x, y, tx, ty)
+      else
+        dist = math.abs(dx) + math.abs(dy)
+      end
+      if dist ~= nil and dist >= 1 and dist <= Civ6Ai_Snapshot.SETTLE_RADIUS then
+        local plot = Map.GetPlot(tx, ty)
+        if plot ~= nil then
+          scanned = scanned + 1
+          local revealed = true
+          if vis ~= nil and vis.IsRevealed ~= nil then
+            local okRev, isRev = pcall(function() return vis:IsRevealed(plot:GetIndex()) end)
+            revealed = (not okRev) or isRev == true
+          end
+          if revealed and Civ6Ai_Snapshot._PlotCitySiteProblem(playerID, tx, ty) == nil then
+            table.insert(sites, {
+              x = tx, y = ty, dist = dist,
+              coastal = Civ6Ai_Snapshot._PlotIsCoastal(tx, ty),
+              fresh_water = Civ6Ai_Snapshot._PlotFreshWater(plot),
+            })
+          end
+        end
+      end
+    end
+    if scanned >= Civ6Ai_Snapshot.SETTLE_SCAN_CAP then
+      break
+    end
+  end
+  table.sort(sites, function(a, b)
+    if a.dist ~= b.dist then
+      return a.dist < b.dist
+    end
+    if a.x ~= b.x then
+      return a.x < b.x
+    end
+    return a.y < b.y
+  end)
+  local capped = {}
+  for i = 1, math.min(#sites, Civ6Ai_Snapshot.SETTLE_SITES_CAP) do
+    capped[i] = sites[i]
+  end
+  return {
+    here_ok = hereOk == true,
+    here_reason = hereReason,
+    coastal = Civ6Ai_Snapshot._PlotIsCoastal(x, y),
+    fresh_water = Civ6Ai_Snapshot._PlotFreshWater(herePlot),
+    sites = capped,
+  }
+end
+
+function Civ6Ai_Snapshot._NetworkMultiplayer()
+  if GameConfiguration ~= nil and GameConfiguration.IsNetworkMultiplayer ~= nil then
+    local ok, mp = pcall(GameConfiguration.IsNetworkMultiplayer, GameConfiguration)
+    if ok then
+      return mp == true
+    end
+  end
+  if Game ~= nil and Game.IsNetworkMultiplayer ~= nil then
+    local ok, mp = pcall(function() return Game.IsNetworkMultiplayer() end)
+    if ok then
+      return mp == true
+    end
+  end
+  return false
+end
+
+function Civ6Ai_Snapshot._AddCommandResults(playerID, turn)
+  local out = Civ6Ai_Util.JsonArrayList()
+  local shared = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+  local rows = shared ~= nil and shared.OrderResults or nil
+  if type(rows) ~= "table" then
+    return out
+  end
+  local matched = {}
+  local fallback = {}
+  for i = 1, #rows do
+    local r = rows[i]
+    if type(r) == "table" and (r.player == playerID or r.P == playerID) then
+      local applyTurn = tonumber(r.apply_turn or r.turn) or turn
+      local decisionTurn = tonumber(r.decision_turn)
+      if decisionTurn == nil then
+        if Civ6Ai_Snapshot._NetworkMultiplayer() then
+          decisionTurn = applyTurn - 1
+        else
+          decisionTurn = applyTurn
+        end
+      end
+      local kindNum = tonumber(r.kind or r.K)
+      local kindName = Civ6Ai_Snapshot.KIND_NAMES[kindNum] or tostring(r.kind or "order")
+      local ok = r.ok == true
+      local reason = tostring(r.reason or "")
+      local unit = r.unit
+      if unit == nil and r.U ~= nil then
+        unit = "UNIT_" .. tostring(r.U)
+      end
+      local effect = "none"
+      if ok and reason ~= "already_there" and reason ~= "plot_unchanged" then
+        effect = "applied"
+      elseif ok then
+        effect = "no_effect"
+      else
+        effect = "failed"
+      end
+      local summary = (ok and "ok" or "fail") .. " " .. kindName
+      if reason ~= "" then
+        summary = summary .. " " .. reason
+      end
+      if string.len(summary) > 300 then
+        summary = string.sub(summary, 1, 300)
+      end
+      local item = {
+        turn = decisionTurn,
+        kind = kindName,
+        summary = summary,
+        affected_ids = unit ~= nil and { tostring(unit) } or {},
+        decision_turn = decisionTurn,
+        apply_turn = applyTurn,
+        unit = unit,
+        ok = ok,
+        reason = reason,
+        effect = effect,
+      }
+      table.insert(fallback, item)
+      if decisionTurn == turn - 1 then
+        table.insert(matched, item)
+      end
+    end
+  end
+  local picked = #matched > 0 and matched or fallback
+  local start = math.max(1, #picked - Civ6Ai_Snapshot.COMMAND_RESULTS_CAP + 1)
+  for i = start, #picked do
+    table.insert(out, picked[i])
+  end
+  return out
+end
+
+function Civ6Ai_Snapshot._UnitAdjacentToEnemy(playerID, unit)
+  local x, y = unit:GetX(), unit:GetY()
+  for direction = 0, 5 do
+    local adj = Map.GetAdjacentPlot(x, y, direction)
+    if adj ~= nil and Civ6Ai_Snapshot._EnemyAtPlot(playerID, adj) ~= nil then
+      return true
+    end
+  end
+  return false
+end
+
+function Civ6Ai_Snapshot._NearestOwnHolySite(playerID, ux, uy)
+  local player = Players[playerID]
+  if player == nil or player.GetCities == nil then
+    return nil
+  end
+  local distIdx = GameInfo ~= nil and GameInfo.Districts ~= nil and GameInfo.Districts["DISTRICT_HOLY_SITE"] or nil
+  local want = distIdx ~= nil and distIdx.Index or nil
+  local best, bestDist = nil, nil
+  pcall(function()
+    for _, city in player:GetCities():Members() do
+      local districts = city.GetDistricts ~= nil and city:GetDistricts() or nil
+      if districts ~= nil then
+        local d = nil
+        if want ~= nil and districts.GetDistrictByType ~= nil then
+          d = districts:GetDistrictByType(want)
+        end
+        if d ~= nil and d.IsComplete ~= nil and d:IsComplete() == true then
+          local dx, dy = d:GetX(), d:GetY()
+          local dist = Map.GetPlotDistance ~= nil and Map.GetPlotDistance(ux, uy, dx, dy) or 99
+          if bestDist == nil or dist < bestDist then
+            bestDist = dist
+            best = { x = dx, y = dy, dist = dist }
+          end
+        end
+      end
+    end
+  end)
+  return best
 end
 
 function Civ6Ai_Snapshot._UnitHealth(unit)
@@ -2200,7 +2517,7 @@ function Civ6Ai_Snapshot._BuildYourUnits(playerID)
     local curHp, maxHp = Civ6Ai_Snapshot._UnitHealth(unit)
     local promoReady = Civ6Ai_Snapshot._UnitPromotionReady(unit)
     local info = Civ6Ai_Snapshot._UnitInfo(unit)
-    table.insert(units, {
+    local rec = {
       unit_id = Civ6Ai_Snapshot._UnitWireId(unit),
       unit_type_id = Civ6Ai_Snapshot._UnitTypeName(unit),
       unit_class_id = info.formation or "UNITCLASS_UNKNOWN",
@@ -2221,7 +2538,18 @@ function Civ6Ai_Snapshot._BuildYourUnits(playerID)
       can_act = needsOrders,
       needs_orders = needsOrders,
       upgrade_options = {},
-    })
+    }
+    local goal = Civ6Ai_Snapshot._UnitGoal(playerID, unit:GetID())
+    if goal ~= nil then
+      rec.goal = goal
+    end
+    local okSettle, settleVal = pcall(Civ6Ai_Snapshot._AddSettleFacts, unit)
+    if okSettle and settleVal ~= nil then
+      rec.settle = settleVal
+    elseif not okSettle then
+      Civ6Ai_Util.Log("snapshot|settle_facts_failed|" .. tostring(settleVal))
+    end
+    table.insert(units, rec)
   end
   return units
 end
@@ -2290,47 +2618,64 @@ function Civ6Ai_Snapshot._HasImprovementPrereqs(playerID, row)
   return true
 end
 
--- Improvements this builder can place on its current tile. UnitPanel lists them
--- with CanStartOperation(BUILD_IMPROVEMENT); that check is local-player UI, so
--- AI seats fall back to ImprovementBuilder.CanHaveImprovement (CivRoyale /
--- BlackDeath scenarios) plus tech/civic prereqs.
+-- Improvements this builder can place on the current tile and owned tiles within
+-- 3. Current tile: UnitManager.CanStartOperation(BUILD_IMPROVEMENT). Other owned
+-- tiles: ImprovementBuilder.CanHaveImprovement + tech/civic, and not already
+-- present. Never list an improvement the engine would reject.
 function Civ6Ai_Snapshot._AddBuilderCommands(commands, playerID, unit, unitId)
   local charges = Civ6Ai_Snapshot._Method(unit, "GetBuildCharges")
   if type(charges) ~= "number" or charges <= 0 then
     return
   end
-  local plot = Map.GetPlot(unit:GetX(), unit:GetY())
-  if plot == nil or GameInfo == nil or GameInfo.Improvements == nil then
+  if GameInfo == nil or GameInfo.Improvements == nil then
     return
   end
+  local ux, uy = unit:GetX(), unit:GetY()
   local added = 0
-  local function offer(improvementType)
+  local seen = {}
+  local function offer(improvementType, px, py)
     if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then
       return
     end
+    local key = improvementType .. "@" .. tostring(px) .. "," .. tostring(py)
+    if seen[key] then
+      return
+    end
+    seen[key] = true
+    local away = (px ~= ux or py ~= uy)
     table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-      command_id = "CMD_improve_" .. unitId .. "_" .. improvementType,
+      command_id = "CMD_improve_" .. unitId .. "_" .. improvementType .. "_" .. tostring(px) .. "_" .. tostring(py),
       kind = "worker_improve",
       fixed_arguments = {
         unit_id = unitId,
         improvement_id = improvementType,
-        target_x = plot:GetX(),
-        target_y = plot:GetY(),
+        target_x = px,
+        target_y = py,
+        goal = away and 1 or nil,
+        intent = away and "improve" or nil,
+        intent_n = away and 2 or nil,
       },
     }))
     added = added + 1
   end
-  local listed = false
+  local function plotHasImprovement(plot, row)
+    if plot == nil or plot.GetImprovementType == nil or row == nil then
+      return false
+    end
+    local existing = plot:GetImprovementType()
+    return type(existing) == "number" and existing >= 0 and existing == row.Index
+  end
   local op = UnitOperationTypes ~= nil and UnitOperationTypes.BUILD_IMPROVEMENT or nil
   if op == nil and GameInfo.UnitOperations ~= nil then
     local row = GameInfo.UnitOperations["UNITOPERATION_BUILD_IMPROVEMENT"]
     op = row ~= nil and row.Hash or nil
   end
-  if op ~= nil and UnitManager ~= nil and UnitManager.CanStartOperation ~= nil then
+  local here = Map.GetPlot(ux, uy)
+  if here ~= nil and op ~= nil and UnitManager ~= nil and UnitManager.CanStartOperation ~= nil then
     local params = {}
     if UnitOperationTypes ~= nil then
-      params[UnitOperationTypes.PARAM_X] = unit:GetX()
-      params[UnitOperationTypes.PARAM_Y] = unit:GetY()
+      params[UnitOperationTypes.PARAM_X] = ux
+      params[UnitOperationTypes.PARAM_Y] = uy
     end
     local ok, can, results = pcall(function()
       return UnitManager.CanStartOperation(unit, op, nil, params, true)
@@ -2340,44 +2685,62 @@ function Civ6Ai_Snapshot._AddBuilderCommands(commands, playerID, unit, unitId)
       improvements = results[UnitOperationResults.IMPROVEMENTS]
     end
     if type(improvements) == "table" then
-      listed = true
       for _, hash in ipairs(improvements) do
         if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then break end
         local row = GameInfo.Improvements[hash]
-        if row ~= nil and row.ImprovementType ~= nil then
-          offer(row.ImprovementType)
+        if row ~= nil and row.ImprovementType ~= nil and not plotHasImprovement(here, row) then
+          offer(row.ImprovementType, ux, uy)
         end
       end
     end
   end
-  if listed then
-    return
-  end
   local team = Civ6Ai_Snapshot._Method(Players[playerID], "GetTeam")
+  local r = Civ6Ai_Snapshot.BUILDER_OFFER_RADIUS
   pcall(function()
-    for row in GameInfo.Improvements() do
-      if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then return end
-      if row.Buildable == true and (row.TraitType == nil or row.TraitType == "")
-          and Civ6Ai_Snapshot._HasImprovementPrereqs(playerID, row) then
-        local can = true
-        if ImprovementBuilder ~= nil and ImprovementBuilder.CanHaveImprovement ~= nil then
-          local okCan, allowed = pcall(ImprovementBuilder.CanHaveImprovement, plot, row.Index, team)
-          can = okCan and allowed == true
-        end
-        if can then
-          offer(row.ImprovementType)
+    for dy = -r, r do
+      for dx = -r, r do
+        if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then return end
+        local px, py = ux + dx, uy + dy
+        local dist = Map.GetPlotDistance ~= nil and Map.GetPlotDistance(ux, uy, px, py) or (math.abs(dx) + math.abs(dy))
+        if dist <= r then
+          local plot = Map.GetPlot(px, py)
+          local owner = plot ~= nil and plot.GetOwner ~= nil and plot:GetOwner() or -1
+          if plot ~= nil and owner == playerID then
+            for row in GameInfo.Improvements() do
+              if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then return end
+              if row.Buildable == true and (row.TraitType == nil or row.TraitType == "")
+                  and Civ6Ai_Snapshot._HasImprovementPrereqs(playerID, row)
+                  and not plotHasImprovement(plot, row) then
+                local can = false
+                if ImprovementBuilder ~= nil and ImprovementBuilder.CanHaveImprovement ~= nil then
+                  local okCan, allowed = pcall(ImprovementBuilder.CanHaveImprovement, plot, row.Index, team)
+                  can = okCan and allowed == true
+                elseif dx == 0 and dy == 0 then
+                  can = true
+                end
+                if can then
+                  offer(row.ImprovementType, px, py)
+                end
+              end
+            end
+          end
         end
       end
     end
   end)
 end
 
--- Neighbour steps the unit can take this turn. Each target must pass the UI
--- MOVE_TO test, the GameCore step check (domain, embark, stacking, move cost incl.
--- rivers: Civ6Ai_GameCore.CanMoveUnitToForPlayer) and, when the engine lists
--- them, be among the unit's reachable plots. Only neighbours are offered: a
--- longer order becomes a multi-turn path that ends the unit's turn.
+-- Neighbour steps for combat units standing next to a visible enemy. Open
+-- moveTo=(x,y) covers every other destination; listing six neighbours for every
+-- unit bloated the prompt and invited illegal water/mountain steps.
 function Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
+  local info = Civ6Ai_Snapshot._UnitInfo(unit)
+  if not Civ6Ai_Snapshot._IsMilitaryInfo(info) then
+    return
+  end
+  if not Civ6Ai_Snapshot._UnitAdjacentToEnemy(unit:GetOwner(), unit) then
+    return
+  end
   local x = unit:GetX()
   local y = unit:GetY()
   local reachable = Civ6Ai_Snapshot._ReachablePlotSet(unit)
@@ -2717,16 +3080,20 @@ function Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
         local ok, can = pcall(function()
           return UnitManager.CanStartOperation(unit, op, nil, params)
         end)
-        if ok and can then
-          table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-            command_id = "CMD_attack_" .. unitId .. "_" .. tostring(tx) .. "_" .. tostring(ty),
-            kind = "attack_target",
-            fixed_arguments = {
-              unit_id = unitId, target_x = tx, target_y = ty,
-              target_kind = target, ranged = ranged,
-            },
-          }))
+        if not (ok and can) then
+          -- CanStartOperation is a local-player UI check; AI seats still see
+          -- the adjacent enemy and apply attack through the synced channel.
+          Civ6Ai_Util.Log("snapshot|attack_ui_false|player=" .. tostring(playerID)
+            .. "|unit=" .. tostring(unitId) .. "|plot=" .. tostring(tx) .. "," .. tostring(ty))
         end
+        table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+          command_id = "CMD_attack_" .. unitId .. "_" .. tostring(tx) .. "_" .. tostring(ty),
+          kind = "attack_target",
+          fixed_arguments = {
+            unit_id = unitId, target_x = tx, target_y = ty,
+            target_kind = target, ranged = ranged,
+          },
+        }))
       end
     end
   end
@@ -2759,6 +3126,135 @@ function Civ6Ai_Snapshot._AddPillageCommand(commands, unit, unitId)
       target_y = plot:GetY(),
     },
   }))
+end
+
+function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId)
+  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+  if row == nil then
+    return
+  end
+  local isTrader = row.UnitType == "UNIT_TRADER" or row.MakeTradeRoute == true or row.MakeTradeRoute == 1
+  if not isTrader then
+    return
+  end
+  local origin = nil
+  if Cities ~= nil and Cities.GetCityInPlot ~= nil then
+    local ok, city = pcall(Cities.GetCityInPlot, unit:GetX(), unit:GetY())
+    if ok then origin = city end
+  end
+  if origin == nil then
+    local player = Players[playerID]
+    local best, bestDist = nil, nil
+    pcall(function()
+      for _, city in player:GetCities():Members() do
+        local dist = Map.GetPlotDistance ~= nil
+          and Map.GetPlotDistance(unit:GetX(), unit:GetY(), city:GetX(), city:GetY()) or 99
+        if bestDist == nil or dist < bestDist then
+          best, bestDist = city, dist
+        end
+      end
+    end)
+    origin = best
+  end
+  local tm = nil
+  if Game ~= nil and Game.GetTradeManager ~= nil then
+    local ok, mgr = pcall(function() return Game.GetTradeManager() end)
+    if ok then tm = mgr end
+  end
+  if tm == nil or tm.CanStartRoute == nil then
+    Civ6Ai_Util.Log("snapshot|trade_api_missing|CanStartRoute")
+    return
+  end
+  if origin == nil or origin.GetID == nil then
+    return
+  end
+  local added = 0
+  for pid = 0, 63 do
+    if added >= 8 then break end
+    local other = Players[pid]
+    local cities = other ~= nil and other.GetCities ~= nil and other:GetCities() or nil
+    if cities ~= nil and cities.Members ~= nil then
+      for _, city in cities:Members() do
+        if added >= 8 then break end
+        local ok, can = pcall(function()
+          return tm:CanStartRoute(origin:GetID(), city:GetID(), true)
+        end)
+        if not ok then
+          ok, can = pcall(function()
+            return tm.CanStartRoute(origin:GetID(), city:GetID())
+          end)
+        end
+        if ok and can == true then
+          table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+            command_id = "CMD_trade_" .. unitId .. "_" .. tostring(city:GetID()),
+            kind = "move_unit",
+            fixed_arguments = {
+              unit_id = unitId,
+              city_id = "CITY_" .. tostring(city:GetID()),
+              target_x = city:GetX(),
+              target_y = city:GetY(),
+              intent = "trade",
+              intent_n = 4,
+              goal = 1,
+            },
+          }))
+          added = added + 1
+        end
+      end
+    end
+  end
+end
+
+function Civ6Ai_Snapshot._AddExploreCommand(commands, unit, unitId)
+  -- Explore is offered as open MoveTo until WP-A lands the EXPLORE executor.
+  return
+end
+
+function Civ6Ai_Snapshot._AddActivateCommand(commands, playerID, unit, unitId)
+  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+  if row == nil then
+    return
+  end
+  local gp = nil
+  if unit.GetGreatPerson ~= nil then
+    local ok, value = pcall(function() return unit:GetGreatPerson() end)
+    if ok then gp = value end
+  end
+  local isGP = gp ~= nil or (row.UnitType ~= nil and string.find(row.UnitType, "GREAT_", 1, true) ~= nil)
+  if not isGP then
+    return
+  end
+  local cmd = UnitCommandTypes ~= nil and UnitCommandTypes.ACTIVATE or nil
+  local canAct = false
+  if cmd ~= nil and UnitManager ~= nil and UnitManager.CanStartCommand ~= nil then
+    local ok, can = pcall(function() return UnitManager.CanStartCommand(unit, cmd) end)
+    canAct = ok and can == true
+  else
+    Civ6Ai_Util.Log("snapshot|activate_api_missing")
+  end
+  if canAct then
+    -- Activate executor is WP-A; until then the prophet walks to a Holy Site.
+    Civ6Ai_Util.Log("snapshot|activate_ready|" .. tostring(unitId))
+  end
+  local isProphet = row.UnitType == "UNIT_GREAT_PROPHET"
+    or (row.GreatPersonClassType == "GREAT_PERSON_CLASS_PROPHET")
+  if isProphet then
+    local site = Civ6Ai_Snapshot._NearestOwnHolySite(playerID, unit:GetX(), unit:GetY())
+    if site ~= nil then
+      table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+        command_id = "CMD_foundrel_move_" .. unitId .. "_" .. tostring(site.x) .. "_" .. tostring(site.y),
+        kind = "move_unit",
+        fixed_arguments = {
+          unit_id = unitId,
+          target_x = site.x,
+          target_y = site.y,
+          goal = 1,
+          intent = "found_religion",
+          intent_n = 3,
+        },
+      }))
+    end
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -3190,6 +3686,9 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
         Civ6Ai_Snapshot._AddPillageCommand(commands, unit, unitId)
         Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
         Civ6Ai_Snapshot._AddBuilderCommands(commands, playerID, unit, unitId)
+        pcall(Civ6Ai_Snapshot._AddTradeRouteCommands, commands, playerID, unit, unitId)
+        pcall(Civ6Ai_Snapshot._AddExploreCommand, commands, unit, unitId)
+        pcall(Civ6Ai_Snapshot._AddActivateCommand, commands, playerID, unit, unitId)
       end
     end
   end
@@ -4023,7 +4522,7 @@ function Civ6Ai_Snapshot.Build(playerID, options)
     strategic_summary = strategicSummary,
     history = {
       accepted_decisions = Civ6Ai_Util.JsonArrayList(),
-      command_results = Civ6Ai_Util.JsonArrayList(),
+      command_results = Civ6Ai_Snapshot._AddCommandResults(playerID, turn),
       public_events = publicEvents,
       diplomacy_events = Civ6Ai_Util.JsonArrayList(),
     },

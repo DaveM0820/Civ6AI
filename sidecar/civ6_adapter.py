@@ -226,11 +226,29 @@ def _normalize_history_item(event: Any) -> dict[str, Any]:
     affected_ids: list[str] = []
     if isinstance(affected, list):
         affected_ids = [str(item) for item in affected if item is not None and str(item)]
+    if not affected_ids and event.get("unit"):
+        affected_ids = [str(event["unit"])]
+    if not summary:
+        bits = []
+        if event.get("ok") is True:
+            bits.append("ok")
+        elif event.get("ok") is False:
+            bits.append("fail")
+        if event.get("kind"):
+            bits.append(str(event["kind"]))
+        if event.get("reason"):
+            bits.append(str(event["reason"]))
+        summary = " ".join(bits)[:300]
     return {
         "turn": turn,
         "kind": kind,
         "summary": summary,
         "affected_ids": affected_ids,
+        **{
+            key: event[key]
+            for key in ("decision_turn", "apply_turn", "unit", "ok", "reason", "effect")
+            if key in event
+        },
     }
 
 
