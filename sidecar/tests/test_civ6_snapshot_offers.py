@@ -153,9 +153,9 @@ class SnapshotLuaOffersTests(unittest.TestCase):
         )
         rows = self.lua.globals().Civ6Ai_Snapshot._BuildKnownPlayers(1)
         ids = [rows[i].player_id for i in range(1, len(rows) + 1)]
-        kinds = [rows[i].kind for i in range(1, len(rows) + 1)]
+        kinds = [bool(rows[i].is_major) for i in range(1, len(rows) + 1)]
         self.assertEqual(["PLAYER_0"], ids)
-        self.assertEqual(["major"], kinds)
+        self.assertEqual([True], kinds)
         self.assertNotIn("PLAYER_62", ids)
         self.assertNotIn("PLAYER_61", ids)
         self.assertNotIn("PLAYER_3", ids)

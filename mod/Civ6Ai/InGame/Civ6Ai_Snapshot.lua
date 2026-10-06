@@ -1496,7 +1496,6 @@ function Civ6Ai_Snapshot._BuildKnownPlayers(playerID)
         local facts = Civ6Ai_Snapshot._RelationFacts(playerID, otherID)
         table.insert(out, {
           player_id = Civ6Ai_Util.PlayerId(otherID),
-          kind = "major",
           is_major = true,
           leader_id = Civ6Ai_Snapshot._LeaderId(otherID),
           leader_name = Civ6Ai_Snapshot._LeaderName(otherID),
