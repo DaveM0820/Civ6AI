@@ -3196,7 +3196,8 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
   local techs = player and player:GetTechs()
   if techs ~= nil then
     for row in GameInfo.Technologies() do
-      if techs:CanResearch(row.Index) and not techs:HasTech(row.Index) then
+      -- Require HasTech == false (not mere ~= true): nil from HasTech must not pass.
+      if techs:CanResearch(row.Index) and techs:HasTech(row.Index) == false then
         table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
           command_id = "CMD_research_" .. row.TechnologyType,
           kind = "set_research_tech",
@@ -3209,7 +3210,8 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
   if culture ~= nil and GameInfo.Civics ~= nil and culture.CanProgress ~= nil then
     for row in GameInfo.Civics() do
       local ok, can = pcall(function()
-        return culture:CanProgress(row.Index) and not culture:HasCivic(row.Index)
+        -- Require HasCivic == false so nil does not look researchable.
+        return culture:CanProgress(row.Index) == true and culture:HasCivic(row.Index) == false
       end)
       if ok and can then
         table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
@@ -3503,7 +3505,7 @@ function Civ6Ai_Snapshot._GovCivics(culture, player)
   end
   out.culture_per_turn = gcall(culture, "GetCultureYield")
   for c in GameInfo.Civics() do
-    if gcall(culture, "CanProgress", c.Index) == true and gcall(culture, "HasCivic", c.Index) ~= true then
+    if gcall(culture, "CanProgress", c.Index) == true and gcall(culture, "HasCivic", c.Index) == false then
       local unlocks = {}
       if GameInfo.Governments ~= nil then
         for g in GameInfo.Governments() do
@@ -3543,7 +3545,7 @@ function Civ6Ai_Snapshot._GovTechs(player)
   end
   out.science_per_turn = gcall(techs, "GetScienceYield")
   for t in GameInfo.Technologies() do
-    if gcall(techs, "CanResearch", t.Index) == true and gcall(techs, "HasTech", t.Index) ~= true then
+    if gcall(techs, "CanResearch", t.Index) == true and gcall(techs, "HasTech", t.Index) == false then
       out.options[#out.options + 1] = {
         id = t.TechnologyType,
         turns = gcall(techs, "GetTurnsToResearch", t.Index),

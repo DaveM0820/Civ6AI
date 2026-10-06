@@ -34,6 +34,22 @@ MEIER = "Sid Meier's Civilization VI"
 DEFAULT_MANAGED_SEATS = ""  # empty = every AI major (and the local human when autotest is on)
 
 
+def civ6_process_running() -> bool:
+    """True if CivilizationVI is running (avoid rotating live session mid-game)."""
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["tasklist", "/FI", "IMAGENAME eq CivilizationVI_DX12.exe"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return "CivilizationVI_DX12.exe" in out
+    except Exception:
+        return False
+
+
+
 def mods_targets() -> list[Path]:
     # Local Documents first; still install into OneDrive Mods when present so
     # whichever tree Civ6 loads gets the same generated Paths.lua (Civ6AiRoot
@@ -382,6 +398,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mp-test", action="store_true",
                         help="Host PC only: run the scripted two-PC multiplayer test in the next network game")
     parser.add_argument("--stub-only", action="store_true", help="Install plain stubs; no live config / runtime.json")
+    parser.add_argument("--keep-session", action="store_true",
+                        help="Reuse existing runtime.json session_id (do not archive live transients)")
+    parser.add_argument("--new-session", action="store_true",
+                        help="Force a fresh session_id even if Civ6 is running")
     return parser.parse_args(argv)
 
 
@@ -393,11 +413,24 @@ def main(argv: list[str] | None = None) -> int:
     settings = None
     if not args.stub_only:
         try:
+            # Prefer keeping the live session when Civ6 is already running, unless
+            # --new-session / explicit --session-id asks otherwise.
+            existing_sid = ""
+            try:
+                existing_sid = str(
+                    json.loads((default_civ6ai_root() / "runtime.json").read_text(encoding="utf-8-sig")).get("session_id") or ""
+                )
+            except (OSError, ValueError, TypeError, AttributeError):
+                existing_sid = ""
+            keep = bool(args.keep_session) or (civ6_process_running() and not args.new_session and not args.session_id)
+            if keep and existing_sid and not args.session_id:
+                print(f"Keeping live session_id={existing_sid} (Civ6 running or --keep-session)")
+            chosen_sid = args.session_id or (existing_sid if keep and existing_sid else ("live-" + time.strftime("%Y%m%d-%H%M%S")))
             settings = live_settings(
                 civ6ai_root=default_civ6ai_root(),
                 log_dir=default_log_dir(),
                 managed_seats=args.managed_seats,
-                session_id=args.session_id or ("live-" + time.strftime("%Y%m%d-%H%M%S")),
+                session_id=chosen_sid,
                 sidecar_timeout=args.sidecar_timeout,
                 autotest=args.autotest,
                 stop_turn=args.stop_turn,

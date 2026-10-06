@@ -19,6 +19,19 @@ CIV6_SETTLER_MAP_ADVICE = (
     "fresh water and coast access, and tile yields (food/production/gold)."
 )
 
+CIV6_EXPANSION_COACHING = (
+    "Expansion: a Settler that sits idle wastes growth. Prefer FoundCity this turn when the "
+    "tile is legal and decent (fresh water or coast, not cramped by another city). If the "
+    "best site is a few tiles away, MoveTo that tile and FoundCity as soon as FoundCity is "
+    "legal — do not park the Settler on your capital or wander the map for ten-plus turns."
+)
+
+CIV6_CHAT_VARIETY_COACHING = (
+    "Chat: do not repeat your opening introduction every turn. After first contact, send a "
+    "fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or "
+    "silence via no chat). Prefer chat.LeaderName for one rival; use chat.all sparingly."
+)
+
 CIV6_MOVE_THEN_ATTACK_GUIDANCE = (
     "A unit with leftover movement can often still attack this turn after moving — "
     "do not treat \"already moved\" as \"cannot attack\" unless the unit has 0 moves left "

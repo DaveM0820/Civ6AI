@@ -821,13 +821,24 @@ function Civ6Ai_Apply._UnitFortify(playerID, args)
     end
     return false, gcReason or "fortify_rejected", args
   end
-  if UnitOperationTypes ~= nil and UnitOperationTypes.FORTIFY ~= nil then
-    if UnitManager.RequestOperation(unit, UnitOperationTypes.FORTIFY) then
+  if UnitOperationTypes ~= nil and UnitOperationTypes.FORTIFY ~= nil
+      and UnitManager ~= nil and UnitManager.RequestOperation ~= nil then
+    local okOp, did = pcall(function()
+      return UnitManager.RequestOperation(unit, UnitOperationTypes.FORTIFY)
+    end)
+    if okOp and did then
       return true, "", args
     end
   end
-  UnitManager.FinishMoves(unit)
-  return true, "finish_moves_fallback", args
+  if UnitManager ~= nil and UnitManager.FinishMoves ~= nil then
+    local okFin = pcall(function()
+      UnitManager.FinishMoves(unit)
+    end)
+    if okFin then
+      return true, "finish_moves_fallback", args
+    end
+  end
+  return false, "fortify_unavailable", args
 end
 
 function Civ6Ai_Apply._QueueProduction(playerID, args)

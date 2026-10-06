@@ -130,5 +130,28 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         )
 
 
+
+    def test_expansion_and_chat_coaching_constants(self):
+        self.assertIn("FoundCity", coaching.CIV6_EXPANSION_COACHING)
+        self.assertIn("Settler", coaching.CIV6_EXPANSION_COACHING)
+        self.assertIn("do not repeat", coaching.CIV6_CHAT_VARIETY_COACHING.lower())
+
+    def test_advice_mentions_expansion_when_settler_present(self):
+        snap = {
+            "your_units": [{"unit_id": "UNIT_1", "unit_type_id": "UNIT_SETTLER"}],
+            "your_cities": [{"city_id": "CITY_1", "name": "Capital"}],
+            "legal_commands": [
+                {"kind": "found_city", "fixed_arguments": {"unit_id": "UNIT_1"}},
+            ],
+            "game": {"map_width": 80, "wrap_x": True},
+        }
+        # _advice_section is private-ish; use build path that includes advice
+        from sidecar import civ6_wire
+        blob = "\n".join(civ6_wire._advice_section(snap)).lower()
+        self.assertIn("expansion", blob)
+        self.assertIn("foundcity", blob.replace(" ", ""))
+        self.assertIn("chat", blob)
+
+
 if __name__ == "__main__":
     unittest.main()

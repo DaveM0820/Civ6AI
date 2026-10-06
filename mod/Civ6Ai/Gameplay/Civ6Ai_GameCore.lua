@@ -762,7 +762,8 @@ function Civ6Ai_GameCore.SetResearchForPlayer(playerID, techIndex)
     return false, "set_research_unavailable"
   end
   if techs.HasTech ~= nil and techs:HasTech(techIndex) then
-    return false, "tech_already_known"
+    -- Idempotent: already researched is not a failure for queued orders.
+    return true, "tech_already_known"
   end
   local ok = pcall(function()
     techs:SetResearchingTech(techIndex)
@@ -783,7 +784,7 @@ function Civ6Ai_GameCore.SetCivicForPlayer(playerID, civicIndex)
     return false, "set_civic_unavailable"
   end
   if culture.HasCivic ~= nil and culture:HasCivic(civicIndex) then
-    return false, "civic_already_known"
+    return true, "civic_already_known"
   end
   local ok = pcall(function()
     culture:SetProgressingCivic(civicIndex)

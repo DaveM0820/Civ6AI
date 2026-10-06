@@ -656,6 +656,7 @@ def _civ6_chat_rules(snapshot: dict[str, Any]) -> list[str]:
     for line in pipeline.early_turn_intro_chat_lines(snapshot):
         if line not in keep:
             keep.append(line)
+    keep.append(coaching.CIV6_CHAT_VARIETY_COACHING)
     return keep
 
 
@@ -1283,6 +1284,7 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
         "- In peacetime, scouts and warriors explore fog. Do not fortify the whole army, because units left "
         "without orders stay where they are.",
         "- Settlers should found or walk toward a settle tile; do not sleep on your own city.",
+        f"- {coaching.CIV6_EXPANSION_COACHING}",
         "- Before you finish: issue one command for each entry under REQUIRED COMMANDS.",
     ]
     if coaching.settler_present(context):
@@ -1291,8 +1293,18 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
             "turn until it founds or reaches safety."
         )
         lines.append(f"- Settler: {coaching.CIV6_SETTLER_MAP_ADVICE}")
+        if any(isinstance(c, dict) and c.get("kind") == "found_city" for c in context.get("legal_commands", []) or []):
+            lines.append(
+                "- FoundCity is legal this turn for at least one Settler — strongly consider founding now unless "
+                "a clearly better tile is within about three moves."
+            )
+    lines.append(f"- {coaching.CIV6_CHAT_VARIETY_COACHING}")
     lines.extend(combat_wire.tactics_advice_lines(context))
     lines.append("- Pick research and civics before they run out so science and culture are never wasted.")
+    lines.append(
+        "- For legal.research.tech / legal.research.civic, pick only from the listed options — never re-pick a "
+        "tech or civic you already finished."
+    )
     if _has_queue_production(context):
         lines.append("- Do not queue production that is already building.")
     return lines
@@ -1362,14 +1374,17 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "- Optional commands (chat, research, civics, remember) are encouraged when useful; chat.all only when you have an original line.",
     ]
     if any(isinstance(c, dict) and c.get("kind") == "found_city" for c in snapshot.get("legal_commands", [])):
-        resp.append("- FoundCity is optional: settle when the tile is good; walking a few turns to a much better "
-                    "site is often worth it.")
+        resp.append("- FoundCity is available: prefer founding this turn on a decent tile (fresh water/coast, not "
+                    "cramped). Walking up to ~3 tiles for a clearly better site is fine; long treks are not.")
         if not snapshot.get("your_cities"):
             # Seats 1-4 read the line above as licence for 25-tile treks toward a far
             # landmass while cityless for 10+ turns.
             resp.append("- You have no city yet: every turn without a capital costs all your science, culture and "
                         "production. Settle the capital here or within about 3 tiles; do not march toward a distant "
                         "landmass first.")
+        else:
+            resp.append("- You already have a capital: still expand — FoundCity with idle Settlers rather than "
+                        "guarding them in the capital forever.")
     resp.extend(f"- {line}" for line in _civ6_chat_rules(snapshot))
 
     # OPTIONAL COMMANDS
