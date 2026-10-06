@@ -795,6 +795,17 @@ class WpAApplyCoreTests(unittest.TestCase):
         self.assertTrue(self.last()["reason"].startswith("self_target_hold"))
         self.assertEqual(self.last()["decision_turn"], 5)
 
+    def test_religion_self_target_does_not_pass_plot_as_belief(self):
+        self.rt.execute(
+            "RELIG_EXTRA = nil; Civ6Ai_Orders.Gov.FoundReligion = function(owner, rel, unit, ...)"
+            " RELIG_EXTRA = {...}; return true, 'founded' end"
+        )
+        self.order(0, K=1, P=2, U=7, X=10, Y=10, A=3, I=7, V=8, W=9, S=102)
+        self.assertEqual(int(self.rt.eval("RELIG_EXTRA[1]")), 8)
+        self.assertEqual(int(self.rt.eval("RELIG_EXTRA[2]")), 9)
+        self.assertIsNone(self.rt.eval("RELIG_EXTRA[3]"))
+        self.assertTrue(self.last()["ok"], self.last())
+
     def test_stale_unit_id(self):
         self.order(0, K=1, P=2, U=999, X=10, Y=11, S=91)
         self.assertEqual(self.last()["reason"], "stale_unit_id")
@@ -876,6 +887,19 @@ class WpAApplyCoreTests(unittest.TestCase):
         self.assertEqual(sent[1]["I2"], 3)
         self.assertEqual(sent[3]["I"], 131072)
         self.assertEqual({p["D"] for p in sent}, {5})
+
+    def test_send_drops_string_fields_from_execute_script(self):
+        rt = lupa.LuaRuntime(unpack_returned_tuples=True)
+        rt.execute(CHANNEL_ENV)
+        rt.execute((MOD / "InGame" / "Civ6Ai_OrderChannel.lua").read_text())
+        seq = rt.globals().Civ6Ai_OrderChannel.Send(1, rt.table_from({
+            "P": 2, "U": 7, "X": 10.9, "Y": 11, "note": "plot", "G": True,
+        }), 6)
+        self.assertIsNotNone(seq)
+        sent = dict(_vals(rt.eval("sent"))[0].items())
+        self.assertEqual(sent["X"], 10)
+        self.assertEqual(sent["G"], 1)
+        self.assertNotIn("note", sent)
 
     def test_purchase_uses_full_city_id(self):
         self.rt.execute(r"""

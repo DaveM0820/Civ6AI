@@ -723,7 +723,7 @@ def recent_self_public_chats(snapshot: dict[str, Any], lookback: int = CHAT_NEAR
             turn = int(event.get("turn") or 0)
         except (TypeError, ValueError):
             continue
-        if current_turn - lookback <= turn < current_turn or (current_turn == 0):
+        if current_turn - lookback <= turn < current_turn:
             text = str(event.get("text") or event.get("summary") or "").strip()
             if text:
                 lines.append(text)

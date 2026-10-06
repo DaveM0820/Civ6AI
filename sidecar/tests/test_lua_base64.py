@@ -37,11 +37,12 @@ class LuaBase64Test(unittest.TestCase):
                 self.assertEqual(self.dec(encoded), data)
 
     def test_collapse_ascii_ws_preserves_utf8_pieta(self):
-        pieta = "Piet\u00e0 (Sculpture)"
+        # In-game Lua strings are 8-bit (UTF-8 bytes). lupa encoding=None matches that.
+        pieta = "Piet\u00e0 (Sculpture)".encode("utf-8")
         collapsed = self.collapse(pieta)
         self.assertEqual(pieta, collapsed)
-        spaced = "Piet\u00e0  (Sculpture)"
-        self.assertEqual("Piet\u00e0 (Sculpture)", self.collapse(spaced))
+        spaced = "Piet\u00e0  (Sculpture)".encode("utf-8")
+        self.assertEqual("Piet\u00e0 (Sculpture)".encode("utf-8"), self.collapse(spaced))
 
     def test_large_snapshot_is_fast(self):
         data = os.urandom(60000)

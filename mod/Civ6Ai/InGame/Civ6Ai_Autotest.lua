@@ -989,6 +989,24 @@ end
 Civ6Ai_Autotest.STALL_SECONDS = 240
 Civ6Ai_Autotest.STALL_MAX_ATTEMPTS = 3
 
+-- True while the same-turn barrier still needs AI answers. Ending the host
+-- turn here would let the native AI play those seats before their queues land.
+function Civ6Ai_Autotest._SameTurnWaitActive()
+  if Civ6Ai_Bridge ~= nil and Civ6Ai_Bridge.HostEndTurnWaiting ~= nil
+      and Civ6Ai_Bridge.HostEndTurnWaiting() == true then
+    return true
+  end
+  local playerID = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or nil
+  if playerID == nil or Civ6Ai_Autotest._PendingSeats == nil then
+    return false
+  end
+  if Civ6Ai_Bridge ~= nil and Civ6Ai_Bridge.HostWaitSnapshotTurn == nil then
+    return false
+  end
+  local pending = Civ6Ai_Autotest._PendingSeats(playerID)
+  return type(pending) == "table" and #pending > 0
+end
+
 function Civ6Ai_Autotest.StartStallWatchdog()
   if Civ6Ai_Autotest._stallWatching then
     return
@@ -1027,15 +1045,24 @@ function Civ6Ai_Autotest.StartStallWatchdog()
       return true
     end
     local playerID = Game.GetLocalPlayer and Game.GetLocalPlayer() or 0
+    local waitingSeats = Civ6Ai_Autotest._SameTurnWaitActive()
     Civ6Ai_Autotest._stallAttempts = (Civ6Ai_Autotest._stallAttempts or 0) + 1
     Civ6Ai_Util.Log("autotest|stall_watch|turn=" .. tostring(turn)
       .. "|seconds=" .. tostring(now - since)
-      .. "|attempt=" .. tostring(Civ6Ai_Autotest._stallAttempts))
+      .. "|attempt=" .. tostring(Civ6Ai_Autotest._stallAttempts)
+      .. "|same_turn_wait=" .. tostring(waitingSeats))
     pcall(function()
       Civ6Ai_Autotest._CloseQueuedPopups()
       Civ6Ai_Autotest._DismissBlockers(playerID)
+      if waitingSeats then
+        return
+      end
       if Civ6Ai_Apply ~= nil and Civ6Ai_Apply.ResolveAllUnitOrders ~= nil then
         Civ6Ai_Apply.ResolveAllUnitOrders(playerID)
+      end
+      -- Human End Turn is gated by ActionPanel; RequestAction would bypass it.
+      if Civ6Ai_Config ~= nil and Civ6Ai_Config.IsAutotest ~= nil and not Civ6Ai_Config.IsAutotest() then
+        return
       end
       if Civ6Ai_Autotest._TryEndTurnNow ~= nil then
         Civ6Ai_Autotest._TryEndTurnNow(playerID)
