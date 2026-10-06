@@ -37,6 +37,8 @@ function Civ6Ai_Production._GetCity(playerID, cityWireId)
   if numericId == nil then
     return nil
   end
+  -- CityManager.GetCity takes the per-player city index (low 16 bits of GetID).
+  -- Gameplay cityById compares full GetID(); do not modulo on that path.
   return CityManager.GetCity(playerID, numericId % 65536)
 end
 

@@ -115,7 +115,7 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
         forTurn = (snapshotTurn or Game.GetCurrentGameTurn()) + 1
       end
     end
-    local sent = Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn)
+    local sent = Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn, snapshotTurn)
     Civ6Ai_Util.Log("apply|order_channel|player=" .. tostring(playerID) .. "|for_turn=" .. tostring(forTurn)
       .. "|sent=" .. tostring(sent))
     return
@@ -1347,7 +1347,9 @@ end
 function Civ6Ai_Apply._CityNum(id)
   local n = tonumber(string.match(tostring(id or ""), "CITY_(%d+)"))
   if n ~= nil then
-    return n % 65536
+    -- Full city id for gameplay Gov.Purchase* (cityById uses c:GetID()).
+    -- UI CityManager.GetCity still takes the low 16 bits; see Production.lua.
+    return n
   end
   return tonumber(id)
 end
