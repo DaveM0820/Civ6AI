@@ -348,11 +348,29 @@ class SameTurnSeatTimingLuaTests(unittest.TestCase):
         self.assertEqual(0, len(self.g.AFTER))
         self.lua.execute("ExposedMembers.Civ6Ai.TurnStartComplete[1] = 5")
         self.g.Civ6Ai_Bridge.RunTurnPulse(1)
+        self.assertEqual(0, len(self.g.AFTER))
+        self.lua.execute('Civ6Ai_Bridge._delivered["1|5"] = true')
+        self.g.Civ6Ai_Bridge.RunTurnPulse(1)
         self.g.Civ6Ai_Bridge.RunTurnPulse(1)
         self.assertEqual([1], list(self.g.AFTER.values()))
-        self.assertTrue(any("seat_end_after_queue|player=1|turn=5|snapshot_turn=5|prepulsed=true|answer=outstanding" in l
+        self.assertTrue(any("seat_end_after_queue|player=1|turn=5|snapshot_turn=5|prepulsed=true|answer=sent" in l
                             for l in self._log()))
         self.assertFalse(any("already_pulsed|player=1" in l for l in self._log()))
+
+    def test_t1_lan_queues_for_this_turn_and_waits_to_end(self):
+        self.g.CURRENT_TURN = 1
+        self.g.Civ6Ai_Apply._IsNetworkMultiplayer = lambda: True
+        self.lua.execute("for p = 1, 4 do ExposedMembers.Civ6Ai.TurnStartComplete[p] = -1 end")
+        self.assertEqual(1, int(self.g.Civ6Ai_Bridge.SeatForTurn(1, 1)))
+        self.assertEqual(4, self.g.Civ6Ai_Bridge.PrepulseSeats("host_end"))
+        self.lua.execute("ExposedMembers.Civ6Ai.TurnStartComplete[1] = 1")
+        self.g.Civ6Ai_Bridge.RunTurnPulse(1)
+        self.assertEqual(0, len(self.g.AFTER))
+        self.lua.execute('Civ6Ai_Bridge._delivered["1|1"] = true')
+        self.g.Civ6Ai_Bridge.RunTurnPulse(1)
+        self.assertEqual([1], list(self.g.AFTER.values()))
+        self.assertTrue(any("seat_end_after_queue|player=1|turn=1|snapshot_turn=1|prepulsed=true|answer=sent" in l
+                            for l in self._log()))
 
     def test_lan_seat_turn_start_reports_the_previous_turns_answer(self):
         # LAN: the answer to the turn 4 snapshot was queued for turn 5.

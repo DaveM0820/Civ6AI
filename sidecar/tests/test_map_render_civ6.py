@@ -258,6 +258,32 @@ class Civ6MapRenderTests(unittest.TestCase):
         with mock.patch("sidecar.map_render_civ6.vision_maps_enabled", return_value=False):
             self.assertEqual([], collect_settle_markers(snap))
 
+    def test_base_layer_cache_second_render_is_faster(self):
+        import time
+        from sidecar.map_render_civ6 import _BASE_LAYER_CACHE, _HEX_LAYER_CACHE, render_civ6_map_png
+
+        snapshot = civ6_adapter.load_golden_snapshot(GOLDEN)
+        snapshot["known_map"]["viewport"] = {"x0": 10, "y0": 18, "width": 16, "height": 14}
+        snapshot["known_map"]["visibility_grid"] = ["." * 16] * 14
+        snapshot["known_map"]["plots"] = [
+            {"plot_id": f"PLOT_{x}_{y}", "x": x, "y": y, "knowledge": "visible",
+             "terrain_id": "TERRAIN_GRASS", "terrain": "TERRAIN_GRASS", "water": False, "peak": False}
+            for y in range(18, 32) for x in range(10, 26)
+        ]
+        _BASE_LAYER_CACHE.clear()
+        _HEX_LAYER_CACHE.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "map.png"
+            t0 = time.perf_counter()
+            render_civ6_map_png(snapshot, path)
+            first = time.perf_counter() - t0
+            t1 = time.perf_counter()
+            render_civ6_map_png(snapshot, path)
+            second = time.perf_counter() - t1
+        self.assertGreater(first, 0)
+        self.assertLess(second, first)
+        print(f"map_render first={first:.4f}s second={second:.4f}s")
+
 
 
 if __name__ == "__main__":

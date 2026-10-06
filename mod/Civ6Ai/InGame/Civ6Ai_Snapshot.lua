@@ -2883,7 +2883,10 @@ end
 function Civ6Ai_Snapshot._PurchaseCost(city, yieldType, hash, formation)
   local gold = Civ6Ai_Snapshot._Method(city, "GetGold")
   local y = Civ6Ai_Snapshot._YieldIndex(yieldType)
-  if gold == nil or y == nil or hash == nil then
+  if y == nil then
+    y = yieldType == "YIELD_FAITH" and 5 or 0
+  end
+  if gold == nil or hash == nil then
     return nil
   end
   local cost
@@ -2971,7 +2974,15 @@ function Civ6Ai_Snapshot._AddPurchaseCommands(commands, playerID)
             end
           end
           local can = Civ6Ai_Snapshot._CanStartPurchase(city, params)
-          if can ~= false then
+          local y = Civ6Ai_Snapshot._YieldIndex(yieldType)
+          local goldObj = Civ6Ai_Snapshot._Method(city, "GetGold")
+          local allowed
+          if goldObj ~= nil and goldObj.CanPurchase ~= nil and y ~= nil then
+            allowed = isUnit
+              and Civ6Ai_Snapshot._Method(goldObj, "CanPurchase", y, hash, formation)
+              or Civ6Ai_Snapshot._Method(goldObj, "CanPurchase", y, hash)
+          end
+          if can ~= false and allowed ~= false then
             local fixed = { city_id = cityId, item_id = itemId }
             if yieldName == "faith" then
               fixed["yield"] = "faith"
@@ -3015,12 +3026,25 @@ function Civ6Ai_Snapshot._AddPurchaseCommands(commands, playerID)
             local index = Civ6Ai_Snapshot._Method(plot, "GetIndex")
             local cost = type(index) == "number" and Civ6Ai_Snapshot._Method(cityGold, "GetPlotPurchaseCost", index) or nil
             if type(cost) == "number" and cost > 0 and cost < Civ6Ai_Snapshot.PURCHASE_UNAVAILABLE and cost <= goldBal then
-              offer("purchase_tile", {
-                city_id = cityId,
-                target_x = plot:GetX(),
-                target_y = plot:GetY(),
-              }, "tile_" .. tostring(plot:GetX()) .. "_" .. tostring(plot:GetY()))
-              tileAdded = tileAdded + 1
+              local params = {}
+              if CityCommandTypes ~= nil then
+                if CityCommandTypes.PARAM_X ~= nil then
+                  params[CityCommandTypes.PARAM_X] = plot:GetX()
+                  params[CityCommandTypes.PARAM_Y] = plot:GetY()
+                end
+                if Civ6Ai_Snapshot._YieldIndex(goldYield) ~= nil then
+                  params[CityCommandTypes.PARAM_YIELD_TYPE] = Civ6Ai_Snapshot._YieldIndex(goldYield)
+                end
+              end
+              local can = Civ6Ai_Snapshot._CanStartPurchase(city, params)
+              if can ~= false then
+                offer("purchase_tile", {
+                  city_id = cityId,
+                  target_x = plot:GetX(),
+                  target_y = plot:GetY(),
+                }, "tile_" .. tostring(plot:GetX()) .. "_" .. tostring(plot:GetY()))
+                tileAdded = tileAdded + 1
+              end
             end
           end
         end
@@ -3694,11 +3718,16 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
           kind = "unit_skip",
           fixed_arguments = {unit_id = unitId},
         }))
-        table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-          command_id = "CMD_fortify_" .. unitId,
-          kind = "unit_posture_fortify",
-          fixed_arguments = {unit_id = unitId},
-        }))
+        local canFortify = UnitManager ~= nil and UnitManager.CanStartOperation ~= nil
+          and UnitOperationTypes ~= nil and UnitOperationTypes.FORTIFY ~= nil
+          and UnitManager.CanStartOperation(unit, UnitOperationTypes.FORTIFY)
+        if canFortify then
+          table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+            command_id = "CMD_fortify_" .. unitId,
+            kind = "unit_posture_fortify",
+            fixed_arguments = {unit_id = unitId},
+          }))
+        end
         if GameInfo ~= nil and GameInfo.UnitOperations ~= nil then
           local foundOp = GameInfo.UnitOperations["UNITOPERATION_FOUND_CITY"]
           local canFound = Civ6Ai_Snapshot._CanFoundCity(unit, foundOp)

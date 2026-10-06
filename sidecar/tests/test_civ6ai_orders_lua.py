@@ -818,10 +818,11 @@ class WpAApplyCoreTests(unittest.TestCase):
         self.assertTrue(self.last()["reason"].startswith("ok_superseded:3>4"))
         self.assertEqual(self.rt.eval("Players[2].tech"), 4)
 
-    def test_research_all_known_fails(self):
+    def test_research_all_known_is_noop_success(self):
         self.rt.execute("Players[2].knownTech = {[3]=true, [4]=true, [5]=true}")
         self.order(0, K=2, P=2, I=3, I2=4, I3=5, S=93)
         self.assertEqual(self.last()["reason"], "tech_already_known")
+        self.assertTrue(self.last()["ok"])
 
     def test_move_retargets_occupied_neighbour(self):
         # Unit 8 sits on 11,10 and is not ordered, so retries cannot free the tile.
