@@ -37,6 +37,9 @@ FOREIGN_RING = (255, 64, 64)
 FEATURE_OVERLAY_SCALE = 0.66
 _BASE_LAYER_CACHE: dict[str, Any] = {}
 _BASE_LAYER_CACHE_LIMIT = 8
+_HEX_LAYER_CACHE: dict[tuple[Any, ...], Any] = {}
+_HEX_MASK_CACHE: dict[tuple[int, int, int], Any] = {}
+_HEX_LAYER_CACHE_LIMIT = 256
 
 
 def civ6_map_north_up(snapshot: dict[str, Any] | None) -> bool:
@@ -525,26 +528,36 @@ def _paste_hex_sprite_layers(
     from PIL import Image, ImageDraw
 
     width, height = _hex_sprite_size(hex_radius)
-    tile = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    tcx, tcy = width / 2, height / 2
-    for layer_index, sprite_path in enumerate(sprite_paths):
-        name = sprite_path.name.lower()
-        if layer_scales is not None and layer_index < len(layer_scales):
-            layer_scale = layer_scales[layer_index]
-        else:
-            layer_scale = 0.72 if "mountain" in name else 1.0
-        layer_w = max(4, int(width * layer_scale))
-        layer_h = max(4, int(height * layer_scale))
-        map_render._paste_image_raster_fit(tile, sprite_path, tcx, tcy, layer_w, layer_h)
-    if dim_factor < 1.0:
-        tile = _dim_rgba_image(tile, dim_factor)
-    local_corners: list[tuple[float, float]] = []
+    scales = tuple(layer_scales or ())
+    cache_key = (tuple(str(path) for path in sprite_paths), width, height, round(dim_factor, 2), scales)
+    tile = _HEX_LAYER_CACHE.get(cache_key)
+    if tile is None:
+        tile = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        tcx, tcy = width / 2, height / 2
+        for layer_index, sprite_path in enumerate(sprite_paths):
+            name = sprite_path.name.lower()
+            if layer_index < len(scales):
+                layer_scale = scales[layer_index]
+            else:
+                layer_scale = 0.72 if "mountain" in name else 1.0
+            layer_w = max(4, int(width * layer_scale))
+            layer_h = max(4, int(height * layer_scale))
+            map_render._paste_image_raster_fit(tile, sprite_path, tcx, tcy, layer_w, layer_h)
+        if dim_factor < 1.0:
+            tile = _dim_rgba_image(tile, dim_factor)
+        _HEX_LAYER_CACHE[cache_key] = tile
+        if len(_HEX_LAYER_CACHE) > _HEX_LAYER_CACHE_LIMIT:
+            _HEX_LAYER_CACHE.pop(next(iter(_HEX_LAYER_CACHE)))
+    mask_key = (width, height, int(hex_radius * 100))
+    mask = _HEX_MASK_CACHE.get(mask_key)
+    if mask is None:
+        tcx, tcy = width / 2, height / 2
+        corners = _flat_top_hex_corners(tcx, tcy, hex_radius)
+        mask = Image.new("L", (width, height), 0)
+        ImageDraw.Draw(mask).polygon(corners, fill=255)
+        _HEX_MASK_CACHE[mask_key] = mask
     origin_x = cx - width / 2
     origin_y = cy - height / 2
-    for px, py in _flat_top_hex_corners(cx, cy, hex_radius):
-        local_corners.append((px - origin_x, py - origin_y))
-    mask = Image.new("L", (width, height), 0)
-    ImageDraw.Draw(mask).polygon(local_corners, fill=255)
     canvas.paste(tile, (int(origin_x), int(origin_y)), mask)
     return True
 
@@ -1241,8 +1254,9 @@ def render_civ6_map_png(
     rendered_tiles = 0
     river_edges_drawn = 0
 
+    grid_blob = "".join(normalized) if isinstance(normalized, list) else ""
     hasher = hashlib.sha1()
-    hasher.update(f"{map_w}x{total_h}:{tile_px}:{int(flip_y)}:{int(prefer_civ5_sprites)}:{x0},{y0},{vw},{vh}".encode())
+    hasher.update(f"{map_w}x{map_h}:{tile_px}:{int(flip_y)}:{int(prefer_civ5_sprites)}:{x0},{y0},{vw},{vh}:{grid_blob}".encode())
     revealed_in_view = 0
     for vy in range(vh):
         wy = y0 + vy
@@ -1256,14 +1270,15 @@ def render_civ6_map_png(
             if state == "revealed":
                 revealed_in_view += 1
             terrain = ""
+            owner = owner_index.get((wx, wy), "") if state == "revealed" else ""
             if isinstance(plot, dict):
-                terrain = str(plot.get("terrain") or plot.get("terrain_type") or "")
-            hasher.update(f"{wx},{wy},{state},{terrain}".encode())
+                terrain = str(plot.get("terrain") or plot.get("terrain_type") or plot.get("terrain_id") or "")
+            hasher.update(f"{wx},{wy},{state},{terrain},{owner}".encode())
     cache_key = hasher.hexdigest()
     cached = _BASE_LAYER_CACHE.get(cache_key)
     used_base_cache = False
-    if cached is not None and cached.size == canvas.size:
-        canvas.paste(cached)
+    if cached is not None and cached.size[0] == map_w and cached.size[1] == map_h:
+        canvas.paste(cached, (0, 0))
         draw = ImageDraw.Draw(canvas)
         used_base_cache = True
 
@@ -1351,7 +1366,7 @@ def render_civ6_map_png(
                         f"{wx},{wy}",
                         map_render._coord_label_font(coord_font),
                     )
-        _BASE_LAYER_CACHE[cache_key] = canvas.copy()
+        _BASE_LAYER_CACHE[cache_key] = canvas.crop((0, 0, map_w, map_h)).copy()
         if len(_BASE_LAYER_CACHE) > _BASE_LAYER_CACHE_LIMIT:
             _BASE_LAYER_CACHE.pop(next(iter(_BASE_LAYER_CACHE)))
 

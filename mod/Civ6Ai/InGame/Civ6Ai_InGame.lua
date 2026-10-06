@@ -148,6 +148,9 @@ function Civ6Ai_OnLoadScreenClose()
     Civ6Ai_Autotest._DisableBoostPopups()
   end
   Civ6Ai_Util.Log("autotest|load_screen_closed")
+  if Civ6Ai_Bridge.SameTurnSeats() and Game.GetCurrentGameTurn() <= 1 then
+    Civ6Ai_Bridge.PrepulseSeats("host_end")
+  end
   -- A loaded save sends LocalPlayerTurnBegin while the load screen is still up,
   -- when the handler above ignores it, so nothing pulsed the current turn and a
   -- reloaded game sat idle. Re-run it now that the screen is closed.

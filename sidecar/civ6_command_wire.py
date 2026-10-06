@@ -427,6 +427,23 @@ def _unit_row(snapshot: dict[str, Any], unit_id: str) -> dict[str, Any] | None:
     return None
 
 
+def _is_listed_settle_site(snapshot: dict[str, Any], unit: dict[str, Any] | None, x: int, y: int) -> bool:
+    if not isinstance(unit, dict):
+        return False
+    if not str(unit.get("unit_type_id") or "").endswith("SETTLER"):
+        return False
+    settle = unit.get("settle") if isinstance(unit.get("settle"), dict) else {}
+    for site in settle.get("sites") or []:
+        if not isinstance(site, dict):
+            continue
+        try:
+            if int(site["x"]) == x and int(site["y"]) == y:
+                return True
+        except (KeyError, TypeError, ValueError):
+            continue
+    return any(row.get("x") == x and row.get("y") == y for row in labeled_settle_sites(snapshot))
+
+
 def _plot_xy_of_unit(unit: dict[str, Any] | None) -> tuple[int, int] | None:
     if not isinstance(unit, dict):
         return None
@@ -528,6 +545,8 @@ def _synthesize_far_move(
     here = _plot_xy_of_unit(unit)
     if here == (x, y):
         return _self_tile_command(snapshot, unit_id)
+    if intent == INTENT_MOVE and _is_listed_settle_site(snapshot, unit, x, y):
+        intent = INTENT_FOUND
     cmd_id = f"CMD_{unit_id}_moveto_{x}_{y}"
     if intent != "move":
         cmd_id = f"CMD_{unit_id}_{intent}_{x}_{y}"
@@ -940,7 +959,7 @@ def sitrep_offer_lines(snapshot: dict[str, Any]) -> list[str]:
             continue
         here_ok = settle.get("here_ok") is True
         reason = settle.get("here_reason")
-        here_bits = ["legal" if here_ok else "illegal"]
+        here_bits = ["founding here is legal" if here_ok else "founding here is illegal"]
         if settle.get("coastal"):
             here_bits.append("coastal")
         if settle.get("fresh_water"):

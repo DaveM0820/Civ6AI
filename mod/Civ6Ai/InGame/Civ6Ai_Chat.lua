@@ -132,6 +132,13 @@ function Civ6Ai_Chat._RecordPrivateChat(fromPlayer, toPlayer, text, turn)
   table.insert(inbox, message)
   Civ6Ai_Chat._TrimHistory(inbox)
   Civ6Ai_Chat._privateInbox[toPlayer] = inbox
+  table.insert(Civ6Ai_Chat._publicEvents, {
+    turn = turn,
+    kind = "CHAT_PRIVATE",
+    text = text,
+    affected_ids = { Civ6Ai_Util.PlayerId(fromPlayer), Civ6Ai_Util.PlayerId(toPlayer) },
+  })
+  Civ6Ai_Chat._TrimHistory(Civ6Ai_Chat._publicEvents)
   Civ6Ai_Chat._PersistRecord({
     kind = "private",
     message_id = messageId,

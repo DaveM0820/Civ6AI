@@ -493,7 +493,7 @@ function Civ6Ai_Orders._DoResearch(owner, o)
   local idx, tag = Civ6Ai_Orders._PickFallback(
     owner, o.I, o.I2, o.I3, Civ6Ai_Orders._TechKnown, Civ6Ai_Orders._CurrentTech)
   if idx == nil then
-    return false, "tech_already_known"
+    return true, "tech_already_known"
   end
   if tag == "already_researching" then
     return true, "ok_already_researching:" .. tostring(idx)
@@ -509,7 +509,7 @@ function Civ6Ai_Orders._DoCivic(owner, o)
   local idx, tag = Civ6Ai_Orders._PickFallback(
     owner, o.I, o.I2, o.I3, Civ6Ai_Orders._CivicKnown, Civ6Ai_Orders._CurrentCivic)
   if idx == nil then
-    return false, "civic_already_known"
+    return true, "civic_already_known"
   end
   if tag == "already_researching" then
     return true, "ok_already_researching:" .. tostring(idx)
@@ -796,6 +796,14 @@ end
 -- Play one seat's orders with retry passes and record each result, then end
 -- the turn of the seat's units the model left in place.
 function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
+  if Game.GetCurrentGameTurn() == 1 then
+    for _, o in ipairs(orders) do
+      local unit = o.U ~= nil and Civ6Ai_Orders._Unit(owner, o.U) or nil
+      if unit ~= nil and (call(unit, "GetMovesRemaining") or 0) <= 0 and UnitManager.RestoreMovement ~= nil then
+        pcall(UnitManager.RestoreMovement, unit)
+      end
+    end
+  end
   local ordered = {}
   for _, o in ipairs(orders) do
     if o.U ~= nil and o.U >= 0 then
@@ -1046,6 +1054,8 @@ function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
       Civ6Ai_Orders._Record(sender, o, false, "stale_turn:" .. tostring(t))
     end
     Civ6Ai_Orders._ContinueGoals(owner, {})
+  elseif turn == 1 and not call(Players[owner], "IsHuman") then
+    Civ6Ai_Orders._FinishIdleUnits(owner, {})
   else
     Civ6Ai_Orders._ContinueGoals(owner, {})
   end

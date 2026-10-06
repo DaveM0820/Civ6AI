@@ -312,6 +312,23 @@ class CommandWireVocabTests(unittest.TestCase):
         self.assertEqual(1, extra["fixed_arguments"]["G"])
         self.assertEqual(0, extra["fixed_arguments"]["A"])
 
+    def test_settler_move_to_listed_site_packs_found_arrival(self):
+        snap = {
+            "game": {"map_width": 40, "map_height": 40},
+            "your_units": [{
+                "unit_id": "UNIT_SETTLER_1", "unit_type_id": "UNIT_SETTLER", "plot_id": "PLOT_10_10",
+                "settle": {"here_ok": True, "coastal": True, "sites": [{"x": 12, "y": 11, "dist": 2, "coastal": True}]},
+            }],
+            "legal_commands": [],
+        }
+        cmd = command_wire.resolve_unit_token(snap, "UNIT_SETTLER_1", "MoveTo(12,11)")
+        extra = next(c for c in snap["legal_commands"] if c["command_id"] == cmd)
+        self.assertEqual("found", extra["fixed_arguments"]["intent"])
+        self.assertEqual(1, extra["fixed_arguments"]["A"])
+        lines = "\n".join(command_wire.sitrep_offer_lines(snap))
+        self.assertIn("founding here is legal", lines)
+        self.assertIn("coastal", lines)
+
     def test_own_tile_move_becomes_found_when_legal(self):
         snap = {
             "game": {"map_width": 40, "map_height": 40},

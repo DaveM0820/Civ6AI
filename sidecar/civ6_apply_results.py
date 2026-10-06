@@ -36,8 +36,6 @@ NON_TRANSIENT_FAILURES = (
     "cannot_build",
     "already_known",
     "stale",
-    "tech_already_known",
-    "civic_already_known",
     "stale_unit_id",
     "stale_city_id",
     "unit_not_found",
@@ -45,7 +43,7 @@ NON_TRANSIENT_FAILURES = (
     "site_no_longer_legal",
 )
 CHAT_NEAR_DUPE_THRESHOLD = 0.6
-CHAT_NEAR_DUPE_LOOKBACK_TURNS = 8
+CHAT_NEAR_DUPE_LOOKBACK_TURNS = 16
 CHAT_INTRO_PATTERNS = re.compile(
     r"\b(i am|i'm|im|my name is|greetings from|let history remember|"
     r"stands firm|allow me to introduce|i introduce)\b",
@@ -363,7 +361,12 @@ def build_command_results(snapshot: dict[str, Any], rows: list[dict[str, Any]], 
     for row in rows:
         actor, order = _order_label(row, wire_ids, city_names)
         reason = str(row.get("reason") or "")
-        ok = row.get("ok") is True or reason.startswith("ok_") or reason.startswith("retargeted:") or reason == "self_target_hold"
+        ok = (
+            row.get("ok") is True
+            or reason.startswith("ok_")
+            or reason.startswith("retargeted:")
+            or reason in ("self_target_hold", "tech_already_known", "civic_already_known")
+        )
         no_effect = reason in NO_EFFECT_REASONS
         if no_effect:
             outcome = _success_text(row)
@@ -704,7 +707,7 @@ def recent_self_chats_by_target(
         if not isinstance(event, dict):
             continue
         kind = str(event.get("kind") or "").upper()
-        if kind and kind != "CHAT_PUBLIC":
+        if kind and kind not in ("CHAT_PUBLIC", "CHAT_PRIVATE"):
             continue
         affected = event.get("affected_ids", [])
         sender = str(affected[0]) if isinstance(affected, list) and affected else ""
@@ -716,6 +719,22 @@ def recent_self_chats_by_target(
             continue
         if current_turn - lookback <= turn < current_turn:
             text = str(event.get("text") or event.get("summary") or "").strip()
+            if text:
+                target = "all" if kind != "CHAT_PRIVATE" else f"player:{affected[1] if len(affected) > 1 else ''}"
+                by_target.setdefault(target, []).append((turn, text))
+                by_target.setdefault("all", []).append((turn, text))
+    inbox = snapshot.get("diplomacy", {}).get("private_inbox") if isinstance(snapshot.get("diplomacy"), dict) else None
+    for message in inbox or []:
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("from_player_id") or "") != self_id:
+            continue
+        try:
+            turn = int(message.get("turn") or 0)
+        except (TypeError, ValueError):
+            continue
+        if current_turn - lookback <= turn < current_turn:
+            text = str(message.get("text") or "").strip()
             if text:
                 by_target.setdefault("all", []).append((turn, text))
     return by_target
@@ -751,11 +770,8 @@ def filter_repeat_public_chat(
             continue
         text = str(message.get("text") or "")
         key = chat_target_key(message)
-        prior_rows = recent_map.get(key, [])
-        prior_texts = [row[1] for row in prior_rows]
-        if key == "all":
-            prior_texts = prior_texts + [row[1] for row in recent_map.get("all", [])]
-            prior_texts = list(dict.fromkeys(prior_texts))
+        prior_rows = recent_map.get(key, []) + recent_map.get("all", [])
+        prior_texts = list(dict.fromkeys(row[1] for row in prior_rows))
         if prior_texts and is_self_reintroduction(text, snapshot):
             dropped.append(
                 "dropped: public chat re-introduced you after a prior line to that civilization and was not sent"
