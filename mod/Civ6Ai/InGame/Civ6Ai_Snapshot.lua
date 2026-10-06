@@ -2166,52 +2166,46 @@ Civ6Ai_Snapshot.KIND_NAMES = {
   [14] = "recruit_great_person", [15] = "patronize_great_person", [16] = "governor",
   [17] = "send_diplomatic_action", [18] = "propose_peace", [19] = "purchase_item",
   [20] = "purchase_tile", [21] = "worker_improve", [22] = "pillage_improvement",
-  [24] = "trade_route", [25] = "automate_explore", [26] = "activate_great_person",
+  [24] = "trade_route", [25] = "explore", [26] = "activate_great_person",
 }
 
--- Persistent destination from WP-A (Game property CIV6AI_GOAL_<owner>_<unitId>).
--- Table or "x|y|intent|setTurn". Missing API / missing key -> no goal.
+Civ6Ai_Snapshot.INTENT_NAMES = {
+  [0] = "move", [1] = "found", [2] = "improve", [3] = "found_religion", [4] = "trade",
+}
+
+-- Persistent destination from WP-A: split Game properties
+-- CIV6AI_GOAL_<owner>_<unitId>_{X,Y,A,T,I}. A is arrival intent (not N).
 function Civ6Ai_Snapshot._UnitGoal(playerID, unitNumericId)
-  if Game == nil then
+  if Game == nil or Game.GetProperty == nil then
+    if Game ~= nil then
+      Civ6Ai_Util.Log("snapshot|goal_api_missing|GetProperty")
+    end
     return nil
   end
-  local key = "CIV6AI_GOAL_" .. tostring(playerID) .. "_" .. tostring(unitNumericId)
-  local ok, raw = false, nil
-  if Game.GetProperty ~= nil then
-    ok, raw = pcall(function() return Game:GetProperty(key) end)
-  elseif Game.GetProperty == nil then
-    Civ6Ai_Util.Log("snapshot|goal_api_missing|GetProperty")
-    return nil
-  end
-  if not ok then
-    Civ6Ai_Util.Log("snapshot|goal_read_failed|" .. tostring(raw))
-    return nil
-  end
-  if raw == nil or raw == "" then
-    return nil
-  end
-  if type(raw) == "table" then
-    local x, y = tonumber(raw.x), tonumber(raw.y)
-    if x == nil or y == nil then
+  local prefix = "CIV6AI_GOAL_" .. tostring(playerID) .. "_" .. tostring(unitNumericId) .. "_"
+  local function prop(field)
+    local ok, raw = pcall(function() return Game:GetProperty(prefix .. field) end)
+    if not ok then
+      Civ6Ai_Util.Log("snapshot|goal_read_failed|" .. tostring(raw))
       return nil
     end
-    return {
-      x = x, y = y,
-      intent = tostring(raw.intent or raw.N or "move"),
-      eta = tonumber(raw.eta),
-    }
+    return tonumber(raw)
   end
-  local x, y, intent, setTurn = string.match(tostring(raw), "^(-?%d+)|(-?%d+)|([^|]*)|(-?%d+)$")
-  if x == nil then
-    x, y = string.match(tostring(raw), "^(-?%d+)[,|](-?%d+)")
-  end
-  if x == nil then
+  local x, y = prop("X"), prop("Y")
+  if x == nil or y == nil or x < 0 or y < 0 then
     return nil
   end
+  local a = prop("A") or 0
+  local setTurn = prop("T")
+  local eta = nil
+  if setTurn ~= nil and Game.GetCurrentGameTurn ~= nil then
+    eta = math.max(0, 10 - (Game.GetCurrentGameTurn() - setTurn))
+  end
   return {
-    x = tonumber(x), y = tonumber(y),
-    intent = (intent ~= nil and intent ~= "") and intent or "move",
-    eta = tonumber(setTurn),
+    x = x, y = y,
+    intent = Civ6Ai_Snapshot.INTENT_NAMES[a] or tostring(a),
+    A = a,
+    eta = eta,
   }
 end
 
@@ -2381,7 +2375,9 @@ function Civ6Ai_Snapshot._AddCommandResults(playerID, turn)
       local ok = r.ok == true
       local reason = tostring(r.reason or "")
       local unit = r.unit
-      if unit == nil and r.U ~= nil then
+      if type(unit) == "number" then
+        unit = "UNIT_" .. tostring(unit)
+      elseif unit == nil and r.U ~= nil then
         unit = "UNIT_" .. tostring(r.U)
       end
       local effect = "none"
@@ -2651,9 +2647,10 @@ function Civ6Ai_Snapshot._AddBuilderCommands(commands, playerID, unit, unitId)
         improvement_id = improvementType,
         target_x = px,
         target_y = py,
+        G = away and 1 or nil,
+        A = away and 2 or nil,
         goal = away and 1 or nil,
         intent = away and "improve" or nil,
-        intent_n = away and 2 or nil,
       },
     }))
     added = added + 1
@@ -3193,9 +3190,10 @@ function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId
               city_id = "CITY_" .. tostring(city:GetID()),
               target_x = city:GetX(),
               target_y = city:GetY(),
-              intent = "trade",
-              intent_n = 4,
+              G = 1,
+              A = 4,
               goal = 1,
+              intent = "trade",
             },
           }))
           added = added + 1
@@ -3248,9 +3246,9 @@ function Civ6Ai_Snapshot._AddActivateCommand(commands, playerID, unit, unitId)
           unit_id = unitId,
           target_x = site.x,
           target_y = site.y,
-          goal = 1,
+          G = 1,
+          A = 3,
           intent = "found_religion",
-          intent_n = 3,
         },
       }))
     end

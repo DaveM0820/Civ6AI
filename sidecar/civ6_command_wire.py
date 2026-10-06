@@ -80,11 +80,16 @@ def unit_command_token(command: dict[str, Any]) -> str | None:
     xy = _xy(fixed)
     if kind == "move_unit":
         intent = str(fixed.get("intent") or "")
-        if intent in ("found", "1") and xy:
+        arrival = fixed.get("A")
+        try:
+            arrival = int(arrival) if arrival is not None else None
+        except (TypeError, ValueError):
+            arrival = None
+        if (arrival == 1 or intent in ("found", "1")) and xy:
             return f"Settle({xy[0]},{xy[1]})"
-        if intent in ("found_religion", "3") and xy:
+        if (arrival == 3 or intent in ("found_religion", "3")) and xy:
             return f"FoundReligion({xy[0]},{xy[1]})"
-        if intent in ("trade", "4") and xy:
+        if (arrival == 4 or intent in ("trade", "4")) and xy:
             return f"TradeRoute({xy[0]},{xy[1]})"
         return f"MoveTo({xy[0]},{xy[1]})" if xy else None
     if kind in ("attack_target", "range_attack", "melee_attack"):
@@ -108,7 +113,7 @@ def unit_command_token(command: dict[str, Any]) -> str | None:
         build = fixed.get("improvement_id") or fixed.get("build_id") or fixed.get("route_id")
         verb = _camel(kind[len("worker_"):])
         if verb == "Improve" and xy and isinstance(build, str) and build and (
-            fixed.get("intent") == "improve" or fixed.get("goal") == 1
+            fixed.get("intent") == "improve" or fixed.get("goal") == 1 or fixed.get("G") == 1 or fixed.get("A") == 2
         ):
             return f"Improve({xy[0]},{xy[1]}):{build}"
         return f"{verb}({build})" if isinstance(build, str) and build else verb
@@ -261,10 +266,22 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
     return None
 
 
+INTENT_MOVE = 0
 INTENT_FOUND = 1
 INTENT_IMPROVE = 2
-INTENT_FOUND_RELIGION = 3
+INTENT_RELIGION = 3
 INTENT_TRADE = 4
+
+
+def _arrival_fields(intent: str = "move", a: int = 0) -> dict[str, Any]:
+    """WP-A batch: G = persistent goal, A = arrival intent (N is batch length)."""
+    persist = 1
+    return {
+        "G": persist,
+        "A": a,
+        "goal": persist,
+        "intent": intent,
+    }
 
 
 def _unit_row(snapshot: dict[str, Any], unit_id: str) -> dict[str, Any] | None:
@@ -361,11 +378,12 @@ def _synthesize_far_move(
     y: int,
     *,
     intent: str = "move",
-    intent_n: int = 0,
+    A: int = INTENT_MOVE,
 ) -> str | None:
     """Civ5-style destination order: ``MoveTo(x,y)`` to any on-map plot.
 
     Adjacent-move rows are not required (F4). Own-tile targets become hold/FoundCity.
+    Encodes WP-A MOVE G=1 and A=arrival intent (found=1, improve=2, religion=3, trade=4).
     """
     if not _on_map(snapshot, x, y):
         LAST_UNRESOLVED.append(f"dropped: off-map MoveTo({x},{y}) for {unit_id}")
@@ -374,22 +392,16 @@ def _synthesize_far_move(
     here = _plot_xy_of_unit(unit)
     if here == (x, y):
         return _self_tile_command(snapshot, unit_id)
-    goal = 1 if intent_n or intent != "move" else 1
     cmd_id = f"CMD_{unit_id}_moveto_{x}_{y}"
     if intent != "move":
         cmd_id = f"CMD_{unit_id}_{intent}_{x}_{y}"
+    fixed = {"unit_id": unit_id, "target_x": x, "target_y": y}
+    fixed.update(_arrival_fields(intent, A))
     return _append_legal(snapshot, {
         "command_id": cmd_id,
         "kind": "move_unit",
         "description": "Move toward destination",
-        "fixed_arguments": {
-            "unit_id": unit_id,
-            "target_x": x,
-            "target_y": y,
-            "goal": goal,
-            "intent": intent,
-            "intent_n": intent_n,
-        },
+        "fixed_arguments": fixed,
         "parameter_domains": {},
         "affected_ids": [unit_id],
         "runtime_status": "tested",
@@ -416,7 +428,7 @@ def _synthesize_settle(snapshot: dict[str, Any], unit_id: str, x: int, y: int) -
             "affected_ids": [unit_id],
             "runtime_status": "tested",
         })
-    return _synthesize_far_move(snapshot, unit_id, x, y, intent="found", intent_n=INTENT_FOUND)
+    return _synthesize_far_move(snapshot, unit_id, x, y, intent="found", A=INTENT_FOUND)
 
 
 def _improve_id_from_value(value: Any) -> str | None:
@@ -454,19 +466,19 @@ def _synthesize_improve(
     unit = _unit_row(snapshot, unit_id)
     here = _plot_xy_of_unit(unit)
     away = here != (x, y)
+    fixed: dict[str, Any] = {
+        "unit_id": unit_id,
+        "improvement_id": improvement_id,
+        "target_x": x,
+        "target_y": y,
+    }
+    if away:
+        fixed.update(_arrival_fields("improve", INTENT_IMPROVE))
     return _append_legal(snapshot, {
         "command_id": f"CMD_improve_{unit_id}_{improvement_id}_{x}_{y}",
         "kind": "worker_improve",
         "description": "Move and improve",
-        "fixed_arguments": {
-            "unit_id": unit_id,
-            "improvement_id": improvement_id,
-            "target_x": x,
-            "target_y": y,
-            "goal": 1 if away else None,
-            "intent": "improve" if away else None,
-            "intent_n": INTENT_IMPROVE if away else None,
-        },
+        "fixed_arguments": fixed,
         "parameter_domains": {},
         "affected_ids": [unit_id],
         "runtime_status": "tested",

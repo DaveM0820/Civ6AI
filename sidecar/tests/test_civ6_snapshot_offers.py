@@ -72,15 +72,34 @@ class SnapshotLuaOffersTests(unittest.TestCase):
         coords = [(sites[i].x, sites[i].y) for i in range(1, len(sites) + 1)]
         self.assertNotIn((10, 10), coords)
 
+    def test_goal_reads_split_civ6ai_goal_properties(self):
+        self.lua.execute(
+            r"""
+            local props = {
+              CIV6AI_GOAL_1_9_X = 18, CIV6AI_GOAL_1_9_Y = 16,
+              CIV6AI_GOAL_1_9_A = 1, CIV6AI_GOAL_1_9_T = 2,
+            }
+            Game = {
+              GetCurrentGameTurn = function() return 4 end,
+              GetProperty = function(self, k) return props[k] end,
+            }
+            """
+        )
+        goal = self.lua.globals().Civ6Ai_Snapshot._UnitGoal(1, 9)
+        self.assertEqual(18, goal.x)
+        self.assertEqual(16, goal.y)
+        self.assertEqual("found", goal.intent)
+        self.assertEqual(1, goal.A)
+
     def test_command_results_labelled_by_decision_turn(self):
         self.lua.execute(
             r"""
             Game = { GetCurrentGameTurn = function() return 4 end }
             GameConfiguration = { IsNetworkMultiplayer = function() return false end }
             ExposedMembers = { Civ6Ai = { OrderResults = {
-              { player=1, kind=1, turn=3, ok=true, reason='ok', U=9 },
-              { player=1, kind=4, turn=3, ok=false, reason='too_close_to_city', U=7, decision_turn=3 },
-              { player=2, kind=1, turn=3, ok=true, reason='ok' },
+              { player=1, kind=1, turn=3, apply_turn=3, decision_turn=3, ok=true, reason='ok', unit=9 },
+              { player=1, kind=4, turn=3, apply_turn=3, decision_turn=3, ok=false, reason='too_close_to_city', unit=7 },
+              { player=2, kind=1, turn=3, apply_turn=3, decision_turn=3, ok=true, reason='ok', unit=1 },
             }}}
             """
         )
@@ -156,7 +175,8 @@ class CommandWireVocabTests(unittest.TestCase):
         cmd = command_wire.resolve_unit_token(snap, "UNIT_SETTLER_1", "MoveTo(30,12)")
         self.assertEqual("CMD_UNIT_SETTLER_1_moveto_30_12", cmd)
         extra = next(c for c in snap["legal_commands"] if c["command_id"] == cmd)
-        self.assertEqual(1, extra["fixed_arguments"]["goal"])
+        self.assertEqual(1, extra["fixed_arguments"]["G"])
+        self.assertEqual(0, extra["fixed_arguments"]["A"])
 
     def test_own_tile_move_becomes_found_when_legal(self):
         snap = {
@@ -188,7 +208,8 @@ class CommandWireVocabTests(unittest.TestCase):
         self.assertTrue(str(out.get("cmd.0", "")).startswith("CMD_"))
         extra = next(c for c in snap["legal_commands"] if c["command_id"] == out["cmd.0"])
         self.assertEqual("found", extra["fixed_arguments"]["intent"])
-        self.assertEqual(1, extra["fixed_arguments"]["intent_n"])
+        self.assertEqual(1, extra["fixed_arguments"]["A"])
+        self.assertEqual(1, extra["fixed_arguments"]["G"])
 
     def test_improve_destination_token(self):
         snap = {
@@ -202,6 +223,8 @@ class CommandWireVocabTests(unittest.TestCase):
         self.assertEqual("worker_improve", extra["kind"])
         self.assertEqual(8, extra["fixed_arguments"]["target_x"])
         self.assertEqual("improve", extra["fixed_arguments"]["intent"])
+        self.assertEqual(2, extra["fixed_arguments"]["A"])
+        self.assertEqual(1, extra["fixed_arguments"]["G"])
 
     def test_trade_route_listed_destination(self):
         snap = {
@@ -211,7 +234,7 @@ class CommandWireVocabTests(unittest.TestCase):
                 "kind": "move_unit",
                 "fixed_arguments": {
                     "unit_id": "UNIT_9", "city_id": "CITY_4", "target_x": 12, "target_y": 4,
-                    "intent": "trade", "intent_n": 4, "goal": 1,
+                    "intent": "trade", "A": 4, "G": 1, "goal": 1,
                 },
             }],
         }
