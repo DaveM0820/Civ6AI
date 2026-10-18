@@ -120,6 +120,16 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
       .. "|sent=" .. tostring(sent))
     return
   end
+  if Civ6Ai_Apply._IsNetworkMultiplayer() then
+    local synced, here = {}, {}
+    for _, c in ipairs(rest) do
+      table.insert(Civ6Ai_Apply.SYNCED_KINDS[c.kind] and synced or here, c)
+    end
+    if #synced > 0 then
+      Civ6Ai_OrderChannel.SendDecision(playerID, { commands = synced }, Game.GetCurrentGameTurn(), snapshotTurn)
+    end
+    decision = { commands = here }
+  end
   Civ6Ai_Apply._orderedUnits = Civ6Ai_Apply._orderedUnits or {}
   Civ6Ai_Apply._orderedUnits[playerID] = {}
   local commands = decision.commands
@@ -458,12 +468,6 @@ function Civ6Ai_Apply._SetResearchTech(playerID, args)
       return true, "", args
     end
   end
-  if ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil and ExposedMembers.Civ6Ai.SetResearchForPlayer ~= nil then
-    if ExposedMembers.Civ6Ai.SetResearchForPlayer(playerID, hash.Index) then
-      Civ6Ai_Util.Log("apply|research|gamecore|player=" .. tostring(playerID) .. "|tech=" .. tostring(techId))
-      return true, "", args
-    end
-  end
   return false, "research_rejected", args
 end
 
@@ -727,14 +731,6 @@ function Civ6Ai_Apply._FoundCity(playerID, args)
     end
     reason = fallbackReason or reason
   end
-  local numericId = Civ6Ai_Apply._ParseUnitNumericId(unitId)
-  if numericId ~= nil and ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil and ExposedMembers.Civ6Ai.FoundCityForPlayer ~= nil then
-    if ExposedMembers.Civ6Ai.FoundCityForPlayer(playerID, numericId) then
-      Civ6Ai_Apply._ScheduleFoundCityFollowup(playerID)
-      Civ6Ai_Util.Log("apply|found_city|gamecore|player=" .. tostring(playerID))
-      return true, "", args
-    end
-  end
   return false, reason or "found_city_rejected", args
 end
 
@@ -877,6 +873,11 @@ Civ6Ai_Apply.GOV_KINDS = {
   appoint_governor = true, assign_governor = true, promote_governor = true,
 }
 Civ6Ai_Apply.VERIFY_TICKS = 90
+Civ6Ai_Apply.SYNCED_KINDS = {
+  change_government = true, found_pantheon = true, found_religion = true, recruit_great_person = true,
+  patronize_great_person = true, send_diplomatic_action = true, propose_peace = true, purchase_item = true,
+  purchase_tile = true, pillage_improvement = true,
+}
 
 local function gcall(obj, name, ...)
   if obj == nil or obj[name] == nil then
