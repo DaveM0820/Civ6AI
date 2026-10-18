@@ -166,11 +166,9 @@ def prompt_lines(snapshot: dict) -> list[str]:
                 f"{s.get('index')}:{_short(s.get('slot_type'), 'SLOT_')}="
                 f"{_short(s.get('policy'), 'POLICY_') if s.get('policy') else 'EMPTY'}" for s in slots)
             lines.append(f"Policy slots: {desc}")
-            if not routes.get("policies", True):
-                lines.append("  (policy cards for this seat are chosen by the game's own AI; no command can set them here)")
-            elif p.get("change_allowed"):
+            if routes.get("policies", True) and p.get("change_allowed"):
                 lines.append("  You may change cards this turn.")
-            else:
+            elif routes.get("policies", True):
                 lines.append("  Cards can't be changed this turn — " + str(p.get("change_rule") or "only after a civic completes"))
         cards = [c for c in _lst(p.get("available")) if isinstance(c, dict)]
         if cards and routes.get("policies", True):
@@ -332,6 +330,8 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
     p = _dct(gov.get("policies"))
     if routes.get("policies", True) and p.get("change_allowed") and _lst(p.get("available")):
         out.append(("policies", "CARD, CARD, ... (complete set; see GOVERNMENT & CULTURE)"))
+    elif any(isinstance(s, dict) and s.get("policy") for s in _lst(p.get("slots"))):
+        out.append(("policies", "SLOT=NONE"))
     r = _dct(gov.get("religion"))
     if r.get("can_found_pantheon") and not r.get("pantheon"):
         beliefs = [_short(b.get("id"), "BELIEF_") for b in _lst(r.get("pantheon_beliefs")) if isinstance(b, dict)]
@@ -508,15 +508,12 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
             ids.append(_add_command(snapshot, "change_government", {"government_id": gid}, f"change government to {gid}"))
     elif ckey == "policies":
         p = _dct(gov.get("policies"))
-        if not routes.get("policies", True):
-            notes.append(f"{key}: policy cards for this seat are chosen by the game's own AI")
-        else:
-            slots = [s for s in _lst(p.get("slots")) if isinstance(s, dict)]
-            cards = [c for c in _lst(p.get("available")) if isinstance(c, dict)]
-            plan, problems = plan_policies(slots, cards, value)
-            notes.extend(f"{key}: {x}" for x in problems)
-            for arg in _policy_arg(plan or {}):
-                ids.append(_add_command(snapshot, "set_policies", {"slots": arg}, f"policy cards {arg}"))
+        slots = [s for s in _lst(p.get("slots")) if isinstance(s, dict)]
+        cards = [c for c in _lst(p.get("available")) if isinstance(c, dict) and routes.get("policies", True)]
+        plan, problems = plan_policies(slots, cards, value)
+        notes.extend(f"{key}: {x}" for x in problems)
+        for arg in _policy_arg(plan or {}):
+            ids.append(_add_command(snapshot, "set_policies", {"slots": arg}, f"policy cards {arg}"))
     elif ckey == "pantheon":
         r = _dct(gov.get("religion"))
         beliefs = [str(b.get("id")) for b in _lst(r.get("pantheon_beliefs")) if isinstance(b, dict)]

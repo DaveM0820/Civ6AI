@@ -1,6 +1,7 @@
 """Civ VI flat-wire prompt builder — TDD target for fixtures/civ6/."""
 from __future__ import annotations
 
+import re
 import copy
 from typing import Any
 
@@ -777,6 +778,11 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
     explored = coaching._civ6_explored_percent(context)
     if isinstance(explored, int):
         map_lines.append(pipeline._wire_line("map.explored", f"{explored}%"))
+    for y, row in enumerate((context.get("known_map") or {}).get("visibility_grid") or []):
+        runs = [m.span() for m in re.finditer(r"[.#]+", row)]
+        if runs:
+            map_lines.append(pipeline._wire_line(f"map.land.y{y}", ", ".join(
+                str(a) if b - a == 1 else f"{a}-{b - 1}" for a, b in runs)))
     if pipeline.map_image_attach_turn(context) and not any("attached" in l for l in map_lines):
         map_lines.append(pipeline._wire_line("map.images", "attached — fog, terrain, coast, unit positions"))
     lines.extend(map_lines)
@@ -1566,7 +1572,6 @@ def build_civ6_playable_context(snapshot: dict[str, Any]) -> dict[str, Any]:
     known_map = context.get("known_map")
     if isinstance(known_map, dict):
         known_map.pop("plots", None)
-        known_map.pop("visibility_grid", None)
         image = known_map.get("image")
         if isinstance(image, dict):
             image["attached"] = pipeline.map_image_attach_turn(snapshot)
