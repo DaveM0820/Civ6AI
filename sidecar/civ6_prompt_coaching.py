@@ -535,8 +535,7 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
             if dist is not None:
                 bits.append(f"dist {dist}")
             labels.append(", ".join(bits) if len(bits) > 1 else bits[0])
-        if labels:
-            lines.append(pipeline._wire_line(f"{prefix}.settle.nearby", "; ".join(labels)))
+        lines.append(pipeline._wire_line(f"{prefix}.settle.nearby", "; ".join(labels) or "none reachable from here"))
     return lines
 
 

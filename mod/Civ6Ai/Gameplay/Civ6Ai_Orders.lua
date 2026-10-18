@@ -437,7 +437,7 @@ function Civ6Ai_Orders._DoMove(sender, o)
     end
     return ok, reason
   end
-  if persist and unit ~= nil then
+  if persist and ok and unit ~= nil then
     Civ6Ai_Orders._StoreGoal(owner, o.U, x, y, intent, o)
   else
     Civ6Ai_Orders._ClearGoal(owner, o.U)

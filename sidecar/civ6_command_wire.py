@@ -928,8 +928,6 @@ def sitrep_offer_lines(snapshot: dict[str, Any]) -> list[str]:
                     bit += " " + ", ".join(flags)
                 site_bits.append(bit)
             lines.append(pipeline_mod._wire_line(f"{prefix}.settle.sites", " | ".join(site_bits)))
-        elif settle.get("no_reachable_site"):
-            lines.append(pipeline_mod._wire_line(f"{prefix}.settle.sites", "none reachable from here"))
     history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
     results = history.get("command_results") if isinstance(history, dict) else []
     if isinstance(results, list):
