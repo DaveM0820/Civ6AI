@@ -439,25 +439,6 @@ def _earlier_failed_items(snapshot: dict[str, Any], rows: list[dict[str, Any]], 
     return items
 
 
-def _native_snapshot_rows(existing: Any, current_turn: int) -> list[dict[str, Any]]:
-    """WP-B history.command_results: {decision_turn, apply_turn, unit, kind, ok, reason, effect}."""
-    if not isinstance(existing, list):
-        return []
-    native: list[dict[str, Any]] = []
-    for row in existing:
-        if not isinstance(row, dict):
-            continue
-        if row.get("kind") in (KIND_OK, KIND_FAILED, KIND_NO_EFFECT, KIND_DROPPED, KIND_FAILED_EARLIER):
-            continue
-        if "decision_turn" not in row and "apply_turn" not in row:
-            continue
-        native.append(row)
-    if not native:
-        return []
-    turn, picked = latest_turn_rows(native, "", current_turn)
-    return picked if turn is not None else native[-MAX_ROWS:]
-
-
 def inject_command_results(snapshot: dict[str, Any], session_dir: Path | None) -> int:
     """Fill history.command_results from snapshot (WP-B) or apply-results.jsonl. Returns rows kept."""
     decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
@@ -470,11 +451,6 @@ def inject_command_results(snapshot: dict[str, Any], session_dir: Path | None) -
     if not isinstance(history, dict):
         return 0
     existing = history.get("command_results")
-    native = _native_snapshot_rows(existing, current_turn)
-    if native:
-        items = build_command_results(snapshot, native, _row_decision_turn(native[0]) or current_turn - 1)
-        history["command_results"] = items[:PRIOR_APPLY_WIRE_CAP]
-        return len(items)
     all_rows = load_apply_results(session_dir)
     turn, rows = latest_turn_rows(all_rows, player_id, current_turn)
     if turn is None or not rows:
