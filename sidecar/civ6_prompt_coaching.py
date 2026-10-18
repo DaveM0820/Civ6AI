@@ -510,7 +510,7 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
     if bits:
         lines.append(pipeline._wire_line(f"{prefix}.settle.here", ", ".join(bits)))
     sites = settle.get("sites") if settle else None
-    if isinstance(sites, list):
+    if isinstance(sites, (list, dict)):
         from sidecar import civ6_command_wire as command_wire
 
         labeled = {
