@@ -102,12 +102,6 @@ def _cities_by_id(snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return out
 
 
-def _happiness_levels(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    rows = [r for r in economy_block(snapshot).get("happiness_levels") or [] if isinstance(r, dict)]
-    return sorted(rows, key=lambda r: _num(r.get("min_amenity")) if _num(r.get("min_amenity")) is not None else -99,
-                  reverse=True)
-
-
 def _unit_domain(unit: dict[str, Any]) -> str:
     domain = str(unit.get("domain_id") or "")
     formation = str(unit.get("unit_class_id") or "")
@@ -272,12 +266,6 @@ def gold_lines(snapshot: dict[str, Any]) -> list[str]:
                 f"***empire.effects.gold = BANKRUPT: treasury {_fmt(treasury)} and {_fmt(net, signed=True)}/turn — "
                 f"{BANKRUPTCY_RULE}. Fix gold income or delete units this turn.***"
             )
-    elif net is not None:
-        lines.append(pipeline._wire_line(
-            "empire.effects.gold",
-            f"Gold positive ({_fmt(net, signed=True)}/turn). Gold buys units, buildings and tiles. Bankruptcy "
-            f"rule: {BANKRUPTCY_RULE}.",
-        ))
     if lost > 0:
         lines.append(f"***empire.gold.bankruptcy_amenity_loss = -{lost} amenities across cities (engine)***")
     return lines
@@ -300,31 +288,6 @@ def amenity_housing_lines(snapshot: dict[str, Any]) -> list[str]:
     if not rows:
         return []
     lines: list[str] = []
-    levels = _happiness_levels(snapshot)
-    if levels:
-        parts = []
-        for level in levels:
-            lo, hi = _num(level.get("min_amenity")), _num(level.get("max_amenity"))
-            if lo is None and hi is not None:
-                span = f"{_fmt(hi)} or less"
-            elif hi is None and lo is not None:
-                span = f"+{_fmt(lo)} or more" if lo > 0 else f"{_fmt(lo)} or more"
-            elif lo == hi:
-                span = _fmt(lo, signed=True)
-            else:
-                span = f"{_fmt(lo, signed=True)}..{_fmt(hi, signed=True)}"
-            text = (f"{span} {_short(level.get('type'), 'HAPPINESS_')} growth "
-                    f"{_fmt(_num(level.get('growth_pct')), signed=True)}% yields "
-                    f"{_fmt(_num(level.get('yield_pct')), signed=True)}%")
-            if (_num(level.get("rebellion")) or 0) > 0:
-                text += " + rebels"
-            parts.append(text)
-        lines.append(pipeline._wire_line(
-            "empire.effects.amenities",
-            "Each city's amenities minus amenities needed (needed grows with population) sets its mood: "
-            + "; ".join(parts) + ". Raise amenities with new luxury resources, Entertainment Complex, "
-            "policy cards and religion.",
-        ))
     worst = []
     for row in rows:
         have, need = _num(row.get("amenities")), _num(row.get("amenities_needed"))
@@ -332,12 +295,6 @@ def amenity_housing_lines(snapshot: dict[str, Any]) -> list[str]:
             worst.append(f"{row.get('name')} {_fmt(have - need, signed=True)} {_mood_text(row)}")
     if worst:
         lines.append(f"***empire.amenities.short = {'; '.join(worst)}***")
-    lines.append(pipeline._wire_line(
-        "empire.effects.housing",
-        "Housing caps growth: food growth is multiplied by the city's housing factor (shown per city); it drops "
-        "as population nears housing and growth all but stops once population exceeds it. Raise housing with "
-        "fresh water, Granary, Aqueduct, farms, and Neighborhoods.",
-    ))
     capped = []
     for row in rows:
         mult = _num(row.get("housing_growth_mult"))

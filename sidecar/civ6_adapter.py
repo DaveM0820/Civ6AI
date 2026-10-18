@@ -1244,6 +1244,7 @@ def _fill_civ6_schema_defaults(shell: dict[str, Any], template: dict[str, Any]) 
     if not isinstance(shell.get("history"), dict):
         shell["history"] = copy.deepcopy(template.get("history", {}))
     else:
+        shell["history"].setdefault("memory_summary", "")
         _merge_template_dict(shell["history"], template.get("history", {}))
     if not isinstance(shell.get("advciv"), dict):
         shell["advciv"] = copy.deepcopy(template.get("advciv", {}))

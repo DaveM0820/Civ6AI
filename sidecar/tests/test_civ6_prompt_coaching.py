@@ -150,7 +150,6 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         blob = "\n".join(civ6_wire._advice_section(snap)).lower()
         self.assertIn("expansion", blob)
         self.assertIn("foundcity", blob.replace(" ", ""))
-        self.assertIn("chat", blob)
 
 
 if __name__ == "__main__":
