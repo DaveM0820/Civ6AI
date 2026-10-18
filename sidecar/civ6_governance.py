@@ -256,7 +256,8 @@ def prompt_lines(snapshot: dict) -> list[str]:
         if pts:
             lines.append("Great person points: " + ", ".join(
                 f"{_short(x.get('class'), 'GREAT_PERSON_CLASS_')} {x.get('points')} (+{x.get('per_turn')}/turn)" for x in pts))
-        avail = [x for x in _lst(gp.get("available")) if isinstance(x, dict)]
+        avail = [x for x in _lst(gp.get("available")) if isinstance(x, dict)
+                 and (x.get("can_recruit") or x.get("can_patronize_gold") or x.get("can_patronize_faith"))]
         if avail:
             lines.append("  Great people available now (first civ to reach the cost gets them):")
             for x in avail:
@@ -282,14 +283,6 @@ def prompt_lines(snapshot: dict) -> list[str]:
         lines.append(f"Great works held: {held}; empty great work slots: {free} (the game places new works itself)")
     if not lines:
         return []
-    lines.append("Commands (optional keys, see OPTIONAL COMMANDS): "
-                 '"government": "CHIEFDOM" | "policies": complete set of cards, e.g. "GOD_KING, DISCIPLINE" '
-                 '(or "0=GOD_KING; 1=NONE"; cards go to slots of their type, then wildcard slots; cards left out are removed) | '
-                 '"pantheon": "BELIEF_ID" | "religion": "RELIGION_ID: FOUNDER_BELIEF, FOLLOWER_BELIEF" | '
-                 '"governor.appoint": "GOVERNOR_ID" | "governor.assign": "GOVERNOR_ID @ CityName" | '
-                 '"governor.promote": "GOVERNOR_ID: PROMOTION_ID" | "greatperson.recruit": "INDIVIDUAL_ID" | '
-                 '"greatperson.patronize": "INDIVIDUAL_ID: gold|faith". '
-                 "If you leave these out the game's own AI makes these choices for you.")
     return lines
 
 

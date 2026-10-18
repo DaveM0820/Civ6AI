@@ -124,7 +124,7 @@ def _victory_lines(key: str, title: str, players: list[dict[str, Any]], names: d
                 text += f"; tied with leader {leader_name} on these stats (behind on score tiebreak)"
         lines.append(pipeline._wire_line(f"rankings.{key}.you", text))
     table = " | ".join(
-        f"{i}. {names.get(str(r.get('player_id')), '?')}: {detail(r)}" for i, r in enumerate(order, start=1))
+        f"{i}. {names.get(str(r.get('player_id')), '?')}: {detail(r)}" for i, r in enumerate(order, start=1) if not r.get("is_you"))
     lines.append(pipeline._wire_line(f"rankings.{key}", table))
     return lines
 
