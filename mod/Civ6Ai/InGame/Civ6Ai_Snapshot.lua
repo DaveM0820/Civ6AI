@@ -3207,7 +3207,7 @@ function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId
         end
         if ok and can == true then
           table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-            command_id = "CMD_trade_" .. unitId .. "_" .. tostring(city:GetID()),
+            command_id = "CMD_trade_" .. unitId .. "_" .. tostring(city:GetOwner()) .. "_" .. tostring(city:GetID()),
             kind = "move_unit",
             fixed_arguments = {
               unit_id = unitId,

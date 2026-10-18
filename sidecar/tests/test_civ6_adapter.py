@@ -25,11 +25,12 @@ class Civ6AdapterTests(unittest.TestCase):
         self.assertEqual(18, snapshot["decision"]["turn"])
         self.assertGreaterEqual(len(snapshot["legal_commands"]), 10)
 
-    def test_duplicate_legal_command_rejected(self):
+    def test_duplicate_legal_command_dropped(self):
         snapshot = civ6_adapter.build_classical_golden_snapshot()
+        n = len(snapshot["legal_commands"])
         snapshot["legal_commands"].append(snapshot["legal_commands"][0])
-        with self.assertRaises(pipeline.BoundaryError):
-            civ6_adapter.validate_civ6_snapshot(snapshot)
+        civ6_adapter.validate_civ6_snapshot(snapshot)
+        self.assertEqual(n, len(snapshot["legal_commands"]))
 
     def test_capabilities_load(self):
         doc = civ6_adapter.load_capabilities()

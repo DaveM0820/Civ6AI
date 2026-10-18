@@ -47,13 +47,14 @@ def validate_civ6_snapshot(snapshot: dict[str, Any]) -> None:
     if errors:
         raise pipeline.BoundaryError("civ6_snapshot_schema", "; ".join(errors[:8]))
     ids: set[str] = set()
+    kept = []
     for command in snapshot.get("legal_commands", []):
         command_id = command.get("command_id")
-        if not isinstance(command_id, str):
-            continue
-        if command_id in ids:
-            raise pipeline.BoundaryError("duplicate_legal_id", command_id)
-        ids.add(command_id)
+        if command_id not in ids:
+            kept.append(command)
+        if isinstance(command_id, str):
+            ids.add(command_id)
+    snapshot["legal_commands"] = kept
 
 
 _LUA_ARRAY_KEYS = frozenset({
