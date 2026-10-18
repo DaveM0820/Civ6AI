@@ -421,6 +421,9 @@ def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None
         pipeline._append_int_wire(lines, "empire.research.tech.cost", research.get("cost"))
         pipeline._append_int_wire(lines, "empire.research.tech.per_turn", research.get("research_per_turn"))
         pipeline._append_int_wire(lines, "empire.research.tech.turns_left", research.get("estimated_turns_remaining"))
+        lines.append(pipeline._wire_line("empire.techs.known", ", ".join(research.get("known_tech_ids") or []) or "none"))
+    known_civics = [c.get("id") for c in empire.get("civics") or [] if isinstance(c, dict) and c.get("id")]
+    lines.append(pipeline._wire_line("empire.civics.known", ", ".join(known_civics) or "none"))
     civic = _civ6_research_civic(snapshot)
     if civic.get("civic_id"):
         pipeline._append_id_wire(lines, "empire.research.civic", civic.get("civic_id"))

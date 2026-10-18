@@ -896,6 +896,13 @@ function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
   if culture ~= nil then
     commerce.culture.rate = Civ6Ai_Snapshot._Int(culture:GetCultureYield())
   end
+  local civics = {}
+  for row in GameInfo.Technologies() do
+    if techs ~= nil and techs:HasTech(row.Index) then table.insert(research.known_tech_ids, row.TechnologyType) end
+  end
+  for row in GameInfo.Civics() do
+    if culture ~= nil and culture:HasCivic(row.Index) then table.insert(civics, {key = "known", id = row.CivicType}) end
+  end
   local amenityNet = 0
   local amenityPos = 0
   local amenityNeg = 0
@@ -920,7 +927,7 @@ function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
     anarchy_turns = 0,
     golden_age_turns = 0,
     war_weariness = 0,
-    civics = {},
+    civics = civics,
     costs = {
       city_maintenance = Civ6Ai_Snapshot._Int(treasury:GetTotalMaintenance()),
       civic_upkeep = 0,
@@ -2299,7 +2306,9 @@ function Civ6Ai_Snapshot._AddSettleFacts(unit)
             local okRev, isRev = pcall(function() return vis:IsRevealed(plot:GetIndex()) end)
             revealed = (not okRev) or isRev == true
           end
-          if revealed and Civ6Ai_Snapshot._PlotCitySiteProblem(playerID, tx, ty) == nil then
+          local okPath, path = pcall(function() return UnitManager.GetMoveToPath(unit, plot:GetIndex()) end)
+          if revealed and (not okPath or (type(path) == "table" and #path > 0))
+              and Civ6Ai_Snapshot._PlotCitySiteProblem(playerID, tx, ty) == nil then
             table.insert(sites, {
               x = tx, y = ty, dist = dist,
               coastal = Civ6Ai_Snapshot._PlotIsCoastal(tx, ty),
@@ -2328,6 +2337,7 @@ function Civ6Ai_Snapshot._AddSettleFacts(unit)
     coastal = Civ6Ai_Snapshot._PlotIsCoastal(x, y),
     fresh_water = Civ6Ai_Snapshot._PlotFreshWater(herePlot),
     sites = sites,
+    no_reachable_site = #sites == 0,
   }
 end
 
