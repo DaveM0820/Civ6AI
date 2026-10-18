@@ -2730,13 +2730,15 @@ function Civ6Ai_Snapshot._PurchaseCost(city, yieldType, hash, formation)
   if gold == nil or hash == nil then
     return nil
   end
-  local cost
+  local cost, can
   if formation ~= nil then
     cost = Civ6Ai_Snapshot._Method(gold, "GetPurchaseCost", y, hash, formation)
+    can = Civ6Ai_Snapshot._Method(gold, "CanPurchase", y, hash, formation)
   else
     cost = Civ6Ai_Snapshot._Method(gold, "GetPurchaseCost", y, hash)
+    can = Civ6Ai_Snapshot._Method(gold, "CanPurchase", y, hash)
   end
-  if type(cost) ~= "number" or cost <= 0 or cost >= Civ6Ai_Snapshot.PURCHASE_UNAVAILABLE then
+  if can ~= true or type(cost) ~= "number" or cost <= 0 or cost >= Civ6Ai_Snapshot.PURCHASE_UNAVAILABLE then
     return nil
   end
   return math.floor(cost)
