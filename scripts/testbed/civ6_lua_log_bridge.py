@@ -511,6 +511,8 @@ def process_lua_log_blobs(
         snapshot_path = player_dir / snapshot_name
         decision_path = player_dir / decision_name
         snapshot_path.write_text(blob["payload"], encoding="utf-8")
+        for marker in player_dir.glob("apply_turn_*.done"):
+            marker.unlink()
         if not is_chat and decision_suppresses_sidecar(player_dir):
             mirror_player_outputs(player_dir, log_path, session_id, player)
             try:

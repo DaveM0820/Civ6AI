@@ -43,10 +43,6 @@ function Civ6Ai_Autotest._AutotestDir()
 end
 
 function Civ6Ai_Autotest._LogLine(text)
-  local path = Civ6Ai_Util.JoinPath(Civ6Ai_Autotest._AutotestDir(), "autotest.log")
-  if Civ6Ai_Util.AppendTextLine(path, text) then
-    return
-  end
   Civ6Ai_Util.Log("autotest|" .. text)
 end
 
