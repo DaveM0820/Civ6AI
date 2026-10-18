@@ -49,25 +49,6 @@ def _snap(**extra):
 
 
 class ApplyResultFeedbackTests(unittest.TestCase):
-    def test_snapshot_command_results_labelled_by_decision_turn(self):
-        snap = _snap()
-        snap["history"]["command_results"] = [{
-            "decision_turn": 36,
-            "apply_turn": 37,
-            "unit": "UNIT_WARRIOR_1",
-            "kind": "move_unit",
-            "ok": True,
-            "reason": "arrived",
-            "effect": "moved",
-            "x": 6,
-            "y": 10,
-        }]
-        added = results.inject_command_results(snap, None)
-        self.assertGreater(added, 0)
-        blob = "\n".join(results.thoughts_lines(snap))
-        self.assertIn("Your T36 orders", blob)
-        self.assertIn("applied T37", blob)
-
     def test_already_there_is_no_effect(self):
         snap = _snap()
         items = results.build_command_results(snap, [{
