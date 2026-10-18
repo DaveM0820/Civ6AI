@@ -481,7 +481,7 @@ def _append_legal(snapshot: dict[str, Any], command: dict[str, Any]) -> str | No
 
 
 def _self_tile_command(snapshot: dict[str, Any], unit_id: str) -> str | None:
-    """Own-tile MoveTo becomes hold/fortify, or FoundCity when that is legal here."""
+    """Own-tile MoveTo becomes a legal Fortify or FoundCity, else is dropped."""
     unit = _unit_row(snapshot, unit_id)
     settle = unit.get("settle") if isinstance(unit, dict) else None
     here_ok = isinstance(settle, dict) and settle.get("here_ok") is True
@@ -512,16 +512,8 @@ def _self_tile_command(snapshot: dict[str, Any], unit_id: str) -> str | None:
         if command.get("kind") == "unit_posture_fortify" and fixed.get("unit_id") == unit_id:
             LAST_UNRESOLVED.append(f"dropped: self-tile move for {unit_id} became Fortify")
             return str(command.get("command_id"))
-    LAST_UNRESOLVED.append(f"dropped: self-tile move for {unit_id} became hold")
-    return _append_legal(snapshot, {
-        "command_id": f"CMD_fortify_{unit_id}",
-        "kind": "unit_posture_fortify",
-        "description": "Hold in place",
-        "fixed_arguments": {"unit_id": unit_id},
-        "parameter_domains": {},
-        "affected_ids": [unit_id],
-        "runtime_status": "tested",
-    })
+    LAST_UNRESOLVED.append(f"dropped: self-tile move for {unit_id} (no legal action here)")
+    return None
 
 
 def _synthesize_far_move(

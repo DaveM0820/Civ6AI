@@ -345,6 +345,15 @@ class CommandWireVocabTests(unittest.TestCase):
         self.assertEqual("CMD_found_UNIT_SETTLER_1", cmd)
         self.assertTrue(any("self-tile" in n for n in command_wire.LAST_UNRESOLVED))
 
+    def test_own_tile_move_without_legal_fortify_is_dropped(self):
+        snap = {
+            "game": {"map_width": 40, "map_height": 40},
+            "your_units": [{"unit_id": "UNIT_W", "unit_type_id": "UNIT_WARRIOR", "plot_id": "PLOT_10_10"}],
+            "legal_commands": [],
+        }
+        self.assertIsNone(command_wire.resolve_unit_token(snap, "UNIT_W", "MoveTo(10,10)"))
+        self.assertEqual([], snap["legal_commands"])
+
     def test_settle_token_and_reply(self):
         snap = {
             "game": {"map_width": 40, "map_height": 40},
