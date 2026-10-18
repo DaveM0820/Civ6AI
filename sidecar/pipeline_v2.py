@@ -831,12 +831,7 @@ def map_image_attach_turn(snapshot: dict[str, Any]) -> bool:
         return True
     decision = snapshot.get("decision", {})
     turn = int(decision.get("turn", 0))
-    player_id = str(decision.get("player_id", "PLAYER_0"))
-    try:
-        player_index = int(player_id.rsplit("_", 1)[-1])
-    except ValueError:
-        player_index = 0
-    return (turn + player_index) % cadence == 0
+    return turn % cadence == 0
 
 
 def _parse_plot_coords(plot_id: Any) -> tuple[int, int] | None:
