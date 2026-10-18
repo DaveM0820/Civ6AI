@@ -2151,7 +2151,7 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   if goal ~= nil then
     return false
   end
-  return Civ6Ai_Snapshot._UnitMoves(unit) > 0
+  return Civ6Ai_Snapshot._UnitMoves(unit) > 0 and (Civ6Ai_Snapshot._Method(unit, "GetBuildCharges") or 0) == 0
 end
 
 -- Hex rings around each settler (3–5 is what the map overlay draws; snapshot
@@ -2160,7 +2160,6 @@ Civ6Ai_Snapshot.SETTLE_RADIUS = 5
 Civ6Ai_Snapshot.SETTLE_SCAN_CAP = 200
 Civ6Ai_Snapshot.SETTLE_SITES_CAP = 200
 Civ6Ai_Snapshot.COMMAND_RESULTS_CAP = 12
-Civ6Ai_Snapshot.BUILDER_OFFER_RADIUS = 3
 
 Civ6Ai_Snapshot.KIND_NAMES = {
   [1] = "move_unit", [2] = "set_research_tech", [3] = "set_research_civic", [4] = "found_city",
@@ -2588,143 +2587,6 @@ function Civ6Ai_Snapshot._PlotIndex(plot)
     return index
   end
   return nil
-end
-
-Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP = 8
-
-function Civ6Ai_Snapshot._HasImprovementPrereqs(playerID, row)
-  if row == nil then
-    return false
-  end
-  if row.PrereqTech ~= nil then
-    local tech = GameInfo.Technologies ~= nil and GameInfo.Technologies[row.PrereqTech] or nil
-    local techs = Civ6Ai_Snapshot._Method(Players[playerID], "GetTechs")
-    if tech ~= nil and Civ6Ai_Snapshot._Method(techs, "HasTech", tech.Index) ~= true then
-      return false
-    end
-  end
-  if row.PrereqCivic ~= nil then
-    local civic = GameInfo.Civics ~= nil and GameInfo.Civics[row.PrereqCivic] or nil
-    local culture = Civ6Ai_Snapshot._Method(Players[playerID], "GetCulture")
-    if civic ~= nil and Civ6Ai_Snapshot._Method(culture, "HasCivic", civic.Index) ~= true then
-      return false
-    end
-  end
-  return true
-end
-
--- Improvement_ValidBuildUnits restricts some Buildable improvements to one unit
--- type (IMPROVEMENT_ROMAN_FORT -> UNIT_ROMAN_LEGION, forts -> military
--- engineer). ImprovementBuilder.CanHaveImprovement does not check the unit, so
--- the owned-tile scan must: an improvement with ValidBuildUnits rows is offered
--- only to a unit listed there. No rows (or no table) = no restriction.
-function Civ6Ai_Snapshot._UnitCanBuildImprovement(unit, row)
-  if row == nil or GameInfo == nil or GameInfo.Improvement_ValidBuildUnits == nil then
-    return true
-  end
-  local unitType = nil
-  pcall(function()
-    local info = GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
-    unitType = info ~= nil and info.UnitType or nil
-  end)
-  local restricted = false
-  local allowed = false
-  pcall(function()
-    for r in GameInfo.Improvement_ValidBuildUnits() do
-      if r.ImprovementType == row.ImprovementType then
-        restricted = true
-        if unitType ~= nil and r.UnitType == unitType then
-          allowed = true
-          return
-        end
-      end
-    end
-  end)
-  return (not restricted) or allowed
-end
-
--- Improvements this builder can place on the current tile and owned tiles within
--- 3: ImprovementBuilder.CanHaveImprovement + tech/civic, and not already
--- present. Never list an improvement the engine would reject.
-function Civ6Ai_Snapshot._AddBuilderCommands(commands, playerID, unit, unitId)
-  local charges = Civ6Ai_Snapshot._Method(unit, "GetBuildCharges")
-  if type(charges) ~= "number" or charges <= 0 then
-    return
-  end
-  if GameInfo == nil or GameInfo.Improvements == nil then
-    return
-  end
-  local ux, uy = unit:GetX(), unit:GetY()
-  local added = 0
-  local seen = {}
-  local function offer(improvementType, px, py)
-    if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then
-      return
-    end
-    local key = improvementType .. "@" .. tostring(px) .. "," .. tostring(py)
-    if seen[key] then
-      return
-    end
-    seen[key] = true
-    local away = (px ~= ux or py ~= uy)
-    table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-      command_id = "CMD_improve_" .. unitId .. "_" .. improvementType .. "_" .. tostring(px) .. "_" .. tostring(py),
-      kind = "worker_improve",
-      fixed_arguments = {
-        unit_id = unitId,
-        improvement_id = improvementType,
-        target_x = px,
-        target_y = py,
-        G = away and 1 or nil,
-        A = away and 2 or nil,
-        goal = away and 1 or nil,
-        intent = away and "improve" or nil,
-      },
-    }))
-    added = added + 1
-  end
-  local function plotHasImprovement(plot, row)
-    if plot == nil or plot.GetImprovementType == nil or row == nil then
-      return false
-    end
-    local existing = plot:GetImprovementType()
-    return type(existing) == "number" and existing >= 0 and existing == row.Index
-  end
-  local team = Civ6Ai_Snapshot._Method(Players[playerID], "GetTeam")
-  local r = Civ6Ai_Snapshot.BUILDER_OFFER_RADIUS
-  pcall(function()
-    for dy = -r, r do
-      for dx = -r, r do
-        if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then return end
-        local px, py = ux + dx, uy + dy
-        local dist = Map.GetPlotDistance ~= nil and Map.GetPlotDistance(ux, uy, px, py) or (math.abs(dx) + math.abs(dy))
-        if dist <= r then
-          local plot = Map.GetPlot(px, py)
-          local owner = plot ~= nil and plot.GetOwner ~= nil and plot:GetOwner() or -1
-          if plot ~= nil and owner == playerID then
-            for row in GameInfo.Improvements() do
-              if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then return end
-              if row.Buildable == true and (row.TraitType == nil or row.TraitType == "")
-                  and Civ6Ai_Snapshot._HasImprovementPrereqs(playerID, row)
-                  and Civ6Ai_Snapshot._UnitCanBuildImprovement(unit, row)
-                  and not plotHasImprovement(plot, row) then
-                local can = false
-                if ImprovementBuilder ~= nil and ImprovementBuilder.CanHaveImprovement ~= nil then
-                  local okCan, allowed = pcall(ImprovementBuilder.CanHaveImprovement, plot, row.Index, team)
-                  can = okCan and allowed == true
-                elseif dx == 0 and dy == 0 then
-                  can = true
-                end
-                if can then
-                  offer(row.ImprovementType, px, py)
-                end
-              end
-            end
-          end
-        end
-      end
-    end
-  end)
 end
 
 -- Neighbour steps for combat units standing next to a visible enemy. Open
@@ -3712,7 +3574,6 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
         Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
         Civ6Ai_Snapshot._AddPillageCommand(commands, unit, unitId)
         Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
-        Civ6Ai_Snapshot._AddBuilderCommands(commands, playerID, unit, unitId)
         pcall(Civ6Ai_Snapshot._AddTradeRouteCommands, commands, playerID, unit, unitId)
         pcall(Civ6Ai_Snapshot._AddExploreCommand, commands, unit, unitId)
         pcall(Civ6Ai_Snapshot._AddActivateCommand, commands, playerID, unit, unitId)

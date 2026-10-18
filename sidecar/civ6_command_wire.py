@@ -369,9 +369,6 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
         if coord:
             return _synthesize_settle(snapshot, unit_id, int(coord.group(1)), int(coord.group(2)))
         verb = "foundcity"
-    if verb == "improve" and coord:
-        imp = _improve_id_from_value(value)
-        return _synthesize_improve(snapshot, unit_id, int(coord.group(1)), int(coord.group(2)), imp)
     if verb == "traderoute":
         return _synthesize_trade_route(snapshot, unit_id, value)
     for token, cmd_id in candidates:
@@ -590,48 +587,6 @@ def _improve_id_from_value(value: Any) -> str | None:
     return None
 
 
-def _synthesize_improve(
-    snapshot: dict[str, Any], unit_id: str, x: int, y: int, improvement_id: str | None
-) -> str | None:
-    if not improvement_id:
-        LAST_UNRESOLVED.append(f"dropped: improve= missing improvement for {unit_id}")
-        return None
-    if not _on_map(snapshot, x, y):
-        LAST_UNRESOLVED.append(f"dropped: off-map improve=({x},{y}) for {unit_id}")
-        return None
-    legal = snapshot.get("legal_commands") if isinstance(snapshot.get("legal_commands"), list) else []
-    for command in legal:
-        if not isinstance(command, dict) or command.get("kind") != "worker_improve":
-            continue
-        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
-        if fixed.get("unit_id") != unit_id:
-            continue
-        if str(fixed.get("improvement_id") or "").upper() != improvement_id.upper():
-            continue
-        if int(fixed.get("target_x", x)) == x and int(fixed.get("target_y", y)) == y:
-            return str(command.get("command_id"))
-    unit = _unit_row(snapshot, unit_id)
-    here = _plot_xy_of_unit(unit)
-    away = here != (x, y)
-    fixed: dict[str, Any] = {
-        "unit_id": unit_id,
-        "improvement_id": improvement_id,
-        "target_x": x,
-        "target_y": y,
-    }
-    if away:
-        fixed.update(_arrival_fields(INTENT_IMPROVE))
-    return _append_legal(snapshot, {
-        "command_id": f"CMD_improve_{unit_id}_{improvement_id}_{x}_{y}",
-        "kind": "worker_improve",
-        "description": "Move and improve",
-        "fixed_arguments": fixed,
-        "parameter_domains": {},
-        "affected_ids": [unit_id],
-        "runtime_status": "tested",
-    })
-
-
 def _synthesize_trade_route(snapshot: dict[str, Any], unit_id: str, value: Any) -> str | None:
     text = str(value or "")
     wanted = _norm(text)
@@ -720,15 +675,10 @@ def pack_apply_command(snapshot: dict[str, Any] | None, command: dict[str, Any])
     intent = args.get("intent")
     if args.get("found") is True:
         intent = INTENT_FOUND
-    if args.get("improve") is True and kind in ("move_unit", "worker_improve"):
-        intent = INTENT_IMPROVE
     if intent in INTENT_A_CODES:
         args["intent"] = intent
         args["goal"] = True
         args.pop("N", None)
-    if kind == "worker_improve" and (args.get("target_x") is not None or args.get("x") is not None):
-        args["goal"] = True
-        args["intent"] = INTENT_IMPROVE
     if kind == "trade_route":
         args["goal"] = True
         args["intent"] = INTENT_TRADE
@@ -861,15 +811,6 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
         if prop.lower() in ("traderoute", "trade_route") and head in units:
             raw = str(value).strip()
             token = raw if raw.lower().startswith("traderoute") else f"TradeRoute({raw})"
-            cmd_id = resolve_unit_token(snapshot, units[head], token)
-            if cmd_id:
-                bound.append(cmd_id)
-                continue
-            unresolved.append(f"{key}={value}")
-            continue
-        if prop.lower() == "improve" and head in units:
-            raw = str(value).strip()
-            token = raw if raw.lower().startswith("improve(") else f"Improve({raw})"
             cmd_id = resolve_unit_token(snapshot, units[head], token)
             if cmd_id:
                 bound.append(cmd_id)

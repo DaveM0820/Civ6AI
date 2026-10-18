@@ -414,7 +414,7 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
       or command.kind == "purchase_item" or command.kind == "purchase_tile" then
     return Civ6Ai_Apply._Deal(playerID, command, args)
   end
-  if command.kind == "worker_improve" or command.kind == "pillage_improvement" then
+  if command.kind == "pillage_improvement" then
     return Civ6Ai_Apply._Work(playerID, command, args)
   end
   if Civ6Ai_Apply.GOV_KINDS ~= nil and Civ6Ai_Apply.GOV_KINDS[command.kind] then
@@ -1435,19 +1435,10 @@ end
 function Civ6Ai_Apply._Work(playerID, command, args)
   local unitNum = Civ6Ai_Apply._ParseUnitNumericId(args.unit_id)
   local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
-  if command.kind == "pillage_improvement" then
-    if unitNum == nil then
-      return false, "missing_unit_id", args
-    end
-    local ok, reason = Civ6Ai_Apply._GovRoute("PillageImprovement", playerID, unitNum, x, y)
-    return ok, reason, args
+  if unitNum == nil then
+    return false, "missing_unit_id", args
   end
-  local row = args.improvement_id ~= nil and GameInfo ~= nil and GameInfo.Improvements ~= nil
-    and GameInfo.Improvements[args.improvement_id] or nil
-  if unitNum == nil or row == nil then
-    return false, "missing_unit_or_improvement", args
-  end
-  local ok, reason = Civ6Ai_Apply._GovRoute("ImproveTile", playerID, unitNum, row.Index, x, y)
+  local ok, reason = Civ6Ai_Apply._GovRoute("PillageImprovement", playerID, unitNum, x, y)
   return ok, reason, args
 end
 

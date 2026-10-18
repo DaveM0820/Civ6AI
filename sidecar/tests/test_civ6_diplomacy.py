@@ -104,29 +104,5 @@ class DiplomacyWireTests(unittest.TestCase):
         })
         self.assertEqual(token, ("purchase", "UNIT_MISSIONARY:faith"))
 
-    def test_improve_token_and_reply_bind(self):
-        token = command_wire.unit_command_token({
-            "kind": "worker_improve",
-            "fixed_arguments": {"unit_id": "UNIT_3", "improvement_id": "IMPROVEMENT_FARM"},
-        })
-        self.assertEqual(token, "Improve(IMPROVEMENT_FARM)")
-        snap = {
-            "your_units": [{"unit_id": "UNIT_3", "unit_type_id": "UNIT_BUILDER", "plot_id": "PLOT_6_7"}],
-            "legal_commands": [{
-                "command_id": "CMD_improve_UNIT_3_IMPROVEMENT_FARM",
-                "kind": "worker_improve",
-                "fixed_arguments": {
-                    "unit_id": "UNIT_3",
-                    "improvement_id": "IMPROVEMENT_FARM",
-                    "target_x": 6,
-                    "target_y": 7,
-                },
-            }],
-        }
-        out = command_wire.expand_civ6_command_wire(snap, {"builder_1.improve": "IMPROVEMENT_FARM"})
-        self.assertEqual(out.get("cmd.0"), "CMD_improve_UNIT_3_IMPROVEMENT_FARM")
-        self.assertEqual(command_wire.LAST_UNRESOLVED, [])
-
-
 if __name__ == "__main__":
     unittest.main()

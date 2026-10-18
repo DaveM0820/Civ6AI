@@ -382,8 +382,6 @@ function Civ6Ai_Orders._ArrivalAction(owner, unit, intent, extra, sender)
       return false, "site_no_longer_legal:" .. tostring(reason)
     end
     return true, "found_on_arrival:" .. tostring(reason)
-  elseif intent == Civ6Ai_Orders.INTENT.IMPROVE then
-    return Civ6Ai_Orders.Gov.ImproveTile(owner, unit:GetID(), extra.I, unit:GetX(), unit:GetY())
   elseif intent == Civ6Ai_Orders.INTENT.RELIGION then
     -- Belief indices live in I/V/W. X/Y on a MOVE are the plot, never beliefs.
     return Civ6Ai_Orders.Gov.FoundReligion(owner, extra.I, unit:GetID(), extra.V, extra.W)
@@ -417,9 +415,6 @@ function Civ6Ai_Orders._DoMove(sender, o)
       if intent == Civ6Ai_Orders.INTENT.FOUND then
         return false, "site_no_longer_legal:" .. tostring(why)
       end
-    end
-    if intent == Civ6Ai_Orders.INTENT.IMPROVE then
-      return Civ6Ai_Orders.Gov.ImproveTile(owner, o.U, o.I, x, y)
     end
     if intent == Civ6Ai_Orders.INTENT.RELIGION then
       return Civ6Ai_Orders.Gov.FoundReligion(owner, o.I, o.U, o.V, o.W)
@@ -787,7 +782,7 @@ function Civ6Ai_Orders._Execute(sender, o)
       or k == Civ6Ai_Orders.K.BUY or k == Civ6Ai_Orders.K.BUY_TILE then
     return Civ6Ai_Orders._DoDeal(sender, o)
   end
-  if k == Civ6Ai_Orders.K.IMPROVE or k == Civ6Ai_Orders.K.PILLAGE then
+  if k == Civ6Ai_Orders.K.PILLAGE then
     return Civ6Ai_Orders._DoWork(sender, o)
   end
   return Civ6Ai_Orders._DoCommand(sender, o)
@@ -2008,90 +2003,6 @@ function Gov.PurchaseTile(owner, cityId, x, y)
     .. ":city=" .. tostring(cityId)
 end
 
--- Spend one builder charge. Civ6 kills the unit on the last charge (UnitPanel
--- GetBuildCharges). ChangeActionCharges is tried when present; if charges cannot
--- be spent the improvement is not left on the plot.
-local function spendCharge(unit)
-  local before = call(unit, "GetBuildCharges")
-  if type(before) ~= "number" then
-    return false, "this game has no gameplay route to read build charges"
-  end
-  if before <= 0 then
-    return false, "that unit has no build charges left"
-  end
-  if unit.ChangeActionCharges ~= nil then
-    pcall(unit.ChangeActionCharges, unit, -1)
-  elseif unit.SetActionCharges ~= nil then
-    pcall(unit.SetActionCharges, unit, before - 1)
-  end
-  local after = call(unit, "GetBuildCharges")
-  if type(after) == "number" and after < before then
-    if after <= 0 then
-      pcall(UnitManager.Kill, unit)
-    else
-      pcall(UnitManager.FinishMoves, unit)
-    end
-    return true, after
-  end
-  if before == 1 then
-    pcall(UnitManager.Kill, unit)
-    return true, 0
-  end
-  return false, "this game has no gameplay route to spend a build charge"
-end
-
--- Builder improve: ImprovementBuilder.SetImprovementType (Firaxis scenarios and
--- this file's TEST_IMPROVEMENT). The unit must stand on the tile.
-function Gov.ImproveTile(owner, unitId, improvementIndex, x, y)
-  local unit = Civ6Ai_Orders._Unit(owner, unitId)
-  if unit == nil then
-    return false, "unit_not_found"
-  end
-  local charges = call(unit, "GetBuildCharges")
-  if type(charges) ~= "number" then
-    return false, "this game has no gameplay route to read build charges"
-  end
-  if charges <= 0 then
-    return false, "that unit has no build charges left"
-  end
-  local ux, uy = call(unit, "GetX"), call(unit, "GetY")
-  if type(x) == "number" and x >= 0 and type(y) == "number" and y >= 0 then
-    if ux ~= x or uy ~= y then
-      return false, "that builder is not on " .. tostring(x) .. "," .. tostring(y)
-    end
-  else
-    x, y = ux, uy
-  end
-  local plot = Map.GetPlot(x, y)
-  local row = GameInfo.Improvements ~= nil and GameInfo.Improvements[improvementIndex] or nil
-  if plot == nil or row == nil then
-    return false, "unknown improvement or plot"
-  end
-  if ImprovementBuilder == nil or ImprovementBuilder.SetImprovementType == nil then
-    return false, "this game has no gameplay route to place an improvement"
-  end
-  local team = call(Players[owner], "GetTeam")
-  if ImprovementBuilder.CanHaveImprovement ~= nil then
-    local okCan, can = pcall(ImprovementBuilder.CanHaveImprovement, plot, row.Index, team)
-    if okCan and can == false then
-      return false, (row.ImprovementType or "that improvement") .. " cannot be built on that tile"
-    end
-  end
-  local beforeImp = call(plot, "GetImprovementType")
-  local okSet = pcall(ImprovementBuilder.SetImprovementType, plot, row.Index, owner)
-  local afterImp = call(plot, "GetImprovementType")
-  if not okSet or afterImp ~= row.Index then
-    return false, "the game refused to place " .. tostring(row.ImprovementType)
-  end
-  local spent, why = spendCharge(unit)
-  if not spent then
-    pcall(ImprovementBuilder.SetImprovementType, plot, beforeImp or -1, owner)
-    return false, why
-  end
-  return true, "improvement=" .. tostring(row.ImprovementType) .. ":plot=" .. tostring(x) .. "," .. tostring(y)
-    .. ":charges=" .. tostring(why)
-end
-
 -- Pillage the improvement under a combat unit. TunerMapPanel uses
 -- ImprovementBuilder.SetImprovementPillaged; PlotToolTip reads it back with
 -- plot:IsImprovementPillaged. The unit must be standing on that tile.
@@ -2157,21 +2068,7 @@ function Civ6Ai_Orders._DoWork(sender, o)
   if why ~= nil then
     return false, why
   end
-  if o.K == Civ6Ai_Orders.K.PILLAGE then
-    return Gov.PillageImprovement(o.P, o.U, o.X, o.Y)
-  end
-  local unit = Civ6Ai_Orders._Unit(o.P, o.U)
-  if unit == nil then
-    return false, "stale_unit_id"
-  end
-  local x, y = o.X, o.Y
-  if type(x) == "number" and x >= 0 and type(y) == "number" and y >= 0 then
-    if unit:GetX() ~= x or unit:GetY() ~= y then
-      o.G, o.A = 1, Civ6Ai_Orders.INTENT.IMPROVE
-      return Civ6Ai_Orders._DoMove(sender, o)
-    end
-  end
-  return Gov.ImproveTile(o.P, o.U, o.I, o.X, o.Y)
+  return Gov.PillageImprovement(o.P, o.U, o.X, o.Y)
 end
 
 -- Synced channel dispatch for the governance kinds.

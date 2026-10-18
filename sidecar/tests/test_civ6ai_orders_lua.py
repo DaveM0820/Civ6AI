@@ -865,13 +865,6 @@ class WpAApplyCoreTests(unittest.TestCase):
         self.assertTrue(self.last()["ok"], self.last())
         self.assertEqual(self.rt.eval("Players[2].founded.x"), 10)
 
-    def test_improve_walks_then_builds(self):
-        self.rt.execute("Players[2].units[1].charges=3")
-        self.order(0, K=21, P=2, U=7, I=0, X=10, Y=11, S=98)
-        self.assertTrue(self.last()["ok"], self.last())
-        self.assertEqual(self.rt.eval("Map.GetPlot(10,11).improvement"), 0)
-        self.assertEqual(self.rt.eval("Players[2].units[1].charges"), 2)
-
     def test_channel_packs_goal_fallbacks_and_new_kinds(self):
         rt = lupa.LuaRuntime(unpack_returned_tuples=True)
         rt.execute(CHANNEL_ENV)
@@ -1020,20 +1013,6 @@ class DealOrdersTests(unittest.TestCase):
         self.assertTrue(self.last()["ok"], self.last()["reason"])
         self.assertEqual(self.rt.eval("Map.GetPlot(6,7).owner"), 2)
         self.assertEqual(self.rt.eval("Players[2].gold"), gold - 25)
-
-    def test_improve_places_and_spends_charge(self):
-        self.rt.execute("Players[2].units[1].charges=3; Players[2].units[1].x=6; Players[2].units[1].y=7")
-        self.order(0, K=21, P=2, U=7, I=0, X=6, Y=7, S=6)
-        self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertEqual(self.rt.eval("Map.GetPlot(6,7).improvement"), 0)
-        self.assertEqual(self.rt.eval("Players[2].units[1].charges"), 2)
-
-    def test_improve_refused_without_charges(self):
-        self.rt.execute("Players[2].units[1].charges=0; Players[2].units[1].x=6; Players[2].units[1].y=7")
-        self.order(0, K=21, P=2, U=7, I=0, X=6, Y=7, S=7)
-        self.assertEqual(self.last()["reason"], "that unit has no build charges left")
-        self.assertIsNone(self.rt.eval("Map.GetPlot(6,7).improvement"))
-
 
 class OrderChannelDealTests(OrderChannelTests):
     def test_war_peace_purchase_pack_integer_fields(self):
