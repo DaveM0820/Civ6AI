@@ -510,7 +510,7 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
     if bits:
         lines.append(pipeline._wire_line(f"{prefix}.settle.here", ", ".join(bits)))
     sites = settle.get("sites") if settle else None
-    if isinstance(sites, (list, dict)):
+    if isinstance(sites, list) or settle.get("no_reachable_site"):
         from sidecar import civ6_command_wire as command_wire
 
         labeled = {
@@ -518,7 +518,7 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
             for row in command_wire.labeled_settle_sites(snapshot)
         }
         labels: list[str] = []
-        for site in sites:
+        for site in sites or []:
             if not isinstance(site, dict):
                 continue
             try:
