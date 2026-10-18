@@ -2644,8 +2644,7 @@ function Civ6Ai_Snapshot._UnitCanBuildImprovement(unit, row)
 end
 
 -- Improvements this builder can place on the current tile and owned tiles within
--- 3. Current tile: UnitManager.CanStartOperation(BUILD_IMPROVEMENT). Other owned
--- tiles: ImprovementBuilder.CanHaveImprovement + tech/civic, and not already
+-- 3: ImprovementBuilder.CanHaveImprovement + tech/civic, and not already
 -- present. Never list an improvement the engine would reject.
 function Civ6Ai_Snapshot._AddBuilderCommands(commands, playerID, unit, unitId)
   local charges = Civ6Ai_Snapshot._Method(unit, "GetBuildCharges")
@@ -2690,35 +2689,6 @@ function Civ6Ai_Snapshot._AddBuilderCommands(commands, playerID, unit, unitId)
     end
     local existing = plot:GetImprovementType()
     return type(existing) == "number" and existing >= 0 and existing == row.Index
-  end
-  local op = UnitOperationTypes ~= nil and UnitOperationTypes.BUILD_IMPROVEMENT or nil
-  if op == nil and GameInfo.UnitOperations ~= nil then
-    local row = GameInfo.UnitOperations["UNITOPERATION_BUILD_IMPROVEMENT"]
-    op = row ~= nil and row.Hash or nil
-  end
-  local here = Map.GetPlot(ux, uy)
-  if here ~= nil and op ~= nil and UnitManager ~= nil and UnitManager.CanStartOperation ~= nil then
-    local params = {}
-    if UnitOperationTypes ~= nil then
-      params[UnitOperationTypes.PARAM_X] = ux
-      params[UnitOperationTypes.PARAM_Y] = uy
-    end
-    local ok, can, results = pcall(function()
-      return UnitManager.CanStartOperation(unit, op, nil, params, true)
-    end)
-    local improvements = nil
-    if ok and can == true and type(results) == "table" and UnitOperationResults ~= nil then
-      improvements = results[UnitOperationResults.IMPROVEMENTS]
-    end
-    if type(improvements) == "table" then
-      for _, hash in ipairs(improvements) do
-        if added >= Civ6Ai_Snapshot.BUILDER_IMPROVE_CAP then break end
-        local row = GameInfo.Improvements[hash]
-        if row ~= nil and row.ImprovementType ~= nil and not plotHasImprovement(here, row) then
-          offer(row.ImprovementType, ux, uy)
-        end
-      end
-    end
   end
   local team = Civ6Ai_Snapshot._Method(Players[playerID], "GetTeam")
   local r = Civ6Ai_Snapshot.BUILDER_OFFER_RADIUS
