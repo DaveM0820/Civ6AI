@@ -250,18 +250,6 @@ function Civ6Ai_Orders._PlotEnterOk(owner, unit, x, y)
   if plot == nil then
     return false, "plot_not_found"
   end
-  local plotOwner = call(plot, "GetOwner")
-  if plotOwner ~= nil and plotOwner >= 0 and plotOwner ~= owner then
-    if Civ6Ai_Orders._AtWar(owner, plotOwner) then
-      return true, ""
-    end
-    local them = Players[plotOwner]
-    local diplo = them ~= nil and call(them, "GetDiplomacy") or nil
-    if diplo ~= nil and call(diplo, "HasOpenBordersFrom", owner) == true then
-      return true, ""
-    end
-    return false, "foreign_territory"
-  end
   return true, ""
 end
 
