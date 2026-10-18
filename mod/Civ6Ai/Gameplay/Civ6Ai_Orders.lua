@@ -2009,7 +2009,7 @@ function Gov.PurchaseTile(owner, cityId, x, y)
 end
 
 -- Spend one builder charge. Civ6 kills the unit on the last charge (UnitPanel
--- GetBuildCharges). ChangeBuildCharges is tried when present; if charges cannot
+-- GetBuildCharges). ChangeActionCharges is tried when present; if charges cannot
 -- be spent the improvement is not left on the plot.
 local function spendCharge(unit)
   local before = call(unit, "GetBuildCharges")
@@ -2019,10 +2019,10 @@ local function spendCharge(unit)
   if before <= 0 then
     return false, "that unit has no build charges left"
   end
-  if unit.ChangeBuildCharges ~= nil then
-    pcall(unit.ChangeBuildCharges, unit, -1)
-  elseif unit.SetBuildCharges ~= nil then
-    pcall(unit.SetBuildCharges, unit, before - 1)
+  if unit.ChangeActionCharges ~= nil then
+    pcall(unit.ChangeActionCharges, unit, -1)
+  elseif unit.SetActionCharges ~= nil then
+    pcall(unit.SetActionCharges, unit, before - 1)
   end
   local after = call(unit, "GetBuildCharges")
   if type(after) == "number" and after < before then
