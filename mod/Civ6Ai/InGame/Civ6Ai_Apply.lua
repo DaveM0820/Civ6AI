@@ -823,10 +823,7 @@ function Civ6Ai_Apply._UnitFortify(playerID, args)
   end
   if UnitOperationTypes ~= nil and UnitOperationTypes.FORTIFY ~= nil
       and UnitManager ~= nil and UnitManager.RequestOperation ~= nil then
-    local okOp, did = pcall(function()
-      return UnitManager.RequestOperation(unit, UnitOperationTypes.FORTIFY)
-    end)
-    if okOp and did then
+    if pcall(UnitManager.RequestOperation, unit, UnitOperationTypes.FORTIFY) then
       return true, "", args
     end
   end
