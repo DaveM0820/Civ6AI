@@ -96,6 +96,7 @@ _LUA_ARRAY_KEYS = frozenset({
     "resources",
     "victory_progress",
     "strategics",
+    "sites",
 })
 
 
