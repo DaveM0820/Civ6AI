@@ -806,7 +806,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
       Civ6Ai_Orders._ClearGoal(owner, o.U)
     end
   end
-  local pending = orders
+  local pending, okUnits = orders, {}
   for pass = 1, Civ6Ai_Orders.MAX_PASSES do
     if #pending == 0 then
       break
@@ -816,6 +816,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
       local ok, reason = Civ6Ai_Orders._Execute(sender, o)
       if ok then
         progress = true
+        okUnits[o.U or -1] = o.K ~= Civ6Ai_Orders.K.SKIP or nil
         Civ6Ai_Orders._Record(sender, o, true, reason)
       elseif retryable(o.K, reason) and pass < Civ6Ai_Orders.MAX_PASSES then
         nextPending[#nextPending + 1] = o
@@ -845,7 +846,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
     pending = nextPending
   end
   Civ6Ai_Orders._ContinueGoals(owner, ordered)
-  Civ6Ai_Orders._FinishIdleUnits(owner, ordered)
+  Civ6Ai_Orders._FinishIdleUnits(owner, ordered, okUnits)
 end
 
 -- Units the model commands. Traders and religious units stay with the game's
@@ -871,20 +872,27 @@ end
 -- An AI seat's model-commanded units end their turn after its orders, so the
 -- game's AI does not move the units the model left in place. A human seat
 -- finishes its own units.
-function Civ6Ai_Orders._FinishIdleUnits(owner, ordered)
+function Civ6Ai_Orders._FinishIdleUnits(owner, ordered, okUnits)
   local p = Players[owner]
   if p == nil or call(p, "IsHuman") then
     return 0
   end
-  local count = 0
+  local count, native, now = 0, 0, Game.GetCurrentGameTurn()
   for _, u in ipairs(sortedMembers(call(p, "GetUnits"))) do
+    local key = "CIV6AI_OK_" .. tostring(owner) .. "_" .. tostring(u:GetID())
+    if (okUnits or {})[u:GetID()] or Game:GetProperty(key) == nil then
+      Game:SetProperty(key, now)
+    end
     if (call(u, "GetMovesRemaining") or 0) > 0 and Civ6Ai_Orders._ModelCommandsUnit(u, ordered)
-        and Civ6Ai_Orders._ReadGoal(owner, u:GetID()) == nil
-        and pcall(UnitManager.FinishMoves, u) then
-      count = count + 1
+        and Civ6Ai_Orders._ReadGoal(owner, u:GetID()) == nil then
+      if now - (num(Game:GetProperty(key)) or now) >= 2 then
+        native = native + 1
+      elseif pcall(UnitManager.FinishMoves, u) then
+        count = count + 1
+      end
     end
   end
-  log("finish_idle|player=" .. tostring(owner) .. "|units=" .. count)
+  log("finish_idle|player=" .. tostring(owner) .. "|units=" .. count .. "|native=" .. native)
   return count
 end
 

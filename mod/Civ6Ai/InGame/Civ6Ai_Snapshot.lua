@@ -2824,7 +2824,7 @@ function Civ6Ai_Snapshot._AddPurchaseCommands(commands, playerID)
               and Civ6Ai_Snapshot._Method(goldObj, "CanPurchase", y, hash, formation)
               or Civ6Ai_Snapshot._Method(goldObj, "CanPurchase", y, hash)
           end
-          if can ~= false and allowed ~= false then
+          if can == true and allowed == true then
             local fixed = { city_id = cityId, item_id = itemId }
             if yieldName == "faith" then
               fixed["yield"] = "faith"
@@ -3591,7 +3591,8 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
     end
   end
   local techs = player and player:GetTechs()
-  if techs ~= nil then
+  local rt = techs ~= nil and techs:GetResearchingTech() or -1
+  if techs ~= nil and (rt < 0 or techs:GetResearchProgress(rt) + techs:GetScienceYield() >= techs:GetResearchCost(rt)) then
     for row in GameInfo.Technologies() do
       -- Require HasTech == false (not mere ~= true): nil from HasTech must not pass.
       if techs:CanResearch(row.Index) and techs:HasTech(row.Index) == false then
@@ -3604,7 +3605,9 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
     end
   end
   local culture = player and player.GetCulture ~= nil and player:GetCulture() or nil
-  if culture ~= nil and GameInfo.Civics ~= nil and culture.CanProgress ~= nil then
+  local rc = culture ~= nil and culture:GetProgressingCivic() or -1
+  if culture ~= nil and GameInfo.Civics ~= nil and culture.CanProgress ~= nil
+      and (rc < 0 or culture:GetCulturalProgress(rc) + culture:GetCultureYield() >= culture:GetCultureCost(rc)) then
     for row in GameInfo.Civics() do
       local ok, can = pcall(function()
         -- Require HasCivic == false so nil does not look researchable.

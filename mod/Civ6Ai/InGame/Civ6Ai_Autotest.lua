@@ -467,13 +467,8 @@ function Civ6Ai_Autotest._CityNeedsProduction(city)
   if city == nil or Civ6Ai_Production == nil then
     return false
   end
-  local state = nil
-  pcall(function() state = Civ6Ai_Production._GetCityProductionState(city) end)
-  if type(state) ~= "table" then
-    return true
-  end
-  local item = state.item_id or state.current or state.build_id
-  return item == nil or item == "" or item == "NONE"
+  local ok, item = pcall(Civ6Ai_Production._GetCityProductionState, city)
+  return ok and (item == nil or item == "" or item == "NONE")
 end
 
 function Civ6Ai_Autotest._ClearProductionBlockers(playerID)
@@ -539,19 +534,6 @@ function Civ6Ai_Autotest._ClearProductionBlockers(playerID)
         return
       end
     end
-  end
-  -- Fallback: experiment target alone.
-  local cityWireId, buildId = Civ6Ai_Production.FindExperimentTarget(playerID)
-  if cityWireId ~= nil and buildId ~= nil then
-    local ok, reason = Civ6Ai_Production.QueueBuild(playerID, cityWireId, buildId)
-    Civ6Ai_Autotest._LogLine(
-      "auto_production|player=" .. tostring(playerID)
-      .. "|city=" .. tostring(cityWireId) .. "|build=" .. tostring(buildId)
-      .. "|ok=" .. tostring(ok) .. "|reason=" .. tostring(reason or ""))
-    Civ6Ai_Util.Log(
-      "autotest|auto_production|player=" .. tostring(playerID)
-      .. "|city=" .. tostring(cityWireId) .. "|build=" .. tostring(buildId)
-      .. "|ok=" .. tostring(ok) .. "|reason=" .. tostring(reason or ""))
   end
 end
 
