@@ -550,30 +550,14 @@ function Civ6Ai_Apply._RequestUnitOperation(unit, op, params, probeLabel, plot)
     end
     return false, "operation_illegal"
   end
-  if UnitManager.RequestOperation ~= nil then
-    if plot ~= nil and UnitManager.RequestOperation(unit, op, plot) then
-      if probeLabel ~= nil then
-        Civ6Ai_Util.Log("apply|probe|" .. probeLabel .. "|ok")
-      end
-      return true, ""
-    end
-    if UnitManager.RequestOperation(unit, op, params) then
-      if probeLabel ~= nil then
-        Civ6Ai_Util.Log("apply|probe|" .. probeLabel .. "|ok")
-      end
-      return true, ""
-    end
-    if UnitManager.RequestOperation(unit, op) then
-      if probeLabel ~= nil then
-        Civ6Ai_Util.Log("apply|probe|" .. probeLabel .. "|ok")
-      end
-      return true, ""
-    end
+  if UnitManager.RequestOperation == nil then
+    return false, "operation_rejected"
   end
+  UnitManager.RequestOperation(unit, op, params)
   if probeLabel ~= nil then
-    Civ6Ai_Util.Log("apply|probe|" .. probeLabel .. "|fail|rejected")
+    Civ6Ai_Util.Log("apply|probe|" .. probeLabel .. "|ok")
   end
-  return false, "operation_rejected"
+  return true, ""
 end
 
 function Civ6Ai_Apply._MoveUnit(playerID, args)
