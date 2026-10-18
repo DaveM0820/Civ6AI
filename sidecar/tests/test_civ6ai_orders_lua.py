@@ -927,7 +927,7 @@ class WpAApplyCoreTests(unittest.TestCase):
           end
         """)
         self.rt.execute("Players[2]:GetTreasury()")
-        self.order(0, K=19, P=2, U=0, X=131072, Y=0, I=0, S=99)
+        self.order(0, K=19, P=2, U=0, X=131072, Y=0, I=0, V=40, S=99)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
 
     def test_trade_explore_activate_guarded_fallback(self):
@@ -1000,7 +1000,7 @@ class DealOrdersTests(unittest.TestCase):
         self.rt.execute("Players[2]:GetTreasury()")
         before = self.rt.eval("#Players[2].units")
         gold = self.rt.eval("Players[2].gold")
-        self.order(0, K=19, P=2, U=0, X=3, Y=0, I=0, S=4)
+        self.order(0, K=19, P=2, U=0, X=3, Y=0, I=0, V=40, S=4)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
         self.assertEqual(self.rt.eval("#Players[2].units"), before + 1)
         self.assertEqual(self.rt.eval("Players[2].gold"), gold - 40)
@@ -1017,6 +1017,7 @@ class DealOrdersTests(unittest.TestCase):
 class OrderChannelDealTests(OrderChannelTests):
     def test_war_peace_purchase_pack_integer_fields(self):
         rt = self.rt
+        rt.execute("Civ6Ai_Snapshot = {_PurchaseCost = function() return 40 end}; CityManager = {GetCity = function() return {} end}")
         d = self.decision([
             '{kind="send_diplomatic_action", arguments={target_player_id="PLAYER_1", action_id="DECLARE_WAR"}}',
             '{kind="propose_peace", arguments={target_player_id="PLAYER_3"}}',
@@ -1032,7 +1033,7 @@ class OrderChannelDealTests(OrderChannelTests):
         self.assertEqual(sent[1]["I"], 3)
         self.assertEqual(sent[2]["X"], 3)
         self.assertEqual(sent[2]["I"], 0)
-        self.assertEqual(sent[2]["U"], 0)
+        self.assertEqual((sent[2]["U"], sent[2]["V"]), (0, 40))
         self.assertEqual((sent[3]["I"], sent[3]["X"], sent[3]["Y"]), (3, 6, 7))
         self.assertEqual((sent[4]["U"], sent[4]["I"], sent[4]["X"], sent[4]["Y"]), (7, 0, 6, 7))
 

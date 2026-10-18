@@ -285,6 +285,8 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
     f.I = (unitRow or bldRow).Index
     f.U = bldRow ~= nil and 1 or 0
     f.Y = string.lower(tostring(args.yield or "gold")) == "faith" and 1 or 0
+    f.V = Civ6Ai_Snapshot._PurchaseCost(CityManager.GetCity(playerID, cityNum), f.Y == 1 and "YIELD_FAITH" or "YIELD_GOLD",
+      (unitRow or bldRow).Hash, unitRow ~= nil and MilitaryFormationTypes ~= nil and MilitaryFormationTypes.STANDARD_MILITARY_FORMATION or nil)
   elseif kind == 20 then
     local cityNum = Civ6Ai_OrderChannel._CityNum(args.city_id)
     local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)

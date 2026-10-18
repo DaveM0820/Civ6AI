@@ -1868,21 +1868,6 @@ end
 
 local UNAVAILABLE_COST = 1000000000
 
-local function yieldIndex(useFaith)
-  local row = GameInfo ~= nil and GameInfo.Yields ~= nil
-    and GameInfo.Yields[useFaith and "YIELD_FAITH" or "YIELD_GOLD"] or nil
-  return row and row.Index or (useFaith and 5 or 0)
-end
-
-local function itemCost(city, hash, useFaith, formation)
-  local gold = call(city, "GetGold")
-  local y = yieldIndex(useFaith)
-  if formation ~= nil then
-    return call(gold, "GetPurchaseCost", y, hash, formation)
-  end
-  return call(gold, "GetPurchaseCost", y, hash)
-end
-
 local function debit(owner, useFaith, cost)
   local p = Players[owner]
   if useFaith then
@@ -1917,7 +1902,7 @@ end
 -- Gold/faith purchase: debit the treasury, then spawn the unit (UnitManager.InitUnit,
 -- Firaxis scenarios and this file's own MP tests) or complete the building
 -- (BuildQueue:CreateIncompleteBuilding at 100%, TunerCityPanel.lua).
-function Gov.PurchaseItem(owner, cityId, itemIndex, isBuilding, useFaith)
+function Gov.PurchaseItem(owner, cityId, itemIndex, isBuilding, useFaith, cost)
   local city = cityById(owner, cityId)
   if city == nil then
     return false, "stale_city_id:" .. tostring(cityId)
@@ -1941,10 +1926,7 @@ function Gov.PurchaseItem(owner, cityId, itemIndex, isBuilding, useFaith)
       return false, typeName .. " is already in that city"
     end
   end
-  local formation = (not isBuilding) and MilitaryFormationTypes ~= nil
-    and MilitaryFormationTypes.STANDARD_MILITARY_FORMATION or nil
-  local cost = itemCost(city, hash, useFaith, formation)
-  if type(cost) ~= "number" or cost <= 0 or cost >= UNAVAILABLE_COST then
+  if type(cost) ~= "number" or cost <= 0 then
     return false, typeName .. " cannot be purchased with " .. (useFaith and "faith" or "gold") .. " in that city"
   end
   local okPay, why = debit(owner, useFaith, cost)
@@ -2064,7 +2046,7 @@ function Civ6Ai_Orders._DoDeal(sender, o)
   elseif k == Civ6Ai_Orders.K.PEACE then
     return Gov.MakePeace(o.P, o.I)
   elseif k == Civ6Ai_Orders.K.BUY then
-    return Gov.PurchaseItem(o.P, o.X, o.I, o.U == 1, o.Y == 1)
+    return Gov.PurchaseItem(o.P, o.X, o.I, o.U == 1, o.Y == 1, o.V)
   elseif k == Civ6Ai_Orders.K.BUY_TILE then
     return Gov.PurchaseTile(o.P, o.I, o.X, o.Y)
   end

@@ -2808,23 +2808,7 @@ function Civ6Ai_Snapshot._AddPurchaseCommands(commands, playerID)
           and Civ6Ai_Snapshot._PurchaseCost(city, yieldType, hash, formation)
           or Civ6Ai_Snapshot._PurchaseCost(city, yieldType, hash)
         if cost ~= nil and cost <= bal then
-          local params = {}
-          if CityCommandTypes ~= nil then
-            params[isUnit and CityCommandTypes.PARAM_UNIT_TYPE or CityCommandTypes.PARAM_BUILDING_TYPE] = hash
-            if Civ6Ai_Snapshot._YieldIndex(yieldType) ~= nil then
-              params[CityCommandTypes.PARAM_YIELD_TYPE] = Civ6Ai_Snapshot._YieldIndex(yieldType)
-            end
-          end
-          local can = Civ6Ai_Snapshot._CanStartPurchase(city, params)
-          local y = Civ6Ai_Snapshot._YieldIndex(yieldType)
-          local goldObj = Civ6Ai_Snapshot._Method(city, "GetGold")
-          local allowed
-          if goldObj ~= nil and goldObj.CanPurchase ~= nil and y ~= nil then
-            allowed = isUnit
-              and Civ6Ai_Snapshot._Method(goldObj, "CanPurchase", y, hash, formation)
-              or Civ6Ai_Snapshot._Method(goldObj, "CanPurchase", y, hash)
-          end
-          if can == true and allowed == true then
+          do
             local fixed = { city_id = cityId, item_id = itemId }
             if yieldName == "faith" then
               fixed["yield"] = "faith"
