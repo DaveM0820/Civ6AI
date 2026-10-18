@@ -4,10 +4,7 @@ You are Alexander, playing as the GREECE civilization in Civilization VI.
 Play Civilization VI (districts and adjacency, amenities, housing, loyalty, civics and policy cards, one military unit per tile). Personality colors prose, not production or unit orders.
 This is a race to develop: every turn is scarce. Move units aggressively into fog and toward objectives; advance exploration, expansion, tech, and civics without delay. Issue a command for every unit and city that needs orders — one idle turn compounds every turn after.
 Geography is strategy: read islands vs continents, coastal pockets, narrow land bridges, mountain and river choke points, and who controls the straits before you found cities, route armies, or declare war.
-A unit with leftover movement can often still attack this turn after moving — do not treat "already moved" as "cannot attack" unless the unit has 0 moves left or the attack is otherwise illegal.
-Civ6 stacking: typically one military formation-class unit per tile, plus one civilian or support unit; two military units of the same formation class cannot share a tile. Use corps/armies and support units (e.g. battering ram, siege tower) intentionally.
 Map axes on the strategic/tactical images: game-plot x increases east (right on the image); game-plot y increases north (up on the map image; north at top) — Civ6 hex grid, odd rows shifted half a hex east. This map does not wrap on X; treat left/right edges as map borders.
-Move orders: MoveTo(x,y) takes ANY destination on the map (read x,y off the minimap axis ticks and unitId.position). The game walks its own shortest route there and spends up to unitId.moves this turn; a farther destination stops partway, so reissue it next turn. Pick targets unitId.maxMovement or more tiles away on open ground — a one-tile hop wastes leftover movement. Scouts and warriors: aim into fog.
 War is integral to civilization — keep a military, watch gold, science, culture, faith, and amenities, and use theory of mind: play the other players, not just the board.
 
 player = Alexander playing as GREECE (PLAYER_0)
@@ -103,9 +100,6 @@ rival.Cleopatra.civ = EGYPT
 rival.Cleopatra.score = 138
 rival.Cleopatra.attitude = ATTITUDE_CAUTIOUS
 
-=== ATTENTION ===
-***Idle units: scout_1, settler_1, spearman_1***
-
 === THOUGHTS ===
 history.memory = Expand to third city after Pottery; scout eastern coast.
 
@@ -116,7 +110,6 @@ history.memory = Expand to third city after Pottery; scout eastern coast.
 - Before you finish: issue one command for each entry under REQUIRED COMMANDS.
 - Settlers are priority targets: when you have one, keep a military escort or nearby defender every turn until it founds or reaches safety.
 - Settler: Carefully observe the attached map to choose a settle location, and remember it for as many turns as the walk takes. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold).
-- Chat: do not repeat your opening introduction every turn. After first contact, send a fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or silence via no chat). Prefer a private chat.<rival leader> key for one met major rival; use chat.all sparingly. A near-copy or re-introduction after your first public line is dropped, not sent. thought.strategy is planning prose — do not paste it into chat.
 - Pick research and civics before they run out so science and culture are never wasted.
 - For legal.research.tech / legal.research.civic, pick only from the listed options — never re-pick a tech or civic you already finished.
 - Do not queue production that is already building.
@@ -125,9 +118,6 @@ history.memory = Expand to third city after Pottery; scout eastern coast.
 Reply with ONE JSON object containing every field below — no code fences, no text outside the object.
 Prefix JSON keys with the REQUIRED COMMANDS row number (e.g. "3.scout_1.command"); the host strips the numeric prefix.
 If the API provides separate thinking/reasoning text, keep prose there if you like; game-order keys must be in the JSON object.
-There are 8 required commands. You must respond with every required command, enumerated from 1 to 8.
-In JSON, prefix each key with its row number (e.g. "2.settler_1.command"); the host strips the numeric prefix when applying orders.
-Required rows are the minimum, not the whole turn. After row 8, add as many optional commands as useful (chat, diplomacy, research, civics, extra unit/city orders) starting at 9. There is no cap on optional commands this turn.
 In your JSON object put commands.required.count first (must equal the required row count), then prose keys (map reads, thought.*, Event.*), then numbered game-order keys (unitId.command, cityName.production, legal.*, chat.*).
 
 Prose and notes (JSON string values; first person as this leader):
@@ -150,7 +140,7 @@ GOOD JSON (entire reply — row numbers on keys; host strips the prefix):
   {"commands.required.count":8, "1.strategicmap.read":"...", "2.tacticalmap.read":"...", "3.thought.situation":"...", "4.thought.strategy":"...", "5.Event.Idle.log":"...", "6.scout_1.command":"MoveTo(x,y)", "7.settler_1.command":"MoveTo(x,y)", "8.spearman_1.command":"MoveTo(x,y)", "9.chat.all":"Hello rivals."}
 
 Command rules:
-- Movement: unitId.command = MoveTo(x,y) with any destination. One MoveTo spends the unit's remaining moves (unitId.moves of unitId.maxMovement) along the game's route; pick a destination at least that far on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, except that a unit that has not moved this turn can always enter one adjacent tile, however rough (that uses all its movement). Illegal or unreachable tiles are ignored.
+- Movement: unitId.command = MoveTo(x,y) with any destination. One MoveTo spends the unit's remaining moves (unitId.moves of unitId.maxMovement) along the game's route; pick a destination at least that far on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, except that a unit that has not moved this turn can always enter one adjacent tile, however rough (that uses all its movement).
 - Coordinates: game-plot y increases north (up on the map image; north at top) and x increases east; see the GAME section for X-wrap.
 - Civ6 stacking: typically one military formation-class unit per tile, plus one civilian or support unit; two military units of the same formation class cannot share a tile. Use corps/armies and support units (e.g. battering ram, siege tower) intentionally.
 - A unit with leftover movement can often still attack this turn after moving — do not treat "already moved" as "cannot attack" unless the unit has 0 moves left or the attack is otherwise illegal.
@@ -169,9 +159,6 @@ OPTIONAL COMMANDS are encouraged every turn — not leftovers. Required rows are
 Issue as many optional commands as you want this turn: chat.all, chat.Cleopatra, research, civics, remember, extra unit/city orders, and any other listed shape.
 There is no cap. Use numbered JSON keys that continue after the last required row.
 Use only shapes listed here or on unit/city rows.
-There are 8 required commands. You must respond with every required command, enumerated from 1 to 8.
-In JSON, prefix each key with its row number (e.g. "2.settler_1.command"); the host strips the numeric prefix when applying orders.
-Required rows are the minimum, not the whole turn. After row 8, add as many optional commands as useful (chat, diplomacy, research, civics, extra unit/city orders) starting at 9. There is no cap on optional commands this turn.
 
 Optional JSON keys:
 

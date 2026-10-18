@@ -25,7 +25,7 @@ class Civ6WirePromptTests(unittest.TestCase):
     def test_sections_present(self):
         snapshot = civ6_adapter.build_classical_golden_snapshot()
         wire = civ6_wire.build_civ6_model_wire_text(snapshot)
-        for section in ("GAME", "EMPIRE", "DIPLOMACY", "OPPONENTS", "ATTENTION", "THOUGHTS", "ADVICE",
+        for section in ("GAME", "EMPIRE", "DIPLOMACY", "OPPONENTS", "THOUGHTS", "ADVICE",
                         "RESPONSE INSTRUCTIONS", "OPTIONAL COMMANDS", "REQUIRED COMMANDS"):
             self.assertIn(f"=== {section} ===", wire)
         self.assertIn('"commands.required.count"', wire)

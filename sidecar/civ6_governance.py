@@ -173,7 +173,7 @@ def prompt_lines(snapshot: dict) -> list[str]:
             else:
                 lines.append("  Cards can't be changed this turn — " + str(p.get("change_rule") or "only after a civic completes"))
         cards = [c for c in _lst(p.get("available")) if isinstance(c, dict)]
-        if cards:
+        if cards and routes.get("policies", True):
             lines.append("  Unlocked policy cards (type — effect):")
             for c in cards:
                 mark = " [slotted]" if c.get("active") else ""

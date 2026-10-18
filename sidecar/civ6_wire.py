@@ -498,6 +498,10 @@ def _civ6_unit_tokens(snapshot: dict[str, Any]) -> dict[str, list[str]]:
             token = "MoveTo(x,y)"
         if token and token not in out.setdefault(unit_id, []):
             out[unit_id].append(token)
+    for unit in snapshot.get("your_units", []):
+        if isinstance(unit, dict) and ((unit.get("movement") or {}).get("current") or 0) > 0:
+            tokens = out.setdefault(str(unit.get("unit_id")), [])
+            tokens[:0] = [] if "MoveTo(x,y)" in tokens else ["MoveTo(x,y)"]
     for unit_id, tokens in out.items():
         tokens.sort(key=_token_sort_key)
     return out
@@ -741,13 +745,7 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
         "that needs orders — one idle turn compounds every turn after.",
         "Geography is strategy: read islands vs continents, coastal pockets, narrow land bridges, mountain and "
         "river choke points, and who controls the straits before you found cities, route armies, or declare war.",
-        coaching.CIV6_MOVE_THEN_ATTACK_GUIDANCE,
-        coaching.CIV6_UNIT_STACKING_GUIDANCE,
         coaching.civ6_map_axes_wrap_guidance(context),
-        "Move orders: MoveTo(x,y) takes ANY destination on the map (read x,y off the minimap axis ticks and "
-        "unitId.position). The game walks its own shortest route there and spends up to unitId.moves this turn; "
-        "a farther destination stops partway, so reissue it next turn. Pick targets unitId.maxMovement or more "
-        "tiles away on open ground — a one-tile hop wastes leftover movement. Scouts and warriors: aim into fog.",
         "War is integral to civilization — keep a military, watch gold, science, culture, faith, and amenities, "
         "and use theory of mind: play the other players, not just the board.",
         "",
@@ -1345,7 +1343,6 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
                 "- FoundCity is legal this turn for at least one Settler — strongly consider founding now unless "
                 "a clearly better tile is within about three moves."
             )
-    lines.append(f"- {coaching.CIV6_CHAT_VARIETY_COACHING}")
     lines.extend(combat_wire.tactics_advice_lines(context))
     lines.append("- Pick research and civics before they run out so science and culture are never wasted.")
     lines.append(
@@ -1377,7 +1374,6 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "Reply with ONE JSON object containing every field below — no code fences, no text outside the object.",
         'Prefix JSON keys with the REQUIRED COMMANDS row number (e.g. "3.scout_1.command"); the host strips the numeric prefix.',
         "If the API provides separate thinking/reasoning text, keep prose there if you like; game-order keys must be in the JSON object.",
-        *count_lines,
         "In your JSON object put commands.required.count first (must equal the required row count), then prose keys "
         "(map reads, thought.*, Event.*), then numbered game-order keys (unitId.command, cityName.production, legal.*, chat.*).",
         "",
@@ -1409,7 +1405,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "moves (unitId.moves of unitId.maxMovement) along the game's route; pick a destination at least that far "
         "on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, "
         "except that a unit that has not moved this turn can always enter one adjacent tile, however rough "
-        "(that uses all its movement). Illegal or unreachable tiles are ignored.",
+        "(that uses all its movement).",
         f"- Coordinates: {coaching.civ6_y_axis_phrase(snapshot)} and x increases east; see the GAME "
         "section for X-wrap.",
         f"- {coaching.CIV6_UNIT_STACKING_GUIDANCE}",
@@ -1484,7 +1480,6 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "extra unit/city orders, and any other listed shape.",
         "There is no cap. Use numbered JSON keys that continue after the last required row.",
         "Use only shapes listed here or on unit/city rows.",
-        *count_lines,
         "",
         "Optional JSON keys:",
         "",
@@ -1551,13 +1546,6 @@ def build_civ6_wire_prompt(context: dict[str, Any], map_stats: list[str] | None 
     attention = list(coaching.collect_civ6_attention_items(context if isinstance(context, dict) else {}))
     attention.extend(civ6_apply_results.blocked_attention_lines(context if isinstance(context, dict) else {}))
     attention.extend(combat_wire.attention_items(context))
-    idle = [
-        pipeline._build_unit_wire_id_map([u for u in context.get("your_units", []) if isinstance(u, dict)]).get(
-            str(u.get("unit_id")), "unit")
-        for u in context.get("your_units", []) if isinstance(u, dict) and u.get("needs_orders")
-    ]
-    if idle:
-        attention.append(f"***Idle units: {', '.join(sorted(idle))}***")
     attention.extend(economy_wire.attention_items(context))
     attention.extend(gs_wire.attention_items(context))
     attention.extend(governance_wire.attention_items(context))
