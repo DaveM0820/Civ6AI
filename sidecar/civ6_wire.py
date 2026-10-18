@@ -779,8 +779,20 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
     if isinstance(explored, int):
         map_lines.append(pipeline._wire_line("map.explored", f"{explored}%"))
     naval = any(isinstance(u, dict) and u.get("domain_id") == "DOMAIN_SEA" for u in context.get("your_units") or [])
-    for name, pattern in (("land", r"[.#]+"), ("coast", r"~+"))[:2 if naval else 1]:
-        for y, row in enumerate((context.get("known_map") or {}).get("visibility_grid") or []):
+    grid = [list(r) for r in (context.get("known_map") or {}).get("visibility_grid") or []]
+    todo = [tuple(map(int, str(o.get("plot_id")).split("_")[1:3])) for o in (context.get("your_units") or []) + (context.get("your_cities") or [])
+            if isinstance(o, dict) and re.fullmatch(r"PLOT_\d+_\d+", str(o.get("plot_id")))]
+    held = todo[:len([u for u in context.get("your_units") or [] if isinstance(u, dict) and re.fullmatch(r"PLOT_\d+_\d+", str(u.get("plot_id")))])]
+    while todo:
+        x, y = todo.pop()
+        if 0 <= y < len(grid) and grid[y] and grid[y][x % len(grid[y])] in ".#":
+            grid[y][x % len(grid[y])] = "*"
+            todo += [(x - 1, y), (x + 1, y)] + [(x + d, y + e) for e in (-1, 1) for d in ((0, 1) if y % 2 else (-1, 0))]
+    for x, y in held:
+        if 0 <= y < len(grid) and grid[y]:
+            grid[y][x % len(grid[y])] = "@"
+    for name, pattern in (("land", r"\*+"), ("island", r"[.#]+"), ("coast", r"~+"))[:3 if naval else 2]:
+        for y, row in enumerate("".join(r) for r in grid):
             runs = [m.span() for m in re.finditer(pattern, row)]
             if runs:
                 map_lines.append(pipeline._wire_line(f"map.{name}.y{y}", ", ".join(
