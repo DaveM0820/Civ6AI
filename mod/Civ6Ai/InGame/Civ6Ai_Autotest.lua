@@ -1032,7 +1032,7 @@ function Civ6Ai_Autotest.StartStallWatchdog()
     pcall(function()
       Civ6Ai_Autotest._CloseQueuedPopups()
       Civ6Ai_Autotest._DismissBlockers(playerID)
-      if waitingSeats then
+      if waitingSeats and Civ6Ai_Autotest._stallAttempts < Civ6Ai_Autotest.STALL_MAX_ATTEMPTS then
         return
       end
       if Civ6Ai_Apply ~= nil and Civ6Ai_Apply.ResolveAllUnitOrders ~= nil then
