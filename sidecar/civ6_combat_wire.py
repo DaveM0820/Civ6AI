@@ -30,7 +30,7 @@ PREDICTION_LABELS = {
 BAD_PREDICTIONS = {"MAJOR_DEFEAT", "DECISIVE_DEFEAT", "INEFFECTIVE"}
 MAX_STRIKE_LINES = 12
 MAX_THREAT_LINES = 8
-ISOLATED_FRIEND_TILES = 2
+ISOLATED_FRIEND_TILES = 3
 ISOLATED_ENEMY_TILES = 4
 LOW_HP_PCT = 30
 
@@ -275,6 +275,11 @@ def war_section_lines(context: dict[str, Any]) -> list[str]:
     if wars:
         lines.append(pipeline._wire_line("war.rivals", ", ".join(wars)))
     block = _combat(context)
+    stats = _own_stats(context)
+    idle = [_wire_ids(context).get(str(u.get("unit_id")), str(u.get("unit_id"))) for u in context.get("your_units", []) or []
+            if isinstance(u, dict) and u.get("needs_orders") and not u.get("goal") and _is_military(u, stats.get(str(u.get("unit_id"))))]
+    if wars and idle:
+        lines.append(pipeline._wire_line("war.idle", f"{len(idle)} combat units have no orders: {', '.join(idle)}"))
     hostiles = _rows(block, "hostiles")
     if hostiles:
         bits = []
@@ -297,8 +302,11 @@ def war_section_lines(context: dict[str, Any]) -> list[str]:
         hp_text = _hp_text(c.get("hp"), c.get("max_hp"))
         if hp_text:
             stat.append(hp_text)
-        stat.append(f"walls {_int(c.get('wall_hp')) or 0}/{_int(c['wall_max_hp'])}" if _int(c.get("wall_max_hp"))
-                    else "no walls (cannot strike)")
+        pop = next((_int(k.get("population")) for k in context.get("known_other_cities", []) or []
+                    if isinstance(k, dict) and k.get("name") == c.get("name")), None) or 1
+        stat.append(f"walls {_int(c.get('wall_hp')) or 0}/{_int(c['wall_max_hp'])}, needs siege or a ram"
+                    if _int(c.get("wall_max_hp")) else
+                    f"no walls, melee can assault (~{max(2, pop + (_int(c.get('strength')) or 0) // 8 + 1)} melee to capture)")
         lines.append(pipeline._wire_line(
             f"war.city.{c.get('name') or 'city'}",
             f"{_owner_label(context, c.get('owner_player_id'))} ({_int(c.get('x'))},{_int(c.get('y'))}) {', '.join(stat)}"))
@@ -370,30 +378,43 @@ def _distance(context: dict[str, Any], a: tuple[int, int], b: tuple[int, int]) -
 def _isolated_lines(context: dict[str, Any]) -> list[str]:
     hostiles = [(h, (_int(h.get("x")), _int(h.get("y")))) for h in _rows(_combat(context), "hostiles")]
     hostiles = [(h, xy) for h, xy in hostiles if xy[0] is not None and xy[1] is not None]
-    if not hostiles:
-        return []
+    at_war = bool(major_wars(context))
     stats = _own_stats(context)
-    units = [u for u in context.get("your_units", []) or [] if isinstance(u, dict)]
+    units = [u for u in context.get("your_units", []) or [] if isinstance(u, dict)
+             and _is_military(u, stats.get(str(u.get("unit_id")))) and u.get("domain_id") != "DOMAIN_SEA"]
     coords = {str(u.get("unit_id")): pipeline._parse_plot_coords(u.get("plot_id")) for u in units}
     wire_ids = _wire_ids(context)
     out: list[str] = []
-    for unit in units:
-        unit_id = str(unit.get("unit_id"))
-        xy = coords.get(unit_id)
-        if xy is None or not _is_military(unit, stats.get(unit_id)):
+    for unit_id, xy in coords.items():
+        if xy is None or any(other != unit_id and oxy is not None and _distance(context, xy, oxy) <= ISOLATED_FRIEND_TILES
+                             for other, oxy in coords.items()):
             continue
-        friends = any(other != unit_id and oxy is not None and _distance(context, xy, oxy) <= ISOLATED_FRIEND_TILES
-                      for other, oxy in coords.items())
-        if friends:
+        near = sorted(((h, _distance(context, xy, hxy)) for h, hxy in hostiles), key=lambda item: item[1])
+        name = f"isolated: {wire_ids.get(unit_id, unit_id)} at ({xy[0]},{xy[1]}) has no friendly military within {ISOLATED_FRIEND_TILES} tiles"
+        if near and near[0][1] <= ISOLATED_ENEMY_TILES:
+            h, d = near[0]
+            out.append(f"{name} and {_owner_label(context, h.get('owner_player_id'))} {h.get('name') or 'unit'} is "
+                       f"{_tiles(d)} away — group up or fall back")
+        elif at_war:
+            out.append(f"{name} — group it with your army")
+    return out
+
+
+def _undefended_city_lines(context: dict[str, Any]) -> list[str]:
+    enemies = [(h, (_int(h.get("x")), _int(h.get("y")))) for h in _rows(_combat(context), "hostiles")
+               if (_int(h.get("strength")) or 0) > 0]
+    out: list[str] = []
+    for city in context.get("your_cities", []) or []:
+        xy = pipeline._parse_plot_coords(city.get("plot_id")) if isinstance(city, dict) else None
+        if xy is None or city.get("garrison_unit_ids"):
             continue
-        near = [(h, _distance(context, xy, hxy)) for h, hxy in hostiles]
-        near = [(h, d) for h, d in near if d <= ISOLATED_ENEMY_TILES]
-        if not near:
-            continue
-        h, d = min(near, key=lambda item: item[1])
-        out.append(f"isolated: {wire_ids.get(unit_id, unit_id)} at ({xy[0]},{xy[1]}) has no friendly unit within "
-                   f"{ISOLATED_FRIEND_TILES} tiles and {_owner_label(context, h.get('owner_player_id'))} "
-                   f"{h.get('name') or 'unit'} is {_tiles(d)} away — group up or fall back")
+        near = [(h, _distance(context, xy, hxy)) for h, hxy in enemies if hxy[0] is not None]
+        near = [item for item in near if item[1] <= ISOLATED_ENEMY_TILES]
+        if near:
+            h, d = min(near, key=lambda item: item[1])
+            build = (city.get("production") or {}).get("item_id") or "nothing"
+            out.append(f"undefended: {city.get('name')} has no garrison, {h.get('name') or 'enemy'} is {_tiles(d)} away, "
+                       f"building {build} — switch production to a military unit")
     return out
 
 
@@ -450,6 +471,7 @@ def attention_items(context: dict[str, Any]) -> list[str]:
     if focus:
         items.append(focus)
     items.extend(_isolated_lines(context))
+    items.extend(_undefended_city_lines(context))
     return items
 
 

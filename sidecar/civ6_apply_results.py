@@ -818,9 +818,14 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
     units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
     wire_ids = pipeline._build_unit_wire_id_map(units)
     reverse = {v: k for k, v in wire_ids.items()}
+    combat = (snapshot.get("civ6") or {}).get("combat") or {}
+    enemy_plots = {(h.get("x"), h.get("y")) for h in combat.get("hostiles") or [] if isinstance(h, dict)}
     for command in commands:
         fp = _command_fingerprint(command)
         matched = None
+        if fp[0] == "attack_target" and (fp[2], fp[3]) not in enemy_plots:
+            dropped.append(f"dropped: AttackTo({fp[2]},{fp[3]}) has no visible enemy unit to hit")
+            continue
         for fail_fp, fail_turn, fail_reason in fails:
             same_kind = fail_fp[0] == fp[0] or (fail_fp[0] in ("move_unit", "attack_target") and fp[0] == fail_fp[0])
             unit_a = fail_fp[1]

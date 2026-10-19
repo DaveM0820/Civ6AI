@@ -220,7 +220,7 @@ def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
     if not isinstance(samples, list) or len(samples) < 2:
         if explored < 25:
             return (
-                f"Map only {explored}% explored — soft advice: keep pushing scouts into fog "
+                f"Map only {explored}% explored — soft advice: give scouts Automate(explore) or push them into fog "
                 "when safe; under-explored maps hide settle sites and rivals."
             )
         return None

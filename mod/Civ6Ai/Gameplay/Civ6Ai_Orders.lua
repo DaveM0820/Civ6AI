@@ -833,7 +833,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
     end
     pending = nextPending
   end
-  Civ6Ai_Orders._ContinueGoals(owner, ordered)
+  Civ6Ai_Orders._ContinueGoals(owner, ordered, okUnits)
   Civ6Ai_Orders._FinishIdleUnits(owner, ordered, okUnits)
 end
 
@@ -871,8 +871,7 @@ function Civ6Ai_Orders._FinishIdleUnits(owner, ordered, okUnits)
     if (okUnits or {})[u:GetID()] or Game:GetProperty(key) == nil then
       Game:SetProperty(key, now)
     end
-    if (call(u, "GetMovesRemaining") or 0) > 0 and Civ6Ai_Orders._ModelCommandsUnit(u, ordered)
-        and Civ6Ai_Orders._ReadGoal(owner, u:GetID()) == nil then
+    if (call(u, "GetMovesRemaining") or 0) > 0 and Civ6Ai_Orders._ModelCommandsUnit(u, ordered) then
       if now - (num(Game:GetProperty(key)) or now) >= 2 then
         native = native + 1
       elseif pcall(UnitManager.FinishMoves, u) then
@@ -884,7 +883,7 @@ function Civ6Ai_Orders._FinishIdleUnits(owner, ordered, okUnits)
   return count
 end
 
-function Civ6Ai_Orders._ContinueGoals(owner, ordered)
+function Civ6Ai_Orders._ContinueGoals(owner, ordered, okUnits)
   local p = Players[owner]
   if p == nil then
     return 0
@@ -902,6 +901,7 @@ function Civ6Ai_Orders._ContinueGoals(owner, ordered)
         else
           n = n + 1
           local ok, reason = Civ6Ai_Orders._MoveWithRetarget(owner, u, goal.x, goal.y)
+          if ok and okUnits ~= nil then okUnits[uid] = true end
           u = Civ6Ai_Orders._Unit(owner, uid)
           if u == nil then
             Civ6Ai_Orders._ClearGoal(owner, uid)

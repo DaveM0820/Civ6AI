@@ -3346,6 +3346,7 @@ function Civ6Ai_Snapshot._VisibleHostiles(playerID)
               local wMax = tonumber(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_OUTER)) or 0
               local wDmg = tonumber(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_OUTER)) or 0
               if gMax > 0 then row.hp, row.max_hp = math.max(0, gMax - gDmg), gMax end
+              row.strength = row.strength or Civ6Ai_Snapshot._CombatNum(Civ6Ai_Snapshot._Method(district, "GetDefenseStrength"))
               row.wall_max_hp = wMax
               if wMax > 0 then row.wall_hp = math.max(0, wMax - wDmg) end
             end
