@@ -61,8 +61,8 @@ TERRAIN_LEGEND = [
     ("Ocean", "#426080"),
     ("Plains", "#b0a070"),
     ("Desert", "#c8b070"),
-    ("Hills", "#9b9b9b"),
-    ("Peak", "#777777"),
+    ("Hills", "#777777"),
+    ("Peak", "#9b9b9b"),
     ("Unexplored", UNEXPLORED_FILL),
 ]
 
