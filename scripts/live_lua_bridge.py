@@ -41,8 +41,6 @@ def main() -> int:
         if lua_log is None:
             lua_log = default_lua_log()
 
-    # Must match Civ6Ai_Paths.Civ6AiRoot from install_mod: local Documents
-    # My Games/.../civ6ai (never OneDrive; never AppData Logs/civ6ai mirror).
     from civ6_paths import preferred_my_games_root  # noqa: PLC0415
 
     civ6ai_root = preferred_my_games_root() / "civ6ai"

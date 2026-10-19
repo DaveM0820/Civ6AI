@@ -1,4 +1,4 @@
-﻿"""Locate Civ6 install + My Games Mods / Logs / runtime folders."""
+"""Locate Civ6 install + My Games Mods / Logs / runtime folders."""
 from __future__ import annotations
 
 import os
@@ -26,45 +26,31 @@ def _unique(paths: Iterable[Path]) -> list[Path]:
     return out
 
 
-def is_onedrive_path(path: Path | str) -> bool:
-    """True when path is under a OneDrive synced folder (file locking / failed Lua IO)."""
-    return "onedrive" in str(path).replace("\\", "/").lower()
+def documents_dir() -> Path:
+    """The shell Documents folder Civ6 itself uses (Known Folder; may be redirected to OneDrive)."""
+    if os.name == "nt":
+        import ctypes
+        import uuid
 
-
-def my_games_roots() -> list[Path]:
-    """Candidate Civ6 My Games trees.
-
-    Local Documents is listed first. OneDrive Documents is still returned when
-    present (Civ6 may load Mods from either), but preferred_my_games_root() and
-    default civ6ai I/O skip OneDrive so session/runtime writes stay local.
-    """
-    home = Path.home()
-    candidates = [
-        home / "Documents" / "My Games" / MEIER,
-        home / "OneDrive" / "Documents" / "My Games" / MEIER,
-    ]
-    local = os.environ.get("LOCALAPPDATA") or ""
-    if local:
-        candidates.append(Path(local) / "Firaxis Games" / MEIER)
-    return _unique(candidates)
+        buf = ctypes.c_wchar_p()
+        guid = (ctypes.c_byte * 16).from_buffer_copy(uuid.UUID("FDD39AD0-238F-46AF-ADB4-6C85480369C7").bytes_le)
+        if ctypes.windll.shell32.SHGetKnownFolderPath(guid, 0, None, ctypes.byref(buf)) == 0:
+            path = Path(buf.value)
+            ctypes.windll.ole32.CoTaskMemFree(buf)
+            return path
+    return Path.home() / "Documents"
 
 
 def preferred_my_games_root() -> Path:
-    """My Games root for civ6ai runtime/session I/O: never OneDrive when a local tree exists."""
-    roots = my_games_roots()
-    local = [r for r in roots if ("My Games" in str(r)) and not is_onedrive_path(r)]
-    if local:
-        return local[0]
-    for root in roots:
-        if "My Games" in str(root):
-            return root
-    home = Path.home()
-    return home / "Documents" / "My Games" / MEIER
+    return documents_dir() / "My Games" / MEIER
+
+
+def my_games_roots() -> list[Path]:
+    return [preferred_my_games_root()]
 
 
 def mods_targets() -> list[Path]:
-    # Local first, then OneDrive (install into both when present).
-    return [root / "Mods" / "Civ6Ai" for root in my_games_roots() if "My Games" in str(root)]
+    return [preferred_my_games_root() / "Mods" / "Civ6Ai"]
 
 
 def logs_dirs() -> list[Path]:

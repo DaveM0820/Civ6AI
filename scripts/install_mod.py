@@ -53,14 +53,10 @@ def civ6_process_running() -> bool:
 
 
 def mods_targets() -> list[Path]:
-    # Local Documents first; still install into OneDrive Mods when present so
-    # whichever tree Civ6 loads gets the same generated Paths.lua (Civ6AiRoot
-    # itself always points at preferred_my_games_root / non-OneDrive).
-    home = Path.home()
-    return [
-        home / "Documents" / "My Games" / MEIER / "Mods" / "Civ6Ai",
-        home / "OneDrive" / "Documents" / "My Games" / MEIER / "Mods" / "Civ6Ai",
-    ]
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from civ6_paths import mods_targets as targets
+
+    return targets()
 
 
 def copy_tree(src: Path, dst: Path) -> int:
@@ -384,7 +380,6 @@ def rotate_session(
 
 
 def default_civ6ai_root() -> Path:
-    """Runtime/session root: local Documents My Games (never OneDrive when local exists)."""
     sys.path.insert(0, str(ROOT / "scripts"))
     from civ6_paths import preferred_my_games_root
 
@@ -505,7 +500,6 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     if settings is not None:
-        mirror = [Path(settings["log_dir"]) / "civ6ai"] if settings["log_dir"] else []
         previous_session = ""
         try:
             previous_session = str(
@@ -513,11 +507,11 @@ def main(argv: list[str] | None = None) -> int:
             )
         except (OSError, ValueError, AttributeError):
             pass
-        backup = write_runtime_json(Path(settings["root"]), settings, mirror)
+        backup = write_runtime_json(Path(settings["root"]), settings, [])
         if previous_session and previous_session != settings["session_id"]:
             archived = sum(
                 archive_session_transients(base / "sessions" / previous_session)
-                for base in [Path(settings["root"])] + mirror
+                for base in [Path(settings["root"])]
             )
             if archived:
                 print(f"Archived {archived} transient file(s) of previous session {previous_session}")
@@ -531,9 +525,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
         print(f"runtime.json -> {Path(settings['root']) / 'runtime.json'}")
-        print(f"build_stamp={settings.get('build_stamp') or ''} runtime_root={settings['root']} (local My Games; never OneDrive)")
-        print("Installed Lua is copied to local Mods/Civ6Ai first (OneDrive only as a mirror);")
-        print("session/PendingApply queue writes succeed if the local InGame copy is written.")
+        print(f"build_stamp={settings.get('build_stamp') or ''} runtime_root={settings['root']}")
     else:
         print("Stub-only install (no live config).")
     return 0

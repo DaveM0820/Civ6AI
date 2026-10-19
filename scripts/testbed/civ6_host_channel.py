@@ -21,29 +21,15 @@ _QUEUE_STATE_NAME = "pending_apply_queue.json"
 def civ6_mod_in_game_dirs() -> list[Path]:
     """Installed Civ6Ai mod InGame folders (where the game include()s PendingApply).
 
-    Local Documents My Games is first (same rule as runtime I/O). OneDrive is a
-    mirror only when that tree also has an installed copy. The repo copy is used
+    The Mods folder under the Documents folder Civ6 uses. The repo copy is used
     when no installed mod exists (dev boxes/tests).
     """
     scripts = Path(__file__).resolve().parents[1]
     if str(scripts) not in sys.path:
         sys.path.insert(0, str(scripts))
-    dirs: list[Path] = []
-    try:
-        from civ6_paths import preferred_my_games_root, installed_mod_dirs
+    from civ6_paths import mods_targets
 
-        local = preferred_my_games_root() / "Mods" / "Civ6Ai" / "InGame"
-        if local.is_dir():
-            dirs.append(local)
-        for mod in installed_mod_dirs():
-            ingame = mod / "InGame"
-            if ingame.is_dir():
-                dirs.append(ingame)
-    except Exception:
-        home = Path.home()
-        dirs.append(home / "Documents/My Games/Sid Meier's Civilization VI/Mods/Civ6Ai/InGame")
-        dirs.append(home / "OneDrive/Documents/My Games/Sid Meier's Civilization VI/Mods/Civ6Ai/InGame")
-        dirs = [d for d in dirs if d.is_dir()]
+    dirs = [d / "InGame" for d in mods_targets() if (d / "InGame").is_dir()]
     if not dirs:
         repo = Path(__file__).resolve().parents[2]
         dirs.append(repo / "mod" / "Civ6Ai" / "InGame")
@@ -89,7 +75,6 @@ def pending_apply_id(payload: str, session_id: str, player: int, turn: int, kind
 def _queue_state_path() -> Path:
     """Host-side queue mirror so multi-seat publishes survive bridge restarts.
 
-    Runtime I/O stays under local Documents My Games (never OneDrive).
     """
     scripts = Path(__file__).resolve().parents[1]
     if str(scripts) not in sys.path:
@@ -228,34 +213,16 @@ def write_pending_apply_lua(
     content = _lua_queue_content(pruned)
     targets = civ6_mod_in_game_dirs()
     written = 0
-    primary_ok = False
-    scripts = Path(__file__).resolve().parents[1]
-    if str(scripts) not in sys.path:
-        sys.path.insert(0, str(scripts))
-    try:
-        from civ6_paths import is_onedrive_path
-    except Exception:
-        def is_onedrive_path(path: Path | str) -> bool:
-            return "onedrive" in str(path).replace("\\", "/").lower()
     for directory in targets:
         path = directory / "Civ6Ai_PendingApply.lua"
-        ok = _write_module(path, content)
-        onedrive = is_onedrive_path(directory)
-        if ok:
+        if _write_module(path, content):
             written += 1
-            if not onedrive:
-                primary_ok = True
             log.info(
                 "Wrote pending apply queue %s player=%s turn=%s kind=%s id=%s len=%d entries=%d",
                 path, player, turn, kind, apply_id, len(payload), len(pruned),
             )
-        elif onedrive:
-            log.warning("pending apply OneDrive mirror skipped %s (local tree is primary)", path)
         else:
             log.warning("pending apply write failed %s", path)
-    has_local = any(not is_onedrive_path(d) for d in targets)
-    if has_local:
-        return written if primary_ok else 0
     return written
 
 
