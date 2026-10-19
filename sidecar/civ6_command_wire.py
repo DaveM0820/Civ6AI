@@ -214,7 +214,7 @@ def unit_command_token(command: dict[str, Any]) -> str | None:
         return f"AttackTo({xy[0]},{xy[1]})" if xy else None
     if kind in UNIT_POSTURE_TOKENS:
         return UNIT_POSTURE_TOKENS[kind]
-    if kind == "automate_explore":
+    if kind == "explore":
         return "Automate(explore)"
     if kind == "found_city":
         return "FoundCity"

@@ -147,7 +147,7 @@ def _civ6_unit_property_parts(command: dict[str, Any]) -> tuple[str, str]:
         return "attackTo", pipeline._coords_from_fixed_arguments(fixed) or "target"
     if kind in CIV6_UNIT_POSTURE_KINDS:
         return "stance", CIV6_UNIT_POSTURE_KINDS[kind]
-    if kind == "automate_explore":
+    if kind == "explore":
         return "automate", "explore"
     if kind == "found_city":
         return "foundCity", "apply"

@@ -424,6 +424,9 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
       or command.kind == "purchase_item" or command.kind == "purchase_tile" then
     return Civ6Ai_Apply._Deal(playerID, command, args)
   end
+  if command.kind == "explore" then
+    return Civ6Ai_Apply._Work(playerID, command, args)
+  end
   if command.kind == "pillage_improvement" then
     return Civ6Ai_Apply._Work(playerID, command, args)
   end
@@ -1423,7 +1426,7 @@ function Civ6Ai_Apply._Work(playerID, command, args)
   if unitNum == nil then
     return false, "missing_unit_id", args
   end
-  local ok, reason = Civ6Ai_Apply._GovRoute("PillageImprovement", playerID, unitNum, x, y)
+  local ok, reason = Civ6Ai_Apply._GovRoute(command.kind == "explore" and "Explore" or "PillageImprovement", playerID, unitNum, x, y)
   return ok, reason, args
 end
 

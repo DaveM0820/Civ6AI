@@ -1736,7 +1736,7 @@ function Gov.Explore(owner, unitId)
   if unit == nil then
     return false, "stale_unit_id"
   end
-  for _, name in ipairs({ "UNITOPERATION_AUTOMATION", "UNITOPERATION_EXPLORE", "UNITOPERATION_AUTO_EXPLORE" }) do
+  for _, name in ipairs({ "UNITOPERATION_AUTOMATE_EXPLORE" }) do
     local okOp, whyOp = startOperation(unit, name, {})
     if okOp then
       return true, whyOp
