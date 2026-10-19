@@ -41,6 +41,9 @@ NON_TRANSIENT_FAILURES = (
     "unit_not_found",
     "plot_occupied_exhausted",
     "site_no_longer_legal",
+    "steps=0",
+    "no_progress",
+    "stack_limit",
 )
 CHAT_NEAR_DUPE_THRESHOLD = 0.6
 CHAT_NEAR_DUPE_LOOKBACK_TURNS = 16
