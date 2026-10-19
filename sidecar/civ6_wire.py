@@ -1426,6 +1426,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, "
         "except that a unit that has not moved this turn can always enter one adjacent tile, however rough "
         "(that uses all its movement).",
+        "- Never MoveTo a mountain or a tile one of your own units already holds.",
         f"- Coordinates: {coaching.civ6_y_axis_phrase(snapshot)} and x increases east; see the GAME "
         "section for X-wrap.",
         f"- {coaching.CIV6_UNIT_STACKING_GUIDANCE}",

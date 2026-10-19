@@ -51,7 +51,7 @@ TERRAIN_COLORS: dict[str, str] = {
 GRID_CHAR_COLORS: dict[str, str] = {
     ".": "#6a9a5a",
     "~": "#5a8ab0",
-    "^": "#9b9b9b",
+    "^": "#f4f4f4",
     "#": "#777777",
 }
 
@@ -62,7 +62,7 @@ TERRAIN_LEGEND = [
     ("Plains", "#b0a070"),
     ("Desert", "#c8b070"),
     ("Hills", "#777777"),
-    ("Peak", "#9b9b9b"),
+    ("Mountain (impassable)", "#f4f4f4"),
     ("Unexplored", UNEXPLORED_FILL),
 ]
 

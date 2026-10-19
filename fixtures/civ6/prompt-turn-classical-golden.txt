@@ -141,6 +141,7 @@ GOOD JSON (entire reply — row numbers on keys; host strips the prefix):
 
 Command rules:
 - Movement: unitId.command = MoveTo(x,y) with any destination. One MoveTo spends the unit's remaining moves (unitId.moves of unitId.maxMovement) along the game's route; pick a destination at least that far on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, except that a unit that has not moved this turn can always enter one adjacent tile, however rough (that uses all its movement).
+- Never MoveTo a mountain or a tile one of your own units already holds.
 - Coordinates: game-plot y increases north (up on the map image; north at top) and x increases east; see the GAME section for X-wrap.
 - Civ6 stacking: typically one military formation-class unit per tile, plus one civilian or support unit; two military units of the same formation class cannot share a tile. Use corps/armies and support units (e.g. battering ram, siege tower) intentionally.
 - A unit with leftover movement can often still attack this turn after moving — do not treat "already moved" as "cannot attack" unless the unit has 0 moves left or the attack is otherwise illegal.
