@@ -1010,8 +1010,9 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
     local st = gcall(culture, "GetSlotType", e.slot)
     local srow = st ~= nil and GameInfo.GovernmentSlots[st] or nil
     local slotType = srow ~= nil and srow.GovernmentSlotType or "?"
-    table.insert(clearList, e.slot)
+    -- NONE keeps whatever the slot holds (models wrote all-NONE and emptied every card).
     if string.upper(e.policy) ~= "NONE" then
+      table.insert(clearList, e.slot)
       local prow = GameInfo.Policies[e.policy] or GameInfo.Policies["POLICY_" .. e.policy]
       if prow == nil then
         return false, "unknown policy card " .. e.policy, args
@@ -1029,9 +1030,10 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
       used[prow.PolicyType] = true
       addList[e.slot] = prow.Hash
       want[e.slot] = prow.Index
-    else
-      want[e.slot] = -1
     end
+  end
+  if #clearList == 0 then
+    return false, "no policy card named (NONE leaves a slot unchanged)", args
   end
   local okReq, reqWhy = Civ6Ai_Apply._AsSeat(playerID, function()
     return culture:RequestPolicyChanges(clearList, addList)

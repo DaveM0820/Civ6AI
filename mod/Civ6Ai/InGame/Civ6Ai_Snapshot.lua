@@ -3097,8 +3097,8 @@ function Civ6Ai_Snapshot._AddCityStrikeCommands(commands, playerID)
 end
 
 function Civ6Ai_Snapshot._AddExploreCommand(commands, unit, unitId)
-  local row = GameInfo.UnitOperations["UNITOPERATION_AUTOMATE_EXPLORE"]
-  if row ~= nil and UnitManager.CanStartOperation(unit, row.Hash, nil, true) then
+  local row = GameInfo.Units[unit:GetType()]
+  if row ~= nil and row.FormationClass ~= "FORMATION_CLASS_CIVILIAN" and (unit:GetMovesRemaining() or 0) > 0 then
     table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({command_id = "CMD_explore_" .. unitId, kind = "explore", fixed_arguments = {unit_id = unitId}}))
   end
 end

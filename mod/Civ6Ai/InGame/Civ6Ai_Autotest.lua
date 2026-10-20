@@ -824,6 +824,9 @@ Civ6Ai_Autotest.BLOCKER_HANDLERS = {
   ENVOYS = function()
     Civ6Ai_Autotest._CloseQueuedPopups()
   end,
+  GIVE_INFLUENCE_TOKEN = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
+  end,
   GREAT_PERSON = function()
     Civ6Ai_Autotest._CloseQueuedPopups()
   end,

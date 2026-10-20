@@ -1805,19 +1805,45 @@ function Gov.MakeTradeRoute(owner, unitId, destCityId)
   return false, "trade_route_unavailable:" .. tostring(whyOp)
 end
 
+-- Explore: RequestOperation does not exist in gameplay script, so walk the unit
+-- to the nearest revealed, passable plot of its domain that borders the unknown.
 function Gov.Explore(owner, unitId)
   local unit = Civ6Ai_Orders._Unit(owner, unitId)
   if unit == nil then
     return false, "stale_unit_id"
   end
-  for _, name in ipairs({ "UNITOPERATION_AUTOMATE_EXPLORE" }) do
-    local okOp, whyOp = startOperation(unit, name, {})
-    if okOp then
-      return true, whyOp
-    end
-    log("explore_fallback|" .. name .. "|" .. tostring(whyOp))
+  local vis = PlayersVisibility ~= nil and PlayersVisibility[owner] or nil
+  if vis == nil then
+    return false, "explore_unavailable:no_visibility"
   end
-  return false, "explore_unavailable"
+  local row = GameInfo.Units[unit:GetType()]
+  local sea = row ~= nil and row.Domain == "DOMAIN_SEA"
+  local ux, uy = unit:GetX(), unit:GetY()
+  local best, bestD = nil, 1e9
+  for i = 0, Map.GetPlotCount() - 1 do
+    local p = Map.GetPlotByIndex(i)
+    local x, y = p:GetX(), p:GetY()
+    if vis:IsRevealed(x, y) and p:IsWater() == sea and not p:IsImpassable() and not (x == ux and y == uy) then
+      local d = Map.GetPlotDistance(ux, uy, x, y)
+      if d < bestD then
+        for dir = 0, 5 do
+          local a = Map.GetAdjacentPlot(x, y, dir)
+          if a ~= nil and not vis:IsRevealed(a:GetX(), a:GetY()) then
+            best, bestD = p, d
+            break
+          end
+        end
+      end
+    end
+  end
+  if best == nil then
+    return false, "explore_unavailable:map_known"
+  end
+  local ok = pcall(UnitManager.MoveUnit, unit, best:GetX(), best:GetY())
+  if not ok then
+    return false, "explore_unavailable:move_error"
+  end
+  return true, "explore_to=" .. best:GetX() .. "," .. best:GetY() .. ":d=" .. bestD
 end
 
 function Gov.ActivateGreatPerson(owner, unitId)
