@@ -80,9 +80,9 @@ def _queue_state_path() -> Path:
     if str(scripts) not in sys.path:
         sys.path.insert(0, str(scripts))
     try:
-        from civ6_paths import preferred_my_games_root
+        from civ6_paths import civ6ai_root
 
-        root = preferred_my_games_root() / "civ6ai"
+        root = civ6ai_root()
         root.mkdir(parents=True, exist_ok=True)
         return root / _QUEUE_STATE_NAME
     except Exception:
