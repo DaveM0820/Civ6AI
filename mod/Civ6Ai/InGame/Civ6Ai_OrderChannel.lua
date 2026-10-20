@@ -438,6 +438,17 @@ function Civ6Ai_OrderChannel.DrainResults()
   return left
 end
 
+-- Orders sent for this seat's turn that the gameplay side has not answered yet.
+function Civ6Ai_OrderChannel.PendingFor(playerID, turn)
+  local n = 0
+  for _, entry in pairs(Civ6Ai_OrderChannel._pending) do
+    if entry.playerID == playerID and entry.turn == turn then
+      n = n + 1
+    end
+  end
+  return n
+end
+
 function Civ6Ai_OrderChannel._EnsureResultPump()
   if Civ6Ai_OrderChannel._pumping then
     return

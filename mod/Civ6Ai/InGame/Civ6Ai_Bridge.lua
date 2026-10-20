@@ -920,7 +920,25 @@ function Civ6Ai_Bridge._OnSeatTurnStart(playerID)
   Civ6Ai_Util.Log("bridge|seat_end_after_queue|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
     .. "|snapshot_turn=" .. tostring(snapTurn)
     .. "|prepulsed=" .. tostring(Civ6Ai_Bridge._prepulseKeys[snapKey] == true) .. "|answer=" .. answer)
-  Civ6Ai_Bridge._EndSeatTurn(playerID)
+  -- A late batch (sent after the seat's turn began) runs when the engine plays
+  -- the operations; ending the seat first dropped ~1 in 4 of them unplayed.
+  local oc = Civ6Ai_OrderChannel
+  if oc == nil or oc.PendingFor == nil or oc.PendingFor(playerID, turn) == 0 then
+    Civ6Ai_Bridge._EndSeatTurn(playerID)
+    return true
+  end
+  local ticks = 0
+  Civ6Ai_Util.ScheduleTick(function()
+    ticks = ticks + 1
+    oc.DrainResults()
+    if ticks < 300 and Game.GetCurrentGameTurn() == turn and oc.PendingFor(playerID, turn) > 0 then
+      return true
+    end
+    Civ6Ai_Util.Log("bridge|seat_end_after_results|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
+      .. "|ticks=" .. ticks .. "|pending=" .. oc.PendingFor(playerID, turn))
+    Civ6Ai_Bridge._EndSeatTurn(playerID)
+    return false
+  end)
   return true
 end
 
@@ -1650,7 +1668,7 @@ end
 Civ6Ai_Bridge.GOV_ARG_KEYS = {
   "government_id", "slots", "belief_id", "belief_ids", "religion_id", "individual_id", "yield",
   "governor_id", "promotion_id", "action_id", "target_player_id", "item_id",
-  "improvement_id",
+  "improvement_id", "other_unit_id", "unit_type_id", "dest_city_id",
 }
 
 function Civ6Ai_Bridge._ParseDecision(text)

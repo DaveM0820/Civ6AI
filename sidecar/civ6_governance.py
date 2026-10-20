@@ -539,11 +539,11 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
                 else:
                     chosen.append(bid)
         prophets = [x for x in _lst(r.get("prophets")) if isinstance(x, dict)]
-        prophet = next((x for x in prophets if x.get("on_holy_site")), prophets[0] if prophets else None)
+        prophet = next((x for x in prophets if x.get("on_holy_site")), None)
         if rid is None:
             notes.append(f"{key}={value}: not a religion you can found now")
         elif prophet is None:
-            notes.append(f"{key}: you need a Great Prophet to found a religion")
+            notes.append(f"{key}: move a Great Prophet onto your Holy Site first (MoveTo intent found_religion)")
         else:
             fixed = {"religion_id": rid, "belief_ids": ",".join(chosen[:4]), "unit_id": str(prophet.get("unit_id"))}
             if not fixed["belief_ids"]:
