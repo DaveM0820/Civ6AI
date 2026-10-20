@@ -26,6 +26,9 @@ function Civ6Ai_Autotest.Initialize()
     if Events.DiplomacyStatement ~= nil then
       Events.DiplomacyStatement.Add(Civ6Ai_Autotest._OnDiplomacyStatement)
     end
+    for _, ev in ipairs({ Events.WorldCongressStage1, Events.WorldCongressStage2 }) do
+      ev.Add(Civ6Ai_Autotest._OnWorldCongress)
+    end
   end
   Civ6Ai_Autotest._DisableBoostPopups()
 end
@@ -206,6 +209,24 @@ function Civ6Ai_Autotest._EndTurnAfterSeats(playerID)
   end)
 end
 
+-- World Congress: close its screens and submit the local seat's turn as the
+-- native popup does when it has no choices (synced player operation; the
+-- seat casts no votes). AI seats vote natively.
+function Civ6Ai_Autotest._OnWorldCongress()
+  local ticks = 0
+  Civ6Ai_Util.ScheduleTick(function()
+    ticks = ticks + 1
+    if ticks < 30 then
+      return true
+    end
+    Civ6Ai_Autotest._CloseQueuedPopups()
+    local me = Game.GetLocalPlayer()
+    local ok = pcall(UI.RequestPlayerOperation, me, PlayerOperations.WORLD_CONGRESS_SUBMIT_TURN, {})
+    Civ6Ai_Util.Log("autotest|world_congress_submit|player=" .. tostring(me) .. "|ok=" .. tostring(ok))
+    return false
+  end)
+end
+
 function Civ6Ai_Autotest._DisableBoostPopups()
   if LuaEvents ~= nil and LuaEvents.TutorialUIRoot_DisableTechAndCivicPopups ~= nil then
     LuaEvents.TutorialUIRoot_DisableTechAndCivicPopups()
@@ -233,6 +254,9 @@ function Civ6Ai_Autotest._CloseQueuedPopups()
     "WorldCrisisPopup",
     "NaturalWonderPopup",
     "WonderBuiltPopup",
+    "WorldCongressIntro",
+    "WorldCongressPopup",
+    "WorldCongressBetweenTurns",
     -- Research/civic chooser panels (CHOOSE RESEARCH / CHOOSE CIVIC).
     "ResearchChooser",
     "CivicsChooser",
