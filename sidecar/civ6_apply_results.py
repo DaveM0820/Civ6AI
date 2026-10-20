@@ -71,6 +71,10 @@ _RETARGET_RE = re.compile(
 )
 
 _SIMPLE_REASONS = {
+    "district_tile_invalid": "the game does not allow that district on that tile (out of city range, wrong terrain, or already used)",
+    "district_needs_tile": "a district needs a tile; pick one of the offered DISTRICT_X@(x,y) rows",
+    "not_your_territory": "the tile is outside your territory",
+    "no_build_charges": "the builder has no build charges left",
     "no_path": "the game found no route to that tile (water, mountains, or closed borders in the way)",
     "water": "that tile is water and this unit cannot embark there yet",
     "water_no_ocean_embark": "that tile is ocean and this unit cannot embark onto ocean yet",
@@ -157,6 +161,8 @@ def describe_reason(reason: Any) -> str:
         return "the game raised a script error on that order"
     if text.startswith("gamecore_unavailable:"):
         return "the game-side order script was unavailable"
+    if text.startswith("tile_cannot_have:"):
+        return "that tile cannot have " + _readable(text.split(":", 1)[1], "IMPROVEMENT_")
     if text in _SIMPLE_REASONS:
         return _SIMPLE_REASONS[text]
     return text.replace("_", " ")
@@ -353,6 +359,51 @@ def _success_text(row: dict[str, Any]) -> str:
     return "ok" + (f" ({detail})" if detail and not detail.startswith("finish moves") else "")
 
 
+# Every tile-targeted order: what it tried, for the shared failure line.
+TILE_ACTIONS = {
+    "move_unit": "move {actor} to", "attack_target": "attack with {actor} at",
+    "city_attack": "strike from {actor} at", "found_city": "found a city with {actor} at",
+    "queue_production": "place {build} at", "worker_improve": "build {build} with {actor} at",
+    "build_fort": "build a fort with {actor} at", "trade_route": "send {actor} on a trade route to",
+    "purchase_tile": "buy the tile", "pillage_improvement": "pillage with {actor} at",
+}
+
+
+def _plot_facts(snapshot: dict[str, Any], x: int, y: int, player_id: str) -> list[str]:
+    """Tile problems the snapshot can see (water, mountain, owner, city, improvement)."""
+    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    plot = next((p for p in known.get("plots") or [] if isinstance(p, dict) and p.get("x") == x and p.get("y") == y), None)
+    if plot is None:
+        return ["tile not explored"]
+    facts = []
+    if plot.get("water"):
+        facts.append("water")
+    if plot.get("peak"):
+        facts.append("mountain")
+    owner = plot.get("revealed_owner_id")
+    if owner and owner != player_id:
+        facts.append(f"owned by {owner}")
+    if plot.get("city_id"):
+        facts.append("city tile")
+    if plot.get("improvement_id"):
+        facts.append(f"already has {_readable(plot['improvement_id'], 'IMPROVEMENT_')}")
+    return facts
+
+
+def tile_failure_text(snapshot: dict[str, Any], row: dict[str, Any], actor: str, reason: str) -> str | None:
+    """'Last turn you tried to <action> (x,y) but it failed: <game reason> | <tile facts>' for tile orders."""
+    kind = str(row.get("kind") or "")
+    fixed = row.get("fixed_arguments") if isinstance(row.get("fixed_arguments"), dict) else {}
+    x, y = fixed.get("target_x", row.get("x")), fixed.get("target_y", row.get("y"))
+    if kind not in TILE_ACTIONS or not isinstance(x, int) or not isinstance(y, int):
+        return None
+    build = _readable(fixed.get("build_id") or fixed.get("improvement_id"), "DISTRICT_").replace("Improvement ", "")
+    action = TILE_ACTIONS[kind].format(actor=actor or "the unit", build=build or "it")
+    pid = str(snapshot.get("player_id") or (snapshot.get("decision") or {}).get("player_id") or "")
+    reasons = [r for r in [describe_reason(reason) or "the game rejected it"] + _plot_facts(snapshot, x, y, pid) if r]
+    return f"Last turn you tried to {action} ({x},{y}) but it failed: " + " | ".join(dict.fromkeys(reasons))
+
+
 def build_command_results(snapshot: dict[str, Any], rows: list[dict[str, Any]], turn: int) -> list[dict[str, Any]]:
     units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
     wire_ids = pipeline._build_unit_wire_id_map(units)
@@ -381,6 +432,8 @@ def build_command_results(snapshot: dict[str, Any], rows: list[dict[str, Any]], 
             outcome = "FAILED — " + (describe_reason(reason) or "the game rejected it")
             wire_kind = KIND_FAILED
         summary = f"{actor} {order}: {outcome}" if actor else f"{order}: {outcome}"
+        if wire_kind == KIND_FAILED:
+            summary = tile_failure_text(snapshot, row, actor, reason) or summary
         affected: list[str] = []
         for value in (
             row.get("command_id"),

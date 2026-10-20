@@ -314,9 +314,6 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
     f.I = row.Index
     local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
     f.X, f.Y = x or -1, y or -1
-    if x ~= nil and y ~= nil then
-      f.G, f.A = 1, 2
-    end
   elseif kind == 22 then
     if f.U == nil then
       return nil, "missing_unit_id"

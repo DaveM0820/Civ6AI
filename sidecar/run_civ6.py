@@ -584,6 +584,7 @@ def main() -> None:
     snapshot = civ6_adapter.upgrade_runtime_snapshot(raw) if args.from_game else raw
     civ6_adapter.normalize_civ6_snapshot(snapshot)
     civ6_priorities.inject_legal_commands(snapshot)
+    civ6_wire.prune_settlers_without_sites(snapshot)
     _apply_personality(snapshot, args.personality)
     try:
         civ6_apply_results.inject_command_results(snapshot, args.session_dir)

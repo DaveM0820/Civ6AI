@@ -2177,6 +2177,10 @@ def _command_matches_city_property(command: dict[str, Any], city_id: str, proper
             build_labels.add(_normalize_wire_value(_readable_id(build_id, "UNIT_")))
             build_labels.add(_normalize_wire_value(_readable_id(build_id, "BUILDING_")))
             build_labels.add(_normalize_wire_value(_readable_id(build_id, "DISTRICT_")))
+            if fixed.get("target_x") is not None:
+                xy = f"({fixed.get('target_x')},{fixed.get('target_y')})"
+                # District placements: one legal row per tile, picked as DISTRICT_X@(x,y).
+                build_labels = {_normalize_wire_value(f"{build_id}@{xy}")}
         normalized_value = _normalize_wire_value(value)
         if len(property_parts) == 1 and property_parts[0] == "changeProduction":
             return normalized_value in build_labels

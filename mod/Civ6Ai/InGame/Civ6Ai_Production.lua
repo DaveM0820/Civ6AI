@@ -197,10 +197,10 @@ end
 
 function Civ6Ai_Production.QueueProduction(playerID, args)
   args = args or {}
-  return Civ6Ai_Production.QueueBuild(playerID, args.city_id, args.build_id)
+  return Civ6Ai_Production.QueueBuild(playerID, args.city_id, args.build_id, tonumber(args.target_x), tonumber(args.target_y))
 end
 
-function Civ6Ai_Production.QueueBuild(playerID, cityWireId, buildId)
+function Civ6Ai_Production.QueueBuild(playerID, cityWireId, buildId, x, y)
   if buildId == nil or buildId == "" then
     return false, "missing_build_id"
   end
@@ -218,11 +218,18 @@ function Civ6Ai_Production.QueueBuild(playerID, cityWireId, buildId)
   end
   local tCheck = {}
   tCheck[paramKey] = item.Hash
-  if not CityManager.CanStartOperation(city, CityOperationTypes.BUILD, tCheck, true) then
-    return false, "cannot_start"
+  local C = CityOperationTypes
+  if paramKey == C.PARAM_DISTRICT_TYPE then
+    if x == nil or y == nil then
+      return false, "district_needs_tile"
+    end
+    tCheck[C.PARAM_X], tCheck[C.PARAM_Y] = x, y
+  end
+  if not CityManager.CanStartOperation(city, C.BUILD, tCheck, true) then
+    return false, paramKey == C.PARAM_DISTRICT_TYPE and "district_tile_invalid" or "cannot_start"
   end
   local tParams = {}
-  tParams[paramKey] = item.Hash
+  for k, v in pairs(tCheck) do tParams[k] = v end
   tParams[CityOperationTypes.PARAM_INSERT_MODE] = CityOperationTypes.VALUE_EXCLUSIVE
   CityManager.RequestOperation(city, CityOperationTypes.BUILD, tParams)
   return true, "queued"

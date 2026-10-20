@@ -393,14 +393,15 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
     return Civ6Ai_Apply._Work(playerID, command, args)
   end
   if command.kind == "activate_great_person" or command.kind == "upgrade_unit" or command.kind == "promote_unit"
-      or command.kind == "join_formation" or command.kind == "city_attack" or command.kind == "build_fort" then
+      or command.kind == "join_formation" or command.kind == "city_attack" or command.kind == "build_fort"
+      or command.kind == "worker_improve" then
     local f, why = Civ6Ai_OrderChannel._Fields(playerID, command)
     if f == nil then
       return false, why, args
     end
     local route = ({ [26] = { "ActivateGreatPerson", f.U }, [27] = { "UpgradeUnit", f.U, f.I, f.V },
       [28] = { "PromoteUnit", f.U, f.I }, [29] = { "JoinFormation", f.U, f.I },
-      [31] = { "CityStrike", f.I, f.X, f.Y }, [32] = { "BuildFort", f.U, f.I } })[f.K]
+      [31] = { "CityStrike", f.I, f.X, f.Y }, [32] = { "BuildFort", f.U, f.I }, [21] = { "BuildImprovement", f.U, f.I } })[f.K]
     local ok, reason = Civ6Ai_Apply._GovRoute(route[1], playerID, route[2], route[3], route[4])
     return ok, reason, args
   end
@@ -840,7 +841,7 @@ Civ6Ai_Apply.VERIFY_TICKS = 90
 Civ6Ai_Apply.SYNCED_KINDS = {
   change_government = true, found_pantheon = true, found_religion = true, recruit_great_person = true,
   patronize_great_person = true, send_diplomatic_action = true, propose_peace = true, purchase_item = true,
-  purchase_tile = true, pillage_improvement = true,
+  purchase_tile = true, pillage_improvement = true, worker_improve = true, build_fort = true,
 }
 
 local function gcall(obj, name, ...)
@@ -1374,6 +1375,15 @@ function Civ6Ai_Apply._Work(playerID, command, args)
   local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
   if unitNum == nil then
     return false, "missing_unit_id", args
+  end
+  -- Local seat: the game's own auto-explore (a synced unit operation that keeps going).
+  local auto = UnitOperationTypes ~= nil and UnitOperationTypes.AUTOMATE_EXPLORE or nil
+  if command.kind == "explore" and auto ~= nil and playerID == Game.GetLocalPlayer() then
+    local unit = UnitManager.GetUnit(playerID, unitNum)
+    if unit ~= nil and UnitManager.CanStartOperation(unit, auto, nil, true) then
+      UnitManager.RequestOperation(unit, auto)
+      return true, "auto_explore", args
+    end
   end
   local ok, reason = Civ6Ai_Apply._GovRoute(command.kind == "explore" and "Explore" or "PillageImprovement", playerID, unitNum, x, y)
   return ok, reason, args

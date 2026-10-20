@@ -2539,6 +2539,7 @@ function Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
 end
 
 Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP = 24
+Civ6Ai_Snapshot.DISTRICT_TILES_CAP = 2
 
 function Civ6Ai_Snapshot._CanQueueRow(city, row, paramKey)
   if city == nil or row == nil or paramKey == nil then
@@ -2592,6 +2593,29 @@ function Civ6Ai_Snapshot._AddProductionCommands(commands, playerID)
         if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP then break end
         if not row.IsWonder and Civ6Ai_Snapshot._CanQueueRow(city, row, CityOperationTypes.PARAM_BUILDING_TYPE) then
           add(row.BuildingType)
+        end
+      end
+    end
+    -- Districts need a tile: offer each with up to DISTRICT_TILES_CAP valid placements.
+    local C = CityOperationTypes
+    for row in GameInfo.Districts() do
+      if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP + 12 then break end
+      local bq = city:GetBuildQueue()
+      if row.DistrictType ~= "DISTRICT_CITY_CENTER" and bq ~= nil and bq:CanProduce(row.Hash, true) then
+        local n = 0
+        for _, plot in ipairs(Map.GetNeighborPlots(city:GetX(), city:GetY(), 3) or {}) do
+          if n >= Civ6Ai_Snapshot.DISTRICT_TILES_CAP then break end
+          local t = { [C.PARAM_DISTRICT_TYPE] = row.Hash, [C.PARAM_X] = plot:GetX(), [C.PARAM_Y] = plot:GetY() }
+          local ok, can = pcall(CityManager.CanStartOperation, city, C.BUILD, t, false)
+          if ok and can then
+            n = n + 1
+            table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+              command_id = "CMD_prod_" .. row.DistrictType .. "_" .. cityId .. "_" .. plot:GetX() .. "_" .. plot:GetY(),
+              kind = "queue_production",
+              fixed_arguments = {city_id = cityId, build_id = row.DistrictType, target_x = plot:GetX(), target_y = plot:GetY()},
+            }))
+            added = added + 1
+          end
         end
       end
     end
@@ -3075,6 +3099,18 @@ function Civ6Ai_Snapshot._AddProgressionCommands(commands, playerID, unit, unitI
       and M(plot, "GetOwner") == playerID and (M(plot, "GetImprovementType") or -1) < 0 and not M(plot, "IsCity") then
     add("build_fort", fort, {improvement_id = fort})
   end
+  -- Builder: every improvement the game allows on its own tile right now.
+  local U = UnitOperationTypes
+  if fort == nil and (M(unit, "GetBuildCharges") or 0) > 0 and U ~= nil and U.BUILD_IMPROVEMENT ~= nil
+      and M(plot, "GetOwner") == playerID and not M(plot, "IsCity") then
+    for imp in GameInfo.Improvements() do
+      local t = { [U.PARAM_X] = unit:GetX(), [U.PARAM_Y] = unit:GetY(), [U.PARAM_IMPROVEMENT_TYPE] = imp.Hash }
+      local ok, can = pcall(UnitManager.CanStartOperation, unit, U.BUILD_IMPROVEMENT, nil, t)
+      if ok and can then
+        add("worker_improve", imp.ImprovementType, {improvement_id = imp.ImprovementType, target_x = unit:GetX(), target_y = unit:GetY()})
+      end
+    end
+  end
 end
 
 -- City ranged strike: a walled city with an enemy unit within 2 tiles.
@@ -3098,7 +3134,7 @@ end
 
 function Civ6Ai_Snapshot._AddExploreCommand(commands, unit, unitId)
   local row = GameInfo.Units[unit:GetType()]
-  if row ~= nil and row.FormationClass ~= "FORMATION_CLASS_CIVILIAN" and (unit:GetMovesRemaining() or 0) > 0 then
+  if row ~= nil and row.FormationClass ~= "FORMATION_CLASS_CIVILIAN" and Civ6Ai_Snapshot._UnitMoves(unit) > 0 then
     table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({command_id = "CMD_explore_" .. unitId, kind = "explore", fixed_arguments = {unit_id = unitId}}))
   end
 end

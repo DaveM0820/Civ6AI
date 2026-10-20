@@ -561,8 +561,8 @@ function Civ6Ai_Orders._DoCommand(sender, o)
     return Civ6Ai_Orders.Gov.JoinFormation(owner, o.U, o.I)
   elseif k == Civ6Ai_Orders.K.CITY_STRIKE then
     return Civ6Ai_Orders.Gov.CityStrike(owner, o.I, o.X, o.Y)
-  elseif k == Civ6Ai_Orders.K.FORT then
-    return Civ6Ai_Orders.Gov.BuildFort(owner, o.U, o.I)
+  elseif k == Civ6Ai_Orders.K.FORT or k == Civ6Ai_Orders.K.IMPROVE then
+    return Civ6Ai_Orders.Gov.BuildImprovement(owner, o.U, o.I)
   end
   return false, "unknown_kind"
 end
@@ -2299,16 +2299,23 @@ function Gov.CityStrike(owner, cityId, x, y)
   return true, "city_strike:dmg=" .. tostring(toDefender)
 end
 
--- Fort (or Roman fort) on the unit's tile; spends one build charge.
-function Gov.BuildFort(owner, unitId, impIndex)
+-- An improvement (builder, or fort) on the unit's tile; spends one build charge.
+function Gov.BuildImprovement(owner, unitId, impIndex)
   local unit = Civ6Ai_Orders._Unit(owner, unitId)
   local row = GameInfo.Improvements[impIndex]
   local plot = unit ~= nil and Map.GetPlot(unit:GetX(), unit:GetY()) or nil
   if plot == nil or row == nil or ImprovementBuilder == nil or ImprovementBuilder.SetImprovementType == nil then
-    return false, "no_fort_route"
+    return false, "no_improvement_route"
   end
   if call(plot, "GetOwner") ~= owner then
-    return false, "forts go on your own territory"
+    return false, "not_your_territory"
+  end
+  if (call(unit, "GetBuildCharges") or 0) <= 0 then
+    return false, "no_build_charges"
+  end
+  if ImprovementBuilder.CanHaveImprovement ~= nil
+      and call(ImprovementBuilder, "CanHaveImprovement", plot, row.Index, call(Players[owner], "GetTeam")) == false then
+    return false, "tile_cannot_have:" .. row.ImprovementType
   end
   pcall(ImprovementBuilder.SetImprovementType, plot, row.Index, owner)
   if call(plot, "GetImprovementType") ~= row.Index then
@@ -2318,6 +2325,7 @@ function Gov.BuildFort(owner, unitId, impIndex)
   pcall(UnitManager.FinishMoves, unit)
   return true, "built=" .. row.ImprovementType
 end
+Gov.BuildFort = Gov.BuildImprovement
 
 function Civ6Ai_Orders._DoDeal(sender, o)
   local why = Civ6Ai_Orders._Authorize(sender, o.P)

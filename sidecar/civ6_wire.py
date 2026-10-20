@@ -28,6 +28,33 @@ CIV6_PRIORITY_PRODUCTION_POLICY = (
 )
 
 
+def prune_settlers_without_sites(snapshot: dict[str, Any]) -> int:
+    """Settlers already cover every legal city site: drop settler production, note why."""
+    settlers = [u for u in snapshot.get("your_units") or [] if isinstance(u, dict) and u.get("unit_type_id") == "UNIT_SETTLER"]
+    sites: set[tuple[Any, Any]] = set()
+    for u in settlers:
+        settle = u.get("settle") if isinstance(u.get("settle"), dict) else {}
+        sites.update((s.get("x"), s.get("y")) for s in settle.get("sites") or [] if isinstance(s, dict))
+        if settle.get("here_ok"):
+            sites.add(("here", u.get("unit_id")))
+    if not settlers or len(sites) >= len(settlers):
+        return 0
+    legal = snapshot.get("legal_commands") if isinstance(snapshot.get("legal_commands"), list) else []
+    keep = [c for c in legal if not (isinstance(c, dict) and c.get("kind") == "queue_production"
+                                     and (c.get("fixed_arguments") or {}).get("build_id") == "UNIT_SETTLER")]
+    snapshot["legal_commands"] = keep
+    snapshot["_no_city_sites"] = len(settlers)
+    return len(legal) - len(keep)
+
+
+def no_city_sites_lines(context: dict[str, Any]) -> list[str]:
+    n = context.get("_no_city_sites") if isinstance(context, dict) else None
+    if not n:
+        return []
+    return [f"No reachable city sites left: your {n} settler(s) already cover every legal site. "
+            "Build no more settlers; put production into districts, buildings and builders."]
+
+
 def _has_queue_production(snapshot: dict[str, Any] | None) -> bool:
     if not isinstance(snapshot, dict):
         return False
@@ -247,6 +274,8 @@ def _group_civ6_city_commands(commands: list[dict[str, Any]]) -> dict[str, list[
         if kind == "queue_production":
             prop = "changeProduction"
             value = _production_label(fixed.get("build_id"))
+            if value.startswith("DISTRICT_") and fixed.get("target_x") is not None:
+                value += f"@({fixed.get('target_x')},{fixed.get('target_y')})"
         elif kind == "set_city_focus":
             prop = "changeFocus"
             value = str(fixed.get("focus_id", "default"))
@@ -1568,6 +1597,7 @@ def build_civ6_wire_prompt(context: dict[str, Any], map_stats: list[str] | None 
         sections.append(pipeline._wire_section("WAR", war_lines))
     attention = list(coaching.collect_civ6_attention_items(context if isinstance(context, dict) else {}))
     attention.extend(civ6_apply_results.blocked_attention_lines(context if isinstance(context, dict) else {}))
+    attention.extend(no_city_sites_lines(context))
     attention.extend(combat_wire.attention_items(context))
     attention.extend(economy_wire.attention_items(context))
     attention.extend(gs_wire.attention_items(context))
