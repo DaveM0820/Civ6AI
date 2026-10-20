@@ -671,8 +671,10 @@ function Civ6Ai_Orders._ResolveAttack(unit, x, y)
   if ranged and (dist < 1 or dist > (call(unit, "GetRange") or num(GameInfo.Units[unit:GetType()].Range) or 1)) then
     return false, "out_of_range:" .. tostring(dist)
   end
+  local city = Cities ~= nil and Cities.GetCityInPlot ~= nil and Cities.GetCityInPlot(x, y) or nil
   local defender = Civ6Ai_Orders._Defender(x, y, owner)
-  if defender == nil then
+  if defender == nil or (city ~= nil and city:GetOwner() ~= owner) then
+    -- A city tile is fought as the city; its garrison only adds strength.
     return Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
   end
   if not Civ6Ai_Orders._AtWar(owner, defender:GetOwner()) then
@@ -738,7 +740,7 @@ function Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
   if not Civ6Ai_Orders._AtWar(owner, city:GetOwner()) then
     return false, "not_at_war"
   end
-  if (call(unit, "GetMovesRemaining") or 0) <= 0 then
+  if (call(unit, "GetMovesRemaining") or 0) <= 0 or (call(unit, "GetAttacksRemaining") or 1) <= 0 then
     return false, "no_moves_left"
   end
   local district = call(call(Players[city:GetOwner()], "GetDistricts"), "FindID", city:GetDistrictID())
@@ -763,6 +765,9 @@ function Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
   end
   local after, captured = left(walls) + left(garrison), false
   if not ranged and after <= 0 and not Civ6Ai_Orders._IsDead(unit) then
+    for _, other in ipairs(Units.GetUnitsInPlot(Map.GetPlot(x, y)) or {}) do
+      if other:GetOwner() ~= owner then pcall(UnitManager.Kill, other) end
+    end
     captured = pcall(Players[owner].AcquireCity, Players[owner], city, true, false)
     if captured then
       pcall(UnitManager.MoveUnit, unit, x, y)
