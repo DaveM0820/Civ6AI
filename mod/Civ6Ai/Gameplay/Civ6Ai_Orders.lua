@@ -53,7 +53,12 @@ Civ6Ai_Orders.K = {
   TRADE = 24,
   EXPLORE = 25,
   ACTIVATE_GP = 26,
+  UPGRADE = 27,
+  PROMOTE = 28,
+  FORMATION = 29,
   REPORT = 30,
+  CITY_STRIKE = 31,
+  FORT = 32,
   PING = 40,
   TEST_MODE = 49,
   TEST_INTROSPECT = 50,
@@ -77,7 +82,7 @@ Civ6Ai_Orders.DECISION_KINDS = {
   [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [9] = true,
   [10] = true, [11] = true, [12] = true, [13] = true, [14] = true, [15] = true, [16] = true,
   [17] = true, [18] = true, [19] = true, [20] = true, [21] = true, [22] = true,
-  [24] = true, [25] = true, [26] = true,
+  [24] = true, [25] = true, [26] = true, [27] = true, [28] = true, [29] = true, [31] = true, [32] = true,
 }
 -- Intent on a MOVE (param A). N is the batch count on the wire, so intent is A.
 Civ6Ai_Orders.INTENT = { MOVE = 0, FOUND = 1, IMPROVE = 2, RELIGION = 3, TRADE = 4 }
@@ -542,6 +547,16 @@ function Civ6Ai_Orders._DoCommand(sender, o)
     return Civ6Ai_Orders.Gov.Explore(owner, o.U)
   elseif k == Civ6Ai_Orders.K.ACTIVATE_GP then
     return Civ6Ai_Orders.Gov.ActivateGreatPerson(owner, o.U)
+  elseif k == Civ6Ai_Orders.K.UPGRADE then
+    return Civ6Ai_Orders.Gov.UpgradeUnit(owner, o.U, o.I, o.V)
+  elseif k == Civ6Ai_Orders.K.PROMOTE then
+    return Civ6Ai_Orders.Gov.PromoteUnit(owner, o.U, o.I)
+  elseif k == Civ6Ai_Orders.K.FORMATION then
+    return Civ6Ai_Orders.Gov.JoinFormation(owner, o.U, o.I)
+  elseif k == Civ6Ai_Orders.K.CITY_STRIKE then
+    return Civ6Ai_Orders.Gov.CityStrike(owner, o.I, o.X, o.Y)
+  elseif k == Civ6Ai_Orders.K.FORT then
+    return Civ6Ai_Orders.Gov.BuildFort(owner, o.U, o.I)
   end
   return false, "unknown_kind"
 end
@@ -2076,6 +2091,116 @@ function Gov.PillageImprovement(owner, unitId, x, y)
     .. ":plot=" .. tostring(ux) .. "," .. tostring(uy)
 end
 
+-- Upgrade: pay the cost the host read from Unit:GetUpgradeCost (V), then
+-- replace the unit with the upgrade type on its tile, keeping damage and XP.
+function Gov.UpgradeUnit(owner, unitId, typeIndex, cost)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  local row = GameInfo.Units[typeIndex]
+  if unit == nil or row == nil then
+    return false, "stale_unit_or_type"
+  end
+  local x, y, dmg = unit:GetX(), unit:GetY(), call(unit, "GetDamage") or 0
+  local xp = call(call(unit, "GetExperience"), "GetExperiencePoints") or 0
+  local okPay, why = debit(owner, false, cost or 0)
+  if not okPay then
+    return false, why
+  end
+  UnitManager.Kill(unit)
+  local okU, new = pcall(UnitManager.InitUnit, owner, row.UnitType, x, y)
+  if not okU or new == nil then
+    credit(owner, false, cost or 0)
+    return false, "the game refused to create " .. row.UnitType
+  end
+  call(new, "SetDamage", dmg)
+  call(call(new, "GetExperience"), "ChangeExperience", xp)
+  pcall(UnitManager.FinishMoves, new)
+  return true, "upgraded=" .. row.UnitType .. ":gold=" .. tostring(cost)
+end
+
+function Gov.PromoteUnit(owner, unitId, promoIndex)
+  local exp = call(Civ6Ai_Orders._Unit(owner, unitId), "GetExperience")
+  local row = GameInfo.UnitPromotions[promoIndex]
+  if exp == nil or row == nil or exp.SetPromotion == nil then
+    return false, "no_promotion_route"
+  end
+  pcall(exp.SetPromotion, exp, row.Index)
+  if call(exp, "HasPromotion", row.Index) ~= true then
+    return false, "the game refused " .. row.UnitPromotionType
+  end
+  pcall(UnitManager.FinishMoves, Civ6Ai_Orders._Unit(owner, unitId))
+  return true, "promoted=" .. row.UnitPromotionType
+end
+
+-- Corps/army (fleet/armada): the unit absorbs an adjacent same-type unit (I).
+function Gov.JoinFormation(owner, unitId, otherId)
+  local unit, other = Civ6Ai_Orders._Unit(owner, unitId), Civ6Ai_Orders._Unit(owner, otherId)
+  local F = MilitaryFormationTypes
+  if unit == nil or other == nil or F == nil or unit.SetMilitaryFormation == nil then
+    return false, "no_formation_route"
+  end
+  local nextF = { [F.STANDARD_MILITARY_FORMATION] = F.CORPS_MILITARY_FORMATION,
+    [F.CORPS_MILITARY_FORMATION] = F.ARMY_MILITARY_FORMATION }
+  local target = nextF[call(unit, "GetMilitaryFormation")]
+  if target == nil or unit:GetType() ~= other:GetType()
+      or Map.GetPlotDistance(unit:GetX(), unit:GetY(), other:GetX(), other:GetY()) > 1 then
+    return false, "needs an adjacent unit of the same type"
+  end
+  UnitManager.Kill(other)
+  pcall(unit.SetMilitaryFormation, unit, target)
+  pcall(UnitManager.FinishMoves, unit)
+  return call(unit, "GetMilitaryFormation") == target, "formation=" .. tostring(target)
+end
+
+-- City ranged strike from the city centre, once per city per turn (synced property).
+function Gov.CityStrike(owner, cityId, x, y)
+  local city = cityById(owner, cityId)
+  local key = "CIV6AI_STRIKE_" .. tostring(owner) .. "_" .. tostring(cityId)
+  if city == nil then
+    return false, "stale_city_id"
+  end
+  if num(Game:GetProperty(key)) == Game.GetCurrentGameTurn() then
+    return false, "city already struck this turn"
+  end
+  local district = call(call(Players[owner], "GetDistricts"), "FindID", city:GetDistrictID())
+  local defender = Civ6Ai_Orders._Defender(x, y, owner)
+  if district == nil or defender == nil or not Civ6Ai_Orders._AtWar(owner, defender:GetOwner()) then
+    return false, "no_enemy_on_plot"
+  end
+  if Map.GetPlotDistance(city:GetX(), city:GetY(), x, y) > 2 then
+    return false, "out_of_range"
+  end
+  local _, toDefender = Civ6Ai_Orders._Forecast(district, defender, CombatTypes ~= nil and CombatTypes.RANGED or nil)
+  if (toDefender or 0) <= 0 then
+    return false, "no_effect:zero_damage"
+  end
+  Game:SetProperty(key, Game.GetCurrentGameTurn())
+  Civ6Ai_Orders._ChangeDamage(defender, toDefender)
+  if Civ6Ai_Orders._IsDead(defender) and call(defender, "IsDead") ~= true then
+    pcall(UnitManager.Kill, defender)
+  end
+  return true, "city_strike:dmg=" .. tostring(toDefender)
+end
+
+-- Fort (or Roman fort) on the unit's tile; spends one build charge.
+function Gov.BuildFort(owner, unitId, impIndex)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  local row = GameInfo.Improvements[impIndex]
+  local plot = unit ~= nil and Map.GetPlot(unit:GetX(), unit:GetY()) or nil
+  if plot == nil or row == nil or ImprovementBuilder == nil or ImprovementBuilder.SetImprovementType == nil then
+    return false, "no_fort_route"
+  end
+  if call(plot, "GetOwner") ~= owner then
+    return false, "forts go on your own territory"
+  end
+  pcall(ImprovementBuilder.SetImprovementType, plot, row.Index, owner)
+  if call(plot, "GetImprovementType") ~= row.Index then
+    return false, "the game refused " .. row.ImprovementType
+  end
+  call(unit, "ChangeBuildCharges", -1)
+  pcall(UnitManager.FinishMoves, unit)
+  return true, "built=" .. row.ImprovementType
+end
+
 function Civ6Ai_Orders._DoDeal(sender, o)
   local why = Civ6Ai_Orders._Authorize(sender, o.P)
   if why ~= nil then
@@ -2142,6 +2267,8 @@ function Gov.Probe()
     { "PlayerReligion", call(p, "GetReligion") }, { "GameReligion", Game.GetReligion ~= nil and Game.GetReligion() or nil },
     { "GameGreatPeople", Game.GetGreatPeople ~= nil and Game.GetGreatPeople() or nil },
     { "GreatPeoplePoints", call(p, "GetGreatPeoplePoints") },
+    { "Unit", sortedMembers(call(p, "GetUnits"))[1] },
+    { "UnitExperience", call(sortedMembers(call(p, "GetUnits"))[1], "GetExperience") },
   }
   for _, pair in ipairs(objects) do
     local okM, names = pcall(Civ6Ai_Orders.MethodNames, pair[2])

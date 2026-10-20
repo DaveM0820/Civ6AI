@@ -143,6 +143,11 @@ def unit_strength_text(unit: dict[str, Any], context: dict[str, Any]) -> str | N
     hp_text = _hp_text(hp, max_hp)
     if hp_text:
         parts.append(hp_text)
+    if _int(unit.get("experience")):
+        parts.append(f"xp {_int(unit['experience'])} level {_int(unit.get('level')) or 1}")
+    promos = unit.get("promotion_ids")
+    if isinstance(promos, list) and promos:
+        parts.append("promotions " + ", ".join(str(p).replace("PROMOTION_", "") for p in promos))
     return ", ".join(parts) if parts else None
 
 

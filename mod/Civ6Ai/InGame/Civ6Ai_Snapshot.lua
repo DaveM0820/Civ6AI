@@ -2175,6 +2175,7 @@ Civ6Ai_Snapshot.KIND_NAMES = {
   [17] = "send_diplomatic_action", [18] = "propose_peace", [19] = "purchase_item",
   [20] = "purchase_tile", [21] = "worker_improve", [22] = "pillage_improvement",
   [24] = "trade_route", [25] = "explore", [26] = "activate_great_person",
+  [27] = "upgrade_unit", [28] = "promote_unit", [29] = "join_formation", [31] = "city_ranged_strike", [32] = "build_fort",
 }
 
 Civ6Ai_Snapshot.INTENT_NAMES = {
@@ -2505,6 +2506,15 @@ function Civ6Ai_Snapshot._UnitPromotionReady(unit)
   return false
 end
 
+function Civ6Ai_Snapshot._HeldPromotions(unit)
+  local exp, out = Civ6Ai_Snapshot._Method(unit, "GetExperience"), {}
+  if exp == nil or exp.HasPromotion == nil then return out end
+  for promo in GameInfo.UnitPromotions() do
+    if exp:HasPromotion(promo.Index) == true then out[#out + 1] = promo.UnitPromotionType end
+  end
+  return out
+end
+
 function Civ6Ai_Snapshot._BuildYourUnits(playerID)
   local player = Players[playerID]
   if player == nil then
@@ -2530,9 +2540,9 @@ function Civ6Ai_Snapshot._BuildYourUnits(playerID)
       health_percent = maxHp > 0 and math.floor(100 * curHp / maxHp) or 100,
       strength = {current = info.combat, maximum = info.combat, change_per_turn = 0},
       movement = {current = moves, maximum = maxMoves, change_per_turn = 0},
-      level = 1,
-      experience = 0,
-      promotion_ids = {},
+      level = Civ6Ai_Snapshot._Method(Civ6Ai_Snapshot._Method(unit, "GetExperience"), "GetLevel") or 1,
+      experience = Civ6Ai_Snapshot._Method(Civ6Ai_Snapshot._Method(unit, "GetExperience"), "GetExperiencePoints") or 0,
+      promotion_ids = Civ6Ai_Snapshot._HeldPromotions(unit),
       promotion_ready = promoReady,
       activity_id = "ACTIVITY_UNKNOWN",
       mission_queue = {},
@@ -2540,7 +2550,7 @@ function Civ6Ai_Snapshot._BuildYourUnits(playerID)
       cargo_unit_ids = {},
       can_act = needsOrders,
       needs_orders = needsOrders,
-      upgrade_options = {},
+      upgrade_options = {(Civ6Ai_Snapshot._UpgradeTarget(playerID, unit))},
     }
     local goal = Civ6Ai_Snapshot._UnitGoal(playerID, unit:GetID())
     if goal ~= nil then
@@ -3083,6 +3093,82 @@ function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId
   end
 end
 
+-- Upgrade target the seat can afford now (tech, gold, own territory), or nil.
+function Civ6Ai_Snapshot._UpgradeTarget(playerID, unit)
+  local M, p = Civ6Ai_Snapshot._Method, Players[playerID]
+  local up = GameInfo.UnitUpgrades ~= nil and GameInfo.UnitUpgrades[GameInfo.Units[unit:GetType()].UnitType] or nil
+  local row = up ~= nil and GameInfo.Units[up.UpgradeUnit] or nil
+  if row == nil then return nil end
+  local tech = row.PrereqTech ~= nil and GameInfo.Technologies[row.PrereqTech] or nil
+  local civic = row.PrereqCivic ~= nil and GameInfo.Civics[row.PrereqCivic] or nil
+  local cost = M(unit, "GetUpgradeCost") or 0
+  local plot = Map.GetPlot(unit:GetX(), unit:GetY())
+  if (tech ~= nil and M(M(p, "GetTechs"), "HasTech", tech.Index) ~= true)
+      or (civic ~= nil and M(M(p, "GetCulture"), "HasCivic", civic.Index) ~= true)
+      or cost <= 0 or (M(M(p, "GetTreasury"), "GetGoldBalance") or 0) < cost
+      or M(plot, "GetOwner") ~= playerID then
+    return nil
+  end
+  return row.UnitType, cost
+end
+
+-- Promotions the unit may take now: its class, not held, any prereq held.
+function Civ6Ai_Snapshot._LegalPromotions(unit)
+  local exp, out = Civ6Ai_Snapshot._Method(unit, "GetExperience"), {}
+  local cls = GameInfo.Units[unit:GetType()].PromotionClass
+  if exp == nil or cls == nil or Civ6Ai_Snapshot._UnitPromotionReady(unit) ~= true then return out end
+  for promo in GameInfo.UnitPromotions() do
+    if promo.PromotionClass == cls and exp:HasPromotion(promo.Index) ~= true then
+      local need, ok = false, false
+      for pre in GameInfo.UnitPromotionPrereqs() do
+        if pre.UnitPromotion == promo.UnitPromotionType then
+          need = true
+          ok = ok or exp:HasPromotion(GameInfo.UnitPromotions[pre.PrereqUnitPromotion].Index) == true
+        end
+      end
+      if ok or not need then out[#out + 1] = promo.UnitPromotionType end
+    end
+  end
+  return out
+end
+
+-- Upgrade, promote, corps/army, fort: the later-era unit orders.
+function Civ6Ai_Snapshot._AddProgressionCommands(commands, playerID, unit, unitId)
+  local add = function(kind, tag, args)
+    args.unit_id = unitId
+    table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({command_id = "CMD_" .. kind .. "_" .. unitId .. "_" .. tag, kind = kind, fixed_arguments = args}))
+  end
+  local up, cost = Civ6Ai_Snapshot._UpgradeTarget(playerID, unit)
+  if up ~= nil then add("upgrade_unit", up, {unit_type_id = up, cost = cost}) end
+  for _, promo in ipairs(Civ6Ai_Snapshot._LegalPromotions(unit)) do
+    add("promote_unit", promo, {promotion_id = promo})
+  end
+  local row, M, p = GameInfo.Units[unit:GetType()], Civ6Ai_Snapshot._Method, Players[playerID]
+  local F = MilitaryFormationTypes
+  local function civic(name) local c = GameInfo.Civics[name]; return c ~= nil and M(M(p, "GetCulture"), "HasCivic", c.Index) == true end
+  local form = F ~= nil and M(unit, "GetMilitaryFormation") or nil
+  local sea = row.Domain == "DOMAIN_SEA"
+  local can = (form == F.STANDARD_MILITARY_FORMATION and civic(sea and "CIVIC_MERCANTILISM" or "CIVIC_NATIONALISM"))
+    or (form == F.CORPS_MILITARY_FORMATION and civic(sea and "CIVIC_NATIONALISM" or "CIVIC_MOBILIZATION"))
+  if can and row.FormationClass ~= "FORMATION_CLASS_CIVILIAN" and row.FormationClass ~= "FORMATION_CLASS_SUPPORT" then
+    for _, other in ipairs(Civ6Ai_Snapshot._IterateUnits(p:GetUnits())) do
+      if other:GetID() ~= unit:GetID() and other:GetType() == unit:GetType()
+          and M(other, "GetMilitaryFormation") == F.STANDARD_MILITARY_FORMATION
+          and Map.GetPlotDistance(unit:GetX(), unit:GetY(), other:GetX(), other:GetY()) <= 1 then
+        local oid = Civ6Ai_Snapshot._UnitWireId(other)
+        add("join_formation", oid, {other_unit_id = oid})
+        break
+      end
+    end
+  end
+  local fort = ({UNIT_MILITARY_ENGINEER = "IMPROVEMENT_FORT", UNIT_ROMAN_LEGION = "IMPROVEMENT_ROMAN_FORT"})[row.UnitType]
+  local plot = Map.GetPlot(unit:GetX(), unit:GetY())
+  if fort ~= nil and GameInfo.Improvements[fort] ~= nil and (M(unit, "GetBuildCharges") or 0) > 0
+      and M(plot, "GetOwner") == playerID and (M(plot, "GetImprovementType") or -1) < 0 and not M(plot, "IsCity") then
+    add("build_fort", fort, {improvement_id = fort})
+  end
+end
+
 function Civ6Ai_Snapshot._AddExploreCommand(commands, unit, unitId)
   local row = GameInfo.UnitOperations["UNITOPERATION_AUTOMATE_EXPLORE"]
   if row ~= nil and UnitManager.CanStartOperation(unit, row.Hash, nil, true) then
@@ -3104,7 +3190,8 @@ function Civ6Ai_Snapshot._AddActivateCommand(commands, playerID, unit, unitId)
   if not isGP then
     return
   end
-  local cmd = UnitCommandTypes ~= nil and UnitCommandTypes.ACTIVATE or nil
+  local cmdRow = GameInfo.UnitCommands ~= nil and GameInfo.UnitCommands["UNITCOMMAND_ACTIVATE_GREAT_PERSON"] or nil
+  local cmd = cmdRow ~= nil and cmdRow.Hash or nil
   local canAct = false
   if cmd ~= nil and UnitManager ~= nil and UnitManager.CanStartCommand ~= nil then
     local ok, can = pcall(function() return UnitManager.CanStartCommand(unit, cmd) end)
@@ -3113,8 +3200,7 @@ function Civ6Ai_Snapshot._AddActivateCommand(commands, playerID, unit, unitId)
     Civ6Ai_Util.Log("snapshot|activate_api_missing")
   end
   if canAct then
-    -- Activate executor is WP-A; until then the prophet walks to a Holy Site.
-    Civ6Ai_Util.Log("snapshot|activate_ready|" .. tostring(unitId))
+    table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({command_id = "CMD_activate_" .. unitId, kind = "activate_great_person", fixed_arguments = {unit_id = unitId}}))
   end
   local isProphet = row.UnitType == "UNIT_GREAT_PROPHET"
     or (row.GreatPersonClassType == "GREAT_PERSON_CLASS_PROPHET")
@@ -3574,6 +3660,8 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
         pcall(Civ6Ai_Snapshot._AddTradeRouteCommands, commands, playerID, unit, unitId)
         pcall(Civ6Ai_Snapshot._AddExploreCommand, commands, unit, unitId)
         pcall(Civ6Ai_Snapshot._AddActivateCommand, commands, playerID, unit, unitId)
+        local okP, whyP = pcall(Civ6Ai_Snapshot._AddProgressionCommands, commands, playerID, unit, unitId)
+        if not okP then Civ6Ai_Util.Log("snapshot|progression_error|" .. tostring(whyP)) end
       end
     end
   end

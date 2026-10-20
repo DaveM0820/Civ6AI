@@ -17,6 +17,7 @@ Civ6Ai_OrderChannel.K = {
   GOVERNMENT = 10, POLICY = 11, PANTHEON = 12, RELIGION = 13, GP_RECRUIT = 14, GP_PATRONIZE = 15, GOVERNOR = 16,
   WAR = 17, PEACE = 18, BUY = 19, BUY_TILE = 20, IMPROVE = 21, PILLAGE = 22,
   FINISH_SEAT = 23, TRADE = 24, EXPLORE = 25, ACTIVATE_GP = 26,
+  UPGRADE = 27, PROMOTE = 28, FORMATION = 29, CITY_STRIKE = 31, FORT = 32,
   REPORT = 30, PING = 40, TEST_MODE = 49, TEST_INTROSPECT = 50, TEST_SPAWN_ENEMY = 51,
   TEST_MELEE_MOVE = 52, TEST_SCRIPTED_COMBAT = 53, TEST_SCRIPTED_PRODUCTION = 54, TEST_IMPROVEMENT = 55,
   TEST_EXPERIENCE = 56, TEST_FAR_MOVE = 57, TEST_COMBAT_PROBE = 58, TEST_DAMAGE_CHECK = 59,
@@ -31,6 +32,7 @@ Civ6Ai_OrderChannel.KIND_BY_COMMAND = {
   send_diplomatic_action = 17, propose_peace = 18, purchase_item = 19, purchase_tile = 20,
   worker_improve = 21, pillage_improvement = 22,
   trade_route = 24, explore = 25, activate_great_person = 26,
+  upgrade_unit = 27, promote_unit = 28, join_formation = 29, city_ranged_strike = 31, build_fort = 32,
 }
 Civ6Ai_OrderChannel.REPORT_DELAY_SECONDS = 5
 Civ6Ai_OrderChannel._counter = Civ6Ai_OrderChannel._counter or 0
@@ -323,6 +325,29 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
     end
     f.I = dest
     f.G, f.A = 1, 4
+  elseif kind == 27 or kind == 28 or kind == 32 then
+    local tbl = ({ [27] = GameInfo.Units, [28] = GameInfo.UnitPromotions, [32] = GameInfo.Improvements })[kind]
+    local row = tbl[args.unit_type_id or args.promotion_id or args.improvement_id or ""]
+    if f.U == nil or row == nil then
+      return nil, "missing_unit_or_type"
+    end
+    f.I = row.Index
+    if kind == 27 then
+      local unit = UnitManager.GetUnit(playerID, f.U)
+      f.V = unit ~= nil and unit.GetUpgradeCost ~= nil and unit:GetUpgradeCost() or -1
+    end
+  elseif kind == 29 then
+    f.I = Civ6Ai_Apply._ParseUnitNumericId(args.other_unit_id)
+    if f.U == nil or f.I == nil then
+      return nil, "missing_unit_id"
+    end
+  elseif kind == 31 then
+    local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
+    f.I = Civ6Ai_OrderChannel._CityNum(args.city_id)
+    if f.I == nil or x == nil then
+      return nil, "missing_city_or_target"
+    end
+    f.X, f.Y = x, y
   elseif kind == 25 or kind == 26 then
     if f.U == nil then
       return nil, "missing_unit_id"
