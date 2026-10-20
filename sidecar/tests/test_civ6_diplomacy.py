@@ -108,5 +108,12 @@ class DiplomacyWireTests(unittest.TestCase):
         self.assertEqual(token, ("purchase", "UNIT_MISSIONARY:faith"))
 
 
+    def test_items_tolerate_copied_pact_label(self):
+        # T100 live: the model copied the hint's 'pacts (both ways):' label into its value.
+        self.assertEqual(diplo.parse_items("100 gold; pacts: open_borders"), [{"gold": 100}, {"kind": "open_borders"}])
+        self.assertEqual(diplo.parse_items("open_borders; pacts (both ways): open_borders"), [{"kind": "open_borders"}])
+        self.assertEqual(diplo.parse_items("tobacco:1"), [{"res": "RESOURCE_TOBACCO", "n": 1}])
+        self.assertIsInstance(diplo.parse_items("banana"), str)
+
 if __name__ == "__main__":
     unittest.main()

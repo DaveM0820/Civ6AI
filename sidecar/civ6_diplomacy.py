@@ -113,6 +113,8 @@ PACTS = {
     "open_borders": (8, "CIVIC_EARLY_EMPIRE"), "embassy": (16, "TECH_WRITING"), "delegation": (32, None),
 }
 _ITEM = re.compile(r"^\s*(\d+)\s+([A-Za-z_]+)\s*$")
+_ITEM_REV = re.compile(r"^\s*([A-Za-z_]+)\s*[:x]\s*(\d+)\s*$")  # 'tobacco:2'
+_LABEL = re.compile(r"^\s*pacts?\b[^:]*:\s*", re.I)  # 'pacts (both ways): open_borders' -> 'open_borders'
 
 
 def _me(snapshot: dict) -> str:
@@ -155,17 +157,21 @@ def _save(snapshot: dict, deals: list[dict[str, Any]]) -> None:
 def parse_items(text: str) -> list[dict[str, Any]] | str:
     """'100 gold, 3 gpt, 1 RESOURCE_IRON' / 'peace' / 'friendship' -> items, or an error."""
     items: list[dict[str, Any]] = []
-    for part in re.split(r",|\band\b|\+", str(text or "")):
+    for part in re.split(r",|;|\||\band\b|\+", str(text or "")):
+        part = _LABEL.sub("", part)
         word = part.strip().lower()
         if not word or word in ("nothing", "none"):
             continue
         if word.replace(" ", "_") in PACTS:
-            items.append({"kind": word.replace(" ", "_")})
+            if {"kind": word.replace(" ", "_")} not in items:
+                items.append({"kind": word.replace(" ", "_")})
             continue
-        m = _ITEM.match(part)
-        if not m or int(m.group(1)) <= 0:
-            return f"'{part.strip()}' is not '<n> gold', '<n> gpt' or '<n> RESOURCE_X'"
-        n, name = int(m.group(1)), m.group(2).upper()
+        m, rev = _ITEM.match(part), _ITEM_REV.match(part)
+        if rev:
+            m = None
+        if (not m and not rev) or int((m or rev).group(1 if m else 2)) <= 0:
+            return f"'{part.strip()}' is not '<n> gold', '<n> gpt', '<n> RESOURCE_X' or a pact"
+        n, name = (int(m.group(1)), m.group(2).upper()) if m else (int(rev.group(2)), rev.group(1).upper())
         if name == "GOLD":
             items.append({"gold": n})
         elif name in ("GPT", "GOLD_PER_TURN"):
@@ -254,9 +260,9 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
         if target["player_id"].startswith("PLAYER_") and target in _majors(snapshot):
             names.append(target["name"])
     if names:
-        out.append(("deal.<Leader>", "give <n> gold, <n> gpt, <n> RESOURCE_X for <items>; pacts (both ways): "
-                    "peace | friendship | alliance | open_borders | embassy | delegation  "
-                    f"(answered next turn; Leader = {' | '.join(names)})"))
+        out.append(("deal.<Leader>", "give <items> for <items>  (items: <n> gold, <n> gpt, <n> RESOURCE_X, or a pact "
+                    "that binds both sides: peace, friendship, alliance, open_borders, embassy, delegation; "
+                    f"answered next turn; Leader = {' | '.join(names)})"))
     return out
 
 
