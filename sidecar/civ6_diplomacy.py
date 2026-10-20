@@ -107,6 +107,11 @@ def _targets(snapshot: dict) -> list[dict[str, Any]]:
 DEALS_NAME = "deals.json"
 GPT_TURNS = 10
 OFFER_TTL = 3
+# Pact -> (Gov.Deal bit, civic/tech this seat needs). Applied both ways; peace needs war, the rest peace.
+PACTS = {
+    "peace": (1, None), "friendship": (2, None), "alliance": (4, "CIVIC_DIPLOMATIC_SERVICE"),
+    "open_borders": (8, "CIVIC_EARLY_EMPIRE"), "embassy": (16, "TECH_WRITING"), "delegation": (32, None),
+}
 _ITEM = re.compile(r"^\s*(\d+)\s+([A-Za-z_]+)\s*$")
 
 
@@ -154,8 +159,8 @@ def parse_items(text: str) -> list[dict[str, Any]] | str:
         word = part.strip().lower()
         if not word or word in ("nothing", "none"):
             continue
-        if word in ("peace", "friendship"):
-            items.append({"kind": word})
+        if word.replace(" ", "_") in PACTS:
+            items.append({"kind": word.replace(" ", "_")})
             continue
         m = _ITEM.match(part)
         if not m or int(m.group(1)) <= 0:
@@ -184,6 +189,28 @@ def _stock_problem(snapshot: dict, items: list[dict[str, Any]]) -> str | None:
     for i in items:
         if "res" in i and i["n"] > have.get(i["res"], 0):
             return f"you have {have.get(i['res'], 0)} {i['res']}"
+    return None
+
+
+def _pact_problem(snapshot: dict, pid: str, kinds: set) -> str | None:
+    """None when this seat may offer every pact in kinds to pid (the other side is checked in Gov.Deal)."""
+    major = next((m for m in _lst(diplomacy(snapshot).get("majors")) if isinstance(m, dict)
+                  and str(m.get("player_id")) == pid), {})
+    empire = _dct(snapshot.get("your_empire"))
+    known = {str(c.get("id")) for c in _lst(empire.get("civics")) if isinstance(c, dict) and c.get("key") == "known"}
+    known |= {str(t) for t in _lst(_dct(empire.get("research")).get("known_tech_ids"))}
+    for kind in sorted(kinds):
+        if kind not in PACTS:
+            continue
+        if (kind == "peace") != bool(major.get("at_war")):
+            return "peace needs a war" if kind == "peace" else f"no {kind} while at war"
+        need = PACTS[kind][1]
+        if need and need not in known:
+            return f"{kind} needs {need}"
+        if kind == "alliance" and not major.get("declared_friendship"):
+            return "alliance needs declared friendship first"
+        if major.get({"friendship": "declared_friendship", "alliance": "alliance", "open_borders": "open_borders"}.get(kind, "_")):
+            return f"you already have {kind}"
     return None
 
 
@@ -227,7 +254,8 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
         if target["player_id"].startswith("PLAYER_") and target in _majors(snapshot):
             names.append(target["name"])
     if names:
-        out.append(("deal.<Leader>", "give <n> gold, <n> gpt, <n> RESOURCE_X for <items> | peace | friendship  "
+        out.append(("deal.<Leader>", "give <n> gold, <n> gpt, <n> RESOURCE_X for <items>; pacts (both ways): "
+                    "peace | friendship | alliance | open_borders | embassy | delegation  "
                     f"(answered next turn; Leader = {' | '.join(names)})"))
     return out
 
@@ -309,7 +337,7 @@ def _deal_command(snapshot: dict, other: str, give: list, want: list, name: str)
         "target_player_id": other,
         "gold": sum(i.get("gold", 0) for i in give) - sum(i.get("gold", 0) for i in want),
         "res1": legs[0][0], "amt1": legs[0][1], "res2": legs[1][0], "amt2": legs[1][1],
-        "mode": 1 if "peace" in kinds else 2 if "friendship" in kinds else 0,
+        "mode": sum(PACTS[k][0] for k in kinds if k in PACTS),
     }
     return _add_command(snapshot, "execute_deal", fixed, f"deal with {name}: give {_items_text(give)} for {_items_text(want)}")
 
@@ -358,9 +386,9 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         for parsed in (give, want):
             if isinstance(parsed, str):
                 return [], [f"{key}={value}: {parsed}"]
-        kinds = {i.get("kind") for i in give + want}
-        if "peace" in kinds and not target["can_make_peace"]:
-            return [], [f"{key}: you are not at war with {name}"]
+        problem = _pact_problem(snapshot, pid, {i.get("kind") for i in give + want} - {None})
+        if problem:
+            return [], [f"{key}={value}: {problem}"]
         problem = _stock_problem(snapshot, give)
         if problem:
             return [], [f"{key}={value}: {problem}"]

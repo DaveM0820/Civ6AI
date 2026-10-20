@@ -1924,7 +1924,28 @@ end
 
 -- An agreed deal (the other seat accepted it a turn earlier). Signed amounts,
 -- + = owner gives. All checks run before any change, so it applies whole or not at all.
--- mode 1 = peace, 2 = declared friendship.
+-- mode bits: 1 peace, 2 friendship, 4 alliance, 8 open borders, 16 embassy, 32 delegation (both ways).
+-- {setter, checker, civic/tech both seats need}. Only delegation and permanent
+-- alliance setters appear in Firaxis scripts; the rest are verified after the call.
+local PACTS = {
+  [2] = { "SetHasDeclaredFriendship", "HasDeclaredFriendship" },
+  [4] = { "SetHasAllied", "HasAllied", "CIVIC_DIPLOMATIC_SERVICE" },
+  [8] = { "SetOpenBorders", "HasOpenBordersFrom", "CIVIC_EARLY_EMPIRE" },
+  [16] = { "SetHasEmbassyAt", "HasEmbassyAt", "TECH_WRITING" },
+  [32] = { "SetHasDelegationAt", "HasDelegationAt" },
+}
+
+local function knows(p, id)
+  if id == nil then
+    return true
+  end
+  local civic, tech = GameInfo.Civics[id], GameInfo.Technologies[id]
+  if civic ~= nil then
+    return call(call(p, "GetCulture"), "HasCivic", civic.Index) == true
+  end
+  return tech ~= nil and call(call(p, "GetTechs"), "HasTech", tech.Index) == true
+end
+
 function Gov.Deal(owner, other, gold, r1, a1, r2, a2, mode)
   local me, them = Players[owner], Players[other]
   if them == nil or call(them, "IsAlive") ~= true then
@@ -1950,17 +1971,30 @@ function Gov.Deal(owner, other, gold, r1, a1, r2, a2, mode)
       legs[#legs + 1] = leg
     end
   end
-  if mode == 1 then
+  mode = mode or 0
+  for bit, pact in pairs(PACTS) do
+    if math.floor(mode / bit) % 2 == 1 and not (knows(me, pact[3]) and knows(them, pact[3])) then
+      return false, pact[2] .. " needs " .. tostring(pact[3]) .. " on both sides"
+    end
+  end
+  if mode % 2 == 1 then
     local ok, why = Gov.MakePeace(owner, other)
     if not ok then
       return false, why
     end
-  elseif mode == 2 then
-    local dMe, dThem = call(me, "GetDiplomacy"), call(them, "GetDiplomacy")
-    pcall(dMe.SetHasDeclaredFriendship, dMe, other, true)
-    pcall(dThem.SetHasDeclaredFriendship, dThem, owner, true)
-    if call(dMe, "HasDeclaredFriendship", other) ~= true then
-      return false, "the game refused the friendship"
+  end
+  local dMe, dThem = call(me, "GetDiplomacy"), call(them, "GetDiplomacy")
+  for _, bit in ipairs({ 2, 4, 8, 16, 32 }) do
+    local pact = PACTS[bit]
+    if math.floor(mode / bit) % 2 == 1 then
+      if dMe == nil or dMe[pact[1]] == nil then
+        return false, "this game has no gameplay route for " .. pact[1]
+      end
+      pcall(dMe[pact[1]], dMe, other, true)
+      pcall(dThem[pact[1]], dThem, owner, true)
+      if call(dMe, pact[2], other) ~= true then
+        return false, "the game refused " .. pact[1]
+      end
     end
   end
   if gold ~= 0 then

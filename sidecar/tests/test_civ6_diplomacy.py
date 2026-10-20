@@ -67,6 +67,17 @@ class DiplomacyWireTests(unittest.TestCase):
             self.assertTrue(diplo.bind_reply(snap, "deal.Cleopatra", "peace")[1])
             self.assertEqual(diplo.trade_lines(snap, "PLAYER_1"), "none")
 
+    def test_pacts_gated_and_packed_as_bits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = _snap(session=tmp)
+            self.assertIn("CIVIC_EARLY_EMPIRE", diplo.bind_reply(a, "deal.Cleopatra", "open borders")[1][0])
+            self.assertIn("DIPLOMATIC_SERVICE", diplo.bind_reply(a, "deal.Cleopatra", "alliance")[1][0])
+            a["your_empire"] = {"civics": [{"key": "known", "id": "CIVIC_EARLY_EMPIRE"}]}
+            self.assertEqual(diplo.bind_reply(a, "deal.Cleopatra", "open_borders, delegation"), ([], []))
+            b = _snap(me="PLAYER_1", other="PLAYER_0", other_name="Amanitore", session=tmp, turn=13)
+            diplo.bind_reply(b, "deal.Amanitore.respond", "ACCEPT")
+            self.assertEqual(b["legal_commands"][-1]["fixed_arguments"]["mode"], 40)
+
     def test_reject_closes_offer(self):
         with tempfile.TemporaryDirectory() as tmp:
             diplo.bind_reply(_snap(session=tmp), "deal.Cleopatra", "friendship")
