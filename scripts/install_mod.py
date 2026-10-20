@@ -381,9 +381,9 @@ def rotate_session(
 
 def default_civ6ai_root() -> Path:
     sys.path.insert(0, str(ROOT / "scripts"))
-    from civ6_paths import preferred_my_games_root
+    from civ6_paths import civ6ai_root
 
-    return preferred_my_games_root() / "civ6ai"
+    return civ6ai_root()
 
 
 def default_log_dir() -> Path | None:

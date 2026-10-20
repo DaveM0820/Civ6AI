@@ -217,11 +217,11 @@ def _start_new_session() -> None:
         if str(ROOT / "scripts" / "testbed") not in sys.path:
             sys.path.insert(0, str(ROOT / "scripts" / "testbed"))
         from civ6_lua_log_bridge import store_log_offset
-        from civ6_paths import my_games_roots
+        from civ6_paths import civ6ai_root
 
         lua_log = next((p for p in lua_log_candidates() if p.is_file()), None)
         if lua_log is not None:
-            autotest = my_games_roots()[0] / "civ6ai" / "autotest"
+            autotest = civ6ai_root() / "autotest"
             size = lua_log.stat().st_size
             for name in ("lua_bridge_offset.txt", "lua_nudge_offset.txt"):
                 store_log_offset(autotest / name, lua_log, size)

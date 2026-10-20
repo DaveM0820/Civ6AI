@@ -45,6 +45,13 @@ def preferred_my_games_root() -> Path:
     return documents_dir() / "My Games" / MEIER
 
 
+def civ6ai_root() -> Path:
+    """Session/runtime I/O: Civ6's own local (never cloud-synced) folder, where Lua.log lives."""
+    local = os.environ.get("LOCALAPPDATA") or ""
+    base = Path(local) / "Firaxis Games" / MEIER if local else preferred_my_games_root()
+    return base / "civ6ai"
+
+
 def my_games_roots() -> list[Path]:
     return [preferred_my_games_root()]
 

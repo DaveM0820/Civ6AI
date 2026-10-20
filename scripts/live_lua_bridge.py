@@ -41,9 +41,9 @@ def main() -> int:
         if lua_log is None:
             lua_log = default_lua_log()
 
-    from civ6_paths import preferred_my_games_root  # noqa: PLC0415
+    from civ6_paths import civ6ai_root as _civ6ai_root  # noqa: PLC0415
 
-    civ6ai_root = preferred_my_games_root() / "civ6ai"
+    civ6ai_root = _civ6ai_root()
 
     civ6ai_root.mkdir(parents=True, exist_ok=True)
     python = python_executable(prefer_pythonw=True)

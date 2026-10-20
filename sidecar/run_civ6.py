@@ -279,6 +279,8 @@ def _persist_thought_memory(
             max_new=1,
             near_dupe=0.7,
         )
+    if snapshot.get("_policy_review_requested"):
+        thought_memory["policy_review_turn"] = int(snapshot["decision"]["turn"])
     histories = normalized_response.get("player_histories", {})
     if isinstance(histories, dict) and histories:
         thought_memory = pipeline.update_player_histories(
@@ -599,6 +601,7 @@ def main() -> None:
     thought_path = _thought_memory_path(civ6ai_root, game_uuid, player_id)
     thought_memory = pipeline.load_thought_memory(thought_path, session_key, snapshot)
     pipeline.inject_thought_history(snapshot, thought_memory)
+    snapshot["_policy_review"] = isinstance(thought_memory, dict) and thought_memory.get("policy_review_turn") == int(snapshot["decision"]["turn"]) - 1
     prior_dropped = thought_memory.get("dropped") if isinstance(thought_memory, dict) else None
     if isinstance(prior_dropped, list) and prior_dropped:
         civ6_apply_results.record_dropped(snapshot, [str(item) for item in prior_dropped])
