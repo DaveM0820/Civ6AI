@@ -260,6 +260,29 @@ def append_apply_results(civ6ai_root: Path, session_id: str, rows: list[dict[str
     return written
 
 
+def record_failed_appends(civ6ai_root: Path, chunk: str) -> int:
+    """The in-game Lua has no file I/O: write its io|append_failed|<path>|<line> lines
+    (chat_log, chat_replay, ...) under civ6ai_root. apply-results has its own path above."""
+    root = str(civ6ai_root.resolve()).replace("\\", "/").lower()
+    n = 0
+    for raw in chunk.splitlines():
+        _, sep, rest = raw.partition("CIV6AI|io|append_failed|")
+        path, bar, line = rest.partition("|")
+        if not sep or not bar or path.endswith(APPLY_RESULTS_NAME):
+            continue
+        target = Path(path)
+        if not str(target.resolve()).replace("\\", "/").lower().startswith(root):
+            continue
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+            n += 1
+        except OSError as error:
+            log.warning("mirrored append failed: %s", error)
+    return n
+
+
 def record_apply_results(civ6ai_root: Path, chunk: str, blobs: list[dict[str, Any]], active_session: str) -> int:
     """Persist this chunk's apply_result rows before the seats' next prompts are built."""
     rows = parse_apply_result_lines(chunk)
@@ -484,6 +507,7 @@ def process_lua_log_blobs(
     repo_path = Path(str(runtime.get("repo") or repo))
     active_session = str(runtime.get("session_id") or "").strip()
     record_apply_results(civ6ai_root, chunk, blobs, active_session)
+    record_failed_appends(civ6ai_root, chunk)
     _note_build_stamp(chunk, repo_path)
     if "autotest|stall|" in chunk or "CIV6AI|autotest|stall|" in chunk:
         log.warning("stall reported in Lua.log")
