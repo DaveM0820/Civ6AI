@@ -2440,7 +2440,7 @@ function Civ6Ai_Snapshot._BuildYourUnits(playerID)
       cargo_unit_ids = {},
       can_act = needsOrders,
       needs_orders = needsOrders,
-      upgrade_options = {(Civ6Ai_Snapshot._UpgradeTarget(playerID, unit))},
+      upgrade_options = Civ6Ai_Snapshot._UpgradeOptions(playerID, unit),
     }
     local goal = Civ6Ai_Snapshot._UnitGoal(playerID, unit:GetID())
     if goal ~= nil then
@@ -2976,6 +2976,13 @@ function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId
       end
     end
   end
+end
+
+-- Schema upgrade list: {} or {{unit_type_id, gold_cost}}.
+function Civ6Ai_Snapshot._UpgradeOptions(playerID, unit)
+  local up, cost = Civ6Ai_Snapshot._UpgradeTarget(playerID, unit)
+  if up == nil then return {} end
+  return {{unit_type_id = up, gold_cost = cost}}
 end
 
 -- Upgrade target the seat can afford now (tech, gold, own territory), or nil.

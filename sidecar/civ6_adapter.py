@@ -317,12 +317,40 @@ def _normalize_private_inbox(snapshot: dict[str, Any]) -> None:
     diplomacy["private_inbox"] = [r for r in (_normalize_chat_record(m) for m in inbox) if r is not None]
 
 
+def _normalize_upgrade_options(snapshot: dict[str, Any]) -> None:
+    """Coerce upgrade_options to schema upgrade objects.
+
+    Civ6Ai_Snapshot.lua sent bare unit type strings ("UNIT_SWORDSMAN"), which
+    failed validation and cost every seat its model turn. Gold cost comes from
+    the unit's upgrade_unit legal command when present.
+    """
+    costs: dict[tuple[str, str], int] = {}
+    for cmd in _as_list(snapshot.get("legal_commands")):
+        args = cmd.get("fixed_arguments") if isinstance(cmd, dict) else None
+        if isinstance(cmd, dict) and cmd.get("kind") == "upgrade_unit" and isinstance(args, dict):
+            try:
+                costs[(str(args.get("unit_id")), str(args.get("unit_type_id")))] = max(0, int(args.get("cost") or 0))
+            except (TypeError, ValueError):
+                pass
+    for unit in _as_list(snapshot.get("your_units")):
+        if not isinstance(unit, dict):
+            continue
+        out = []
+        for opt in _as_list(unit.get("upgrade_options")):
+            if isinstance(opt, str) and opt:
+                out.append({"unit_type_id": opt, "gold_cost": costs.get((str(unit.get("unit_id")), opt), 0)})
+            elif isinstance(opt, dict) and opt.get("unit_type_id"):
+                out.append(opt)
+        unit["upgrade_options"] = out
+
+
 def _normalize_wire_shapes(snapshot: dict[str, Any]) -> None:
     """Normalize flat game/Lua wire into civ6ai-input schema before validation."""
     history = snapshot.get("history")
     if isinstance(history, dict):
         _normalize_history_wire(history)
     _normalize_private_inbox(snapshot)
+    _normalize_upgrade_options(snapshot)
     decision = snapshot.get("decision")
     if isinstance(decision, dict):
         _normalize_decision_wire(decision)
