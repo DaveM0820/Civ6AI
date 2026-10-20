@@ -427,6 +427,18 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
   if command.kind == "explore" then
     return Civ6Ai_Apply._Work(playerID, command, args)
   end
+  if command.kind == "activate_great_person" or command.kind == "upgrade_unit" or command.kind == "promote_unit"
+      or command.kind == "join_formation" or command.kind == "city_ranged_strike" or command.kind == "build_fort" then
+    local f, why = Civ6Ai_OrderChannel._Fields(playerID, command)
+    if f == nil then
+      return false, why, args
+    end
+    local route = ({ [26] = { "ActivateGreatPerson", f.U }, [27] = { "UpgradeUnit", f.U, f.I, f.V },
+      [28] = { "PromoteUnit", f.U, f.I }, [29] = { "JoinFormation", f.U, f.I },
+      [31] = { "CityStrike", f.I, f.X, f.Y }, [32] = { "BuildFort", f.U, f.I } })[f.K]
+    local ok, reason = Civ6Ai_Apply._GovRoute(route[1], playerID, route[2], route[3], route[4])
+    return ok, reason, args
+  end
   if command.kind == "pillage_improvement" then
     return Civ6Ai_Apply._Work(playerID, command, args)
   end

@@ -21,7 +21,8 @@ APPLY_KINDS = {
     "set_research_tech", "set_research_civic", "move_unit", "queue_production",
     "unit_skip", "unit_posture_fortify", "found_city", "attack_target",
     "send_diplomatic_action", "propose_peace", "purchase_item", "purchase_tile",
-    "worker_improve", "pillage_improvement", "explore",
+    "worker_improve", "pillage_improvement", "explore", "activate_great_person",
+    "upgrade_unit", "promote_unit", "join_formation", "city_ranged_strike", "build_fort",
     "respond_to_diplomacy", "diplomatic_session",
 }
 
