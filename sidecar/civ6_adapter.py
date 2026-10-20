@@ -344,6 +344,18 @@ def _normalize_upgrade_options(snapshot: dict[str, Any]) -> None:
         unit["upgrade_options"] = out
 
 
+def _normalize_amenities(snapshot: dict[str, Any]) -> None:
+    """GetAmenities() goes below 0 under bankruptcy or war weariness; fold the deficit into negative so net stays exact."""
+    rows = [c.get("amenities") for c in _as_list(snapshot.get("your_cities")) if isinstance(c, dict)]
+    empire = snapshot.get("empire")
+    if isinstance(empire, dict):
+        rows.append(empire.get("amenities"))
+    for row in rows:
+        if isinstance(row, dict) and isinstance(row.get("positive"), int) and row["positive"] < 0:
+            row["negative"] = int(row.get("negative") or 0) - row["positive"]
+            row["positive"] = 0
+
+
 def _normalize_wire_shapes(snapshot: dict[str, Any]) -> None:
     """Normalize flat game/Lua wire into civ6ai-input schema before validation."""
     history = snapshot.get("history")
@@ -351,6 +363,7 @@ def _normalize_wire_shapes(snapshot: dict[str, Any]) -> None:
         _normalize_history_wire(history)
     _normalize_private_inbox(snapshot)
     _normalize_upgrade_options(snapshot)
+    _normalize_amenities(snapshot)
     decision = snapshot.get("decision")
     if isinstance(decision, dict):
         _normalize_decision_wire(decision)
