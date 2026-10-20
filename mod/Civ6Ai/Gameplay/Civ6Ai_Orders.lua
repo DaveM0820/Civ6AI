@@ -693,6 +693,9 @@ function Civ6Ai_Orders._ResolveAttack(unit, x, y)
   if ranged then
     toAttacker = 0
   end
+  if toDefender <= 0 and toAttacker <= 0 then
+    return false, "no_effect:zero_damage"
+  end
   local defBefore = call(defender, "GetDamage") or 0
   local attBefore = call(unit, "GetDamage") or 0
   Civ6Ai_Orders._ChangeDamage(defender, toDefender)
@@ -745,6 +748,9 @@ function Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
   local toAttacker, toCity = Civ6Ai_Orders._Forecast(unit, district, Civ6Ai_Orders._CombatType(unit))
   if toAttacker == nil then
     return false, toCity
+  end
+  if toCity <= 0 then
+    return false, "no_effect:zero_damage"
   end
   local walls, garrison = DefenseTypes.DISTRICT_OUTER, DefenseTypes.DISTRICT_GARRISON
   local function left(t) return (call(district, "GetMaxDamage", t) or 0) - (call(district, "GetDamage", t) or 0) end
