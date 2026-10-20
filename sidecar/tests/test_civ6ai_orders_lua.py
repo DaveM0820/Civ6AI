@@ -986,7 +986,7 @@ class DealOrdersTests(unittest.TestCase):
         self.order(0, K=17, P=2, I=1, X=0, S=1)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
         self.assertTrue(self.rt.eval("Players[2].war[1]"))
-        self.order(0, K=18, P=2, I=1, S=2)
+        self.order(0, K=33, P=2, I=1, W=0, X=-1, Y=0, I2=-1, I3=0, A=1, S=2)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
         self.assertIsNone(self.rt.eval("Players[2].war[1]"))
 
@@ -1020,17 +1020,17 @@ class OrderChannelDealTests(OrderChannelTests):
         rt.execute("Civ6Ai_Snapshot = {_PurchaseCost = function() return 40 end}; CityManager = {GetCity = function() return {} end}")
         d = self.decision([
             '{kind="send_diplomatic_action", arguments={target_player_id="PLAYER_1", action_id="DECLARE_WAR"}}',
-            '{kind="propose_peace", arguments={target_player_id="PLAYER_3"}}',
+            '{kind="execute_deal", arguments={target_player_id="PLAYER_3", gold=50, res1="", amt1=0, res2="", amt2=0, mode=1}}',
             '{kind="purchase_item", arguments={city_id="CITY_3", item_id="UNIT_WARRIOR"}}',
             '{kind="purchase_tile", arguments={city_id="CITY_3", target_x=6, target_y=7}}',
             '{kind="worker_improve", arguments={unit_id="UNIT_7", improvement_id="IMPROVEMENT_FARM", target_x=6, target_y=7}}',
         ])
         self.assertEqual(rt.globals().Civ6Ai_OrderChannel.SendDecision(2, d, 6), 5)
         sent = [dict(p.items()) for p in _vals(rt.eval("sent"))]
-        self.assertEqual([p["K"] for p in sent], [17, 18, 19, 20, 21])
+        self.assertEqual([p["K"] for p in sent], [17, 33, 19, 20, 21])
         self.assertEqual(sent[0]["I"], 1)
         self.assertEqual(sent[0]["X"], 0)
-        self.assertEqual(sent[1]["I"], 3)
+        self.assertEqual((sent[1]["I"], sent[1]["W"], sent[1]["X"], sent[1]["A"]), (3, 50, -1, 1))
         self.assertEqual(sent[2]["X"], 3)
         self.assertEqual(sent[2]["I"], 0)
         self.assertEqual((sent[2]["U"], sent[2]["V"]), (0, 40))

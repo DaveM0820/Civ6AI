@@ -75,7 +75,6 @@ CIV6_EMPIRE_WIRE: dict[str, tuple[str, str]] = {
     "form_alliance": ("legal.alliance", "alliance_type"),
     "propose_trade": ("legal.trade.offer", "offer"),
     "propose_peace": ("legal.peace", "apply"),
-    "respond_to_diplomacy": ("legal.diplomacy.respond", "response"),
     "respond_to_trade": ("legal.trade.respond", "response"),
     "recruit_great_person": ("legal.gp.recruit", "great_person_id"),
     "patronize_great_person": ("legal.gp.patronize", "great_person_id"),
@@ -1265,6 +1264,9 @@ def _opponents_section(context: dict[str, Any]) -> list[str]:
         diplo = diplo_majors.get(str(rival.get("player_id")))
         if diplo is not None:
             lines.extend(_civ6_major_relation_lines(context, name, diplo))
+            from sidecar import civ6_diplomacy as diplomacy_wire
+
+            lines.append(pipeline._wire_line(f"rival.{name}.trades", diplomacy_wire.trade_lines(context, str(rival.get("player_id")))))
         elif isinstance(relation, dict):
             attitude = _attitude_label(relation.get("attitude_id"))
             if attitude:

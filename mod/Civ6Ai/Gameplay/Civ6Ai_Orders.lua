@@ -44,7 +44,7 @@ Civ6Ai_Orders.K = {
   GP_PATRONIZE = 15,
   GOVERNOR = 16,
   WAR = 17,
-  PEACE = 18,
+  DEAL = 33,
   BUY = 19,
   BUY_TILE = 20,
   IMPROVE = 21,
@@ -82,7 +82,7 @@ Civ6Ai_Orders.DECISION_KINDS = {
   [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [9] = true,
   [10] = true, [11] = true, [12] = true, [13] = true, [14] = true, [15] = true, [16] = true,
   [17] = true, [18] = true, [19] = true, [20] = true, [21] = true, [22] = true,
-  [24] = true, [25] = true, [26] = true, [27] = true, [28] = true, [29] = true, [31] = true, [32] = true,
+  [24] = true, [25] = true, [26] = true, [27] = true, [28] = true, [29] = true, [31] = true, [32] = true, [33] = true,
 }
 -- Intent on a MOVE (param A). N is the batch count on the wire, so intent is A.
 Civ6Ai_Orders.INTENT = { MOVE = 0, FOUND = 1, IMPROVE = 2, RELIGION = 3, TRADE = 4 }
@@ -834,7 +834,7 @@ function Civ6Ai_Orders._Execute(sender, o)
   if k ~= nil and k >= Civ6Ai_Orders.K.GOVERNMENT and k <= Civ6Ai_Orders.K.GOVERNOR then
     return Civ6Ai_Orders._DoGovernance(sender, o)
   end
-  if k == Civ6Ai_Orders.K.WAR or k == Civ6Ai_Orders.K.PEACE
+  if k == Civ6Ai_Orders.K.WAR or k == Civ6Ai_Orders.K.DEAL
       or k == Civ6Ai_Orders.K.BUY or k == Civ6Ai_Orders.K.BUY_TILE then
     return Civ6Ai_Orders._DoDeal(sender, o)
   end
@@ -1922,6 +1922,58 @@ function Gov.MakePeace(owner, other)
   return true, "peace_with=" .. tostring(other)
 end
 
+-- An agreed deal (the other seat accepted it a turn earlier). Signed amounts,
+-- + = owner gives. All checks run before any change, so it applies whole or not at all.
+-- mode 1 = peace, 2 = declared friendship.
+function Gov.Deal(owner, other, gold, r1, a1, r2, a2, mode)
+  local me, them = Players[owner], Players[other]
+  if them == nil or call(them, "IsAlive") ~= true then
+    return false, "that civilization is not in the game"
+  end
+  local tMe, tThem = call(me, "GetTreasury"), call(them, "GetTreasury")
+  local rMe, rThem = call(me, "GetResources"), call(them, "GetResources")
+  gold = gold or 0
+  local payer = gold > 0 and tMe or tThem
+  if gold ~= 0 and (call(payer, "GetGoldBalance") or 0) < math.abs(gold) then
+    return false, "not enough gold for the deal"
+  end
+  local legs = {}
+  for _, leg in ipairs({ { r1, a1 }, { r2, a2 } }) do
+    if leg[1] ~= nil and leg[1] >= 0 and leg[2] ~= nil and leg[2] ~= 0 then
+      local from = leg[2] > 0 and rMe or rThem
+      if from == nil or from.ChangeResourceAmount == nil then
+        return false, "this game has no gameplay route to move resources"
+      end
+      if (call(from, "GetResourceAmount", leg[1]) or 0) < math.abs(leg[2]) then
+        return false, "not enough " .. tostring(GameInfo.Resources[leg[1]].ResourceType) .. " for the deal"
+      end
+      legs[#legs + 1] = leg
+    end
+  end
+  if mode == 1 then
+    local ok, why = Gov.MakePeace(owner, other)
+    if not ok then
+      return false, why
+    end
+  elseif mode == 2 then
+    local dMe, dThem = call(me, "GetDiplomacy"), call(them, "GetDiplomacy")
+    pcall(dMe.SetHasDeclaredFriendship, dMe, other, true)
+    pcall(dThem.SetHasDeclaredFriendship, dThem, owner, true)
+    if call(dMe, "HasDeclaredFriendship", other) ~= true then
+      return false, "the game refused the friendship"
+    end
+  end
+  if gold ~= 0 then
+    tMe:ChangeGoldBalance(-gold)
+    tThem:ChangeGoldBalance(gold)
+  end
+  for _, leg in ipairs(legs) do
+    rMe:ChangeResourceAmount(leg[1], -leg[2])
+    rThem:ChangeResourceAmount(leg[1], leg[2])
+  end
+  return true, "deal_with=" .. tostring(other)
+end
+
 local UNAVAILABLE_COST = 1000000000
 
 local function debit(owner, useFaith, cost)
@@ -2209,8 +2261,8 @@ function Civ6Ai_Orders._DoDeal(sender, o)
   local k = o.K
   if k == Civ6Ai_Orders.K.WAR then
     return Gov.DeclareWar(o.P, o.I, o.X == 1)
-  elseif k == Civ6Ai_Orders.K.PEACE then
-    return Gov.MakePeace(o.P, o.I)
+  elseif k == Civ6Ai_Orders.K.DEAL then
+    return Gov.Deal(o.P, o.I, o.W, o.X, o.Y, o.I2, o.I3, o.A)
   elseif k == Civ6Ai_Orders.K.BUY then
     return Gov.PurchaseItem(o.P, o.X, o.I, o.U == 1, o.Y == 1, o.V)
   elseif k == Civ6Ai_Orders.K.BUY_TILE then

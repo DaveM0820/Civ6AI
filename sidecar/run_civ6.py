@@ -585,6 +585,8 @@ def main() -> None:
     _apply_personality(snapshot, args.personality)
     try:
         civ6_apply_results.inject_command_results(snapshot, args.session_dir)
+        if args.session_dir:
+            snapshot["_session_dir"] = str(args.session_dir)
     except Exception as error:  # never block a seat-turn on feedback rows
         print(f"apply-results feedback skipped: {error}", file=sys.stderr)
 

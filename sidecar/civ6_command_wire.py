@@ -847,6 +847,9 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
         for cmd_id in bound:
             index += 1
             out[f"cmd.{index}"] = cmd_id
+    from sidecar import civ6_diplomacy as diplomacy_wire
+
+    bound.extend(diplomacy_wire.instalment_ids(snapshot))
     LAST_UNRESOLVED.extend(unresolved)
     return out
 

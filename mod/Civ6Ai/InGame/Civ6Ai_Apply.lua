@@ -69,44 +69,12 @@ end
 -- forTurn, and results are recorded when they come back. forTurn defaults to
 -- Civ6Ai_Bridge.SeatForTurn: snapshotTurn in single player when the seat's
 -- turn snapshotTurn has not started yet (same-turn timing), else snapshotTurn + 1.
--- DiplomacyManager is the leader screen's own session call (RequestSession /
--- AddResponse). It is the network diplomacy path, so the host answers once
--- when the model replies instead of queueing it for the seat's next turn.
-Civ6Ai_Apply.SESSION_NOW = {
-  respond_to_diplomacy = true,
-  diplomatic_session = true,
-}
-
-function Civ6Ai_Apply._SessionCommands(decision)
-  local now, later = {}, {}
-  for _, command in ipairs(decision.commands or {}) do
-    if Civ6Ai_Apply.SESSION_NOW[command.kind] then
-      table.insert(now, command)
-    else
-      table.insert(later, command)
-    end
-  end
-  return now, later
-end
-
-function Civ6Ai_Apply._ApplySessions(playerID, commands)
-  for _, command in ipairs(commands) do
-    local ok, reason, args = Civ6Ai_Apply._DiplomacySession(playerID, command)
-    Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, args)
-  end
-end
-
 function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   if decision == nil or decision.commands == nil then
     Civ6Ai_Util.Log("apply|no_commands|player=" .. tostring(playerID))
     return
   end
-  local sessions, rest = Civ6Ai_Apply._SessionCommands(decision)
-  Civ6Ai_Apply._ApplySessions(playerID, sessions)
-  decision = { commands = rest }
-  if #rest == 0 then
-    return
-  end
+  local rest = decision.commands
   if playerID ~= Game.GetLocalPlayer() then
     if forTurn == nil then
       if Civ6Ai_Bridge ~= nil and Civ6Ai_Bridge.SeatForTurn ~= nil then
@@ -417,10 +385,7 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
   if command.kind == "attack_target" then
     return Civ6Ai_Apply._AttackTarget(playerID, args)
   end
-  if command.kind == "respond_to_diplomacy" or command.kind == "diplomatic_session" then
-    return Civ6Ai_Apply._DiplomacySession(playerID, command)
-  end
-  if command.kind == "send_diplomatic_action" or command.kind == "propose_peace"
+  if command.kind == "send_diplomatic_action" or command.kind == "execute_deal"
       or command.kind == "purchase_item" or command.kind == "purchase_tile" then
     return Civ6Ai_Apply._Deal(playerID, command, args)
   end
@@ -1369,12 +1334,12 @@ function Civ6Ai_Apply._Deal(playerID, command, args)
     local ok, reason = Civ6Ai_Apply._GovRoute("DeclareWar", playerID, other, string.find(action, "SURPRISE", 1, true) ~= nil)
     return ok, reason, args
   end
-  if kind == "propose_peace" then
-    local other = Civ6Ai_Apply._PlayerNum(args.target_player_id)
-    if other == nil then
-      return false, "missing_target_player", args
+  if kind == "execute_deal" then
+    local f, why = Civ6Ai_OrderChannel._Fields(playerID, command)
+    if f == nil then
+      return false, why, args
     end
-    local ok, reason = Civ6Ai_Apply._GovRoute("MakePeace", playerID, other)
+    local ok, reason = Civ6Ai_Apply._GovRoute("Deal", playerID, f.I, f.W, f.X, f.Y, f.I2, f.I3, f.A)
     return ok, reason, args
   end
   if kind == "purchase_item" then
@@ -1400,36 +1365,6 @@ function Civ6Ai_Apply._Deal(playerID, command, args)
     return ok, reason, args
   end
   return false, "unsupported_kind", args
-end
-
-function Civ6Ai_Apply._DiplomacySession(playerID, command)
-  local args = command.arguments or {}
-  if DiplomacyManager == nil then
-    return false, "this game has no diplomacy session manager", args
-  end
-  if command.kind == "respond_to_diplomacy" then
-    local sessionID = tonumber(args.session_id)
-    if sessionID == nil or DiplomacyManager.AddResponse == nil then
-      return false, "missing diplomacy session", args
-    end
-    local response = string.upper(tostring(args.response or ""))
-    local key = (response == "ACCEPT" or response == "POSITIVE" or response == "YES") and "POSITIVE" or "NEGATIVE"
-    local ok = pcall(DiplomacyManager.AddResponse, sessionID, playerID, key)
-    if not ok then
-      return false, "the game refused the diplomacy response", args
-    end
-    return true, "session=" .. tostring(sessionID) .. ":response=" .. key, args
-  end
-  local other = tonumber((tostring(args.target_player_id or "")):match("PLAYER_(%d+)")) or tonumber(args.target_player_id)
-  local session = tostring(args.action_id or "")
-  if other == nil or session == "" or DiplomacyManager.RequestSession == nil then
-    return false, "missing diplomacy target or action", args
-  end
-  local ok = pcall(DiplomacyManager.RequestSession, playerID, other, session)
-  if not ok then
-    return false, "the game refused to open that diplomacy session", args
-  end
-  return true, "session=" .. session .. ":to=" .. tostring(other), args
 end
 
 function Civ6Ai_Apply._Work(playerID, command, args)

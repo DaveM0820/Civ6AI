@@ -1640,7 +1640,6 @@ function Civ6Ai_Snapshot._BuildDiplomacy(playerID)
       trade = inv,
     })
   end
-  Civ6Ai_Snapshot._FillDiplomacySessions(playerID, out, metMajors)
   out.your_trade = Civ6Ai_Snapshot._TradeInventory(playerID)
   local myInfluence = Civ6Ai_Snapshot._Method(Players[playerID], "GetInfluence")
   local tokens = Civ6Ai_Snapshot._Method(myInfluence, "GetTokensToGive")
@@ -1648,114 +1647,6 @@ function Civ6Ai_Snapshot._BuildDiplomacy(playerID)
     out.envoys_to_give = math.floor(tokens)
   end
   return out
-end
-
--- Sessions the leader screen answers with DiplomacyManager.AddResponse, plus
--- the actions IsDiplomaticActionValid still allows this seat to open.
-Civ6Ai_Snapshot.DIPLO_ACTIONS = {
-  { valid = "DIPLOACTION_DIPLOMATIC_DELEGATION", session = "DIPLOMATIC_DELEGATION", label = "delegation" },
-  { valid = "DIPLOACTION_RESIDENT_EMBASSY", session = "RESIDENT_EMBASSY", label = "embassy" },
-  { valid = "DIPLOACTION_DECLARE_FRIENDSHIP", session = "DECLARE_FRIEND", label = "friendship" },
-  { valid = "DIPLOACTION_DENOUNCE", session = "DENOUNCE", label = "denounce" },
-  { valid = "DIPLOACTION_OPEN_BORDERS", session = "OPEN_BORDERS", label = "open_borders" },
-}
-
-function Civ6Ai_Snapshot._SessionTypeName(info)
-  if info == nil or DiplomacyManager == nil or DiplomacyManager.GetKeyName == nil then
-    return nil
-  end
-  local ok, name = pcall(DiplomacyManager.GetKeyName, info.StatementType or info.SessionType)
-  if ok and type(name) == "string" and name ~= "" then
-    return name
-  end
-  return nil
-end
-
-function Civ6Ai_Snapshot._DealLines(owner, other)
-  if DealManager == nil or DealManager.GetWorkingDeal == nil or DealDirection == nil then
-    return nil
-  end
-  local ok, deal = pcall(DealManager.GetWorkingDeal, DealDirection.INCOMING, owner, other)
-  if not ok or deal == nil or deal.Items == nil then
-    return nil
-  end
-  local lines = Civ6Ai_Snapshot._Arr()
-  local okItems, err = pcall(function()
-    for item in deal:Items() do
-      local amount = item.GetAmount ~= nil and item:GetAmount() or nil
-      local name = item.GetValueTypeNameID ~= nil and item:GetValueTypeNameID() or nil
-      local fromId = item.GetFromPlayerID ~= nil and item:GetFromPlayerID() or nil
-      local text = tostring(name or item:GetType())
-      if type(amount) == "number" and amount > 0 then
-        text = tostring(math.floor(amount)) .. " " .. text
-      end
-      if fromId ~= nil then
-        text = Civ6Ai_Snapshot._PlayerLabel(fromId) .. ": " .. text
-      end
-      table.insert(lines, text)
-    end
-  end)
-  if not okItems then
-    return nil
-  end
-  return lines
-end
-
-function Civ6Ai_Snapshot._FillDiplomacySessions(playerID, out, metMajors)
-  out.pending_requests = Civ6Ai_Snapshot._Arr()
-  out.available_actions = Civ6Ai_Snapshot._Arr()
-  local diplo = Civ6Ai_Snapshot._Method(Players[playerID], "GetDiplomacy")
-  if DiplomacyManager ~= nil and DiplomacyManager.FindOpenSessionID ~= nil then
-    local seen = {}
-    for _, otherID in ipairs(metMajors) do
-      for _, pair in ipairs({ { otherID, playerID }, { playerID, otherID } }) do
-        local ok, sessionID = pcall(DiplomacyManager.FindOpenSessionID, pair[1], pair[2])
-        if ok and type(sessionID) == "number" and seen[sessionID] ~= true then
-          seen[sessionID] = true
-          local info = nil
-          if DiplomacyManager.GetSessionInfo ~= nil then
-            local okInfo, got = pcall(DiplomacyManager.GetSessionInfo, sessionID)
-            if okInfo then
-              info = got
-            end
-          end
-          local fromID = info ~= nil and info.FromPlayer or pair[1]
-          local toID = info ~= nil and info.ToPlayer or pair[2]
-          if toID == playerID then
-            table.insert(out.pending_requests, {
-              session_id = sessionID,
-              from_player_id = Civ6Ai_Snapshot._PlayerLabel(fromID),
-              type = Civ6Ai_Snapshot._SessionTypeName(info),
-              items = Civ6Ai_Snapshot._DealLines(playerID, fromID),
-            })
-          end
-        end
-      end
-    end
-  end
-  if diplo == nil or diplo.IsDiplomaticActionValid == nil then
-    return
-  end
-  for _, otherID in ipairs(metMajors) do
-    for _, action in ipairs(Civ6Ai_Snapshot.DIPLO_ACTIONS) do
-      local ok, valid = pcall(diplo.IsDiplomaticActionValid, diplo, action.valid, otherID, true)
-      if ok and valid == true then
-        local cost = nil
-        if diplo.GetDiplomaticActionCost ~= nil then
-          local okCost, gold = pcall(diplo.GetDiplomaticActionCost, diplo, action.valid)
-          if okCost and type(gold) == "number" then
-            cost = math.floor(gold)
-          end
-        end
-        table.insert(out.available_actions, {
-          player_id = Civ6Ai_Snapshot._PlayerLabel(otherID),
-          action = action.session,
-          label = action.label,
-          gold_cost = cost,
-        })
-      end
-    end
-  end
 end
 
 function Civ6Ai_Snapshot._MapWrap()
@@ -2009,10 +1900,6 @@ function Civ6Ai_Snapshot._DeriveStrategicSummary(playerID, yourCities, yourUnits
           { wireId }))
       end
     end
-  end
-  if diplomacy ~= nil and diplomacy.pending_requests ~= nil and #diplomacy.pending_requests > 0 then
-    table.insert(summary.diplomacy_alerts, Civ6Ai_Snapshot._MakeAlert(
-      "diplomacy", "critical", "Pending diplomacy requests require a response", {}))
   end
   return Civ6Ai_Snapshot._MergeNotificationAlerts(playerID, summary)
 end
