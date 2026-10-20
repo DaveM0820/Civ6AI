@@ -30,11 +30,11 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
 import circuit_breaker_state  # noqa: E402
-from civ6_paths import logs_dirs, lua_log_candidates  # noqa: E402
+from civ6_paths import live_runtime_dir, logs_dirs, lua_log_candidates  # noqa: E402
 from sidecar.civ6_config import apply_config_to_environ, load_local_config  # noqa: E402
 from windows_process import popen_hidden, python_executable, run_hidden  # noqa: E402
 
-PID_DIR = ROOT / "runtime"
+PID_DIR = live_runtime_dir()
 PID_FILE = PID_DIR / "live_workers.json"
 LOG_DIR = PID_DIR / "logs"
 
@@ -306,7 +306,7 @@ def main() -> int:
         print(f"  {w['name']} pid={w['pid']} log={w['log']}")
     print("Config:", cfg.endpoint, cfg.model, f"vision={cfg.vision}")
     print("Stop with: python scripts/stop_live.py")
-    print("Watch: Lua.log + runtime/logs/*.log  (see docs/REAL_TEST.md)")
+    print(f"Watch: Lua.log + {LOG_DIR}\\*.log  (see docs/REAL_TEST.md)")
     if logs_dirs():
         print("Logs dirs:", "; ".join(str(p) for p in logs_dirs()))
     return 0

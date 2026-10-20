@@ -52,6 +52,11 @@ def civ6ai_root() -> Path:
     return base / "civ6ai"
 
 
+def live_runtime_dir() -> Path:
+    """start_live/stop_live PIDs and worker logs (kept off cloud-synced folders)."""
+    return civ6ai_root() / "runtime"
+
+
 def my_games_roots() -> list[Path]:
     return [preferred_my_games_root()]
 

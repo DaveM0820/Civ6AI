@@ -26,6 +26,7 @@ import circuit_breaker_state  # noqa: E402
 from civ6_paths import (  # noqa: E402
     find_civ6_install,
     installed_mod_dirs,
+    live_runtime_dir,
     logs_dirs,
     lua_log_candidates,
     mods_targets,
@@ -315,7 +316,7 @@ def _check_circuit_breakers() -> Check:
     ignore the breaker. To reset, set the file contents to {} (or delete it).
     """
     check = Check("Sidecar circuit breaker state")
-    dry_run_path = ROOT / "runtime" / "logs" / "circuit_breaker.json"
+    dry_run_path = live_runtime_dir() / "logs" / "circuit_breaker.json"
     lines = [
         circuit_breaker_state.describe(dry_run_path)
         + " (legacy dry-run file; ignored by start_live.py --dry-run, not used by live seats)"

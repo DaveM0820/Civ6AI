@@ -10,7 +10,10 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PID_FILE = ROOT / "runtime" / "live_workers.json"
+sys.path.insert(0, str(ROOT / "scripts"))
+from civ6_paths import live_runtime_dir  # noqa: E402
+
+PID_FILE = live_runtime_dir() / "live_workers.json"
 
 
 def _terminate(pid: int) -> None:
