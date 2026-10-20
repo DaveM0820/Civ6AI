@@ -804,7 +804,10 @@ function Civ6Ai_Snapshot._UnitInfo(unit)
   end
   if unit.GetCombat ~= nil then
     local ok, value = pcall(function() return unit:GetCombat() end)
-    if ok and tonumber(value) ~= nil then info.combat = math.floor(tonumber(value)) end
+    if ok and tonumber(value) ~= nil and math.floor(tonumber(value)) ~= info.combat then
+      Civ6Ai_Util.Log("snapshot|combat_mismatch|" .. tostring(okRow and row.UnitType) .. "|db=" .. tostring(info.combat) .. "|engine=" .. tostring(value))
+      info.combat = math.floor(tonumber(value))
+    end
   end
   if unit.GetRangedCombat ~= nil then
     local ok, value = pcall(function() return unit:GetRangedCombat() end)
@@ -2175,7 +2178,7 @@ Civ6Ai_Snapshot.KIND_NAMES = {
   [17] = "send_diplomatic_action", [18] = "propose_peace", [19] = "purchase_item",
   [20] = "purchase_tile", [21] = "worker_improve", [22] = "pillage_improvement",
   [24] = "trade_route", [25] = "explore", [26] = "activate_great_person",
-  [27] = "upgrade_unit", [28] = "promote_unit", [29] = "join_formation", [31] = "city_ranged_strike", [32] = "build_fort",
+  [27] = "upgrade_unit", [28] = "promote_unit", [29] = "join_formation", [31] = "city_attack", [32] = "build_fort",
 }
 
 Civ6Ai_Snapshot.INTENT_NAMES = {
@@ -3064,13 +3067,8 @@ function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId
       for _, city in cities:Members() do
         if added >= 8 then break end
         local ok, can = pcall(function()
-          return tm:CanStartRoute(origin:GetID(), city:GetID(), true)
+          return tm:CanStartRoute(origin:GetOwner(), origin:GetID(), city:GetOwner(), city:GetID())
         end)
-        if not ok then
-          ok, can = pcall(function()
-            return tm.CanStartRoute(origin:GetID(), city:GetID())
-          end)
-        end
         if ok and can == true then
           table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
             command_id = "CMD_trade_" .. unitId .. "_" .. tostring(city:GetOwner()) .. "_" .. tostring(city:GetID()),
@@ -3099,6 +3097,22 @@ function Civ6Ai_Snapshot._UpgradeTarget(playerID, unit)
   local up = GameInfo.UnitUpgrades ~= nil and GameInfo.UnitUpgrades[GameInfo.Units[unit:GetType()].UnitType] or nil
   local row = up ~= nil and GameInfo.Units[up.UpgradeUnit] or nil
   if row == nil then return nil end
+  local cfg = PlayerConfigurations ~= nil and PlayerConfigurations[playerID] or nil
+  local mine = {}
+  for _, t in ipairs({"CivilizationTraits", "LeaderTraits"}) do
+    for r in GameInfo[t]() do
+      if r.CivilizationType == M(cfg, "GetCivilizationTypeName") or r.LeaderType == M(cfg, "GetLeaderTypeName") then mine[r.TraitType] = true end
+    end
+  end
+  for r in GameInfo.UnitReplaces() do
+    local u = r.ReplacesUnitType == row.UnitType and GameInfo.Units[r.CivUniqueUnitType] or nil
+    if u ~= nil and mine[u.TraitType] then row = u end
+  end
+  local res = row.StrategicResource ~= nil and GameInfo.Resources[row.StrategicResource] or nil
+  local xp2 = GameInfo.Units_XP2 ~= nil and GameInfo.Units_XP2[row.UnitType] or nil
+  if res ~= nil and (M(M(p, "GetResources"), "GetResourceAmount", res.Index) or 0) < math.max(1, xp2 ~= nil and tonumber(xp2.ResourceCost) or 1) then
+    return nil
+  end
   local tech = row.PrereqTech ~= nil and GameInfo.Technologies[row.PrereqTech] or nil
   local civic = row.PrereqCivic ~= nil and GameInfo.Civics[row.PrereqCivic] or nil
   local cost = M(unit, "GetUpgradeCost") or 0
@@ -3166,6 +3180,25 @@ function Civ6Ai_Snapshot._AddProgressionCommands(commands, playerID, unit, unitI
   if fort ~= nil and GameInfo.Improvements[fort] ~= nil and (M(unit, "GetBuildCharges") or 0) > 0
       and M(plot, "GetOwner") == playerID and (M(plot, "GetImprovementType") or -1) < 0 and not M(plot, "IsCity") then
     add("build_fort", fort, {improvement_id = fort})
+  end
+end
+
+-- City ranged strike: a walled city with an enemy unit within 2 tiles.
+function Civ6Ai_Snapshot._AddCityStrikeCommands(commands, playerID)
+  local M = Civ6Ai_Snapshot._Method
+  for _, city in Players[playerID]:GetCities():Members() do
+    local d = Civ6Ai_Snapshot._CityCenterDistrict(city)
+    if d ~= nil and (tonumber(M(d, "GetMaxDamage", DefenseTypes.DISTRICT_OUTER)) or 0) > 0 then
+      for _, plot in ipairs(Map.GetNeighborPlots(city:GetX(), city:GetY(), Civ6Ai_Snapshot.CITY_STRIKE_RANGE) or {}) do
+        if Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot) == "unit" then
+          table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+            command_id = "CMD_citystrike_" .. tostring(city:GetID()) .. "_" .. plot:GetX() .. "_" .. plot:GetY(),
+            kind = "city_attack",
+            fixed_arguments = {city_id = Civ6Ai_Production._WireCityId(city), target_x = plot:GetX(), target_y = plot:GetY()},
+          }))
+        end
+      end
+    end
   end
 end
 
@@ -3506,8 +3539,11 @@ function Civ6Ai_Snapshot._BuildCombat(playerID)
     local combatType = Civ6Ai_Snapshot._CombatTypeFor(u)
     local cid = u.unit:GetComponentID()
     local res
-    if kind == "unit" then
-      res = Civ6Ai_Snapshot._SimulateVersus(cid, target.unit:GetComponentID(), combatType)
+    local tcid = kind == "unit" and target.unit:GetComponentID()
+      or (target.district ~= nil and target.district:GetComponentID()) or nil
+    if tcid ~= nil then
+      res = Civ6Ai_Snapshot._SimulateVersus(cid, tcid, combatType)
+        or (ranged and Civ6Ai_Snapshot._SimulateVersus(cid, tcid, CombatTypes.RANGED)) or nil
     end
     if res == nil then
       res = Civ6Ai_Snapshot._SimulateInto(cid, combatType, target.x, target.y)
@@ -3664,6 +3700,10 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
         if not okP then Civ6Ai_Util.Log("snapshot|progression_error|" .. tostring(whyP)) end
       end
     end
+  end
+  if player ~= nil then
+    local okS, whyS = pcall(Civ6Ai_Snapshot._AddCityStrikeCommands, commands, playerID)
+    if not okS then Civ6Ai_Util.Log("snapshot|city_strike_error|" .. tostring(whyS)) end
   end
   local techs = player and player:GetTechs()
   local rt = techs ~= nil and techs:GetResearchingTech() or -1

@@ -32,7 +32,7 @@ Civ6Ai_OrderChannel.KIND_BY_COMMAND = {
   send_diplomatic_action = 17, propose_peace = 18, purchase_item = 19, purchase_tile = 20,
   worker_improve = 21, pillage_improvement = 22,
   trade_route = 24, explore = 25, activate_great_person = 26,
-  upgrade_unit = 27, promote_unit = 28, join_formation = 29, city_ranged_strike = 31, build_fort = 32,
+  upgrade_unit = 27, promote_unit = 28, join_formation = 29, city_attack = 31, build_fort = 32,
 }
 Civ6Ai_OrderChannel.REPORT_DELAY_SECONDS = 5
 Civ6Ai_OrderChannel._counter = Civ6Ai_OrderChannel._counter or 0

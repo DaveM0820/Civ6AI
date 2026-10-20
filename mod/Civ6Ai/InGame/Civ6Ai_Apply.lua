@@ -428,7 +428,7 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
     return Civ6Ai_Apply._Work(playerID, command, args)
   end
   if command.kind == "activate_great_person" or command.kind == "upgrade_unit" or command.kind == "promote_unit"
-      or command.kind == "join_formation" or command.kind == "city_ranged_strike" or command.kind == "build_fort" then
+      or command.kind == "join_formation" or command.kind == "city_attack" or command.kind == "build_fort" then
     local f, why = Civ6Ai_OrderChannel._Fields(playerID, command)
     if f == nil then
       return false, why, args
