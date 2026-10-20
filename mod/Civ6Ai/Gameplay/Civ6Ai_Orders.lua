@@ -398,6 +398,12 @@ function Civ6Ai_Orders._DoMove(sender, o)
   if x == nil or y == nil or x < 0 or y < 0 then
     return false, "missing_target"
   end
+  if intent == Civ6Ai_Orders.INTENT.TRADE and o.I ~= nil then
+    -- The offer was checked from the trader's current city and the engine paths the
+    -- route itself (sea included), so start it here instead of walking to the target.
+    Civ6Ai_Orders._ClearGoal(owner, o.U)
+    return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, o.U, o.I)
+  end
   if unit:GetX() == x and unit:GetY() == y then
     Civ6Ai_Orders._ClearGoal(owner, o.U)
     if intent == Civ6Ai_Orders.INTENT.FOUND or Civ6Ai_Orders._IsSettler(unit) then

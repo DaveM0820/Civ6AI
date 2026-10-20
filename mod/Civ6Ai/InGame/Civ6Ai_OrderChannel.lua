@@ -165,7 +165,10 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
       if args.found == true or args.intent == "found" then intent = 1 end
       if args.improve == true or args.intent == "improve" then intent = 2 end
       if args.intent == "found_religion" then intent = 3 end
-      if args.intent == "trade" then intent = 4 end
+      if args.intent == "trade" then
+        intent = 4
+        f.I = Civ6Ai_OrderChannel._CityNum(args.city_id)
+      end
       f.A = intent or 0
       local persist = args.goal == true or args.goal == 1 or tonumber(args.G) == 1 or (f.A ~= nil and f.A > 0)
       f.G = persist and 1 or 0
