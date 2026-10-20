@@ -673,7 +673,7 @@ function Civ6Ai_Orders._ResolveAttack(unit, x, y)
   end
   local defender = Civ6Ai_Orders._Defender(x, y, owner)
   if defender == nil then
-    return false, "no_enemy_on_plot"
+    return Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
   end
   if not Civ6Ai_Orders._AtWar(owner, defender:GetOwner()) then
     return false, "not_at_war"
@@ -722,6 +722,48 @@ function Civ6Ai_Orders._ResolveAttack(unit, x, y)
   return true, (ranged and "ranged" or "melee") .. ":def_dmg=" .. defBefore .. ">" .. defAfter
     .. ":att_dmg=" .. attBefore .. ">" .. (lost and "dead" or tostring(call(unit, "GetDamage") or 0))
     .. ":killed=" .. tostring(killed)
+end
+
+-- No unit on X,Y: fight the enemy city there (its centre district, walls first),
+-- with the engine's forecast. A melee hit that leaves no walls or city HP takes it.
+function Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
+  local owner = unit:GetOwner()
+  local city = Cities ~= nil and Cities.GetCityInPlot ~= nil and Cities.GetCityInPlot(x, y) or nil
+  if city == nil or city:GetOwner() == owner then
+    return false, "no_enemy_on_plot"
+  end
+  if not Civ6Ai_Orders._AtWar(owner, city:GetOwner()) then
+    return false, "not_at_war"
+  end
+  if (call(unit, "GetMovesRemaining") or 0) <= 0 then
+    return false, "no_moves_left"
+  end
+  local district = call(call(Players[city:GetOwner()], "GetDistricts"), "FindID", city:GetDistrictID())
+  if district == nil or DefenseTypes == nil then
+    return false, "no_city_district"
+  end
+  local toAttacker, toCity = Civ6Ai_Orders._Forecast(unit, district, Civ6Ai_Orders._CombatType(unit))
+  if toAttacker == nil then
+    return false, toCity
+  end
+  local walls, garrison = DefenseTypes.DISTRICT_OUTER, DefenseTypes.DISTRICT_GARRISON
+  local function left(t) return (call(district, "GetMaxDamage", t) or 0) - (call(district, "GetDamage", t) or 0) end
+  local before = left(walls) + left(garrison)
+  local w = math.min(toCity, left(walls))
+  call(district, "ChangeDamage", walls, w)
+  call(district, "ChangeDamage", garrison, toCity - w)
+  if not ranged then
+    Civ6Ai_Orders._ChangeDamage(unit, toAttacker)
+  end
+  local after, captured = left(walls) + left(garrison), false
+  if not ranged and after <= 0 and not Civ6Ai_Orders._IsDead(unit) then
+    captured = pcall(Players[owner].AcquireCity, Players[owner], city, true, false)
+    if captured then
+      pcall(UnitManager.MoveUnit, unit, x, y)
+    end
+  end
+  pcall(UnitManager.FinishMoves, unit)
+  return true, (ranged and "ranged" or "melee") .. ":city_hp=" .. before .. ">" .. after .. ":captured=" .. tostring(captured)
 end
 
 function Civ6Ai_Orders._MeleeStep(unit, x, y)
