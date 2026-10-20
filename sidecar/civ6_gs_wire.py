@@ -168,6 +168,8 @@ def _stockpile_lines(snapshot: dict[str, Any]) -> list[str]:
             bits.append(f"power {_fmt(power_demand)}")
         if bits:
             text += " (" + "; ".join(bits) + ")"
+        if cap and (_num(row.get("amount")) or 0) >= cap:
+            text += " FULL, income is wasted: build or upgrade units that use it"
         lines.append(pipeline._wire_line(f"empire.stockpile.{key}", text))
     return lines
 

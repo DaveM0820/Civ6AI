@@ -439,7 +439,8 @@ def city_lines(snapshot: dict[str, Any], city: dict[str, Any], name: str) -> lis
     buildings = [str(b) for b in row.get("built_buildings") or [] if b]
     lines.append(pipeline._wire_line(f"{name}.buildings", ", ".join(buildings) if buildings else "none"))
     districts = [str(d) for d in row.get("built_districts") or [] if d]
-    lines.append(pipeline._wire_line(f"{name}.districts", ", ".join(districts) if districts else "none (city center only)"))
+    lines.append(pipeline._wire_line(f"{name}.districts", ", ".join(districts) if districts
+                                     else "none (city center only): queue a district, districts drive science, gold and defence"))
     return lines
 
 

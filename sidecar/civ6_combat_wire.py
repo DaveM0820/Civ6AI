@@ -84,8 +84,10 @@ def _owner_label(context: dict[str, Any], owner: Any) -> str:
     kind = civ6_wire.civ6_player_kind(rival) if rival else "major"
     if kind == "barbarians":
         return "Barbarian"
-    if kind == "free cities":
+    if kind == "free cities" or (not rival and owner_id.endswith("_62")):
         return "Free Cities"
+    if not rival and owner_id.endswith("_63"):
+        return "Barbarian"
     return civ6_wire._player_display(context, owner_id)
 
 
@@ -189,7 +191,9 @@ def outcome_text(row: dict[str, Any]) -> str:
 
 
 def _previews(context: dict[str, Any]) -> list[dict[str, Any]]:
-    return _rows(_combat(context), "previews")
+    # A ranged shot at a 0-strength civilian is wasted; a melee unit captures it instead.
+    return [r for r in _rows(_combat(context), "previews")
+            if not (r.get("ranged") and r.get("target_kind") != "city" and not _int(r.get("defender_strength")))]
 
 
 def unit_row_lines(prefix: str, unit: dict[str, Any], context: dict[str, Any]) -> list[str]:
@@ -300,10 +304,14 @@ def war_section_lines(context: dict[str, Any]) -> list[str]:
                 stat.append(f"{_int(h['max_moves'])} moves")
             bits.append(f"{text} {', '.join(stat)}")
         lines.append(pipeline._wire_line("war.enemies.visible", " | ".join(bits)))
+    mine = [(u, pipeline._parse_plot_coords(u.get("plot_id"))) for u in context.get("your_units", []) or []
+            if isinstance(u, dict) and _is_military(u, stats.get(str(u.get("unit_id"))))]
     for c in _rows(block, "hostile_cities")[:6]:
         stat = []
-        if _int(c.get("strength")):
-            stat.append(f"{_int(c['strength'])} str")
+        strength = _int(c.get("strength")) or next((_int(r.get("defender_strength")) for r in _previews(context)
+                                                    if r.get("target_kind") == "city" and r.get("target_name") == c.get("name")), None)
+        if strength:
+            stat.append(f"{strength} str")
         hp_text = _hp_text(c.get("hp"), c.get("max_hp"))
         if hp_text:
             stat.append(hp_text)
@@ -312,6 +320,10 @@ def war_section_lines(context: dict[str, Any]) -> list[str]:
         stat.append(f"walls {_int(c.get('wall_hp')) or 0}/{_int(c['wall_max_hp'])}, needs siege or a ram"
                     if _int(c.get("wall_max_hp")) else
                     f"no walls, melee can assault (~{max(2, pop + (_int(c.get('strength')) or 0) // 8 + 1)} melee to capture)")
+        cxy = (_int(c.get("x")), _int(c.get("y")))
+        near = [u for u, xy in mine if xy is not None and cxy[0] is not None and _distance(context, xy, cxy) <= 3]
+        far = sum(1 for u in near if _int((stats.get(str(u.get("unit_id"))) or {}).get("ranged_strength")))
+        stat.append(f"you have {len(near)} military within 3 ({far} siege/ranged)")
         lines.append(pipeline._wire_line(
             f"war.city.{c.get('name') or 'city'}",
             f"{_owner_label(context, c.get('owner_player_id'))} ({_int(c.get('x'))},{_int(c.get('y'))}) {', '.join(stat)}"))
@@ -396,6 +408,11 @@ def _isolated_lines(context: dict[str, Any]) -> list[str]:
             continue
         near = sorted(((h, _distance(context, xy, hxy)) for h, hxy in hostiles), key=lambda item: item[1])
         name = f"isolated: {wire_ids.get(unit_id, unit_id)} at ({xy[0]},{xy[1]}) has no friendly military within {ISOLATED_FRIEND_TILES} tiles"
+        others = [oxy for other, oxy in coords.items() if other != unit_id and oxy is not None]
+        if others:
+            hub = max(others, key=lambda o: sum(1 for p in others if _distance(context, o, p) <= ISOLATED_FRIEND_TILES))
+            count = sum(1 for p in others if _distance(context, hub, p) <= ISOLATED_FRIEND_TILES)
+            name += f", nearest army: {count} units around ({hub[0]},{hub[1]})"
         if near and near[0][1] <= ISOLATED_ENEMY_TILES:
             h, d = near[0]
             out.append(f"{name} and {_owner_label(context, h.get('owner_player_id'))} {h.get('name') or 'unit'} is "
@@ -431,6 +448,8 @@ def _focus_fire_line(context: dict[str, Any]) -> str | None:
     wire_ids = _wire_ids(context)
     targets: dict[tuple[int, int], list[str]] = {}
     names: dict[tuple[int, int], str] = {}
+    dmg: dict[tuple[int, int], int] = {}
+    hp: dict[tuple[int, int], int] = {}
     for row in _previews(context):
         if row.get("needs_move") or str(row.get("prediction") or "").upper() == "INEFFECTIVE":
             continue
@@ -441,8 +460,12 @@ def _focus_fire_line(context: dict[str, Any]) -> str | None:
         name = wire_ids.get(str(row.get("unit_id")), str(row.get("unit_id")))
         if name not in bucket:
             bucket.append(name)
+            dmg[(x, y)] = dmg.get((x, y), 0) + (_int(row.get("damage_to_defender")) or 0)
         names[(x, y)] = str(row.get("target_name") or "target")
+        if _int(row.get("defender_hp")) is not None:
+            hp[(x, y)] = _int(row.get("defender_hp"))
     bits = [f"{', '.join(units[:4])} can all hit {names[xy]} at ({xy[0]},{xy[1]})"
+            + (f" (combined ~{dmg[xy]}dmg vs {hp[xy]}hp: lethal)" if xy in hp and dmg.get(xy, 0) >= hp[xy] else "")
             for xy, units in sorted(targets.items(), key=lambda kv: -len(kv[1])) if len(units) >= 2]
     if not bits:
         return None
@@ -477,6 +500,14 @@ def attention_items(context: dict[str, Any]) -> list[str]:
         items.append(focus)
     items.extend(_isolated_lines(context))
     items.extend(_undefended_city_lines(context))
+    types = {str(u.get("unit_type_id")) for u in context.get("your_units", []) or [] if isinstance(u, dict)}
+    if major_wars(context) and "UNIT_GREAT_GENERAL" in types:
+        items.append("great generals: keep each within 2 tiles of your attacking units (+5 str, +1 move)")
+    if major_wars(context) and types & {"UNIT_MILITARY_ENGINEER", "UNIT_ROMAN_LEGION"}:
+        items.append("forts: use BuildFort on a hill or choke near the front (+4 defence, units auto-fortify)")
+    walled = any(_int(c.get("wall_max_hp")) for c in _rows(_combat(context), "hostile_cities"))
+    if major_wars(context) and walled and not any(_int(s.get("ranged_strength")) for s in _own_stats(context).values()):
+        items.append("siege: enemy cities here are walled and you have no ranged/siege unit; build a Bombard/Trebuchet or a Siege Tower/Battering Ram before assaulting")
     return items
 
 
