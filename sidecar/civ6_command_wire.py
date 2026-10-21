@@ -335,6 +335,10 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
     """Return the legal command_id for ``unitId.command = <token>`` or None."""
     if isinstance(value, str) and value.strip().startswith("CMD_"):
         return value.strip()
+    found_xy = re.match(r"^\s*(?:FoundCity|Found)\s*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)\s*$", str(value or ""), re.I)
+    if found_xy:
+        # FoundCity(x,y) = settle there (own tile becomes FoundCity).
+        return resolve_unit_token(snapshot, unit_id, f"Settle({found_xy.group(1)},{found_xy.group(2)})")
     settle_eq = _SETTLE_EQ_RE.match(str(value or ""))
     if settle_eq:
         return _synthesize_goal_move(

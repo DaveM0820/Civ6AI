@@ -855,7 +855,31 @@ def _result_fingerprint(item: dict[str, Any]) -> tuple[str, str, Any, Any] | Non
             int(match.group("x")),
             int(match.group("y")),
         )
+    if order_kind in ("move_unit", "attack_target"):
+        # Tile-failure summaries ("...move scout_1 to (43,10) but it failed...") no longer
+        # match _BLOCKED_RE; take the target from the command id so repeats are still caught.
+        for value in item.get("affected_ids") or []:
+            m = _CMD_TARGET_RE.search(str(value))
+            if m:
+                return (order_kind, unit, int(m.group(1)), int(m.group(2)))
     return (order_kind, unit, None, None)
+
+
+_CMD_TARGET_RE = re.compile(r"_(?:moveto|found|attack|improve|trade|religion)_(-?\d+)_(-?\d+)$")
+
+
+def _explore_substitute(snapshot: dict[str, Any], dropped_move: dict[str, Any],
+                        reverse: dict[str, str]) -> dict[str, Any] | None:
+    """A legal explore order for the unit whose move was dropped, shaped like the bound move."""
+    args = dropped_move.get("arguments") if isinstance(dropped_move.get("arguments"), dict) else {}
+    unit = str(args.get("unit_id") or "")
+    unit = reverse.get(unit, unit)
+    cmd_id = f"CMD_explore_{unit}"
+    if not any(isinstance(c, dict) and c.get("command_id") == cmd_id for c in snapshot.get("legal_commands") or []):
+        return None
+    sub = {k: v for k, v in dropped_move.items() if k not in ("arguments", "command_id", "kind")}
+    sub.update({"command_id": cmd_id, "kind": "explore", "arguments": {"unit_id": unit}})
+    return sub
 
 
 def _land_units_cannot_embark(snapshot: dict[str, Any]) -> bool:
@@ -887,12 +911,30 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
     water_plots = {(p.get("x"), p.get("y")) for p in known.get("plots") or [] if isinstance(p, dict) and p.get("water")}
     land_units = {u.get("unit_id") for u in units if u.get("domain_id") == "DOMAIN_LAND"}
     land_units |= {wire_ids.get(uid) for uid in list(land_units) if wire_ids.get(uid)}
+    peak_plots = {(p.get("x"), p.get("y")) for p in known.get("plots") or [] if isinstance(p, dict) and p.get("peak")}
+    substitutes: list[dict[str, Any]] = []
+
+    def _explore_instead(command: dict[str, Any]) -> None:
+        unit = str((command.get("arguments") or {}).get("unit_id") or "")
+        if any(str((c.get("arguments") or {}).get("unit_id") or "") == unit for c in kept + substitutes
+               if c is not command and isinstance(c.get("arguments"), dict)):
+            return
+        sub = _explore_substitute(snapshot, command, reverse)
+        if sub is not None and sub["arguments"]["unit_id"] not in {str((c.get("arguments") or {}).get("unit_id")) for c in substitutes}:
+            substitutes.append(sub)
+            dropped.append(f"note: {unit} explores instead")
+
     for command in commands:
         fp = _command_fingerprint(command)
         matched = None
         if (water_blocked and fp[0] == "move_unit" and (fp[2], fp[3]) in water_plots
                 and (fp[1] in land_units or reverse.get(fp[1]) in land_units)):
             dropped.append(f"dropped: MoveTo({fp[2]},{fp[3]}) is water; land units cannot embark before Shipbuilding")
+            _explore_instead(command)
+            continue
+        if fp[0] == "move_unit" and (fp[2], fp[3]) in peak_plots:
+            dropped.append(f"dropped: MoveTo({fp[2]},{fp[3]}) is a mountain; no unit can enter it")
+            _explore_instead(command)
             continue
         if fp[0] == "attack_target" and (fp[2], fp[3]) not in enemy_plots:
             dropped.append(f"dropped: AttackTo({fp[2]},{fp[3]}) has no visible enemy unit or city to hit")
@@ -910,7 +952,11 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
             dropped.append(
                 f"dropped: repeat of T{matched[0]} failure ({matched[1].split(':')[0] or 'non-transient'})"
             )
+            if fp[0] == "move_unit":
+                _explore_instead(command)
             continue
         kept.append(command)
+    kept_units = {str((c.get("arguments") or {}).get("unit_id") or "") for c in kept if isinstance(c.get("arguments"), dict)}
+    kept.extend(s for s in substitutes if s["arguments"]["unit_id"] not in kept_units)
     return kept, dropped
 

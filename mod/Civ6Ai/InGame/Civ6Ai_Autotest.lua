@@ -457,13 +457,34 @@ function Civ6Ai_Autotest._PickFallbackCivic(playerID)
   return nil
 end
 
+-- The local seat's UI research call does nothing in network games (logged
+-- research_rejected every time); send the fallback pick on the synced channel, once per turn.
+Civ6Ai_Autotest._autoSent = Civ6Ai_Autotest._autoSent or {}
+function Civ6Ai_Autotest._SetFallback(playerID, kind, args, direct)
+  local local_ = Game ~= nil and Game.GetLocalPlayer ~= nil and playerID == Game.GetLocalPlayer()
+  if local_ and Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.SendDecision ~= nil
+      and Civ6Ai_Apply._IsNetworkMultiplayer ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer() then
+    local turn = Game.GetCurrentGameTurn()
+    local id = tostring(args.tech_id or args.civic_id)
+    local key = tostring(playerID) .. "|" .. kind .. "|" .. id .. "|" .. tostring(turn)
+    if Civ6Ai_Autotest._autoSent[key] then
+      return true, "already_sent"
+    end
+    Civ6Ai_Autotest._autoSent[key] = true
+    local n = Civ6Ai_OrderChannel.SendDecision(playerID, { commands = { {
+      kind = kind, command_id = "CMD_auto_" .. id, arguments = args } } }, turn, turn)
+    return n > 0, n > 0 and "sent_synced" or "send_failed"
+  end
+  return direct(playerID, args)
+end
+
 function Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
   if Civ6Ai_Apply == nil then
     return
   end
   local techId = Civ6Ai_Autotest._PickFallbackTech(playerID)
   if techId ~= nil and Civ6Ai_Apply._SetResearchTech ~= nil then
-    local ok, reason = Civ6Ai_Apply._SetResearchTech(playerID, { tech_id = techId })
+    local ok, reason = Civ6Ai_Autotest._SetFallback(playerID, "set_research_tech", { tech_id = techId }, Civ6Ai_Apply._SetResearchTech)
     Civ6Ai_Autotest._LogLine(
       "auto_research|player=" .. tostring(playerID)
       .. "|tech=" .. tostring(techId) .. "|ok=" .. tostring(ok)
@@ -475,7 +496,7 @@ function Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
   end
   local civicId = Civ6Ai_Autotest._PickFallbackCivic(playerID)
   if civicId ~= nil and Civ6Ai_Apply._SetResearchCivic ~= nil then
-    local ok, reason = Civ6Ai_Apply._SetResearchCivic(playerID, { civic_id = civicId })
+    local ok, reason = Civ6Ai_Autotest._SetFallback(playerID, "set_research_civic", { civic_id = civicId }, Civ6Ai_Apply._SetResearchCivic)
     Civ6Ai_Autotest._LogLine(
       "auto_civic|player=" .. tostring(playerID)
       .. "|civic=" .. tostring(civicId) .. "|ok=" .. tostring(ok)

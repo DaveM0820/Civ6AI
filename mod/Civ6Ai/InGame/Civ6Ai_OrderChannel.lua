@@ -395,7 +395,7 @@ function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn, snapshotT
     f.K = nil
     local seq = Civ6Ai_OrderChannel.Send(kind, f, forTurn)
     if seq ~= nil then
-      Civ6Ai_OrderChannel._pending[seq] = { playerID = playerID, command = entry.command, turn = forTurn }
+      Civ6Ai_OrderChannel._pending[seq] = { playerID = playerID, command = entry.command, turn = forTurn, kind = kind }
       sent = sent + 1
     else
       Civ6Ai_Apply._RecordResult(playerID, entry.command, false, "send_failed", entry.command.arguments or {})
@@ -415,7 +415,13 @@ function Civ6Ai_OrderChannel.DrainResults()
   local shared = Civ6Ai_OrderChannel._Shared()
   local me = Game.GetLocalPlayer()
   for _, r in ipairs(shared.OrderResults or {}) do
-    local entry = r.sender == me and Civ6Ai_OrderChannel._pending[r.seq] or nil
+    local entry = r.sender == me and not r._old and Civ6Ai_OrderChannel._pending[r.seq] or nil
+    -- Same seq can be a result left over from an earlier game (ExposedMembers survives
+    -- a return to the main menu); only take the one for this seat and order kind.
+    if entry ~= nil and ((r.player ~= nil and r.player ~= entry.playerID)
+        or (r.kind ~= nil and entry.kind ~= nil and r.kind ~= entry.kind)) then
+      entry = nil
+    end
     if entry ~= nil then
       Civ6Ai_OrderChannel._pending[r.seq] = nil
       Civ6Ai_Apply._RecordResult(entry.playerID, entry.command, r.ok == true, r.reason, entry.command.arguments or {})
@@ -507,6 +513,10 @@ function Civ6Ai_OrderChannel.Initialize()
     return
   end
   Civ6Ai_OrderChannel._initialized = true
+  -- Results already present belong to an earlier game in this Civ process.
+  for _, r in ipairs(Civ6Ai_OrderChannel._Shared().OrderResults or {}) do
+    r._old = true
+  end
   if Events ~= nil and Events.LocalPlayerTurnBegin ~= nil then
     Events.LocalPlayerTurnBegin.Add(Civ6Ai_OrderChannel._OnTurnBegin)
   end
