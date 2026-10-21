@@ -106,3 +106,24 @@ def test_improve_substitute_nearest():
     snap = {"legal_commands": [_improve_cmd(3, 4, "IMPROVEMENT_FARM"), _improve_cmd(9, 9, "IMPROVEMENT_FARM")]}
     sub = ar._improve_substitute(snap, {"command_id": "x", "kind": "move_unit", "arguments": {"unit_id": "UNIT_7"}}, {}, 10, 9)
     assert sub["arguments"]["target_x"] == 9 and sub["kind"] == "move_unit"
+
+
+def test_one_site_per_builder():
+    from sidecar import civ6_apply_results as ar
+    a = _improve_cmd(3, 4, "IMPROVEMENT_FARM", "UNIT_1")
+    b = _improve_cmd(3, 4, "IMPROVEMENT_FARM", "UNIT_2")
+    b2 = _improve_cmd(5, 5, "IMPROVEMENT_MINE", "UNIT_2")
+    snap = {"legal_commands": [a, b, b2]}
+    cmds = [{"command_id": x["command_id"], "kind": "move_unit", "arguments": dict(x["fixed_arguments"])} for x in (a, b)]
+    notes = []
+    out = ar._one_site_per_builder(snap, cmds, notes)
+    assert [c["arguments"]["target_x"] for c in out] == [3, 5] and notes
+
+
+def test_clip_sentence_and_usable_deal():
+    from sidecar import civ6_wire, civ6_diplomacy
+    t = "First sentence here. Second one is long " + "x" * 400
+    assert civ6_wire._clip_sentence(t, 100) == "First sentence here."
+    snap = {"your_empire": {"research": {"known_tech_ids": ["TECH_MINING"]}}}
+    assert civ6_diplomacy._usable_problem(snap, [{"res": "RESOURCE_IRON", "n": 1}])
+    assert civ6_diplomacy._usable_problem(snap, [{"res": "RESOURCE_SILK", "n": 1}]) is None

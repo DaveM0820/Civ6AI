@@ -1002,5 +1002,40 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
         kept.append(command)
     kept_units = {str((c.get("arguments") or {}).get("unit_id") or "") for c in kept if isinstance(c.get("arguments"), dict)}
     kept.extend(s for s in substitutes if s["arguments"]["unit_id"] not in kept_units)
-    return kept, dropped
+    return _one_site_per_builder(snapshot, kept, dropped), dropped
+
+
+def _one_site_per_builder(snapshot: dict[str, Any], commands: list[dict[str, Any]],
+                          dropped: list[str]) -> list[dict[str, Any]]:
+    """Two builders sent to one Improve tile: the later one takes its next free listed site."""
+    claimed: set[tuple[Any, Any]] = set()
+    out: list[dict[str, Any]] = []
+    for c in commands:
+        args = c.get("arguments") if isinstance(c.get("arguments"), dict) else {}
+        if c.get("kind") != "move_unit" or args.get("intent") != "improve":
+            out.append(c)
+            continue
+        xy = (args.get("target_x"), args.get("target_y"))
+        if xy not in claimed:
+            claimed.add(xy)
+            out.append(c)
+            continue
+        alt = None
+        for lc in snapshot.get("legal_commands") or []:
+            f = lc.get("fixed_arguments") if isinstance(lc, dict) else None
+            if (isinstance(f, dict) and f.get("unit_id") == args.get("unit_id") and f.get("intent") == "improve"
+                    and (f.get("target_x"), f.get("target_y")) not in claimed):
+                alt = lc
+                break
+        if alt is None:
+            dropped.append(f"dropped: Improve({xy[0]},{xy[1]}) for {args.get('unit_id')}: another builder already has that tile")
+            continue
+        f = alt["fixed_arguments"]
+        claimed.add((f.get("target_x"), f.get("target_y")))
+        dropped.append(f"note: {args.get('unit_id')} takes Improve({f.get('target_x')},{f.get('target_y')}) instead; "
+                       f"another builder has ({xy[0]},{xy[1]})")
+        sub = {k: v for k, v in c.items() if k not in ("arguments", "command_id")}
+        sub.update({"command_id": alt["command_id"], "arguments": dict(f)})
+        out.append(sub)
+    return out
 

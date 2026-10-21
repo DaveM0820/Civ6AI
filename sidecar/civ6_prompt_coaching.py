@@ -354,7 +354,9 @@ def civ6_economy_attention(snapshot: dict[str, Any]) -> list[str]:
         if isinstance(net_i, int) and net_i < 0:
             out.append(
                 f"Empire amenities net {net_i} — soft advice: unhappy cities grow slower and revolt risk rises; "
-                "fix luxuries, entertainment, or policies."
+                "fix luxuries, entertainment, or policies. Builders: improve luxury resources in your borders "
+                "(plantation, camp, quarry, etc.) — each new luxury type gives amenities to several cities; "
+                "trade for a luxury you lack."
             )
     return out
 

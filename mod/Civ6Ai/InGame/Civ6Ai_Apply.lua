@@ -557,6 +557,16 @@ function Civ6Ai_Apply._MoveUnit(playerID, args)
   if unit == nil then
     return false, "unit_not_found", args
   end
+  if unit:GetX() == x and unit:GetY() == y and args.improvement_id ~= nil
+      and (args.intent == "improve" or tonumber(args.A) == 2) then
+    -- Improve(x,y) on the builder's own tile: build now instead of "already_there".
+    local f, why = Civ6Ai_OrderChannel._Fields(playerID, {kind = "worker_improve", arguments = args})
+    if f == nil then
+      return false, why, args
+    end
+    local ok, reason = Civ6Ai_Apply._GovRoute("BuildImprovement", playerID, f.U, f.I)
+    return ok, reason, args
+  end
   if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
     if numericId == nil then
       return false, "missing_unit_numeric_id", args

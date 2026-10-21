@@ -831,6 +831,27 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
     return lines
 
 
+_MILITARY_ALERT_RE = re.compile(r"unit|attack|war|enemy|barbarian|army|siege|defen|pillag|captur|threat|need orders", re.I)
+_PLAYER_RE = re.compile(r"\bPLAYER_(\d+)\b")
+
+
+def _clip_sentence(text: str, limit: int) -> str:
+    """Cut at the last sentence end within limit (never mid-sentence when one exists)."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    return cut[:end + 1] if end > 0 else cut.rsplit(" ", 1)[0] + "…"
+
+
+def _leader_names(context: dict[str, Any]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for rival in list(context.get("known_players", []) or []) + list(context.get("rivals", []) or []):
+        if isinstance(rival, dict) and isinstance(rival.get("player_id"), str):
+            out[rival["player_id"]] = pipeline._rival_leader_name(rival)
+    return out
+
+
 def _empire_section(context: dict[str, Any]) -> list[str]:
     lines = ["# == Summary =="]
     _append_civ6_empire_wire(lines, context)
@@ -838,12 +859,24 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
     lines.extend(gs_wire.empire_lines(context))
     summary = context.get("strategic_summary")
     if isinstance(summary, dict):
+        seen_alerts: set[str] = set()
+        counts: dict[str, int] = {}
         for section, wire_name in (("city_alerts", "city"), ("economy_alerts", "economy"),
                                    ("military_alerts", "military"), ("diplomacy_alerts", "diplomacy"),
                                    ("resource_alerts", "resource")):
-            for index, alert in enumerate(summary.get(section, [])[:6]):
-                if isinstance(alert, dict) and alert.get("text"):
-                    lines.append(pipeline._wire_line(f"alert.{wire_name}.{index}", str(alert["text"])[:200]))
+            for alert in summary.get(section, [])[:6]:
+                if not (isinstance(alert, dict) and alert.get("text")):
+                    continue
+                text = str(alert["text"])[:200]
+                if text in seen_alerts:
+                    continue
+                seen_alerts.add(text)
+                name = wire_name
+                if name == "military" and not _MILITARY_ALERT_RE.search(text):
+                    name = "notice"  # generic game notification, not a military alert
+                index = counts.get(name, 0)
+                counts[name] = index + 1
+                lines.append(pipeline._wire_line(f"alert.{name}.{index}", text))
     # Cities
     cities = [c for c in context.get("your_cities", []) if isinstance(c, dict)]
     if cities:
@@ -968,6 +1001,8 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
     )
     history = context.get("history", {})
     chat_lines: list[str] = []
+    leaders = _leader_names(context)
+    seen_chat: set[str] = set()
     if isinstance(history, dict):
         for index, event in enumerate(pipeline._recent_history_events(
                 history.get("public_events", []), pipeline.chat_history_max_messages())):
@@ -975,6 +1010,11 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
                 continue
             text = pipeline._format_public_chat_line(context, event)
             if text:
+                text = _PLAYER_RE.sub(lambda m: leaders.get(m.group(0), "an unmet leader"), text)
+                body = text.split(":", 1)[-1].strip()[:120]
+                if body in seen_chat:
+                    continue  # same line echoed by another speaker or turn
+                seen_chat.add(body)
                 chat_lines.append(pipeline._wire_line(f"chat.public.t{int(event.get('turn', 0))}.{index}", text))
     diplomacy_block = context.get("diplomacy", {})
     inbox = diplomacy_block.get("private_inbox", []) if isinstance(diplomacy_block, dict) else []
@@ -1167,7 +1207,8 @@ def _civ6_major_relation_lines(context: dict[str, Any], name: str, diplo: dict[s
         lines.append(pipeline._wire_line(f"rival.{name}.approach", approach))
     if diplo.get("defensive_pact"):
         lines.append(pipeline._wire_line(f"rival.{name}.defensivePact", True))
-    reasons = [r for r in diplo.get("reasons", []) or [] if isinstance(r, dict) and r.get("text")]
+    reasons = [r for r in diplo.get("reasons", []) or [] if isinstance(r, dict) and r.get("text")
+               and "unknown reason" not in str(r.get("text")).lower()]
     if reasons:
         lines.append(pipeline._wire_line(
             f"rival.{name}.why",
@@ -1345,7 +1386,7 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
     if isinstance(history, dict):
         memory = history.get("memory_summary")
         if isinstance(memory, str) and memory.strip():
-            lines.append(pipeline._wire_line("history.memory", memory.strip()[:400]))
+            lines.append(pipeline._wire_line("history.memory", _clip_sentence(memory.strip(), 400)))
         thought_rows = [entry for entry in history.get("thought_memory", []) if isinstance(entry, dict)]
         thought_rows = list(reversed(thought_rows))
         kept_thoughts: list[str] = []
@@ -1367,8 +1408,9 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
                 continue
             expires = note.get("expires_turn")
             until = "forever" if expires is None else f"until T{expires}"
+            text = re.sub(r"\s*\((?:until T\d+|forever)\)", "", str(note["text"])).strip()
             lines.append(pipeline._wire_line(
-                f"remembered.T{int(note.get('turn', 0))}", f"{str(note['text']).strip()} ({until})"
+                f"remembered.T{int(note.get('turn', 0))}", f"{text} ({until})"
             ))
     lines.extend(civ6_apply_results.thoughts_lines(context))
     return lines

@@ -613,6 +613,14 @@ def _synthesize_settle(snapshot: dict[str, Any], unit_id: str, x: int, y: int) -
             "affected_ids": [unit_id],
             "runtime_status": "tested",
         })
+    if not site_obeys_founding_rules(snapshot, x, y):
+        sites = labeled_settle_sites(snapshot, radius=12)
+        if not sites:
+            LAST_UNRESOLVED.append(f"dropped: Settle({x},{y}) for {unit_id}: too close to a city or not land; no legal site listed")
+            return None
+        best = min(sites, key=lambda r: _hex_dist(x, y, r["x"], r["y"]))
+        LAST_UNRESOLVED.append(f"dropped: Settle({x},{y}) for {unit_id} is not a legal site; going to {best['label']} ({best['x']},{best['y']}) instead")
+        x, y = best["x"], best["y"]
     return _synthesize_far_move(snapshot, unit_id, x, y, intent=INTENT_FOUND)
 
 

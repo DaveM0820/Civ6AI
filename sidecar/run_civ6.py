@@ -606,6 +606,10 @@ def main() -> None:
     thought_memory = pipeline.load_thought_memory(thought_path, session_key, snapshot)
     pipeline.inject_thought_history(snapshot, thought_memory)
     snapshot["_policy_review"] = isinstance(thought_memory, dict) and thought_memory.get("policy_review_turn") == int(snapshot["decision"]["turn"]) - 1
+    _pol = ((snapshot.get("civ6") or {}).get("governance") or {}).get("policies") or {}
+    if isinstance(_pol, dict) and _pol.get("empty_slots") and _pol.get("change_allowed"):
+        snapshot["_policy_review"] = True  # empty slot / civic just completed: show the cards now
+
     prior_dropped = thought_memory.get("dropped") if isinstance(thought_memory, dict) else None
     if isinstance(prior_dropped, list) and prior_dropped:
         civ6_apply_results.record_dropped(snapshot, [str(item) for item in prior_dropped])

@@ -198,6 +198,24 @@ def _stock_problem(snapshot: dict, items: list[dict[str, Any]]) -> str | None:
     return None
 
 
+STRATEGIC_TECH = {"RESOURCE_HORSES": "TECH_ANIMAL_HUSBANDRY", "RESOURCE_IRON": "TECH_BRONZE_WORKING",
+                  "RESOURCE_NITER": "TECH_MILITARY_ENGINEERING", "RESOURCE_COAL": "TECH_INDUSTRIALIZATION",
+                  "RESOURCE_OIL": "TECH_REFINING", "RESOURCE_ALUMINUM": "TECH_RADIO",
+                  "RESOURCE_URANIUM": "TECH_COMBUSTION"}
+
+
+def _usable_problem(snapshot: dict, items: list[dict[str, Any]]) -> str | None:
+    """A strategic you would receive but cannot use yet (its reveal tech is unknown)."""
+    known = {str(t) for t in _lst(_dct(_dct(snapshot.get("your_empire")).get("research")).get("known_tech_ids"))}
+    if not known:
+        return None
+    for i in items:
+        tech = STRATEGIC_TECH.get(str(i.get("res") or ""))
+        if tech and tech not in known:
+            return f"{i['res']} is useless to you before {tech}"
+    return None
+
+
 def _pact_problem(snapshot: dict, pid: str, kinds: set) -> str | None:
     """None when this seat may offer every pact in kinds to pid (the other side is checked in Gov.Deal)."""
     major = next((m for m in _lst(diplomacy(snapshot).get("majors")) if isinstance(m, dict)
@@ -373,7 +391,7 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         offer["done_turn"] = _turn(snapshot)
         ids: list[str] = []
         if answer in ("ACCEPT", "YES"):
-            problem = _stock_problem(snapshot, offer.get("want", []))
+            problem = _stock_problem(snapshot, offer.get("want", [])) or _usable_problem(snapshot, offer.get("give", []))
             cid = None if problem else _deal_command(snapshot, pid, offer.get("want", []), offer.get("give", []), name)
             if cid is None:
                 offer["status"] = "rejected"
@@ -400,7 +418,7 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         problem = _pact_problem(snapshot, pid, {i.get("kind") for i in give + want} - {None})
         if problem:
             return [], [f"{key}={value}: {problem}"]
-        problem = _stock_problem(snapshot, give)
+        problem = _stock_problem(snapshot, give) or _usable_problem(snapshot, want)
         if problem:
             return [], [f"{key}={value}: {problem}"]
         deals = [d for d in load_deals(snapshot)

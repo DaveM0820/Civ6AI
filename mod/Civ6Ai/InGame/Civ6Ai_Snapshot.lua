@@ -3192,13 +3192,23 @@ function Civ6Ai_Snapshot._AddBuilderImproveCommands(commands, playerID, unit, un
   local urow = GameInfo.Units[unit:GetType()]
   local ux, uy = unit:GetX(), unit:GetY()
   local area = Civ6Ai_Snapshot._AreaId(Map.GetPlot(ux, uy))
+  -- One site per builder: skip tiles another of my builders is headed to or standing on.
+  local reserved = {}
+  for _, other in ipairs(Civ6Ai_Snapshot._IterateUnits(Players[playerID]:GetUnits())) do
+    if other:GetID() ~= unit:GetID() and (M(other, "GetBuildCharges") or 0) > 0 then
+      reserved[other:GetX() .. "," .. other:GetY()] = true
+      local g = Civ6Ai_Snapshot._UnitGoal(playerID, other:GetID())
+      if g ~= nil and g.A == 2 then reserved[g.x .. "," .. g.y] = true end
+    end
+  end
   local sites = {}
   for dx = -8, 8 do
     for dy = -8, 8 do
       local plot = Map.GetPlot(ux + dx, uy + dy)
       if plot ~= nil and M(plot, "GetOwner") == playerID and not M(plot, "IsCity") and not M(plot, "IsWater")
           and not M(plot, "IsMountain") and (M(plot, "GetImprovementType") or -1) < 0
-          and (M(plot, "GetDistrictType") or -1) < 0 and Civ6Ai_Snapshot._AreaId(plot) == area then
+          and (M(plot, "GetDistrictType") or -1) < 0 and Civ6Ai_Snapshot._AreaId(plot) == area
+          and not reserved[plot:GetX() .. "," .. plot:GetY()] then
         local d = Map.GetPlotDistance(ux, uy, plot:GetX(), plot:GetY())
         if d <= 8 then
           local imps, res = Civ6Ai_Snapshot._LegalImprovementsAt(playerID, urow.UnitType, plot)
