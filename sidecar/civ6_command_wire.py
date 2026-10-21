@@ -379,7 +379,7 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
     if verb == "traderoute":
         return _synthesize_trade_route(snapshot, unit_id, value)
     improves = [(t, c) for t, c in candidates if _verb(t) == "improve" and _COORD_RE.search(t)]
-    if improves and verb in ("improve", "moveto"):
+    if improves and verb == "improve":
         return _pick_improve(improves, value, coord)
     for token, cmd_id in candidates:
         if _verb(token) != verb:
@@ -523,26 +523,23 @@ def _self_tile_command(snapshot: dict[str, Any], unit_id: str) -> str | None:
     return None
 
 
-def _pick_improve(improves: list[tuple[str, str]], value: Any, coord: Any) -> str:
-    """Builder: the Improve offer for that tile (and improvement, if named), else the nearest site."""
+def _pick_improve(improves: list[tuple[str, str]], value: Any, coord: Any) -> str | None:
+    """The Improve offer for that exact tile. A different tile is unresolved."""
+    if not coord:
+        return None
+    x, y = int(coord.group(1)), int(coord.group(2))
+    here = [(t, c) for t, c in improves
+            if (int(_COORD_RE.search(t).group(1)), int(_COORD_RE.search(t).group(2))) == (x, y)]
     want = _norm(value)
-    if coord:
-        x, y = int(coord.group(1)), int(coord.group(2))
-        here = [(t, c) for t, c in improves
-                if (int(_COORD_RE.search(t).group(1)), int(_COORD_RE.search(t).group(2))) == (x, y)]
-        for t, c in here:
-            imp = t.rsplit(",", 1)[-1].rstrip(")").lower()
-            if imp in want or imp.replace("improvement_", "") in want:
-                return c
-        if here:
-            return here[0][1]
-
-        def dist(item: tuple[str, str]) -> int:
-            m = _COORD_RE.search(item[0])
-            return _hex_dist(x, y, int(m.group(1)), int(m.group(2)))
-
-        return min(improves, key=dist)[1]
-    return improves[0][1]
+    for t, c in here:
+        imp = t.rsplit(",", 1)[-1].rstrip(")").lower()
+        if imp in want or imp.replace("improvement_", "") in want:
+            return c
+    named = re.search(r"improvement_[a-z0-9_]+", str(value).lower())
+    if named or not here:
+        LAST_UNRESOLVED.append(f"Improve token unresolved: ({x},{y}) not offered for this builder")
+        return None
+    return here[0][1]
 
 
 def _hex_dist(x1: int, y1: int, x2: int, y2: int) -> int:
@@ -757,6 +754,16 @@ def resolve_city_token(snapshot: dict[str, Any], city_id: str, prop: str, value:
         return value.strip()
     prop_l = {"changeproduction": "production", "purchase": "purchase", "buy": "purchase",
               "changefocus": "focus", "attack": "rangestrike", "bombard": "rangestrike"}.get(prop.lower(), prop.lower())
+    raw = str(value or "").strip()
+    if "|" in raw and "@" in raw:
+        head, _, rest = raw.partition("@")
+        for piece in rest.split("|"):
+            piece = piece.strip()
+            if piece:
+                hit = resolve_city_token(snapshot, city_id, prop, f"{head}@{piece}")
+                if hit:
+                    return hit
+        return None
     wanted = _norm(value)
     if not wanted or "|" in wanted:
         return None

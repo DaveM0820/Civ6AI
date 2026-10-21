@@ -123,14 +123,24 @@ def test_improve_token_and_resolve():
     assert cw.unit_command_token(snap["legal_commands"][0]) == "Improve(3,4,IMPROVEMENT_FARM)"
     assert cw.resolve_unit_token(snap, "UNIT_7", "Improve(3,4,IMPROVEMENT_MINE)").endswith("MINE_improve_3_4")
     assert cw.resolve_unit_token(snap, "UNIT_7", "Improve(3,4,MINE)").endswith("MINE_improve_3_4")
-    assert cw.resolve_unit_token(snap, "UNIT_7", "MoveTo(8,9)").endswith("FARM_improve_9_9")
+    moved = cw.resolve_unit_token(snap, "UNIT_7", "MoveTo(8,9)")
+    assert moved is None or "improve" not in moved
+    assert cw.resolve_unit_token(snap, "UNIT_7", "Improve(8,9,IMPROVEMENT_FARM)") is None
+    assert any("Improve token unresolved: (8,9)" in note for note in cw.LAST_UNRESOLVED)
 
 
 def test_improve_substitute_nearest():
     from sidecar import civ6_apply_results as ar
-    snap = {"legal_commands": [_improve_cmd(3, 4, "IMPROVEMENT_FARM"), _improve_cmd(9, 9, "IMPROVEMENT_FARM")]}
-    sub = ar._improve_substitute(snap, {"command_id": "x", "kind": "move_unit", "arguments": {"unit_id": "UNIT_7"}}, {}, 10, 9)
-    assert sub["arguments"]["target_x"] == 9 and sub["kind"] == "move_unit"
+    snap = {"legal_commands": [_improve_cmd(3, 4, "IMPROVEMENT_FARM"), _improve_cmd(9, 9, "IMPROVEMENT_FARM")],
+            "your_units": [{"unit_id": "UNIT_7", "unit_type_id": "UNIT_BUILDER"}],
+            "decision": {"player_id": "PLAYER_0"},
+            "known_map": {"plots": [{"x": 10, "y": 9, "revealed_owner_id": "PLAYER_1"}]}}
+    move = {"command_id": "x", "kind": "move_unit",
+            "arguments": {"unit_id": "UNIT_7", "target_x": 10, "target_y": 9}}
+    kept, dropped = ar.filter_repeat_failures(snap, [move])
+    assert kept == []
+    assert any("outside your borders" in note for note in dropped)
+    assert not any("instead" in note for note in dropped)
 
 
 def test_one_site_per_builder():
@@ -140,9 +150,9 @@ def test_one_site_per_builder():
     b2 = _improve_cmd(5, 5, "IMPROVEMENT_MINE", "UNIT_2")
     snap = {"legal_commands": [a, b, b2]}
     cmds = [{"command_id": x["command_id"], "kind": "move_unit", "arguments": dict(x["fixed_arguments"])} for x in (a, b)]
-    notes = []
+    notes: list[str] = []
     out = ar._one_site_per_builder(snap, cmds, notes)
-    assert [c["arguments"]["target_x"] for c in out] == [3, 5] and notes
+    assert [c["arguments"]["target_x"] for c in out] == [3, 3] and notes == []
 
 
 def test_clip_sentence_and_usable_deal():

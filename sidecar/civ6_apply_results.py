@@ -790,6 +790,26 @@ def is_near_duplicate_chat(text: str, recent: list[str], threshold: float = CHAT
     return False
 
 
+def _recent_other_public(snapshot: dict[str, Any]) -> list[str]:
+    me = str((snapshot.get("decision") or {}).get("player_id") or "")
+    texts: list[str] = []
+    history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
+    for event in history.get("public_events") or []:
+        if not isinstance(event, dict):
+            continue
+        kind = str(event.get("kind") or "").upper()
+        if kind and kind != "CHAT_PUBLIC":
+            continue
+        affected = event.get("affected_ids") or []
+        sender = str(affected[0]) if isinstance(affected, list) and affected else ""
+        if sender == me:
+            continue
+        text = str(event.get("text") or event.get("summary") or "").strip()
+        if text:
+            texts.append(text)
+    return texts[-8:]
+
+
 def filter_repeat_public_chat(
     snapshot: dict[str, Any],
     chat_messages: list[dict[str, Any]],
@@ -813,6 +833,15 @@ def filter_repeat_public_chat(
             dropped.append(
                 "dropped: public chat was a near-repeat of your own recent line and was not sent"
             )
+            continue
+        leader = str(((snapshot.get("personality") or {}).get("leader_name")) or "").strip().lower()
+        low = text.strip().lower()
+        if leader and (low.startswith(f"friend {leader}") or low.startswith(leader + ",") or low.startswith(leader + ":")):
+            dropped.append("dropped: public chat addressed your own leader and was not sent")
+            continue
+        others = _recent_other_public(snapshot)
+        if others and is_near_duplicate_chat(text, others):
+            dropped.append("dropped: public chat repeated a rival's recent line and was not sent")
             continue
         kept.append(message)
         if text.strip():
@@ -882,34 +911,6 @@ def _explore_substitute(snapshot: dict[str, Any], dropped_move: dict[str, Any],
     return sub
 
 
-def _improve_substitute(snapshot: dict[str, Any], dropped_move: dict[str, Any], reverse: dict[str, str],
-                        x: Any, y: Any) -> dict[str, Any] | None:
-    """The builder's listed Improve offer nearest the dropped target."""
-    args = dropped_move.get("arguments") if isinstance(dropped_move.get("arguments"), dict) else {}
-    unit = str(args.get("unit_id") or "")
-    unit = reverse.get(unit, unit)
-    from sidecar.civ6_command_wire import _hex_dist
-
-    best = None
-    for c in snapshot.get("legal_commands") or []:
-        fixed = c.get("fixed_arguments") if isinstance(c, dict) else None
-        if (not isinstance(fixed, dict) or fixed.get("unit_id") != unit or c.get("kind") != "move_unit"
-                or fixed.get("intent") != "improve"):
-            continue
-        try:
-            d = _hex_dist(int(x), int(y), int(fixed["target_x"]), int(fixed["target_y"]))
-        except (TypeError, ValueError, KeyError):
-            d = 0
-        if best is None or d < best[0]:
-            best = (d, c)
-    if best is None:
-        return None
-    c = best[1]
-    sub = {k: v for k, v in dropped_move.items() if k not in ("arguments", "command_id", "kind")}
-    sub.update({"command_id": c["command_id"], "kind": "move_unit", "arguments": dict(c["fixed_arguments"])})
-    return sub
-
-
 def _land_units_cannot_embark(snapshot: dict[str, Any]) -> bool:
     """Shipbuilding not researched yet: Sailing or Shipbuilding is still current or offered."""
     techs = ((snapshot.get("civ6") or {}).get("governance") or {}).get("techs") or {}
@@ -957,13 +958,6 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
             substitutes.append(sub)
             dropped.append(f"note: {unit} explores instead")
 
-    def _improve_instead(command: dict[str, Any], x: Any, y: Any) -> None:
-        unit = str((command.get("arguments") or {}).get("unit_id") or "")
-        sub = _improve_substitute(snapshot, command, reverse, x, y)
-        if sub is not None:
-            substitutes.append(sub)
-            dropped.append(f"note: {unit} goes to improve ({sub['arguments']['target_x']},{sub['arguments']['target_y']}) instead")
-
     for command in commands:
         fp = _command_fingerprint(command)
         matched = None
@@ -975,7 +969,6 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
         if (fp[0] == "move_unit" and (fp[1] in builders or reverse.get(fp[1]) in builders)
                 and (fp[2], fp[3]) in plot_owner and plot_owner[(fp[2], fp[3])] != me):
             dropped.append(f"dropped: builder MoveTo({fp[2]},{fp[3]}) is outside your borders; builders improve only your own tiles")
-            _improve_instead(command, fp[2], fp[3])
             continue
         if fp[0] == "move_unit" and (fp[2], fp[3]) in peak_plots:
             dropped.append(f"dropped: MoveTo({fp[2]},{fp[3]}) is a mountain; no unit can enter it")
@@ -1009,54 +1002,7 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
 
 def _one_site_per_builder(snapshot: dict[str, Any], commands: list[dict[str, Any]],
                           dropped: list[str], failed: set | None = None) -> list[dict[str, Any]]:
-    """Two builders sent to one Improve tile: the later one takes its next free listed site.
-    A builder left with no order (or whose order was dropped) gets its first free listed site."""
-    claimed: set[tuple[Any, Any]] = set()
-    avoid = set(failed or ())  # tiles that just failed: never picked as an alternative
-    out: list[dict[str, Any]] = []
-    for c in commands:
-        args = c.get("arguments") if isinstance(c.get("arguments"), dict) else {}
-        if c.get("kind") != "move_unit" or args.get("intent") != "improve":
-            out.append(c)
-            continue
-        xy = (args.get("target_x"), args.get("target_y"))
-        if xy not in claimed:
-            claimed.add(xy)
-            out.append(c)
-            continue
-        alt = None
-        for lc in snapshot.get("legal_commands") or []:
-            f = lc.get("fixed_arguments") if isinstance(lc, dict) else None
-            if (isinstance(f, dict) and f.get("unit_id") == args.get("unit_id") and f.get("intent") == "improve"
-                    and (f.get("target_x"), f.get("target_y")) not in claimed | avoid):
-                alt = lc
-                break
-        if alt is None:
-            dropped.append(f"dropped: Improve({xy[0]},{xy[1]}) for {args.get('unit_id')}: another builder already has that tile")
-            continue
-        f = alt["fixed_arguments"]
-        claimed.add((f.get("target_x"), f.get("target_y")))
-        dropped.append(f"note: {args.get('unit_id')} takes Improve({f.get('target_x')},{f.get('target_y')}) instead; "
-                       f"another builder has ({xy[0]},{xy[1]})")
-        sub = {k: v for k, v in c.items() if k not in ("arguments", "command_id")}
-        sub.update({"command_id": alt["command_id"], "arguments": dict(f)})
-        out.append(sub)
-    ordered = {str((c.get("arguments") or {}).get("unit_id") or "") for c in out if isinstance(c.get("arguments"), dict)}
-    for lc in snapshot.get("legal_commands") or []:
-        f = lc.get("fixed_arguments") if isinstance(lc, dict) else None
-        if not isinstance(f, dict) or f.get("intent") != "improve" or lc.get("kind") != "move_unit":
-            continue
-        uid = str(f.get("unit_id") or "")
-        xy = (f.get("target_x"), f.get("target_y"))
-        if uid in ordered or xy in claimed or xy in avoid:
-            continue
-        ordered.add(uid)
-        claimed.add(xy)
-        dropped.append(f"note: idle {uid} auto-assigned Improve({xy[0]},{xy[1]},{f.get('improvement_id')})")
-        template = out[0] if out else {}
-        sub = {k: v for k, v in template.items() if k not in ("arguments", "command_id", "kind", "sequence")}
-        sub.update({"command_id": lc["command_id"], "kind": "move_unit", "arguments": dict(f),
-                    "sequence": max([int(c.get("sequence") or 0) for c in out] or [0]) + 1})
-        out.append(sub)
-    return out
+    """Builders keep the Improve tile the model named. Two builders on one tile is a model miss."""
+    del snapshot, dropped, failed
+    return commands
 
