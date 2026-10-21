@@ -344,6 +344,95 @@ class Civ6MapRenderTests(unittest.TestCase):
         self.assertEqual(0, blank["improvements_drawn"])
         self.assertEqual(0, blank["districts_drawn"])
 
+    def test_sprite_territory_tint_is_a_light_wash(self):
+        from PIL import Image
+
+        from sidecar.map_render_civ6 import _paste_strategic_hex, _paste_territory_tint, _territory_tint_alpha
+
+        canvas = Image.new("RGBA", (96, 96), (18, 18, 24, 255))
+        plot = {
+            "terrain_id": "TERRAIN_DESERT",
+            "knowledge": "visible",
+            "water": False,
+            "hills": False,
+            "peak": False,
+        }
+        self.assertTrue(_paste_strategic_hex(canvas, plot, 48, 48, 28))
+        before = canvas.getpixel((48, 48))
+        color = map_render._player_color("PLAYER_1")
+        alpha = _territory_tint_alpha(plot)
+        self.assertLess(alpha, 0.3)
+        _paste_territory_tint(canvas, 48, 48, 28, color, alpha)
+        after = canvas.getpixel((48, 48))
+        self.assertEqual(255, after[3])
+        player = map_render._hex_to_rgb(color)
+        for index, channel in enumerate(player):
+            expected = (channel - before[index]) * alpha
+            self.assertAlmostEqual(after[index] - before[index], expected, delta=8)
+        moved = sum((after[i] - before[i]) ** 2 for i in range(3))
+        remaining = sum((after[i] - player[i]) ** 2 for i in range(3))
+        self.assertLess(moved, remaining)
+        remembered = dict(plot, knowledge="remembered")
+        self.assertAlmostEqual(_territory_tint_alpha(remembered), alpha * 0.6, places=3)
+
+    def test_hex_grid_outline_stays_thin_and_translucent(self):
+        from PIL import Image, ImageDraw
+
+        from sidecar.map_render_civ6 import HEX_GRID_OUTLINE, _flat_top_hex_corners
+
+        base = (210, 180, 110, 255)
+        canvas = Image.new("RGBA", (96, 96), base)
+        overlay = Image.new("RGBA", (96, 96), (0, 0, 0, 0))
+        ImageDraw.Draw(overlay).polygon(_flat_top_hex_corners(48, 48, 30), outline=HEX_GRID_OUTLINE)
+        merged = Image.alpha_composite(canvas, overlay)
+        self.assertEqual(base, merged.getpixel((48, 48)))
+        changed = [
+            merged.getpixel((x, y))
+            for y in range(96)
+            for x in range(96)
+            if merged.getpixel((x, y)) != base
+        ]
+        self.assertGreater(len(changed), 20)
+        self.assertLess(len(changed), 400)
+        for pixel in changed:
+            self.assertGreater(pixel[0], 140)
+            self.assertNotEqual(pixel[:3], (0x33, 0x33, 0x33))
+        self.assertLess(HEX_GRID_OUTLINE[3], 96)
+
+    def test_overview_and_tactical_renders_stay_under_one_second(self):
+        import json
+        import time
+
+        from sidecar.map_render_civ6 import _BASE_LAYER_CACHE, render_civ6_map_png
+        from sidecar.map_situational import compute_overview_viewport, pick_auto_focus_tile, viewport_focused_on_tile
+
+        snapshot = json.loads((ROOT / "fixtures" / "civ6" / "live-runtime-t4-city-snapshot.json").read_text())
+        overview_vp = compute_overview_viewport(snapshot)
+        focus = pick_auto_focus_tile({}, snapshot)
+        width = int(snapshot["game"]["map_width"])
+        height = int(snapshot["game"]["map_height"])
+        tactical_vp = viewport_focused_on_tile(focus[0], focus[1], width, height)
+        _BASE_LAYER_CACHE.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            render_civ6_map_png(
+                snapshot, Path(tmp) / "warm-overview.png", viewport=overview_vp, image_role="overview", target_size=768,
+            )
+            render_civ6_map_png(
+                snapshot, Path(tmp) / "warm-tactical.png", viewport=tactical_vp, image_role="viewport", target_size=1024,
+            )
+            started = time.perf_counter()
+            render_civ6_map_png(
+                snapshot, Path(tmp) / "overview.png", viewport=overview_vp, image_role="overview", target_size=768,
+            )
+            overview_s = time.perf_counter() - started
+            started = time.perf_counter()
+            render_civ6_map_png(
+                snapshot, Path(tmp) / "tactical.png", viewport=tactical_vp, image_role="viewport", target_size=1024,
+            )
+            tactical_s = time.perf_counter() - started
+        self.assertLess(overview_s, 1.0)
+        self.assertLess(tactical_s, 1.0)
+        print(f"overview={overview_s:.4f}s tactical={tactical_s:.4f}s")
 
 
 if __name__ == "__main__":

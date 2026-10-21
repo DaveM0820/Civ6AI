@@ -40,6 +40,12 @@ _BASE_LAYER_CACHE_LIMIT = 8
 _HEX_LAYER_CACHE: dict[tuple[Any, ...], Any] = {}
 _HEX_MASK_CACHE: dict[tuple[int, int, int], Any] = {}
 _HEX_LAYER_CACHE_LIMIT = 256
+_TINT_SOLID_CACHE: dict[tuple[Any, ...], Any] = {}
+_TINT_MASK_CACHE: dict[tuple[int, int, int, int], Any] = {}
+# 1px per-tile grid. A light, low-alpha stroke: the page background used to
+# show through the seam as a black mesh, and a dark stroke upscales into a
+# heavy line. Civ borders are a separate full-color stroke and stay bold.
+HEX_GRID_OUTLINE = (255, 255, 255, 42)
 
 
 def civ6_map_north_up(snapshot: dict[str, Any] | None) -> bool:
@@ -601,6 +607,47 @@ def _paste_strategic_hex(
         dim_factor,
         layer_scales=[scale for _path, scale in layers],
     )
+
+
+def _territory_tint_alpha(plot: dict[str, Any] | None) -> float:
+    alpha = map_render.TERRITORY_TINT_ALPHA
+    if isinstance(plot, dict) and plot.get("knowledge") == "remembered":
+        alpha *= 0.6
+    return alpha
+
+
+def _paste_territory_tint(
+    canvas: Any,
+    cx: float,
+    cy: float,
+    hex_radius: float,
+    owner_color: str,
+    alpha: float,
+) -> None:
+    """Low-alpha player wash inside the hex, on top of a strategic sprite.
+
+    ``_tile_fill`` already tints solid fills. A sprite paste covers that fill,
+    so owned land with terrain art needs the same wash composited over the art.
+    Icons and units are drawn later and stay untinted.
+    """
+    from PIL import Image, ImageDraw
+
+    width, height = _hex_sprite_size(hex_radius)
+    rgb = map_render._hex_to_rgb(owner_color)
+    alpha_byte = max(1, min(255, int(round(max(0.0, min(1.0, alpha)) * 255))))
+    solid_key = (width, height, rgb)
+    solid = _TINT_SOLID_CACHE.get(solid_key)
+    if solid is None:
+        solid = Image.new("RGBA", (width, height), rgb + (255,))
+        _TINT_SOLID_CACHE[solid_key] = solid
+    mask_key = (width, height, int(round(hex_radius * 100)), alpha_byte)
+    mask = _TINT_MASK_CACHE.get(mask_key)
+    if mask is None:
+        tcx, tcy = width / 2, height / 2
+        mask = Image.new("L", (width, height), 0)
+        ImageDraw.Draw(mask).polygon(_flat_top_hex_corners(tcx, tcy, hex_radius), fill=alpha_byte)
+        _TINT_MASK_CACHE[mask_key] = mask
+    canvas.paste(solid, (int(cx - width / 2), int(cy - height / 2)), mask)
 
 
 def civ6_strategic_layers(plot: dict[str, Any] | None) -> list[tuple[Path, float]]:
@@ -1499,6 +1546,8 @@ def render_civ6_map_png(
             draw.text((axis_gutter - 2, cy), str(wy), fill="#999999", font=axis_label_font, anchor="rm")
 
     if not used_base_cache:
+        grid_overlay = Image.new("RGBA", (map_w, map_h), (0, 0, 0, 0))
+        grid_draw = ImageDraw.Draw(grid_overlay)
         for vy in range(vh):
             wy = y0 + vy
             for vx in range(vw):
@@ -1515,41 +1564,73 @@ def render_civ6_map_png(
                 corners = _flat_top_hex_corners(cx, cy, hex_radius)
                 if state == "revealed":
                     rendered_tiles += 1
+                    # Terrain fill under the sprite closes the 1px seam. Without it
+                    # the page background reads as a black grid between hexes.
+                    fill_rgb = map_render._rgb_tuple(fill)
+                    draw.polygon(corners, fill=fill_rgb, outline=fill_rgb)
                     used_sprite = _paste_strategic_hex(
                         canvas, plot, cx, cy, hex_radius, prefer_civ5_sprites=prefer_civ5_sprites,
                     )
-                    if not used_sprite:
-                        draw.polygon(corners, fill=map_render._rgb_tuple(fill), outline="#333333")
-                    elif not prefer_civ5_sprites:
-                        draw.polygon(corners, outline="#333333")
-                    if not prefer_civ5_sprites:
-                        if _plot_is_hills(plot):
-                            _draw_hills_glyph(draw, cx, cy, hex_radius)
-                        if not rivers_trusted and isinstance(plot, dict) and plot.get("river_edges"):
-                            _draw_river_tile_mark(draw, cx, cy, hex_radius)
-                    _paste_resource_icon(canvas, plot, cx, cy, hex_radius, tile_px)
-                    _paste_tile_marks(canvas, draw, plot, cx, cy, hex_radius, tile_px)
-                    _paste_ruins_marker(canvas, plot, cx, cy, hex_radius)
-                    if territory_owner is not None:
-                        owner_color = map_render._player_color(territory_owner)
-                        border_width = max(2, tile_px // 5) if prefer_civ5_sprites else max(2, tile_px // 7)
-                        for nx, ny, edge in _hex_neighbors_odd_r(wx, wy):
-                            neighbor_owner = owner_index.get((nx, ny))
-                            if neighbor_owner != territory_owner:
-                                inset = 0.0 if prefer_civ5_sprites else 0.15
-                                if flip_y:
-                                    ncx, ncy, _, _ = _odd_r_cell_center(
-                                        nx, ny, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
-                                    )
-                                    edge = _edge_index_toward_neighbor(cx, cy, ncx, ncy, corners)
-                                seg = _hex_edge_segment(corners, edge, inset)
-                                draw.line(
-                                    seg,
-                                    fill=map_render._rgb_tuple(owner_color),
-                                    width=border_width,
-                                )
+                    if territory_owner is not None and used_sprite:
+                        _paste_territory_tint(
+                            canvas,
+                            cx,
+                            cy,
+                            hex_radius,
+                            map_render._player_color(territory_owner),
+                            _territory_tint_alpha(plot),
+                        )
+                    # Civ5 sprite tiles never drew a per-tile stroke; keep that.
+                    if not used_sprite or not prefer_civ5_sprites:
+                        grid_draw.polygon(corners, outline=HEX_GRID_OUTLINE)
                 else:
                     draw.polygon(corners, fill=map_render._rgb_tuple(fill))
+        # Faint grid under icons. PIL's polygon outline replaces pixels, so the
+        # stroke is composited from a clear layer instead of punched into the art.
+        map_region = Image.alpha_composite(canvas.crop((0, 0, map_w, map_h)), grid_overlay)
+        canvas.paste(map_region, (0, 0))
+        draw = ImageDraw.Draw(canvas)
+        for vy in range(vh):
+            wy = y0 + vy
+            for vx in range(vw):
+                wx = x0 + vx
+                key = (wx, wy)
+                plot = plot_index.get(key)
+                grid_char = map_render._grid_char_at(
+                    normalized, wx, wy, origin=map_render.visibility_grid_origin(known_map),
+                )
+                state = map_render._tile_terrain_state(plot, grid_char, has_visibility_grid)
+                if state != "revealed":
+                    continue
+                territory_owner = owner_index.get(key)
+                cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
+                corners = _flat_top_hex_corners(cx, cy, hex_radius)
+                if not prefer_civ5_sprites:
+                    if _plot_is_hills(plot):
+                        _draw_hills_glyph(draw, cx, cy, hex_radius)
+                    if not rivers_trusted and isinstance(plot, dict) and plot.get("river_edges"):
+                        _draw_river_tile_mark(draw, cx, cy, hex_radius)
+                _paste_resource_icon(canvas, plot, cx, cy, hex_radius, tile_px)
+                _paste_tile_marks(canvas, draw, plot, cx, cy, hex_radius, tile_px)
+                _paste_ruins_marker(canvas, plot, cx, cy, hex_radius)
+                if territory_owner is not None:
+                    owner_color = map_render._player_color(territory_owner)
+                    border_width = max(2, tile_px // 5) if prefer_civ5_sprites else max(2, tile_px // 7)
+                    for nx, ny, edge in _hex_neighbors_odd_r(wx, wy):
+                        neighbor_owner = owner_index.get((nx, ny))
+                        if neighbor_owner != territory_owner:
+                            inset = 0.0 if prefer_civ5_sprites else 0.15
+                            if flip_y:
+                                ncx, ncy, _, _ = _odd_r_cell_center(
+                                    nx, ny, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
+                                )
+                                edge = _edge_index_toward_neighbor(cx, cy, ncx, ncy, corners)
+                            seg = _hex_edge_segment(corners, edge, inset)
+                            draw.line(
+                                seg,
+                                fill=map_render._rgb_tuple(owner_color),
+                                width=border_width,
+                            )
         if show_tile_coords:
             for vy in range(vh):
                 wy = y0 + vy
