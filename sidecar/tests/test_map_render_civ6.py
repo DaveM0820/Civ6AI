@@ -361,7 +361,8 @@ class Civ6MapRenderTests(unittest.TestCase):
         before = canvas.getpixel((48, 48))
         color = map_render._player_color("PLAYER_1")
         alpha = _territory_tint_alpha(plot)
-        self.assertLess(alpha, 0.3)
+        self.assertGreaterEqual(alpha, 0.4)
+        self.assertLess(alpha, 0.5)
         _paste_territory_tint(canvas, 48, 48, 28, color, alpha)
         after = canvas.getpixel((48, 48))
         self.assertEqual(255, after[3])
@@ -372,6 +373,7 @@ class Civ6MapRenderTests(unittest.TestCase):
         moved = sum((after[i] - before[i]) ** 2 for i in range(3))
         remaining = sum((after[i] - player[i]) ** 2 for i in range(3))
         self.assertLess(moved, remaining)
+        self.assertGreater(sum(abs(after[i] - before[i]) for i in range(3)), 60)
         remembered = dict(plot, knowledge="remembered")
         self.assertAlmostEqual(_territory_tint_alpha(remembered), alpha * 0.6, places=3)
 

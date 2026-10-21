@@ -199,16 +199,15 @@ next turn start:
   Lua applies an entry only for the matching session and player, only for the turn
   allowed above, and only once per apply id. The file stays on disk, so include()
   re-reading it is harmless. Seats never share an entry.
-- **New game = new session:** `scripts/start_live.py` (default) rotates the session
-  id in the installed `Civ6Ai_Paths.lua` and `runtime.json`.
-  It also archives per-player transient files (decisions, apply files, snapshots,
-  markers) into `sessions/<id>/_archive_<stamp>/` and moves the Lua.log offsets to
-  the end. Start it **before** starting the new game. Use `--keep-session` only
-  to restart helpers for the game already running.
+- **Session:** `scripts/start_live.py` reuses the current session id, Lua.log
+  offsets, and queued answers. Pass `--new-session` before a new game to rotate
+  the id in the installed `Civ6Ai_Paths.lua` and `runtime.json`, archive
+  per-player transient files into `sessions/<id>/_archive_<stamp>/`, and move
+  the Lua.log offsets to the end. `--keep-session` is the same as the default.
 
 **Planning with full movement.** Because an AI seat's orders play at its next turn start (and under same-turn timing the seat's units have 0 moves while the host plays), its snapshot reports every unit's full movement (`UnitMovesForPlayer(..., planning)`), and `legal_commands` are checked against full movement too. `orders|queue_units|...|below_full=` shows whether any model-commanded unit had less than full movement when its queue started (the game's AI moving it first).
 
-**Turn timer must be off.** In Advanced Setup set the MP_helper "Smart-Timer" option to off/None. With "Smart-Timer: Classic" the game ends the local seat's turn after ~60 s regardless of the model, so answers (1-2 min per seat) arrive stale (`pending_apply_stale_turn`, `inbox_wait_abandoned`). `start_live --keep-session` no longer clears queued PendingApply answers, and Enter nudges are only sent while the local seat's turn is still active.
+**Turn timer must be off.** In Advanced Setup set the MP_helper "Smart-Timer" option to off/None. With "Smart-Timer: Classic" the game ends the local seat's turn after ~60 s regardless of the model, so answers (1-2 min per seat) arrive stale (`pending_apply_stale_turn`, `inbox_wait_abandoned`). `start_live` (and `--keep-session`) leaves queued PendingApply answers in place; `--new-session` clears them. Enter nudges are only sent while the local seat's turn is still active.
 
 ## Troubleshooting
 

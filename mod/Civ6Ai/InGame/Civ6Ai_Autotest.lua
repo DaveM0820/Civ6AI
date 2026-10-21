@@ -641,7 +641,9 @@ function Civ6Ai_Autotest._ClearPolicyGovernmentBlockers(playerID)
       table.insert(clearList, e.slot)
       if string.upper(e.policy) ~= "NONE" then
         local prow = GameInfo.Policies[e.policy]
-        if prow ~= nil then
+        if prow ~= nil and Civ6Ai_Apply ~= nil and Civ6Ai_Apply._PolicyTypeHash ~= nil then
+          addList[e.slot] = Civ6Ai_Apply._PolicyTypeHash(prow)
+        elseif prow ~= nil then
           addList[e.slot] = prow.Hash
         end
       end

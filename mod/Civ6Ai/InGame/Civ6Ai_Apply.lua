@@ -1018,6 +1018,22 @@ local function slotFits(slotType, policyRow)
   return false
 end
 
+-- GovernmentScreen confirms with GameInfo.Types[PolicyType].Hash.
+-- RequestPolicyChanges ignores a different hash and the slot stays empty
+-- ("slot N still holds nothing").
+function Civ6Ai_Apply._PolicyTypeHash(prow)
+  if prow == nil then
+    return nil
+  end
+  local typeName = prow.PolicyType
+  local types = GameInfo ~= nil and GameInfo.Types or nil
+  local typeRow = types ~= nil and typeName ~= nil and types[typeName] or nil
+  if typeRow ~= nil and typeRow.Hash ~= nil then
+    return typeRow.Hash
+  end
+  return prow.Hash
+end
+
 function Civ6Ai_Apply._SetPolicies(playerID, command, args)
   local plan, why = Civ6Ai_Apply._ParsePolicySlots(args.slots)
   if plan == nil then
@@ -1031,7 +1047,19 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
   if gcall(culture, "CivicCompletedThisTurn") ~= true and (gcall(culture, "GetNumPolicySlotsOpen") or 0) <= 0 then
     return false, "policy cards can only be changed on a turn when a civic completed", args
   end
-  local clearList, addList, want, used = {}, {}, {}, {}
+  -- Start from the cards already slotted, then overlay the plan. NONE leaves
+  -- a slot alone (models wrote all-NONE and emptied every card). A card named
+  -- for a new slot is lifted out of its old one: the engine denies the add
+  -- while that card is still active, and the destination stays empty.
+  local desired = {}
+  for i = 0, n - 1 do
+    local cur = gcall(culture, "GetSlotPolicy", i)
+    local crow = cur ~= nil and cur >= 0 and GameInfo.Policies[cur] or nil
+    if crow ~= nil then
+      desired[i] = crow
+    end
+  end
+  local want, used = {}, {}
   for _, e in ipairs(plan) do
     if e.slot < 0 or e.slot >= n then
       return false, "there is no policy slot " .. e.slot .. " (you have " .. n .. ")", args
@@ -1039,14 +1067,15 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
     local st = gcall(culture, "GetSlotType", e.slot)
     local srow = st ~= nil and GameInfo.GovernmentSlots[st] or nil
     local slotType = srow ~= nil and srow.GovernmentSlotType or "?"
-    -- NONE keeps whatever the slot holds (models wrote all-NONE and emptied every card).
     if string.upper(e.policy) ~= "NONE" then
-      table.insert(clearList, e.slot)
       local prow = GameInfo.Policies[e.policy] or GameInfo.Policies["POLICY_" .. e.policy]
       if prow == nil then
         return false, "unknown policy card " .. e.policy, args
       end
-      if gcall(culture, "IsPolicyUnlocked", prow.Hash) ~= true and gcall(culture, "IsPolicyUnlocked", prow.Index) ~= true then
+      local typeHash = Civ6Ai_Apply._PolicyTypeHash(prow)
+      if gcall(culture, "IsPolicyUnlocked", typeHash) ~= true
+          and gcall(culture, "IsPolicyUnlocked", prow.Hash) ~= true
+          and gcall(culture, "IsPolicyUnlocked", prow.Index) ~= true then
         return false, e.policy .. " is not unlocked yet", args
       end
       if not slotFits(slotType, prow) then
@@ -1057,18 +1086,57 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
         return false, e.policy .. " can only be slotted once", args
       end
       used[prow.PolicyType] = true
-      addList[e.slot] = prow.Hash
+      for i = 0, n - 1 do
+        if i ~= e.slot and desired[i] ~= nil and desired[i].PolicyType == prow.PolicyType then
+          desired[i] = nil
+        end
+      end
+      desired[e.slot] = prow
       want[e.slot] = prow.Index
     end
   end
-  if #clearList == 0 then
+  if next(want) == nil then
     return false, "no policy card named (NONE leaves a slot unchanged)", args
+  end
+  if Game ~= nil and Game.IsAllowStrategicCommands ~= nil and Game.IsAllowStrategicCommands(playerID) == false then
+    return false, "policy cards cannot be changed until this seat's turn is active", args
+  end
+  -- Same shape as GovernmentScreen OnConfirmPolicies: slot indexes to clear,
+  -- then slot index -> type hash for the cards that should be there afterwards.
+  -- Only slots that actually change are sent, so an ignored request cannot
+  -- wipe a card that was already correct.
+  local clearList, addList = {}, {}
+  for i = 0, n - 1 do
+    local cur = gcall(culture, "GetSlotPolicy", i)
+    local crow = cur ~= nil and cur >= 0 and GameInfo.Policies[cur] or nil
+    local nextRow = desired[i]
+    local same = (crow == nil and nextRow == nil)
+      or (crow ~= nil and nextRow ~= nil and crow.PolicyType == nextRow.PolicyType)
+    if not same then
+      table.insert(clearList, i)
+      if nextRow ~= nil then
+        local typeHash = Civ6Ai_Apply._PolicyTypeHash(nextRow)
+        if typeHash == nil then
+          return false, nextRow.PolicyType .. " has no type hash", args
+        end
+        addList[i] = typeHash
+      end
+    end
+  end
+  if #clearList == 0 then
+    local parts = {}
+    for slot, idx in pairs(want) do
+      parts[#parts + 1] = slot .. "=" .. (GameInfo.Policies[idx] and GameInfo.Policies[idx].PolicyType or "?")
+    end
+    table.sort(parts)
+    return true, "policies=" .. table.concat(parts, ";") .. ":already", args
   end
   local okReq, reqWhy = Civ6Ai_Apply._AsSeat(playerID, function()
     return culture:RequestPolicyChanges(clearList, addList)
   end)
-  if not okReq and reqWhy ~= nil and reqWhy ~= "" then
-    Civ6Ai_Util.Log("apply|policies|request|player=" .. tostring(playerID) .. "|" .. tostring(reqWhy))
+  if okReq == false then
+    return false, "the game refused the policy change"
+      .. ((reqWhy ~= nil and reqWhy ~= "") and (": " .. tostring(reqWhy)) or ""), args
   end
   local label = tostring(args.slots)
   return Civ6Ai_Apply._Defer(playerID, command, args, "policies=" .. label, function()

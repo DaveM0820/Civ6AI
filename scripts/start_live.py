@@ -190,6 +190,11 @@ def _dry_run(cfg, state: Path, timeout_seconds: float | None = None) -> int:
     return 1
 
 
+def rotate_session_requested(args: argparse.Namespace) -> bool:
+    """A bare start, and --keep-session, reuse the session already on disk."""
+    return bool(getattr(args, "new_session", False))
+
+
 def _start_new_session() -> None:
     """Fresh session id for the next game + no stale per-player files or log backlog.
 
@@ -243,8 +248,13 @@ def main() -> int:
     parser.add_argument(
         "--keep-session",
         action="store_true",
-        help="Restart helpers for the game that is already running (keep session id and Lua.log offsets). "
-        "Default: start a NEW session for the next game (fresh session id, stale per-player files archived).",
+        help="Keep the current session id, Lua.log offsets, and queued answers. This is the default.",
+    )
+    parser.add_argument(
+        "--new-session",
+        action="store_true",
+        help="Start a fresh session for a new game (new session id, archive stale per-player files, "
+        "move Lua.log offsets to the end, clear PendingApply).",
     )
     parser.add_argument(
         "--timeout",
@@ -264,16 +274,21 @@ def main() -> int:
         print(f"Workers already recorded in {PID_FILE}. Run scripts/stop_live.py first.")
         return 1
 
-    if not args.keep_session:
+    # Reuse the session already on disk unless a new game was asked for.
+    # --keep-session is the same as the default, so an old restart command still works.
+    if args.new_session and args.keep_session:
+        print("WARNING: --new-session and --keep-session were both set; starting a new session.")
+    if rotate_session_requested(args):
         _start_new_session()
+    else:
+        print("Keeping the current session. Pass --new-session to rotate it.")
 
     # A PendingApply module left over from an earlier session is rejected by Lua
-    # every frame (stale session id); clear it so a fresh session starts clean.
-    # With --keep-session the queued answers belong to the running game (AI seats
-    # apply them at their next activation), so they must survive a helper restart.
+    # every frame (stale session id); clear it only when rotating.
+    # Queued answers belong to the running game, so a helper restart must leave them.
     try:
-        if args.keep_session:
-            raise RuntimeError("kept for the running session (--keep-session)")
+        if not rotate_session_requested(args):
+            raise RuntimeError("kept for the current session")
         if str(ROOT / "scripts" / "testbed") not in sys.path:
             sys.path.insert(0, str(ROOT / "scripts" / "testbed"))
         from civ6_host_channel import clear_pending_apply_lua

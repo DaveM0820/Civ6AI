@@ -21,7 +21,9 @@ MIN_VIEWPORT_TILES = 8
 MAX_VIEWPORT_TILES = 48
 MAX_CANVAS_PX = 960
 MAX_COORD_LABEL_CELLS = 128
-TERRITORY_TINT_ALPHA = 0.22
+# Strong enough to read ownership on a sprite overview, still a wash:
+# the terrain stays closer to its own color than to the player color.
+TERRITORY_TINT_ALPHA = 0.42
 MODEL_IMAGE_SIZE = 512
 MODEL_IMAGE_MIME = "image/png"
 CIV5_OVERVIEW_MODEL_IMAGE_SIZE = 1536

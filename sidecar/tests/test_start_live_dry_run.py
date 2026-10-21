@@ -1,6 +1,7 @@
 """Tests for scripts/start_live.py --dry-run pass/fail evaluation (offline)."""
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import io
 import json
@@ -152,6 +153,17 @@ class DryRunCommandTests(unittest.TestCase):
         self.assertEqual(1, code)
         self.assertIn("PLAYER_0=1/3 closed", out)
         self.assertIn("ignored by dry run", out)
+
+
+class StartLiveSessionTests(unittest.TestCase):
+    def test_default_reuses_the_current_session(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--keep-session", action="store_true")
+        parser.add_argument("--new-session", action="store_true")
+        self.assertFalse(start_live.rotate_session_requested(parser.parse_args([])))
+        self.assertFalse(start_live.rotate_session_requested(parser.parse_args(["--keep-session"])))
+        self.assertTrue(start_live.rotate_session_requested(parser.parse_args(["--new-session"])))
+        self.assertTrue(start_live.rotate_session_requested(parser.parse_args(["--new-session", "--keep-session"])))
 
 
 if __name__ == "__main__":
