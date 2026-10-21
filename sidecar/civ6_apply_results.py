@@ -1011,7 +1011,8 @@ def _one_site_per_builder(snapshot: dict[str, Any], commands: list[dict[str, Any
                           dropped: list[str], failed: set | None = None) -> list[dict[str, Any]]:
     """Two builders sent to one Improve tile: the later one takes its next free listed site.
     A builder left with no order (or whose order was dropped) gets its first free listed site."""
-    claimed: set[tuple[Any, Any]] = set(failed or ())
+    claimed: set[tuple[Any, Any]] = set()
+    avoid = set(failed or ())  # tiles that just failed: never picked as an alternative
     out: list[dict[str, Any]] = []
     for c in commands:
         args = c.get("arguments") if isinstance(c.get("arguments"), dict) else {}
@@ -1027,7 +1028,7 @@ def _one_site_per_builder(snapshot: dict[str, Any], commands: list[dict[str, Any
         for lc in snapshot.get("legal_commands") or []:
             f = lc.get("fixed_arguments") if isinstance(lc, dict) else None
             if (isinstance(f, dict) and f.get("unit_id") == args.get("unit_id") and f.get("intent") == "improve"
-                    and (f.get("target_x"), f.get("target_y")) not in claimed):
+                    and (f.get("target_x"), f.get("target_y")) not in claimed | avoid):
                 alt = lc
                 break
         if alt is None:
@@ -1047,7 +1048,7 @@ def _one_site_per_builder(snapshot: dict[str, Any], commands: list[dict[str, Any
             continue
         uid = str(f.get("unit_id") or "")
         xy = (f.get("target_x"), f.get("target_y"))
-        if uid in ordered or xy in claimed:
+        if uid in ordered or xy in claimed or xy in avoid:
             continue
         ordered.add(uid)
         claimed.add(xy)
