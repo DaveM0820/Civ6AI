@@ -553,6 +553,8 @@ def _civ6_unit_tokens(snapshot: dict[str, Any]) -> dict[str, list[str]]:
         # MoveTo(x,y) (any plot; the game walks its own route), not a list of tiles.
         if token and token.startswith("MoveTo("):
             token = "MoveTo(x,y)"
+        elif token and token.startswith("AttackTo("):
+            token = combat_wire.with_attack_forecast(token, snapshot, unit_id=unit_id)
         if token and token not in out.setdefault(unit_id, []):
             out[unit_id].append(token)
     for unit in snapshot.get("your_units", []):
@@ -610,6 +612,8 @@ def _civ6_city_tokens(snapshot: dict[str, Any]) -> dict[str, dict[str, list[str]
         if not pair:
             continue
         prop, token = pair
+        if prop == "rangeStrike" and token.startswith("("):
+            token = combat_wire.with_attack_forecast(token, snapshot, city_id=city_id)
         if prop == "production" and (_production_turns(snapshot, city_id, token) or 0) >= 30:
             continue
         bucket = out.setdefault(city_id, {}).setdefault(prop, [])

@@ -440,8 +440,16 @@ function Civ6Ai_OrderChannel.DrainResults()
     -- model the order never ran, so a result written on that tick is kept.
     if turn > entry.turn + 1 then
       Civ6Ai_OrderChannel._pending[seq] = nil
-      Civ6Ai_Apply._RecordResult(entry.playerID, entry.command, false, "no_result_from_gameplay", entry.command.arguments or {})
-      log("result_missing|seq=" .. tostring(seq) .. "|for_turn=" .. tostring(entry.turn))
+      local reason = "no_result_from_gameplay"
+      local byPlayer = shared.TurnStartErrors
+      local byTurn = byPlayer ~= nil and byPlayer[entry.playerID] or nil
+      local err = type(byTurn) == "table" and byTurn[entry.turn] or (type(byTurn) == "string" and byTurn or nil)
+      if err ~= nil and tostring(err) ~= "" then
+        reason = "no_result_from_gameplay:" .. tostring(err)
+      end
+      Civ6Ai_Apply._RecordResult(entry.playerID, entry.command, false, reason, entry.command.arguments or {})
+      log("result_missing|seq=" .. tostring(seq) .. "|for_turn=" .. tostring(entry.turn)
+        .. (err ~= nil and ("|error=" .. tostring(err)) or ""))
     else
       left = left + 1
     end

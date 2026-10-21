@@ -304,6 +304,15 @@ def city_command_token(command: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
+def bare_order_token(value: Any) -> str:
+    """Drop a trailing combat forecast: ``AttackTo(1,2) (Major Victory ...)`` -> ``AttackTo(1,2)``."""
+    raw = str(value or "").strip().strip('"').strip("'")
+    cut = raw.find(") (")
+    if cut >= 0:
+        return raw[: cut + 1].strip()
+    return raw
+
+
 def _norm(text: Any) -> str:
     raw = str(text or "").strip().strip('"').strip("'")
     return re.sub(r"\s+", "", raw).lower()
@@ -338,6 +347,7 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
     """Return the legal command_id for ``unitId.command = <token>`` or None."""
     if isinstance(value, str) and value.strip().startswith("CMD_"):
         return value.strip()
+    value = bare_order_token(value)
     found_xy = re.match(r"^\s*(?:FoundCity|Found)\s*\(\s*(-?\d+)\s*,\s*(-?\d+)\s*\)\s*$", str(value or ""), re.I)
     if found_xy:
         # FoundCity(x,y) = settle there (own tile becomes FoundCity).
@@ -804,6 +814,7 @@ def pack_apply_command(snapshot: dict[str, Any] | None, command: dict[str, Any])
 def resolve_city_token(snapshot: dict[str, Any], city_id: str, prop: str, value: Any) -> str | None:
     if isinstance(value, str) and value.strip().startswith("CMD_"):
         return value.strip()
+    value = bare_order_token(value)
     prop_l = {"changeproduction": "production", "purchase": "purchase", "buy": "purchase",
               "changefocus": "focus", "attack": "rangestrike", "bombard": "rangestrike"}.get(prop.lower(), prop.lower())
     raw = str(value or "").strip()

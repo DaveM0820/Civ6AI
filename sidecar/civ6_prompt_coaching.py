@@ -404,6 +404,8 @@ def append_attack_options_to_unit_line(options: list[str], attack_tokens: list[s
 
 def civ6_attack_option_tokens_for_unit(unit_id: str, snapshot: dict[str, Any]) -> list[str]:
     """Build attackTo/(x,y)[+preview] tokens from legal attack_target commands for one unit."""
+    from sidecar import civ6_combat_wire as combat_wire
+
     tokens: list[str] = []
     previews = snapshot.get("strategic_summary", {})
     preview_rows = []
@@ -425,22 +427,26 @@ def civ6_attack_option_tokens_for_unit(unit_id: str, snapshot: dict[str, Any]) -
         except (TypeError, ValueError):
             continue
         label = f"attackTo/({xi},{yi})"
-        for row in preview_rows:
-            if row.get("attacker_unit_id") != unit_id:
-                continue
-            if int(row.get("target_x", -1)) != xi or int(row.get("target_y", -1)) != yi:
-                continue
-            dmg_e = row.get("damage_to_enemy")
-            dmg_s = row.get("damage_to_self")
-            pred = row.get("prediction")
-            bits = []
-            if pred:
-                bits.append(str(pred))
-            if isinstance(dmg_e, int) and isinstance(dmg_s, int):
-                bits.append(f"~{dmg_e}toThem/~{dmg_s}toUs")
-            if bits:
-                label = f"{label}[{','.join(bits)}]"
-            break
+        suffix = combat_wire.forecast_suffix_for(snapshot, xi, yi, unit_id=unit_id)
+        if suffix:
+            label = f"{label}{suffix}"
+        else:
+            for row in preview_rows:
+                if row.get("attacker_unit_id") != unit_id:
+                    continue
+                if int(row.get("target_x", -1)) != xi or int(row.get("target_y", -1)) != yi:
+                    continue
+                dmg_e = row.get("damage_to_enemy")
+                dmg_s = row.get("damage_to_self")
+                pred = row.get("prediction")
+                bits = []
+                if pred:
+                    bits.append(str(pred))
+                if isinstance(dmg_e, int) and isinstance(dmg_s, int):
+                    bits.append(f"~{dmg_e}toThem/~{dmg_s}toUs")
+                if bits:
+                    label = f"{label}[{','.join(bits)}]"
+                break
         if label not in tokens:
             tokens.append(label)
     return tokens

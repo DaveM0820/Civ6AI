@@ -126,6 +126,80 @@ local function sortedMembers(coll)
   return list
 end
 
+local function trimErr(err)
+  local text = tostring(err or "")
+  if #text > 240 then
+    text = string.sub(text, 1, 240)
+  end
+  return text
+end
+
+-- City centre district. Gameplay cities have no GetDistrictID (calling it throws
+-- "function expected instead of nil" before call() can nil-check the argument).
+-- The centre is the district on the city plot, else a CITY_CENTER in the city's
+-- or the player's district list. Every lookup goes through call/pcall.
+function Civ6Ai_Orders._DistrictById(owner, city, id)
+  id = num(id)
+  if id == nil or id < 0 then
+    return nil
+  end
+  local lists = { call(Players ~= nil and Players[owner] or nil, "GetDistricts"), call(city, "GetDistricts") }
+  for _, list in ipairs(lists) do
+    local found = call(list, "FindID", id) or call(list, "GetDistrict", id)
+    if found ~= nil then
+      return found
+    end
+  end
+  return nil
+end
+
+function Civ6Ai_Orders._MatchCityCenter(list, x, y)
+  local ok, found = pcall(function()
+    for _, d in ipairs(sortedMembers(list)) do
+      if call(d, "GetX") == x and call(d, "GetY") == y then
+        return d
+      end
+      local row = GameInfo ~= nil and GameInfo.Districts ~= nil and GameInfo.Districts[call(d, "GetType")] or nil
+      if row ~= nil and row.DistrictType == "DISTRICT_CITY_CENTER" then
+        return d
+      end
+    end
+    return nil
+  end)
+  if ok then
+    return found
+  end
+  return nil
+end
+
+function Civ6Ai_Orders._CityCenterDistrict(city)
+  if city == nil then
+    return nil
+  end
+  local owner = call(city, "GetOwner")
+  local x, y = call(city, "GetX"), call(city, "GetY")
+  local plot = nil
+  if x ~= nil and y ~= nil and Map ~= nil and Map.GetPlot ~= nil then
+    local okPlot, p = pcall(Map.GetPlot, x, y)
+    if okPlot then
+      plot = p
+    end
+  end
+  local district = Civ6Ai_Orders._DistrictById(owner, city, call(plot, "GetDistrictID"))
+  if district ~= nil then
+    return district
+  end
+  district = Civ6Ai_Orders._DistrictById(owner, city, call(city, "GetDistrictID"))
+  if district ~= nil then
+    return district
+  end
+  district = Civ6Ai_Orders._MatchCityCenter(call(city, "GetDistricts"), x, y)
+  if district ~= nil then
+    return district
+  end
+  return Civ6Ai_Orders._MatchCityCenter(call(Players ~= nil and Players[owner] or nil, "GetDistricts"), x, y)
+end
+
 function Civ6Ai_Orders._Shared()
   if ExposedMembers == nil then
     return {}
@@ -792,7 +866,7 @@ function Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
   if (call(unit, "GetMovesRemaining") or 0) <= 0 or (call(unit, "GetAttacksRemaining") or 1) <= 0 then
     return false, "no_moves_left"
   end
-  local district = call(call(Players[city:GetOwner()], "GetDistricts"), "FindID", city:GetDistrictID())
+  local district = Civ6Ai_Orders._CityCenterDistrict(city)
   if district == nil or DefenseTypes == nil then
     return false, "no_city_district"
   end
@@ -906,7 +980,12 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
     end
     local nextPending, progress = {}, false
     for _, o in ipairs(pending) do
-      local ok, reason = Civ6Ai_Orders._Execute(sender, o)
+      -- One order's script error is that order's result. It must not abort the
+      -- rest of the turn (a thrown city:GetDistrictID used to do that).
+      local ran, ok, reason = pcall(Civ6Ai_Orders._Execute, sender, o)
+      if not ran then
+        ok, reason = false, "order_error:" .. trimErr(ok)
+      end
       if ok then
         progress = true
         okUnits[o.U or -1] = o.K ~= Civ6Ai_Orders.K.SKIP or nil
@@ -923,10 +1002,14 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
         if o.K == Civ6Ai_Orders.K.MOVE and unit ~= nil then
           local nx, ny = Civ6Ai_Orders._RetargetPlot(owner, unit, o.X, o.Y)
           if nx ~= nil then
-            local rok, rreason = Civ6Ai_Orders._MoveOnce(owner, o.U, nx, ny)
-            Civ6Ai_Orders._Record(sender, o, rok, (rok and "retargeted:" or "plot_occupied_exhausted:")
-              .. tostring(o.X) .. "," .. tostring(o.Y) .. ">" .. tostring(nx) .. "," .. tostring(ny)
-              .. ":" .. tostring(rreason))
+            local ran, rok, rreason = pcall(Civ6Ai_Orders._MoveOnce, owner, o.U, nx, ny)
+            if not ran then
+              Civ6Ai_Orders._Record(sender, o, false, "order_error:" .. trimErr(rok))
+            else
+              Civ6Ai_Orders._Record(sender, o, rok, (rok and "retargeted:" or "plot_occupied_exhausted:")
+                .. tostring(o.X) .. "," .. tostring(o.Y) .. ">" .. tostring(nx) .. "," .. tostring(ny)
+                .. ":" .. tostring(rreason))
+            end
           else
             Civ6Ai_Orders._Record(sender, o, false, "plot_occupied_exhausted")
           end
@@ -1005,13 +1088,23 @@ function Civ6Ai_Orders._ContinueGoals(owner, ordered, okUnits)
           log("goal_expired|player=" .. tostring(owner) .. "|unit=" .. tostring(uid))
         else
           n = n + 1
-          local ok, reason = Civ6Ai_Orders._MoveWithRetarget(owner, u, goal.x, goal.y)
-          if ok and okUnits ~= nil then okUnits[uid] = true end
-          u = Civ6Ai_Orders._Unit(owner, uid)
-          if u == nil then
+          local ran, ok, reason = pcall(Civ6Ai_Orders._MoveWithRetarget, owner, u, goal.x, goal.y)
+          if not ran then
+            log("goal_error|player=" .. tostring(owner) .. "|unit=" .. tostring(uid) .. "|" .. trimErr(ok))
             Civ6Ai_Orders._ClearGoal(owner, uid)
+          end
+          if ran and ok and okUnits ~= nil then okUnits[uid] = true end
+          u = Civ6Ai_Orders._Unit(owner, uid)
+          if not ran then
+            u = nil
+          end
+          if u == nil then
+            if ran then Civ6Ai_Orders._ClearGoal(owner, uid) end
           elseif u:GetX() == goal.x and u:GetY() == goal.y then
-            local aok, awhy = Civ6Ai_Orders._ArrivalAction(owner, u, goal.intent, goal)
+            local aRan, aok, awhy = pcall(Civ6Ai_Orders._ArrivalAction, owner, u, goal.intent, goal)
+            if not aRan then
+              aok, awhy = false, "order_error:" .. trimErr(aok)
+            end
             log("goal_arrive|player=" .. tostring(owner) .. "|unit=" .. tostring(uid)
               .. "|ok=" .. tostring(aok) .. "|reason=" .. tostring(awhy))
             Civ6Ai_Orders._ClearGoal(owner, uid)
@@ -1186,6 +1279,25 @@ end
 -- Tell the interface the seat's turn has started (after its queue ran, so the
 -- snapshot sees the result). The local seat's LocalPlayerTurnBegin fires
 -- earlier, so its pulse waits for the TurnStartComplete mark (Civ6Ai_InGame).
+-- A turn-start script error, kept by turn so a later timeout can tell the model
+-- the real message. Local bookkeeping on ExposedMembers, same path as OrderResults.
+function Civ6Ai_Orders._NoteTurnStartError(owner, err)
+  local shared = Civ6Ai_Orders._Shared()
+  shared.TurnStartErrors = shared.TurnStartErrors or {}
+  local byTurn = shared.TurnStartErrors[owner]
+  if type(byTurn) ~= "table" then
+    byTurn = {}
+    shared.TurnStartErrors[owner] = byTurn
+  end
+  local turn = Game.GetCurrentGameTurn()
+  byTurn[turn] = trimErr(err)
+  for t, _ in pairs(byTurn) do
+    if type(t) == "number" and t < turn - 3 then
+      byTurn[t] = nil
+    end
+  end
+end
+
 function Civ6Ai_Orders._PublishTurnStart(owner)
   local shared = Civ6Ai_Orders._Shared()
   shared.TurnStartComplete = shared.TurnStartComplete or {}
@@ -2347,9 +2459,12 @@ function Gov.CityStrike(owner, cityId, x, y)
   if num(Game:GetProperty(key)) == Game.GetCurrentGameTurn() then
     return false, "city already struck this turn"
   end
-  local district = call(call(Players[owner], "GetDistricts"), "FindID", city:GetDistrictID())
+  local district = Civ6Ai_Orders._CityCenterDistrict(city)
   local defender = Civ6Ai_Orders._Defender(x, y, owner)
-  if district == nil or defender == nil or not Civ6Ai_Orders._AtWar(owner, defender:GetOwner()) then
+  if district == nil then
+    return false, "no_city_district"
+  end
+  if defender == nil or not Civ6Ai_Orders._AtWar(owner, defender:GetOwner()) then
     return false, "no_enemy_on_plot"
   end
   if Map.GetPlotDistance(city:GetX(), city:GetY(), x, y) > 2 then
@@ -3505,6 +3620,7 @@ function Civ6Ai_Orders.Init()
     local ok, err = pcall(Civ6Ai_Orders.OnPlayerTurnStartComplete, owner)
     if not ok then
       log("turn_start_error|player=" .. tostring(owner) .. "|" .. tostring(err))
+      Civ6Ai_Orders._NoteTurnStartError(owner, err)
     end
     Civ6Ai_Orders._PublishTurnStart(owner)
   end)

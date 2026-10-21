@@ -7,6 +7,7 @@ this module only formats them. Ported in spirit from the Civ5 mod's WAR section
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
@@ -185,6 +186,70 @@ def _target_text(context: dict[str, Any], row: dict[str, Any]) -> str:
     if _int(row.get("defender_wall_max_hp")):
         bits.append(f"walls {_int(row.get('defender_wall_hp')) or 0}/{_int(row['defender_wall_max_hp'])}")
     return f"{label} ({', '.join(bits)})" if bits else label
+
+
+def attack_forecast_note(row: dict[str, Any] | None) -> str:
+    """Parenthetical forecast for an attack option, or '' when the engine said nothing."""
+    if not isinstance(row, dict):
+        return ""
+    text = outcome_text(row)
+    if not text or text == "no engine preview":
+        return ""
+    return f" ({text})"
+
+
+def _preview_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    civ6 = snapshot.get("civ6") if isinstance(snapshot, dict) else None
+    combat = civ6.get("combat") if isinstance(civ6, dict) else None
+    raw = combat.get("previews") if isinstance(combat, dict) else None
+    if not isinstance(raw, list):
+        return []
+    return [row for row in raw if isinstance(row, dict)]
+
+
+def forecast_suffix_for(
+    snapshot: dict[str, Any],
+    x: int,
+    y: int,
+    *,
+    unit_id: str | None = None,
+    city_id: str | None = None,
+) -> str:
+    """`` (Major Victory ~12dmg ...)`` for the preview matching this attack, else ''."""
+    for row in _preview_rows(snapshot):
+        if _int(row.get("target_x")) != x or _int(row.get("target_y")) != y:
+            continue
+        if unit_id is not None:
+            if row.get("unit_id") != unit_id or row.get("city_id"):
+                continue
+        elif city_id is not None:
+            if row.get("city_id") != city_id:
+                continue
+        else:
+            continue
+        return attack_forecast_note(row)
+    return ""
+
+
+def with_attack_forecast(
+    token: str,
+    snapshot: dict[str, Any],
+    *,
+    unit_id: str | None = None,
+    city_id: str | None = None,
+) -> str:
+    """Append the engine forecast to ``AttackTo(x,y)`` or ``(x,y)`` when a preview exists."""
+    if not token or not isinstance(snapshot, dict):
+        return token
+    match = re.search(r"(-?\d+)\s*,\s*(-?\d+)", token)
+    if match is None:
+        return token
+    note = forecast_suffix_for(
+        snapshot, int(match.group(1)), int(match.group(2)), unit_id=unit_id, city_id=city_id,
+    )
+    if note and ") (" not in token:
+        return token + note
+    return token
 
 
 def outcome_text(row: dict[str, Any]) -> str:

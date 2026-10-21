@@ -123,6 +123,7 @@ _SIMPLE_REASONS = {
     "explore_unavailable": "the game has no explore operation for this unit",
     "activate_unavailable": "the game could not activate that great person",
     "no_result_from_gameplay": "the game never reported a result for this order before the turn ended; reissue it if it is still legal",
+    "no_city_district": "the city centre could not be resolved, so the attack was not made",
     "no_effect:zero_damage": "the combat forecast is 0 damage, so the attack was not made",
     "not_at_war": "you are not at war with that owner",
     "no_enemy_on_plot": "no enemy unit or city is on that tile",
@@ -174,8 +175,20 @@ def describe_reason(reason: Any) -> str:
         return "the forecast dealt damage but the game did not apply it" + extra
     if text.startswith("out_of_range"):
         return "the target is outside this unit's attack range"
+    if text.startswith("order_error:"):
+        detail = text[len("order_error:"):].strip()
+        extra = f": {detail}" if detail else ""
+        return "the game raised a script error on that order" + extra + "; do not reissue this same order"
+    if text.startswith("no_result_from_gameplay:"):
+        detail = text[len("no_result_from_gameplay:"):].strip()
+        base = "the game never reported a result for this order before the turn ended"
+        if detail:
+            return base + f" because a script error aborted the turn ({detail}); do not reissue this same order"
+        return _SIMPLE_REASONS["no_result_from_gameplay"]
     if text.startswith("gamecore_error:") or text.startswith("move_unit_error:"):
-        return "the game raised a script error on that order"
+        detail = text.split(":", 1)[1].strip()
+        extra = f": {detail}" if detail else ""
+        return "the game raised a script error on that order" + extra + "; do not reissue this same order"
     if text.startswith("gamecore_unavailable:"):
         return "the game-side order script was unavailable"
     if text.startswith("tile_cannot_have:"):

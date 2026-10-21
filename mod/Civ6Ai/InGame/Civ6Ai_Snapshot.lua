@@ -3566,13 +3566,60 @@ function Civ6Ai_Snapshot._SimulateInto(attackerCid, combatType, x, y)
   return nil
 end
 
-function Civ6Ai_Snapshot._CityCenterDistrict(city)
-  local ok, district = pcall(function()
-    local districtId = city:GetDistrictID()
-    return Players[city:GetOwner()]:GetDistricts():FindID(districtId)
-  end)
-  if ok then return district end
+-- City centre. GetDistrictID exists on some UI city objects and is missing on
+-- the gameplay city (calling it throws). Try the city plot, then that method
+-- through _Method, then the city's and the player's district lists.
+function Civ6Ai_Snapshot._DistrictById(owner, city, id)
+  local n = tonumber(id)
+  if n == nil or n < 0 then return nil end
+  local lists = {}
+  if owner ~= nil and Players ~= nil and Players[owner] ~= nil then
+    table.insert(lists, Civ6Ai_Snapshot._Method(Players[owner], "GetDistricts"))
+  end
+  if city ~= nil then
+    table.insert(lists, Civ6Ai_Snapshot._Method(city, "GetDistricts"))
+  end
+  for _, list in ipairs(lists) do
+    local found = Civ6Ai_Snapshot._Method(list, "FindID", n) or Civ6Ai_Snapshot._Method(list, "GetDistrict", n)
+    if found ~= nil then return found end
+  end
   return nil
+end
+
+function Civ6Ai_Snapshot._ScanCityCenter(list, x, y)
+  if list == nil or list.Members == nil then return nil end
+  local found = nil
+  pcall(function()
+    for _, d in list:Members() do
+      local dx, dy = Civ6Ai_Snapshot._Method(d, "GetX"), Civ6Ai_Snapshot._Method(d, "GetY")
+      local typ = Civ6Ai_Snapshot._Method(d, "GetType")
+      local row = GameInfo ~= nil and GameInfo.Districts ~= nil and GameInfo.Districts[typ] or nil
+      if (x ~= nil and dx == x and dy == y) or (row ~= nil and row.DistrictType == "DISTRICT_CITY_CENTER") then
+        found = d
+        return
+      end
+    end
+  end)
+  return found
+end
+
+function Civ6Ai_Snapshot._CityCenterDistrict(city)
+  if city == nil then return nil end
+  local owner = Civ6Ai_Snapshot._Method(city, "GetOwner")
+  local x, y = Civ6Ai_Snapshot._Method(city, "GetX"), Civ6Ai_Snapshot._Method(city, "GetY")
+  local plot = nil
+  if x ~= nil and y ~= nil and Map ~= nil and Map.GetPlot ~= nil then
+    plot = Civ6Ai_Snapshot._Try(Map.GetPlot, x, y)
+  end
+  local district = Civ6Ai_Snapshot._DistrictById(owner, city, Civ6Ai_Snapshot._Method(plot, "GetDistrictID"))
+  if district ~= nil then return district end
+  district = Civ6Ai_Snapshot._DistrictById(owner, city, Civ6Ai_Snapshot._Method(city, "GetDistrictID"))
+  if district ~= nil then return district end
+  district = Civ6Ai_Snapshot._ScanCityCenter(Civ6Ai_Snapshot._Method(city, "GetDistricts"), x, y)
+  if district ~= nil then return district end
+  local playerDistricts = owner ~= nil and Players ~= nil and Players[owner] ~= nil
+    and Civ6Ai_Snapshot._Method(Players[owner], "GetDistricts") or nil
+  return Civ6Ai_Snapshot._ScanCityCenter(playerDistricts, x, y)
 end
 
 -- Visible hostile units and cities (at war or barbarian) for this player.
@@ -3729,6 +3776,44 @@ function Civ6Ai_Snapshot._BuildCombat(playerID)
       for _, c in ipairs(cities) do
         local ok, err = pcall(addPreview, u, c, "city")
         if not ok then Civ6Ai_Util.Log("snapshot|combat_preview_failed|" .. tostring(err)) end
+      end
+    end
+  end
+  -- City ranged strike forecast (the city's own centre vs a hostile unit in
+  -- range). These rows carry city_id so the prompt can put the numbers on the
+  -- city's rangeStrike option.
+  local function addCityStrike(city, h)
+    if #out.previews >= Civ6Ai_Snapshot.COMBAT_PREVIEW_CAP then return end
+    if city == nil or h == nil or h.unit == nil then return end
+    local dist = Civ6Ai_Snapshot._Dist(city:GetX(), city:GetY(), h.x, h.y)
+    if dist < 1 or dist > Civ6Ai_Snapshot.CITY_STRIKE_RANGE then return end
+    local district = Civ6Ai_Snapshot._CityCenterDistrict(city)
+    local dcid = Civ6Ai_Snapshot._Method(district, "GetComponentID")
+    local ucid = Civ6Ai_Snapshot._Method(h.unit, "GetComponentID")
+    if dcid == nil or ucid == nil then return end
+    local rangedType = CombatTypes ~= nil and CombatTypes.RANGED or nil
+    local res = Civ6Ai_Snapshot._SimulateVersus(dcid, ucid, rangedType)
+    local row = Civ6Ai_Snapshot._CombatResultRow(res, true)
+    if row == nil then return end
+    row.city_id = "CITY_" .. tostring(city:GetID())
+    row.target_x, row.target_y = h.x, h.y
+    local strikeTarget = "unit"
+    row.target_kind = strikeTarget
+    row.target_name = h.name
+    row.target_owner = h.owner
+    row.ranged = true
+    row.distance = dist
+    row.needs_move = false
+    row.source = "city"
+    row.simulated = row.prediction ~= nil
+    table.insert(out.previews, row)
+  end
+  local okCities, clist = pcall(function() return player:GetCities() end)
+  if okCities and clist ~= nil and clist.Members ~= nil then
+    for _, city in clist:Members() do
+      for _, h in ipairs(hostiles) do
+        local ok, err = pcall(addCityStrike, city, h)
+        if not ok then Civ6Ai_Util.Log("snapshot|city_strike_preview_failed|" .. tostring(err)) end
       end
     end
   end

@@ -115,6 +115,82 @@ class WarReviewTests(unittest.TestCase):
         self.assertIn("0 damage", results.describe_reason("no_effect:zero_damage"))
         self.assertIn("did not apply", results.describe_reason("no_effect:damage_not_applied:forecast=14"))
         self.assertIn("never reported", results.describe_reason("no_result_from_gameplay"))
+        crashed = results.describe_reason(
+            "no_result_from_gameplay:function expected instead of nil"
+        )
+        self.assertIn("function expected instead of nil", crashed)
+        self.assertIn("do not reissue", crashed)
+        order_err = results.describe_reason("order_error:function expected instead of nil")
+        self.assertIn("function expected instead of nil", order_err)
+        self.assertIn("do not reissue", order_err)
+        self.assertNotIn("reissue it", order_err)
+
+    def test_attack_options_carry_the_combat_forecast_and_still_bind(self):
+        snap = {
+            "your_units": [{
+                "unit_id": "UNIT_1_5",
+                "unit_type_id": "UNIT_SPEARMAN",
+                "needs_orders": True,
+                "movement": {"current": 2},
+            }],
+            "your_cities": [{
+                "city_id": "CITY_8",
+                "name": "Teotihuacan",
+            }],
+            "legal_commands": [
+                {
+                    "command_id": "CMD_attack_UNIT_1_5_17_22",
+                    "kind": "attack_target",
+                    "fixed_arguments": {
+                        "unit_id": "UNIT_1_5", "target_x": 17, "target_y": 22,
+                        "target_kind": "city", "ranged": False,
+                    },
+                },
+                {
+                    "command_id": "CMD_citystrike_8_18_22",
+                    "kind": "city_attack",
+                    "fixed_arguments": {"city_id": "CITY_8", "target_x": 18, "target_y": 22},
+                },
+            ],
+            "civ6": {"combat": {"previews": [
+                {
+                    "unit_id": "UNIT_1_5", "target_x": 17, "target_y": 22,
+                    "damage_to_defender": 12, "damage_to_attacker": 4,
+                    "prediction": "MAJOR_VICTORY", "ranged": False, "target_kind": "city",
+                },
+                {
+                    "city_id": "CITY_8", "target_x": 18, "target_y": 22,
+                    "damage_to_defender": 20, "damage_to_attacker": 0,
+                    "prediction": "MAJOR_VICTORY", "ranged": True, "target_kind": "unit",
+                    "source": "city",
+                },
+            ]}},
+        }
+        tokens = civ6_wire._civ6_unit_tokens(snap)["UNIT_1_5"]
+        attack = next(t for t in tokens if t.startswith("AttackTo(17,22)"))
+        self.assertIn("~12dmg", attack)
+        self.assertIn("~4dmg", attack)
+        self.assertEqual(
+            command_wire.resolve_unit_token(snap, "UNIT_1_5", attack),
+            "CMD_attack_UNIT_1_5_17_22",
+        )
+        self.assertEqual(
+            command_wire.resolve_unit_token(snap, "UNIT_1_5", "AttackTo(17,22)"),
+            "CMD_attack_UNIT_1_5_17_22",
+        )
+        strike = civ6_wire._civ6_city_tokens(snap)["CITY_8"]["rangeStrike"][0]
+        self.assertTrue(strike.startswith("(18,22) ("))
+        self.assertIn("~20dmg", strike)
+        self.assertEqual(
+            command_wire.resolve_city_token(snap, "CITY_8", "rangeStrike", strike),
+            "CMD_citystrike_8_18_22",
+        )
+        bare = {
+            "legal_commands": snap["legal_commands"][:1],
+            "your_units": snap["your_units"],
+        }
+        self.assertIn("AttackTo(17,22)", civ6_wire._civ6_unit_tokens(bare)["UNIT_1_5"])
+        self.assertFalse(any("(" in t.split(")", 1)[-1] for t in civ6_wire._civ6_unit_tokens(bare)["UNIT_1_5"] if t.startswith("AttackTo")))
 
     def test_strategy_mismatch_is_context_only(self):
         note = results.strategy_orders_note("Attack Utrecht and take it.", [{"kind": "move_unit"}])

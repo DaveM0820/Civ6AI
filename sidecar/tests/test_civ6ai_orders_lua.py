@@ -338,6 +338,114 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertEqual(self.rt.eval("Players[2].units[1].dmg"), 20)
         self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
 
+    def test_city_attack_and_strike_without_get_district_id(self):
+        # Gameplay cities have no GetDistrictID. The centre comes from the city
+        # plot, or from the city's district list. Neither call may throw.
+        self.rt.execute(r"""
+          DefenseTypes = {DISTRICT_OUTER=1, DISTRICT_GARRISON=2}
+          local function mkDistrict(id, x, y)
+            local d = {id=id, x=x, y=y, wdmg=0, gdmg=0}
+            function d:GetID() return self.id end
+            function d:GetX() return self.x end
+            function d:GetY() return self.y end
+            function d:GetComponentID() return self end
+            function d:GetType() return 0 end
+            function d:GetMaxDamage(t) if t == 1 then return 100 end return 200 end
+            function d:GetDamage(t) if t == 1 then return self.wdmg end return self.gdmg end
+            function d:ChangeDamage(t, n)
+              if t == 1 then self.wdmg = self.wdmg + n else self.gdmg = self.gdmg + n end
+            end
+            return d
+          end
+          centerA = mkDistrict(42, 20, 20)
+          centerB = mkDistrict(43, 30, 30)
+          local function mkCity(id, owner, x, y, districts)
+            local c = {id=id, owner=owner, x=x, y=y, districts=districts}
+            function c:GetID() return self.id end
+            function c:GetOwner() return self.owner end
+            function c:GetX() return self.x end
+            function c:GetY() return self.y end
+            function c:GetDistricts()
+              local me=self
+              return {Members=function()
+                local i=0
+                return function() i=i+1; local d=me.districts[i]; if d then return i, d end end
+              end}
+            end
+            return c
+          end
+          cityA = mkCity(7, 1, 20, 20, {})
+          cityB = mkCity(8, 2, 30, 30, {centerB})
+          local plotA = Map.GetPlot(20, 20)
+          function plotA:GetDistrictID() return 42 end
+          local p1, p2 = Players[1], Players[2]
+          function p1:GetDistricts()
+            return {FindID=function(_, id) if id == 42 then return centerA end end,
+                    Members=function() return function() return nil end end}
+          end
+          function p1:GetCities()
+            return {Members=function()
+              local i=0; local cs={cityA}
+              return function() i=i+1; if cs[i] then return i, cs[i] end end
+            end}
+          end
+          function p2:GetCities()
+            return {Members=function()
+              local i=0; local cs={cityB}
+              return function() i=i+1; if cs[i] then return i, cs[i] end end
+            end}
+          end
+          Cities = {GetCityInPlot=function(x, y) if x == 20 and y == 20 then return cityA end end}
+          Players[1].war = {[2]=true}
+          Players[2].war = {[1]=true}
+          table.insert(Players[2].units, MkUnit(2, 30, 20, 21, 0))
+          table.insert(Players[1].units, MkUnit(1, 40, 31, 30, 0))
+        """)
+        self.assertIsNone(self.rt.eval("cityA.GetDistrictID"))
+        self.assertIsNone(self.rt.eval("cityB.GetDistrictID"))
+        self.assertEqual(self.rt.eval("Civ6Ai_Orders._CityCenterDistrict(cityA).id"), 42)
+        self.assertEqual(self.rt.eval("Civ6Ai_Orders._CityCenterDistrict(cityB).id"), 43)
+        self.order(0, K=7, P=2, U=30, X=20, Y=20, S=70, B=3, J=1, N=2, T=6)
+        self.order(0, K=31, P=2, I=8, X=31, Y=30, S=71, B=3, J=2, N=2, T=6)
+        self.turn_start(2, turn=6)
+        by_seq = {r["seq"]: r for r in self.results()}
+        self.assertTrue(by_seq[70]["ok"], by_seq[70]["reason"])
+        self.assertIn("city_hp", by_seq[70]["reason"])
+        self.assertGreater(self.rt.eval("centerA.wdmg"), 0)
+        self.assertTrue(by_seq[71]["ok"], by_seq[71]["reason"])
+        self.assertTrue(str(by_seq[71]["reason"]).startswith("city_strike:"))
+        self.assertEqual(self.rt.eval("Players[1].units[#Players[1].units].dmg"), 30)
+        logs = [str(s) for s in _vals(self.rt.eval("logs"))]
+        self.assertFalse(any("turn_start_error" in s for s in logs))
+
+    def test_one_throwing_order_still_runs_the_rest(self):
+        self.rt.execute(r"""
+          local orig = Civ6Ai_Orders._Execute
+          function Civ6Ai_Orders._Execute(sender, o)
+            if o.U == 7 then error("function expected instead of nil") end
+            return orig(sender, o)
+          end
+        """)
+        self.order(0, K=1, P=2, U=7, X=10, Y=11, S=5, B=9, J=1, N=2, T=6)
+        self.order(0, K=1, P=2, U=8, X=11, Y=11, S=6, B=9, J=2, N=2, T=6)
+        self.turn_start(2, turn=6)
+        by_seq = {r["seq"]: r for r in self.results()}
+        self.assertFalse(by_seq[5]["ok"])
+        self.assertTrue(str(by_seq[5]["reason"]).startswith("order_error:"))
+        self.assertIn("function expected instead of nil", by_seq[5]["reason"])
+        self.assertTrue(by_seq[6]["ok"], by_seq[6]["reason"])
+        self.assertEqual(self.rt.eval("Players[2].units[2].y"), 11)
+        self.assertEqual(self.rt.eval("ExposedMembers.Civ6Ai.TurnStartComplete[2]"), 6)
+        logs = [str(s) for s in _vals(self.rt.eval("logs"))]
+        self.assertFalse(any("turn_start_error" in s for s in logs))
+
+    def test_turn_start_error_is_kept_by_turn(self):
+        self.rt.globals().Civ6Ai_Orders._NoteTurnStartError(2, "function expected instead of nil")
+        self.assertEqual(
+            self.rt.eval("ExposedMembers.Civ6Ai.TurnStartErrors[2][5]"),
+            "function expected instead of nil",
+        )
+
     def test_zero_melee_forecast_retries_without_combat_type(self):
         self.rt.execute(
             "Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,3,10,11,0));"
@@ -610,6 +718,18 @@ class OrderChannelTests(unittest.TestCase):
         rt.execute("TURN = 8")
         self.assertEqual(rt.globals().Civ6Ai_OrderChannel.DrainResults(), 0)
         self.assertEqual(rt.eval("recorded[1].reason"), "no_result_from_gameplay")
+
+    def test_missing_result_includes_the_turn_start_error(self):
+        rt = self.rt
+        d = self.decision(['{kind="unit_skip", arguments={unit_id="UNIT_2_8"}}'])
+        rt.globals().Civ6Ai_OrderChannel.SendDecision(2, d, 6)
+        rt.execute("ExposedMembers.Civ6Ai.TurnStartErrors = {[2]={[6]='function expected instead of nil'}}")
+        rt.execute("TURN = 8")
+        self.assertEqual(rt.globals().Civ6Ai_OrderChannel.DrainResults(), 0)
+        self.assertEqual(
+            rt.eval("recorded[1].reason"),
+            "no_result_from_gameplay:function expected instead of nil",
+        )
 
     def test_report_uses_local_checksum(self):
         rt = self.rt
