@@ -2047,7 +2047,16 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   if goal ~= nil then
     return false
   end
-  return Civ6Ai_Snapshot._UnitMoves(unit) > 0 and (Civ6Ai_Snapshot._Method(unit, "GetBuildCharges") or 0) == 0
+  if Civ6Ai_Snapshot._UnitMoves(unit) <= 0 then
+    return false
+  end
+  -- Builders of AI seats are left to the game's own AI. A human seat (P0) has no
+  -- builder AI, so its builders need orders (improve/move offers) or they sit idle.
+  if (Civ6Ai_Snapshot._Method(unit, "GetBuildCharges") or 0) > 0 then
+    local owner = Players[unit:GetOwner()]
+    return owner ~= nil and owner.IsHuman ~= nil and owner:IsHuman() == true
+  end
+  return true
 end
 
 -- Hex rings around each settler (3–5 is what the map overlay draws; snapshot
