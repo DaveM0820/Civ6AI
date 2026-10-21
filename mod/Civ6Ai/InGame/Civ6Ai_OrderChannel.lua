@@ -15,7 +15,7 @@ Civ6Ai_OrderChannel = Civ6Ai_OrderChannel or {}
 Civ6Ai_OrderChannel.K = {
   MOVE = 1, RESEARCH = 2, CIVIC = 3, FOUND = 4, SKIP = 5, FORTIFY = 6, ATTACK = 7, PRIORITY = 9,
   GOVERNMENT = 10, POLICY = 11, PANTHEON = 12, RELIGION = 13, GP_RECRUIT = 14, GP_PATRONIZE = 15, GOVERNOR = 16,
-  WAR = 17, DEAL = 33, BUY = 19, BUY_TILE = 20, IMPROVE = 21, PILLAGE = 22,
+  WAR = 17, DEAL = 33, ENVOY = 34, BUY = 19, BUY_TILE = 20, IMPROVE = 21, PILLAGE = 22,
   FINISH_SEAT = 23, TRADE = 24, EXPLORE = 25, ACTIVATE_GP = 26,
   UPGRADE = 27, PROMOTE = 28, FORMATION = 29, CITY_STRIKE = 31, FORT = 32,
   REPORT = 30, PING = 40, TEST_MODE = 49, TEST_INTROSPECT = 50, TEST_SPAWN_ENEMY = 51,
@@ -29,7 +29,7 @@ Civ6Ai_OrderChannel.KIND_BY_COMMAND = {
   unit_posture_fortify = 6, attack_target = 7, set_build_priority = 9,
   change_government = 10, set_policies = 11, found_pantheon = 12, found_religion = 13,
   recruit_great_person = 14, patronize_great_person = 15,
-  send_diplomatic_action = 17, execute_deal = 33, purchase_item = 19, purchase_tile = 20,
+  send_diplomatic_action = 17, execute_deal = 33, send_envoy = 34, purchase_item = 19, purchase_tile = 20,
   worker_improve = 21, pillage_improvement = 22,
   trade_route = 24, explore = 25, activate_great_person = 26,
   upgrade_unit = 27, promote_unit = 28, join_formation = 29, city_attack = 31, build_fort = 32,
@@ -269,6 +269,11 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
       return nil, "only DECLARE_WAR can be sent on the order channel"
     end
     f.I, f.X = other, war
+  elseif kind == 34 then
+    f.I = Civ6Ai_OrderChannel._PlayerNum(args.target_player_id or args.city_state_id)
+    if f.I == nil then
+      return nil, "missing_target_player"
+    end
   elseif kind == 33 then
     -- Both sides agreed (offer, then the receiver's accept). Signed amounts: + = this seat gives.
     f.I = Civ6Ai_OrderChannel._PlayerNum(args.target_player_id)

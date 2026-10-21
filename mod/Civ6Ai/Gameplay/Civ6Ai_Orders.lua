@@ -45,6 +45,7 @@ Civ6Ai_Orders.K = {
   GOVERNOR = 16,
   WAR = 17,
   DEAL = 33,
+  ENVOY = 34,
   BUY = 19,
   BUY_TILE = 20,
   IMPROVE = 21,
@@ -82,7 +83,7 @@ Civ6Ai_Orders.DECISION_KINDS = {
   [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [9] = true,
   [10] = true, [11] = true, [12] = true, [13] = true, [14] = true, [15] = true, [16] = true,
   [17] = true, [18] = true, [19] = true, [20] = true, [21] = true, [22] = true,
-  [24] = true, [25] = true, [26] = true, [27] = true, [28] = true, [29] = true, [31] = true, [32] = true, [33] = true,
+  [24] = true, [25] = true, [26] = true, [27] = true, [28] = true, [29] = true, [31] = true, [32] = true, [33] = true, [34] = true,
 }
 -- Intent on a MOVE (param A). N is the batch count on the wire, so intent is A.
 Civ6Ai_Orders.INTENT = { MOVE = 0, FOUND = 1, IMPROVE = 2, RELIGION = 3, TRADE = 4 }
@@ -845,7 +846,7 @@ function Civ6Ai_Orders._Execute(sender, o)
   if k ~= nil and k >= Civ6Ai_Orders.K.GOVERNMENT and k <= Civ6Ai_Orders.K.GOVERNOR then
     return Civ6Ai_Orders._DoGovernance(sender, o)
   end
-  if k == Civ6Ai_Orders.K.WAR or k == Civ6Ai_Orders.K.DEAL
+  if k == Civ6Ai_Orders.K.WAR or k == Civ6Ai_Orders.K.DEAL or k == Civ6Ai_Orders.K.ENVOY
       or k == Civ6Ai_Orders.K.BUY or k == Civ6Ai_Orders.K.BUY_TILE then
     return Civ6Ai_Orders._DoDeal(sender, o)
   end
@@ -1427,6 +1428,9 @@ function Gov.ChangeGovernment(owner, govIndex)
     return false, name .. " is not unlocked yet (research the civic that unlocks it first)"
   end
   local current = call(culture, "GetCurrentGovernment")
+  if call(culture, "IsInAnarchy") == true or (current ~= nil and current < 0) then
+    return false, "you are in anarchy; wait until it ends before changing government"
+  end
   if current ~= nil and current == row.Index then
     return false, "you already have " .. name
   end
@@ -1434,9 +1438,8 @@ function Gov.ChangeGovernment(owner, govIndex)
   if num(Game:GetProperty(govProp(owner, "CHANGED"))) == turn then
     return false, "government was already changed this turn"
   end
-  -- Gameplay scripts have no GetCurrentGovernment, so "no government yet" only
-  -- counts when it can be read; otherwise a civic must have completed.
-  local fresh = (current ~= nil and current < 0) or call(culture, "CivicCompletedThisTurn") == true
+  -- A negative current government is anarchy, not "no government yet".
+  local fresh = call(culture, "CivicCompletedThisTurn") == true
     or call(culture, "GetCivicCompletedThisTurn") == true
   if not fresh then
     return false, "a government can only be changed on a turn when a civic completed"
@@ -1983,6 +1986,41 @@ local function knows(p, id)
   return tech ~= nil and call(call(p, "GetTechs"), "HasTech", tech.Index) == true
 end
 
+-- One envoy from this seat to a city-state. Gameplay only (ChangeTokensToGive /
+-- ChangeTokensReceived). The UI GIVE_INFLUENCE_TOKEN request is not used.
+function Gov.SendEnvoy(owner, minor)
+  local me, them = Players[owner], Players[minor]
+  if them == nil or call(them, "IsAlive") ~= true then
+    return false, "that city-state is not in the game"
+  end
+  local infMe, infThem = call(me, "GetInfluence"), call(them, "GetInfluence")
+  if infMe == nil or infThem == nil then
+    return false, "this game has no influence object"
+  end
+  local have = call(infMe, "GetTokensToGive") or 0
+  if have < 1 then
+    return false, "you have no envoys to send"
+  end
+  local before = call(infThem, "GetTokensReceived", owner) or 0
+  if infMe.ChangeTokensToGive ~= nil and infThem.ChangeTokensReceived ~= nil then
+    pcall(infMe.ChangeTokensToGive, infMe, -1)
+    pcall(infThem.ChangeTokensReceived, infThem, owner, 1)
+  elseif infThem.GiveTokenToPlayer ~= nil then
+    local ok, err = pcall(infThem.GiveTokenToPlayer, infThem, owner)
+    if not ok then
+      return false, "the game refused the envoy: " .. tostring(err)
+    end
+  else
+    return false, "this game has no gameplay route to send an envoy"
+  end
+  local after = call(infThem, "GetTokensReceived", owner) or before
+  local left = call(infMe, "GetTokensToGive")
+  if after <= before and (left == nil or left >= have) then
+    return false, "the game did not move an envoy"
+  end
+  return true, "envoy_to=" .. tostring(minor)
+end
+
 function Gov.Deal(owner, other, gold, r1, a1, r2, a2, mode)
   local me, them = Players[owner], Players[other]
   if them == nil or call(them, "IsAlive") ~= true then
@@ -2342,6 +2380,8 @@ function Civ6Ai_Orders._DoDeal(sender, o)
     return Gov.DeclareWar(o.P, o.I, o.X == 1)
   elseif k == Civ6Ai_Orders.K.DEAL then
     return Gov.Deal(o.P, o.I, o.W, o.X, o.Y, o.I2, o.I3, o.A)
+  elseif k == Civ6Ai_Orders.K.ENVOY then
+    return Gov.SendEnvoy(o.P, o.I)
   elseif k == Civ6Ai_Orders.K.BUY then
     return Gov.PurchaseItem(o.P, o.X, o.I, o.U == 1, o.Y == 1, o.V)
   elseif k == Civ6Ai_Orders.K.BUY_TILE then

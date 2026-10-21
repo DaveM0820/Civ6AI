@@ -77,6 +77,9 @@ function Civ6Ai_Snapshot._GovernmentId(playerID)
   local culture = player:GetCulture()
   if culture ~= nil and culture.GetCurrentGovernment ~= nil then
     local govIndex = culture:GetCurrentGovernment()
+    if govIndex ~= nil and govIndex < 0 then
+      return nil
+    end
     if govIndex ~= nil and govIndex >= 0 and GameInfo ~= nil and GameInfo.Governments ~= nil then
       for row in GameInfo.Governments() do
         if row.Index == govIndex then
@@ -942,6 +945,19 @@ function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
       amenityNet = amenityNet + Civ6Ai_Snapshot._Int(amenities.net)
     end
   end
+  local anarchyTurns = 0
+  if culture ~= nil and culture.IsInAnarchy ~= nil then
+    local okA, inA = pcall(function() return culture:IsInAnarchy() end)
+    if okA and inA == true then
+      local okE, endTurn = pcall(function() return culture:GetAnarchyEndTurn() end)
+      local nowTurn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or 0
+      if okE and type(endTurn) == "number" and endTurn > nowTurn then
+        anarchyTurns = endTurn - nowTurn
+      else
+        anarchyTurns = 1
+      end
+    end
+  end
   return {
     team_id = "TEAM_" .. tostring(player:GetTeam()),
     score = Civ6Ai_Snapshot._Int(player:GetScore()),
@@ -951,7 +967,7 @@ function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
     research = research,
     commerce = commerce,
     unit_counts = Civ6Ai_Snapshot._BuildUnitCounts(playerID),
-    anarchy_turns = 0,
+    anarchy_turns = anarchyTurns,
     golden_age_turns = 0,
     war_weariness = 0,
     civics = civics,
@@ -1574,9 +1590,7 @@ function Civ6Ai_Snapshot._TradeInventory(otherID)
           local amount = Civ6Ai_Snapshot._Method(resources, "GetResourceAmount", row.Index)
           if type(amount) == "number" and amount > 0 then
             local list = class == "RESOURCECLASS_LUXURY" and inv.luxuries or inv.strategics
-            if #list < Civ6Ai_Snapshot.TRADE_RESOURCE_CAP then
-              table.insert(list, { resource_id = row.ResourceType, amount = math.floor(amount) })
-            end
+            table.insert(list, { resource_id = row.ResourceType, amount = math.floor(amount) })
           end
         end
       end
@@ -1624,6 +1638,10 @@ function Civ6Ai_Snapshot._BuildDiplomacy(playerID)
             city_state_type = leader:match("^LEADER_MINOR_CIV_(.+)$"),
             suzerain_id = (type(suzerain) == "number" and suzerain >= 0) and Civ6Ai_Snapshot._PlayerLabel(suzerain) or nil,
             your_envoys = type(envoys) == "number" and math.floor(envoys) or nil,
+            suzerain_envoys = (type(suzerain) == "number" and suzerain >= 0) and (function()
+              local n = Civ6Ai_Snapshot._Method(influence, "GetTokensReceived", suzerain)
+              return type(n) == "number" and math.floor(n) or nil
+            end)() or nil,
             at_war = csFacts.at_war == true,
             can_declare_war = csFacts.can_declare_war == true,
             can_make_peace = csFacts.can_make_peace == true,
@@ -2063,6 +2081,28 @@ function Civ6Ai_Snapshot._GameCoreCanMove(unit, x, y)
   return not ok or can == true
 end
 
+-- UI GetBuildCharges lags at turn start for the local seat (reads 0), the same
+-- class of bug as GetMovesRemaining. Gameplay BuildChargesForPlayer is authoritative.
+function Civ6Ai_Snapshot._BuildCharges(unit)
+  local ui = Civ6Ai_Snapshot._Method(unit, "GetBuildCharges")
+  local core = nil
+  local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+  if routes ~= nil and routes.BuildChargesForPlayer ~= nil and unit ~= nil and unit.GetOwner ~= nil then
+    local ok, n = pcall(routes.BuildChargesForPlayer, unit:GetOwner(), unit:GetID())
+    if ok and type(n) == "number" then
+      core = n
+    end
+  end
+  local charges = core
+  if type(charges) ~= "number" then
+    charges = tonumber(ui) or 0
+  end
+  if type(ui) == "number" and type(core) == "number" and ui ~= core then
+    Civ6Ai_Util.Log("snapshot|builder_charges|unit=" .. tostring(unit:GetID()) .. "|ui=" .. tostring(ui) .. "|core=" .. tostring(core))
+  end
+  return charges, ui, core
+end
+
 function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   if unit == nil or unit:GetX() == -9999 then
     return false
@@ -2076,7 +2116,8 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   end
   -- Builders of AI seats are left to the game's own AI. A human seat (P0) has no
   -- builder AI, so its builders need orders (improve/move offers) or they sit idle.
-  if (Civ6Ai_Snapshot._Method(unit, "GetBuildCharges") or 0) > 0 then
+  local charges = select(1, Civ6Ai_Snapshot._BuildCharges(unit))
+  if charges > 0 then
     local owner = Players[unit:GetOwner()]
     if owner ~= nil and owner.IsHuman ~= nil and owner:IsHuman() == true then return true end
     -- AI seat: hand the builder to the model only once the game's AI left it idle
@@ -2084,7 +2125,7 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
     Civ6Ai_Snapshot._builderSeen = Civ6Ai_Snapshot._builderSeen or {}
     local key = tostring(unit:GetOwner()) .. "_" .. tostring(unit:GetID())
     local turn = Game.GetCurrentGameTurn()
-    local sig = unit:GetX() .. "," .. unit:GetY() .. "," .. tostring(unit:GetBuildCharges())
+    local sig = unit:GetX() .. "," .. unit:GetY() .. "," .. tostring(charges)
     local seen = Civ6Ai_Snapshot._builderSeen[key]
     if seen == nil or seen.sig ~= sig then
       Civ6Ai_Snapshot._builderSeen[key] = {sig = sig, turn = turn}
@@ -2108,6 +2149,7 @@ Civ6Ai_Snapshot.KIND_NAMES = {
   [10] = "change_government", [11] = "set_policies", [12] = "found_pantheon", [13] = "found_religion",
   [14] = "recruit_great_person", [15] = "patronize_great_person", [16] = "governor",
   [17] = "send_diplomatic_action", [18] = "propose_peace", [19] = "purchase_item",
+  [34] = "send_envoy",
   [20] = "purchase_tile", [21] = "worker_improve", [22] = "pillage_improvement",
   [24] = "trade_route", [25] = "explore", [26] = "activate_great_person",
   [27] = "upgrade_unit", [28] = "promote_unit", [29] = "join_formation", [31] = "city_attack", [32] = "build_fort",
@@ -2487,6 +2529,10 @@ function Civ6Ai_Snapshot._BuildYourUnits(playerID)
       needs_orders = needsOrders,
       upgrade_options = Civ6Ai_Snapshot._UpgradeOptions(playerID, unit),
     }
+    local charges = select(1, Civ6Ai_Snapshot._BuildCharges(unit))
+    if charges > 0 then
+      rec.build_charges = charges
+    end
     local goal = Civ6Ai_Snapshot._UnitGoal(playerID, unit:GetID())
     if goal ~= nil then
       rec.goal = goal
@@ -3140,13 +3186,14 @@ function Civ6Ai_Snapshot._AddProgressionCommands(commands, playerID, unit, unitI
   end
   local fort = ({UNIT_MILITARY_ENGINEER = "IMPROVEMENT_FORT", UNIT_ROMAN_LEGION = "IMPROVEMENT_ROMAN_FORT"})[row.UnitType]
   local plot = Map.GetPlot(unit:GetX(), unit:GetY())
-  if fort ~= nil and GameInfo.Improvements[fort] ~= nil and (M(unit, "GetBuildCharges") or 0) > 0
+  local charges = select(1, Civ6Ai_Snapshot._BuildCharges(unit))
+  if fort ~= nil and GameInfo.Improvements[fort] ~= nil and charges > 0
       and M(plot, "GetOwner") == playerID and (M(plot, "GetImprovementType") or -1) < 0 and not M(plot, "IsCity") then
     add("build_fort", fort, {improvement_id = fort})
   end
   -- Builder: every improvement the game allows on its own tile right now.
   local U = UnitOperationTypes
-  if fort == nil and (M(unit, "GetBuildCharges") or 0) > 0 and U ~= nil and U.BUILD_IMPROVEMENT ~= nil
+  if fort == nil and charges > 0 and U ~= nil and U.BUILD_IMPROVEMENT ~= nil
       and M(plot, "GetOwner") == playerID and not M(plot, "IsCity") then
     for imp in GameInfo.Improvements() do
       local t = { [U.PARAM_X] = unit:GetX(), [U.PARAM_Y] = unit:GetY(), [U.PARAM_IMPROVEMENT_TYPE] = imp.Hash }
@@ -3212,32 +3259,36 @@ end
 
 function Civ6Ai_Snapshot._AddBuilderImproveCommands(commands, playerID, unit, unitId)
   local M = Civ6Ai_Snapshot._Method
-  if (M(unit, "GetBuildCharges") or 0) <= 0 then return end
+  local charges, ui, core = Civ6Ai_Snapshot._BuildCharges(unit)
+  local before = #commands
+  if charges <= 0 then
+    Civ6Ai_Util.Log("snapshot|improve|unit=" .. tostring(unitId)
+      .. "|charges=" .. tostring(charges) .. "|ui=" .. tostring(ui) .. "|core=" .. tostring(core)
+      .. "|sites=0|commands=0|dropped_area=0")
+    return
+  end
   local urow = GameInfo.Units[unit:GetType()]
   local ux, uy = unit:GetX(), unit:GetY()
   local area = Civ6Ai_Snapshot._AreaId(Map.GetPlot(ux, uy))
-  -- One site per builder: skip tiles another of my builders is headed to or standing on.
-  local reserved = {}
-  for _, other in ipairs(Civ6Ai_Snapshot._IterateUnits(Players[playerID]:GetUnits())) do
-    if other:GetID() ~= unit:GetID() and (M(other, "GetBuildCharges") or 0) > 0 then
-      reserved[other:GetX() .. "," .. other:GetY()] = true
-      local g = Civ6Ai_Snapshot._UnitGoal(playerID, other:GetID())
-      if g ~= nil and g.A == 2 then reserved[g.x .. "," .. g.y] = true end
-    end
-  end
-  local sites = {}
+  local sites, droppedArea = {}, 0
   for dx = -8, 8 do
     for dy = -8, 8 do
       local plot = Map.GetPlot(ux + dx, uy + dy)
       if plot ~= nil and M(plot, "GetOwner") == playerID and not M(plot, "IsCity") and not M(plot, "IsWater")
           and not M(plot, "IsMountain") and (M(plot, "GetImprovementType") or -1) < 0
-          and (M(plot, "GetDistrictType") or -1) < 0 and Civ6Ai_Snapshot._AreaId(plot) == area
-          and not reserved[plot:GetX() .. "," .. plot:GetY()] then
+          and (M(plot, "GetDistrictType") or -1) < 0 then
         local d = Map.GetPlotDistance(ux, uy, plot:GetX(), plot:GetY())
         if d <= 8 then
-          local imps, res = Civ6Ai_Snapshot._LegalImprovementsAt(playerID, urow.UnitType, plot)
-          if #imps > 0 then
-            table.insert(sites, {x = plot:GetX(), y = plot:GetY(), d = d, res = res, imps = imps})
+          -- Snapshot plot records hardcode AREA_0. A nil GetArea on one side is
+          -- unknown, not a different landmass; only two known differing ids exclude.
+          local plotArea = Civ6Ai_Snapshot._AreaId(plot)
+          if area ~= nil and plotArea ~= nil and plotArea ~= area then
+            droppedArea = droppedArea + 1
+          else
+            local imps, res = Civ6Ai_Snapshot._LegalImprovementsAt(playerID, urow.UnitType, plot)
+            if #imps > 0 then
+              table.insert(sites, {x = plot:GetX(), y = plot:GetY(), d = d, res = res, imps = imps})
+            end
           end
         end
       end
@@ -3261,6 +3312,10 @@ function Civ6Ai_Snapshot._AddBuilderImproveCommands(commands, playerID, unit, un
       }))
     end
   end
+  Civ6Ai_Util.Log("snapshot|improve|unit=" .. tostring(unitId)
+    .. "|charges=" .. tostring(charges) .. "|ui=" .. tostring(ui) .. "|core=" .. tostring(core)
+    .. "|sites=" .. tostring(#sites) .. "|commands=" .. tostring(#commands - before)
+    .. "|dropped_area=" .. tostring(droppedArea))
 end
 
 -- City ranged strike: a walled city with an enemy unit within 2 tiles.
@@ -3724,6 +3779,27 @@ end
 
 Civ6Ai_Snapshot.LEGAL_COMMAND_CAP = 500
 
+-- One envoy per met city-state when this seat still has tokens to give.
+-- Gameplay applies it (Gov.SendEnvoy); the UI influence-token request is not used.
+function Civ6Ai_Snapshot._AddEnvoyCommands(commands, playerID)
+  local inf = Civ6Ai_Snapshot._Method(Players[playerID], "GetInfluence")
+  local tokens = Civ6Ai_Snapshot._Method(inf, "GetTokensToGive")
+  if type(tokens) ~= "number" or tokens < 1 then
+    return
+  end
+  local diplo = Civ6Ai_Snapshot._BuildDiplomacy(playerID)
+  for _, cs in ipairs(diplo.city_states or {}) do
+    local pid = tostring(cs.player_id or "")
+    if pid ~= "" then
+      table.insert(commands, 1, Civ6Ai_Snapshot._EnrichLegalCommand({
+        command_id = "CMD_envoy_" .. pid,
+        kind = "send_envoy",
+        fixed_arguments = {target_player_id = pid},
+      }))
+    end
+  end
+end
+
 function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
   -- Priority order under the sidecar schema cap (512): unit orders, research/civics, then production.
   local commands = {}
@@ -3823,6 +3899,7 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
     table.insert(commands, command)
   end
   Civ6Ai_Snapshot._AddPurchaseCommands(commands, playerID)
+  pcall(Civ6Ai_Snapshot._AddEnvoyCommands, commands, playerID)
   local capped = {}
   for index, command in ipairs(commands) do
     if index > Civ6Ai_Snapshot.LEGAL_COMMAND_CAP then
@@ -3932,7 +4009,20 @@ function Civ6Ai_Snapshot._GovGovernment(culture)
   local canAtAll = gcall(culture, "CanChangeGovernmentAtAll")
   local made = gcall(culture, "GovernmentChangeMade")
   local fresh = row == nil or gcall(culture, "CivicCompletedThisTurn") == true
-  out.change_allowed = canAtAll ~= false and made ~= true and fresh
+  local inAnarchy = gcall(culture, "IsInAnarchy") == true
+  local endTurn = gcall(culture, "GetAnarchyEndTurn")
+  local nowTurn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or 0
+  local anarchyLeft = 0
+  if inAnarchy or (current ~= nil and current < 0) then
+    if type(endTurn) == "number" and endTurn > nowTurn then
+      anarchyLeft = endTurn - nowTurn
+    else
+      anarchyLeft = 1
+    end
+    out.in_anarchy = true
+    out.anarchy_turns_left = anarchyLeft
+  end
+  out.change_allowed = canAtAll ~= false and made ~= true and fresh and not out.in_anarchy
   out.change_rule = "a government can be changed only on a turn when a civic completed"
   local slotsByGov = {}
   if GameInfo.Government_SlotCounts ~= nil then

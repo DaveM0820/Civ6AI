@@ -386,6 +386,7 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
     return Civ6Ai_Apply._AttackTarget(playerID, args)
   end
   if command.kind == "send_diplomatic_action" or command.kind == "execute_deal"
+      or command.kind == "send_envoy"
       or command.kind == "purchase_item" or command.kind == "purchase_tile" then
     return Civ6Ai_Apply._Deal(playerID, command, args)
   end
@@ -865,7 +866,7 @@ Civ6Ai_Apply.GOV_KINDS = {
 Civ6Ai_Apply.VERIFY_TICKS = 90
 Civ6Ai_Apply.SYNCED_KINDS = {
   change_government = true, found_pantheon = true, found_religion = true, recruit_great_person = true,
-  patronize_great_person = true, send_diplomatic_action = true, propose_peace = true, purchase_item = true,
+  patronize_great_person = true, send_diplomatic_action = true, propose_peace = true, send_envoy = true, purchase_item = true,
   purchase_tile = true, pillage_improvement = true, worker_improve = true, build_fort = true,
   -- The local seat's UI research request returns nothing (not true), so every
   -- P0 research order was logged research_rejected. Use the synced channel.
@@ -965,6 +966,9 @@ function Civ6Ai_Apply._ChangeGovernment(playerID, command, args)
   end
   local culture = Players[playerID]:GetCulture()
   local current = gcall(culture, "GetCurrentGovernment")
+  if gcall(culture, "IsInAnarchy") == true or (type(current) == "number" and current < 0) then
+    return false, "you are in anarchy; wait until it ends before changing government", args
+  end
   if current == row.Index then
     return false, "you already have " .. row.GovernmentType, args
   end
@@ -974,7 +978,7 @@ function Civ6Ai_Apply._ChangeGovernment(playerID, command, args)
   if gcall(culture, "GovernmentChangeMade") == true then
     return false, "government was already changed this turn", args
   end
-  if current ~= nil and current >= 0 and gcall(culture, "CivicCompletedThisTurn") ~= true then
+  if gcall(culture, "CivicCompletedThisTurn") ~= true then
     return false, "a government can only be changed on a turn when a civic completed", args
   end
   local okR = gcall(culture, "RequestChangeGovernment", row.Hash)
@@ -983,11 +987,14 @@ function Civ6Ai_Apply._ChangeGovernment(playerID, command, args)
   end
   return Civ6Ai_Apply._Defer(playerID, command, args, "government=" .. row.GovernmentType, function()
     local now = gcall(culture, "GetCurrentGovernment")
+    if gcall(culture, "IsInAnarchy") == true then
+      if now == row.Index then
+        return true, "government=" .. row.GovernmentType .. " (anarchy started)"
+      end
+      return false, "you are in anarchy; wait until it ends before changing government"
+    end
     if now == row.Index then
       return true, "government=" .. row.GovernmentType
-    end
-    if gcall(culture, "IsInAnarchy") == true then
-      return true, "government=" .. row.GovernmentType .. ":anarchy"
     end
     return false, "government is still " .. tostring(now and GameInfo.Governments[now] and GameInfo.Governments[now].GovernmentType)
   end)
@@ -1363,6 +1370,14 @@ function Civ6Ai_Apply._Deal(playerID, command, args)
       return false, "only DECLARE_WAR can be applied", args
     end
     local ok, reason = Civ6Ai_Apply._GovRoute("DeclareWar", playerID, other, string.find(action, "SURPRISE", 1, true) ~= nil)
+    return ok, reason, args
+  end
+  if kind == "send_envoy" then
+    local other = Civ6Ai_Apply._PlayerNum(args.target_player_id or args.city_state_id)
+    if other == nil then
+      return false, "missing_target_player", args
+    end
+    local ok, reason = Civ6Ai_Apply._GovRoute("SendEnvoy", playerID, other)
     return ok, reason, args
   end
   if kind == "execute_deal" then

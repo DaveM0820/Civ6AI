@@ -798,6 +798,21 @@ end
 -- Movement for snapshots. The interface's unit cache lags at turn start (the
 -- local seat reads 0 moves at LocalPlayerTurnBegin). planning: the seat's
 -- orders run at its next turn start (Civ6Ai_Orders queue), with full movement.
+-- Build charges for snapshots. The interface unit cache can report 0 charges
+-- for the local seat at turn start (the same lag as GetMovesRemaining), so
+-- the UI context asks the gameplay unit.
+function Civ6Ai_GameCore.BuildChargesForPlayer(playerID, unitNumericId)
+  local _, unit = Civ6Ai_GameCore._FindUnit(playerID, unitNumericId)
+  if unit == nil or unit.GetBuildCharges == nil then
+    return nil
+  end
+  local ok, n = pcall(function() return unit:GetBuildCharges() end)
+  if ok and type(n) == "number" then
+    return n
+  end
+  return nil
+end
+
 function Civ6Ai_GameCore.UnitMovesForPlayer(playerID, unitNumericId, planning)
   local _, unit = Civ6Ai_GameCore._FindUnit(playerID, unitNumericId)
   if unit == nil then
@@ -819,6 +834,7 @@ function Civ6Ai_InitializeGameCore()
   ExposedMembers.Civ6Ai.SetCivicForPlayer = Civ6Ai_GameCore.SetCivicForPlayer
   ExposedMembers.Civ6Ai.FinishMovesForPlayer = Civ6Ai_GameCore.FinishMovesForPlayer
   ExposedMembers.Civ6Ai.UnitMovesForPlayer = Civ6Ai_GameCore.UnitMovesForPlayer
+  ExposedMembers.Civ6Ai.BuildChargesForPlayer = Civ6Ai_GameCore.BuildChargesForPlayer
   ExposedMembers.Civ6Ai.WriteFile = Civ6Ai_GameCore.WriteFile
   ExposedMembers.Civ6Ai.ReadFile = Civ6Ai_GameCore.ReadFile
   ExposedMembers.Civ6Ai.AppendFile = Civ6Ai_GameCore.AppendFile
