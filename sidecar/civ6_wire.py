@@ -1620,6 +1620,14 @@ def build_civ6_playable_context(snapshot: dict[str, Any]) -> dict[str, Any]:
         return {}
     known_map = context.get("known_map")
     if isinstance(known_map, dict):
+        # Builder site facts need the plots that are stripped below.
+        from sidecar import civ6_prompt_coaching as coaching
+
+        for unit in context.get("your_units") or []:
+            if isinstance(unit, dict) and unit.get("unit_type_id") == "UNIT_BUILDER":
+                xy = coaching._unit_xy(unit)
+                if xy is not None:
+                    unit["improve_sites"] = coaching.builder_improve_sites(snapshot, *xy)
         known_map.pop("plots", None)
         image = known_map.get("image")
         if isinstance(image, dict):

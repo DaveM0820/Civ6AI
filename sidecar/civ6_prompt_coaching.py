@@ -501,19 +501,26 @@ def builder_improve_sites(snapshot: dict[str, Any], x: int, y: int, cap: int = 6
     return rows[:cap]
 
 
+def _unit_xy(unit: dict[str, Any]) -> tuple[int, int] | None:
+    parts = str(unit.get("plot_id") or "").split("_")
+    if len(parts) < 3:
+        return None
+    try:
+        return int(parts[1]), int(parts[2])
+    except ValueError:
+        return None
+
+
 def builder_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, Any]) -> list[str]:
     """Where a builder can improve: Improve options only appear once it stands on such a tile."""
     from sidecar import pipeline_v2 as pipeline
 
-    plot = str(unit.get("plot_id") or "")
-    parts = plot.split("_")
-    if len(parts) < 3:
+    xy = _unit_xy(unit)
+    if xy is None:
         return []
-    try:
-        x, y = int(parts[1]), int(parts[2])
-    except ValueError:
-        return []
-    sites = builder_improve_sites(snapshot, x, y)
+    sites = unit.get("improve_sites")
+    if not isinstance(sites, list):
+        sites = builder_improve_sites(snapshot, *xy)
     if not sites:
         return [pipeline._wire_line(f"{prefix}.improve.sites", "none inside your borders; move toward a city's tiles")]
     labels = []
