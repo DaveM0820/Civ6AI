@@ -434,6 +434,67 @@ class Civ6MapRenderTests(unittest.TestCase):
         self.assertLess(tactical_s, 1.0)
         print(f"overview={overview_s:.4f}s tactical={tactical_s:.4f}s")
 
+    def test_city_nameplate_paints_over_rivers(self):
+        import json
+
+        from PIL import Image
+
+        from sidecar.map_render_civ6 import _BASE_LAYER_CACHE, render_civ6_map_png
+        from sidecar.map_situational import pick_auto_focus_tile, viewport_focused_on_tile
+
+        snapshot = json.loads((ROOT / "fixtures" / "civ6" / "live-runtime-t4-city-snapshot.json").read_text())
+        snapshot.setdefault("civ6", {}).setdefault("map", {})["river_edge_format"] = "across-v2"
+        focus = pick_auto_focus_tile({}, snapshot)
+        width = int(snapshot["game"]["map_width"])
+        height = int(snapshot["game"]["map_height"])
+        tactical = viewport_focused_on_tile(focus[0], focus[1], width, height)
+        saved: dict[str, Image.Image] = {}
+        original = map_render.encode_model_image_bytes
+
+        def _capture(image, *, target_size=None):
+            saved["canvas"] = image.copy()
+            return original(image, target_size=target_size)
+
+        map_render.encode_model_image_bytes = _capture
+        try:
+            _BASE_LAYER_CACHE.clear()
+            meta = render_civ6_map_png(
+                snapshot, None, viewport=tactical, image_role="viewport", target_size=1024,
+            )
+        finally:
+            map_render.encode_model_image_bytes = original
+        self.assertGreater(meta.get("river_edges_drawn", 0), 0)
+        image = saved["canvas"].convert("RGB")
+        player_id = str(snapshot["decision"]["player_id"])
+        plate = map_render._hex_to_rgb(map_render._player_color(player_id))
+        river = map_render._hex_to_rgb("#4ec8f0")
+        width, height = image.size
+        river_pixels = 0
+        name_runs: list[tuple[int, int, int]] = []
+        for y in range(height):
+            run = 0
+            start = 0
+            for x in range(width + 1):
+                pixel = image.getpixel((x, y)) if x < width else None
+                if pixel == river:
+                    river_pixels += 1
+                if pixel == plate:
+                    if run == 0:
+                        start = x
+                    run += 1
+                else:
+                    if run > 40:
+                        name_runs.append((y, start, start + run - 1))
+                    run = 0
+        self.assertGreater(river_pixels, 30)
+        self.assertGreater(len(name_runs), 2)
+        covered = 0
+        for y, start, end in name_runs:
+            for x in range(start, end + 1):
+                if image.getpixel((x, y)) == river:
+                    covered += 1
+        self.assertEqual(0, covered)
+
 
 if __name__ == "__main__":
     unittest.main()

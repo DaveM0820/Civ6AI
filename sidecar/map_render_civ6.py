@@ -1040,13 +1040,19 @@ def _draw_settle_site_marker(
     hex_radius: float,
     tile_px: int,
     site: dict[str, Any],
+    *,
+    marker: bool = True,
+    label: bool = True,
 ) -> None:
     corners = _flat_top_hex_corners(cx, cy, hex_radius)
-    _draw_hex_ring(draw, corners, SETTLE_LOOK_COLOR, max(2, tile_px // 8))
-    label = str(site.get("label") or "")
-    if label:
+    if marker:
+        _draw_hex_ring(draw, corners, SETTLE_LOOK_COLOR, max(2, tile_px // 8))
+    label_text = str(site.get("label") or "")
+    if label and label_text:
         font = map_render._coord_label_font(max(8, tile_px // 3))
-        _draw_outlined_text(draw, (cx, cy - hex_radius * 0.12), label, font, fill="#fff4c0")
+        _draw_outlined_text(draw, (cx, cy - hex_radius * 0.12), label_text, font, fill="#fff4c0")
+    if not marker:
+        return
     icon_r = max(2, int(hex_radius * 0.14))
     if site.get("coastal"):
         ox, oy = cx - hex_radius * 0.38, cy + hex_radius * 0.32
@@ -1488,6 +1494,13 @@ def render_civ6_map_png(
     river_width = max(10, tile_px // 5) if prefer_civ5_sprites else max(4, tile_px // 8)
     rendered_tiles = 0
     river_edges_drawn = 0
+    river_segments: list[tuple[tuple[int, int], tuple[int, int]]] = []
+    if rivers_trusted:
+        river_segments, river_edges_drawn = _collect_river_segments(
+            plot_index, normalized, known_map, has_visibility_grid, viewport,
+            x0, y0, tile_px, axis_gutter, flip_y, vh, hex_radius,
+            prefer_civ5=prefer_civ5_sprites,
+        )
 
     grid_blob = "".join(normalized) if isinstance(normalized, list) else ""
     hasher = hashlib.sha1()
@@ -1590,6 +1603,28 @@ def render_civ6_map_png(
         map_region = Image.alpha_composite(canvas.crop((0, 0, map_w, map_h)), grid_overlay)
         canvas.paste(map_region, (0, 0))
         draw = ImageDraw.Draw(canvas)
+        # Terrain marks, then rivers, then civ borders. Icons and labels are
+        # drawn after this layer so a river cannot cover a name.
+        for vy in range(vh):
+            wy = y0 + vy
+            for vx in range(vw):
+                wx = x0 + vx
+                key = (wx, wy)
+                plot = plot_index.get(key)
+                grid_char = map_render._grid_char_at(
+                    normalized, wx, wy, origin=map_render.visibility_grid_origin(known_map),
+                )
+                state = map_render._tile_terrain_state(plot, grid_char, has_visibility_grid)
+                if state != "revealed" or prefer_civ5_sprites:
+                    continue
+                cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
+                if _plot_is_hills(plot):
+                    _draw_hills_glyph(draw, cx, cy, hex_radius)
+                if not rivers_trusted and isinstance(plot, dict) and plot.get("river_edges"):
+                    _draw_river_tile_mark(draw, cx, cy, hex_radius)
+        if rivers_trusted and river_segments:
+            _draw_river_network(draw, river_segments, river_width)
+        border_width = max(2, tile_px // 5) if prefer_civ5_sprites else max(2, tile_px // 7)
         for vy in range(vh):
             wy = y0 + vy
             for vx in range(vw):
@@ -1605,45 +1640,40 @@ def render_civ6_map_png(
                 territory_owner = owner_index.get(key)
                 cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
                 corners = _flat_top_hex_corners(cx, cy, hex_radius)
-                if not prefer_civ5_sprites:
-                    if _plot_is_hills(plot):
-                        _draw_hills_glyph(draw, cx, cy, hex_radius)
-                    if not rivers_trusted and isinstance(plot, dict) and plot.get("river_edges"):
-                        _draw_river_tile_mark(draw, cx, cy, hex_radius)
+                if territory_owner is None:
+                    continue
+                owner_color = map_render._player_color(territory_owner)
+                for nx, ny, edge in _hex_neighbors_odd_r(wx, wy):
+                    neighbor_owner = owner_index.get((nx, ny))
+                    if neighbor_owner != territory_owner:
+                        inset = 0.0 if prefer_civ5_sprites else 0.15
+                        if flip_y:
+                            ncx, ncy, _, _ = _odd_r_cell_center(
+                                nx, ny, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
+                            )
+                            edge = _edge_index_toward_neighbor(cx, cy, ncx, ncy, corners)
+                        seg = _hex_edge_segment(corners, edge, inset)
+                        draw.line(
+                            seg,
+                            fill=map_render._rgb_tuple(owner_color),
+                            width=border_width,
+                        )
+        for vy in range(vh):
+            wy = y0 + vy
+            for vx in range(vw):
+                wx = x0 + vx
+                key = (wx, wy)
+                plot = plot_index.get(key)
+                grid_char = map_render._grid_char_at(
+                    normalized, wx, wy, origin=map_render.visibility_grid_origin(known_map),
+                )
+                state = map_render._tile_terrain_state(plot, grid_char, has_visibility_grid)
+                if state != "revealed":
+                    continue
+                cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
                 _paste_resource_icon(canvas, plot, cx, cy, hex_radius, tile_px)
                 _paste_tile_marks(canvas, draw, plot, cx, cy, hex_radius, tile_px)
                 _paste_ruins_marker(canvas, plot, cx, cy, hex_radius)
-                if territory_owner is not None:
-                    owner_color = map_render._player_color(territory_owner)
-                    border_width = max(2, tile_px // 5) if prefer_civ5_sprites else max(2, tile_px // 7)
-                    for nx, ny, edge in _hex_neighbors_odd_r(wx, wy):
-                        neighbor_owner = owner_index.get((nx, ny))
-                        if neighbor_owner != territory_owner:
-                            inset = 0.0 if prefer_civ5_sprites else 0.15
-                            if flip_y:
-                                ncx, ncy, _, _ = _odd_r_cell_center(
-                                    nx, ny, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
-                                )
-                                edge = _edge_index_toward_neighbor(cx, cy, ncx, ncy, corners)
-                            seg = _hex_edge_segment(corners, edge, inset)
-                            draw.line(
-                                seg,
-                                fill=map_render._rgb_tuple(owner_color),
-                                width=border_width,
-                            )
-        if show_tile_coords:
-            for vy in range(vh):
-                wy = y0 + vy
-                for vx in range(vw):
-                    wx = x0 + vx
-                    cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
-                    coord_font = map_render._coord_font_size(tile_px, wx, wy)
-                    _draw_outlined_text(
-                        draw,
-                        (cx, cy + hex_radius * 0.52),
-                        f"{wx},{wy}",
-                        map_render._coord_label_font(coord_font),
-                    )
         _BASE_LAYER_CACHE[cache_key] = canvas.crop((0, 0, map_w, map_h)).copy()
         if len(_BASE_LAYER_CACHE) > _BASE_LAYER_CACHE_LIMIT:
             _BASE_LAYER_CACHE.pop(next(iter(_BASE_LAYER_CACHE)))
@@ -1651,11 +1681,10 @@ def render_civ6_map_png(
     rendered_tiles = revealed_in_view
 
     nameplates: list[tuple[Any, float, float, float, str, tuple[int, int, int]]] = []
+    civ5_nameplates: list[tuple[Any, ...]] = []
     for (vx, vy), markers in sorted(tile_markers.items(), key=lambda item: (item[0][1], item[0][0])):
         wx, wy = x0 + vx, y0 + vy
         cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
-        px = int(cx - tile_px // 2)
-        py = int(cy - tile_px // 2)
         cities = [m for m in markers if m.get("kind") == "city"]
         others = [m for m in markers if m.get("kind") != "city"]
         if prefer_civ5_sprites:
@@ -1663,15 +1692,10 @@ def render_civ6_map_png(
                 slug = map_icons.city_icon_slug(bool(marker.get("is_capital")))
                 _paste_civ5_overlay(canvas, slug, cx, cy, tile_px, 0.62)
                 name_font = map_render._load_bitmap_font(max(7, tile_px // 4))
-                _draw_city_nameplate(
-                    draw,
-                    name_font,
-                    cx,
-                    cy,
-                    hex_radius,
-                    str(marker.get("name", "City")),
-                    marker.get("population"),
-                )
+                civ5_nameplates.append((
+                    name_font, cx, cy, hex_radius,
+                    str(marker.get("name", "City")), marker.get("population"),
+                ))
             player_id = str(snapshot.get("decision", {}).get("player_id", "PLAYER_0"))
             own_rgb = map_render._hex_to_rgb(map_render._player_color(player_id))
             foreign_rgb = map_render._hex_to_rgb("#ff4444")
@@ -1695,25 +1719,41 @@ def render_civ6_map_png(
             canvas, draw, snapshot, cities, others, cx, cy, hex_radius, tile_px, nameplates,
         )
 
-    for plate in nameplates:
-        _draw_civ6_nameplate(draw, *plate)
-
     settle_rings_drawn = 0
+    settle_label_sites: list[tuple[float, float, dict[str, Any]]] = []
     for site in settle_markers:
         wx, wy = int(site["x"]), int(site["y"])
         if wx < x0 or wy < y0 or wx >= x0 + vw or wy >= y0 + vh:
             continue
         cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
-        _draw_settle_site_marker(draw, canvas, cx, cy, hex_radius, tile_px, site)
+        _draw_settle_site_marker(
+            draw, canvas, cx, cy, hex_radius, tile_px, site, marker=True, label=False,
+        )
+        settle_label_sites.append((cx, cy, site))
         settle_rings_drawn += 1
 
-    if rivers_trusted:
-        river_segments, river_edges_drawn = _collect_river_segments(
-            plot_index, normalized, known_map, has_visibility_grid, viewport,
-            x0, y0, tile_px, axis_gutter, flip_y, vh, hex_radius,
-            prefer_civ5=prefer_civ5_sprites,
+    # Labels are the top layer: coordinate text, then city names, then settle tags.
+    if show_tile_coords:
+        for vy in range(vh):
+            wy = y0 + vy
+            for vx in range(vw):
+                wx = x0 + vx
+                cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
+                coord_font = map_render._coord_font_size(tile_px, wx, wy)
+                _draw_outlined_text(
+                    draw,
+                    (cx, cy + hex_radius * 0.52),
+                    f"{wx},{wy}",
+                    map_render._coord_label_font(coord_font),
+                )
+    for plate in civ5_nameplates:
+        _draw_city_nameplate(draw, *plate)
+    for plate in nameplates:
+        _draw_civ6_nameplate(draw, *plate)
+    for cx, cy, site in settle_label_sites:
+        _draw_settle_site_marker(
+            draw, canvas, cx, cy, hex_radius, tile_px, site, marker=False, label=True,
         )
-        _draw_river_network(draw, river_segments, river_width)
 
     draw.line((0, map_h, map_w, map_h), fill="#444444", width=1)
     ly_header = map_h + 6
