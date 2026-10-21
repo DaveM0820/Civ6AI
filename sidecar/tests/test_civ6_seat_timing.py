@@ -594,7 +594,7 @@ class SeatFoundAndCivicTests(unittest.TestCase):
         kinds = [cmds[i].kind for i in range(1, len(cmds) + 1)]
         self.assertIn("found_city", kinds)
 
-    def test_queued_seat_is_not_offered_city_production(self):
+    def test_no_seat_is_offered_city_production(self):
         lua = LuaRuntime()
         lua.execute("Civ6Ai_Util = { Log = function() end }")
         lua.execute((ROOT / "mod/Civ6Ai/InGame/Civ6Ai_Snapshot.lua").read_text(encoding="utf-8"))
@@ -604,8 +604,9 @@ class SeatFoundAndCivicTests(unittest.TestCase):
           Players = setmetatable({}, { __index = function() LOOKED = true end })
         """)
         snap = lua.globals().Civ6Ai_Snapshot
-        self.assertTrue(snap._CanQueueProduction(0))
+        self.assertFalse(snap._CanQueueProduction(0))
         self.assertFalse(snap._CanQueueProduction(2))
+        snap._AddProductionCommands([], 0)
         snap._AddProductionCommands([], 2)
         self.assertFalse(lua.eval("LOOKED"))
 

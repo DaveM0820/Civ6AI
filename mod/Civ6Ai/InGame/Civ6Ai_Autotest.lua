@@ -508,78 +508,8 @@ function Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
   end
 end
 
-function Civ6Ai_Autotest._CityNeedsProduction(city)
-  if city == nil or Civ6Ai_Production == nil then
-    return false
-  end
-  local ok, item = pcall(Civ6Ai_Production._GetCityProductionState, city)
-  return ok and (item == nil or item == "" or item == "NONE")
-end
-
 function Civ6Ai_Autotest._ClearProductionBlockers(playerID)
-  if Civ6Ai_Production == nil or Civ6Ai_Production.FindExperimentTarget == nil then
-    return
-  end
-  -- Local-seat UI RequestOperation only; matches Apply._QueueProduction constraints.
-  local localPlayer = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or nil
-  if localPlayer == nil or playerID ~= localPlayer then
-    return
-  end
-  local player = Players ~= nil and Players[playerID] or nil
-  if player == nil or player.GetCities == nil then
-    return
-  end
-  local cities = player:GetCities()
-  if cities == nil then
-    return
-  end
-  -- Copy the cities out under pcall: iterating Members() right after this
-  -- pulse founded a city raised "Not a valid instance" (lMembersAux), which
-  -- aborted AfterPulse before the seat snapshots and the end turn.
-  local members = nil
-  local okList, listErr = pcall(function()
-    if cities.Members ~= nil then
-      local list = {}
-      for _, city in cities:Members() do
-        table.insert(list, city)
-      end
-      members = list
-    end
-  end)
-  if not okList then
-    Civ6Ai_Util.Log("autotest|auto_production_skip|player=" .. tostring(playerID)
-      .. "|reason=" .. tostring(listErr))
-    members = nil
-  end
-  local function consider(city)
-    if city == nil or not Civ6Ai_Autotest._CityNeedsProduction(city) then
-      return false
-    end
-    local cityWireId, buildId = Civ6Ai_Production.FindExperimentTarget(playerID)
-    -- Prefer this city's wire id when FindExperimentTarget returned capital.
-    if buildId == nil then
-      return false
-    end
-    local wire = cityWireId
-    pcall(function() wire = Civ6Ai_Production._WireCityId(city) or cityWireId end)
-    local ok, reason = Civ6Ai_Production.QueueBuild(playerID, wire, buildId)
-    Civ6Ai_Autotest._LogLine(
-      "auto_production|player=" .. tostring(playerID)
-      .. "|city=" .. tostring(wire) .. "|build=" .. tostring(buildId)
-      .. "|ok=" .. tostring(ok) .. "|reason=" .. tostring(reason or ""))
-    Civ6Ai_Util.Log(
-      "autotest|auto_production|player=" .. tostring(playerID)
-      .. "|city=" .. tostring(wire) .. "|build=" .. tostring(buildId)
-      .. "|ok=" .. tostring(ok) .. "|reason=" .. tostring(reason or ""))
-    return ok == true
-  end
-  if members ~= nil then
-    for _, city in ipairs(members) do
-      if consider(city) then
-        return
-      end
-    end
-  end
+  -- The local seat is the human. Empty cities are not filled from this pulse.
 end
 
 -- Auto-fill empty policy slots when FILL_CIVIC_SLOT would leave Change Policies up.

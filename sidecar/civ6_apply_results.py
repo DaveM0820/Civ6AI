@@ -103,7 +103,7 @@ _SIMPLE_REASONS = {
     "invalid_civic": "that civic cannot be studied now",
     "research_rejected": "the game rejected that research choice",
     "civic_rejected": "the game rejected that civic choice",
-    "production_requires_local_player": "the host cannot change this seat's city production yet; the city keeps its current build",
+    "production_requires_local_player": "this seat does not take production orders; AI seats use build priorities, and the human plays the local seat",
     "attack_requires_local_player": "the host cannot issue attacks for this seat yet",
     "attack_rejected": "the game rejected the attack (target out of reach or no longer there)",
     "attack_op_missing": "the game has no attack order for this unit",

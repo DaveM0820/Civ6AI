@@ -2039,11 +2039,10 @@ function Civ6Ai_Snapshot._PlansNextTurn(playerID)
   return Game.GetLocalPlayer() ~= playerID
 end
 
--- CityManager.RequestOperation(BUILD) is the local player's production screen.
--- Queued seats have no such route (OrderChannel has no queue_production kind);
--- they steer what the engine AI builds with set_build_priority instead.
+-- No seat is offered queue_production. The local seat is the human. AI seats
+-- steer what the engine AI builds with set_build_priority.
 function Civ6Ai_Snapshot._CanQueueProduction(playerID)
-  return not Civ6Ai_Snapshot._PlansNextTurn(playerID)
+  return false
 end
 
 -- Movement the unit has for the model's orders. Prefers the GameCore view (see
@@ -2665,96 +2664,7 @@ function Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
   end
 end
 
-Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP = 24
-Civ6Ai_Snapshot.DISTRICT_TILES_CAP = 2
-
-function Civ6Ai_Snapshot._CanQueueRow(city, row, paramKey)
-  if city == nil or row == nil or paramKey == nil then
-    return false
-  end
-  local ok, result = pcall(function()
-    local bq = city:GetBuildQueue()
-    if bq == nil or not bq:CanProduce(row.Hash, true) then
-      return false
-    end
-    local tCheck = {}
-    tCheck[paramKey] = row.Hash
-    return CityManager.CanStartOperation(city, CityOperationTypes.BUILD, tCheck, true)
-  end)
-  return ok and result == true
-end
-
 function Civ6Ai_Snapshot._AddProductionCommands(commands, playerID)
-  if not Civ6Ai_Snapshot._CanQueueProduction(playerID) then
-    return
-  end
-  if Civ6Ai_Production == nil or Players[playerID] == nil or GameInfo == nil then
-    return
-  end
-  local cities = Players[playerID]:GetCities()
-  if cities == nil then
-    return
-  end
-  for _, city in cities:Members() do
-    local cityId = Civ6Ai_Production._WireCityId(city)
-    local added = 0
-    local function add(buildId)
-      table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-        command_id = "CMD_prod_" .. buildId .. "_" .. cityId,
-        kind = "queue_production",
-        fixed_arguments = {city_id = cityId, build_id = buildId},
-      }))
-      added = added + 1
-    end
-    -- Units first, then regular buildings (districts and wonders need a plot, so they are not offered).
-    if GameInfo.Units ~= nil then
-      for row in GameInfo.Units() do
-        if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP then break end
-        if Civ6Ai_Snapshot._CanQueueRow(city, row, CityOperationTypes.PARAM_UNIT_TYPE) then
-          add(row.UnitType)
-        end
-      end
-    end
-    if GameInfo.Buildings ~= nil then
-      for row in GameInfo.Buildings() do
-        if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP then break end
-        if not row.IsWonder and Civ6Ai_Snapshot._CanQueueRow(city, row, CityOperationTypes.PARAM_BUILDING_TYPE) then
-          add(row.BuildingType)
-        end
-      end
-    end
-    -- Districts need a tile: offer each with up to DISTRICT_TILES_CAP valid placements.
-    local C = CityOperationTypes
-    for row in GameInfo.Districts() do
-      if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP + 12 then break end
-      local bq = city:GetBuildQueue()
-      if row.DistrictType ~= "DISTRICT_CITY_CENTER" and bq ~= nil and bq:CanProduce(row.Hash, true) then
-        local n = 0
-        for _, plot in ipairs(Map.GetNeighborPlots(city:GetX(), city:GetY(), 3) or {}) do
-          if n >= Civ6Ai_Snapshot.DISTRICT_TILES_CAP then break end
-          local t = { [C.PARAM_DISTRICT_TYPE] = row.Hash, [C.PARAM_X] = plot:GetX(), [C.PARAM_Y] = plot:GetY() }
-          local ok, can = pcall(CityManager.CanStartOperation, city, C.BUILD, t, false)
-          if ok and can then
-            n = n + 1
-            table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-              command_id = "CMD_prod_" .. row.DistrictType .. "_" .. cityId .. "_" .. plot:GetX() .. "_" .. plot:GetY(),
-              kind = "queue_production",
-              fixed_arguments = {city_id = cityId, build_id = row.DistrictType, target_x = plot:GetX(), target_y = plot:GetY()},
-            }))
-            added = added + 1
-          end
-        end
-      end
-    end
-    if GameInfo.Projects ~= nil then
-      for row in GameInfo.Projects() do
-        if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP then break end
-        if Civ6Ai_Snapshot._CanQueueRow(city, row, CityOperationTypes.PARAM_PROJECT_TYPE) then
-          add(row.ProjectType)
-        end
-      end
-    end
-  end
 end
 
 Civ6Ai_Snapshot.PURCHASE_UNAVAILABLE = 1000000000
@@ -3912,22 +3822,13 @@ function Civ6Ai_Snapshot._AddEnvoyCommands(commands, playerID)
 end
 
 function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
-  -- Priority order under the sidecar schema cap (512): unit orders, research/civics, then production.
+  -- Priority order under the sidecar schema cap (512): unit orders, then research/civics.
+  -- City item orders are not offered; AI seats use set_build_priority.
   Civ6Ai_Snapshot._hostileCache = nil
   Civ6Ai_Snapshot._hostileCachePlayer = nil
   local commands = {}
   local prodCommands = {}
   Civ6Ai_Snapshot._AddProductionCommands(prodCommands, playerID)
-  if Civ6Ai_Config.IsSeatExperiment() and Civ6Ai_Snapshot._CanQueueProduction(playerID) then
-    local cityId, buildId = Civ6Ai_Production.FindExperimentTarget(playerID)
-    if buildId ~= nil and cityId ~= nil then
-      table.insert(prodCommands, Civ6Ai_Snapshot._EnrichLegalCommand({
-        command_id = "CMD_exp_prod_" .. buildId .. "_" .. cityId,
-        kind = "queue_production",
-        fixed_arguments = {city_id = cityId, build_id = buildId},
-      }))
-    end
-  end
   local player = Players[playerID]
   if player ~= nil then
     for _, unit in ipairs(Civ6Ai_Snapshot._IterateUnits(player:GetUnits())) do

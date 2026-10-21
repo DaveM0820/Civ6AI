@@ -442,14 +442,13 @@ def _runtime_autotest_response(snapshot: dict) -> dict:
     commands: list[dict[str, Any]] = []
     handled_units: set[str] = set()
 
-    for kind in ("set_research_tech", "queue_production"):
-        for item in legal:
-            if item.get("kind") != kind:
-                continue
-            entry = _command_entry(item)
-            if entry is not None:
-                commands.append(entry)
-                break
+    for item in legal:
+        if item.get("kind") != "set_research_tech":
+            continue
+        entry = _command_entry(item)
+        if entry is not None:
+            commands.append(entry)
+            break
 
     for item in legal:
         if item.get("kind") != "found_city":
@@ -486,6 +485,8 @@ def _runtime_autotest_response(snapshot: dict) -> dict:
 
     if not commands:
         for item in legal:
+            if item.get("kind") == "queue_production":
+                continue
             entry = _command_entry(item)
             if entry is not None:
                 commands.append(entry)

@@ -826,16 +826,9 @@ function Civ6Ai_Apply._UnitFortify(playerID, args)
 end
 
 function Civ6Ai_Apply._QueueProduction(playerID, args)
-  if Civ6Ai_Production == nil then
-    return false, "production_module_missing", args
-  end
-  if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
-    -- CityManager.RequestOperation is UI-only (local player) and GameCore has no
-    -- reliable "set current production" call; report it instead of faking success.
-    return false, "production_requires_local_player", args
-  end
-  local ok, reason = Civ6Ai_Production.QueueProduction(playerID, args)
-  return ok, reason or "", args
+  -- The local seat is the human. AI seats use set_build_priority. A stale
+  -- queue_production command is refused and does not touch the city.
+  return false, "production_requires_local_player", args
 end
 
 function Civ6Ai_Apply._ParsePlotId(plotId)

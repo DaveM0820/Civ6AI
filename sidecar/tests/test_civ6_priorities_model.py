@@ -6,7 +6,7 @@ import json
 import unittest
 from pathlib import Path
 
-from sidecar import civ6_adapter, civ6_command_wire, civ6_priorities as prio
+from sidecar import civ6_adapter, civ6_command_wire, civ6_economy, civ6_priorities as prio
 from sidecar import pipeline_v2 as pipeline
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -79,6 +79,24 @@ class PrioritiesModelTests(unittest.TestCase):
             "fixed_arguments": {"city_id": "CITY_0", "build_id": "UNIT_WARRIOR"},
         }]
         self.assertEqual(civ6_wire.CIV6_NATIVE_FALLBACK_POLICY, civ6_wire.native_fallback_policy(snap))
+
+    def test_human_seat_is_not_told_to_order_production(self):
+        from sidecar import civ6_wire
+        snap = _snapshot()
+        snap.get("civ6", {}).pop("priorities", None)
+        snap["legal_commands"] = [
+            c for c in snap.get("legal_commands") or []
+            if not (isinstance(c, dict) and c.get("kind") == "queue_production")
+        ]
+        self.assertEqual(civ6_wire.CIV6_HUMAN_SEAT_POLICY, civ6_wire.native_fallback_policy(snap))
+        text = civ6_wire.build_civ6_response_instructions(snap)
+        self.assertNotIn("cityName.production =", text)
+        self.assertNotIn("leave cityName.production", text)
+        notes = civ6_economy.attention_items({
+            "your_cities": [{"city_id": "CITY_1", "name": "Utrecht", "production": {"item_id": "NONE"}}],
+        })
+        self.assertIn("This seat does not take production orders", notes[0])
+        self.assertIn("Nothing will be queued for you", notes[0])
 
 
 if __name__ == "__main__":

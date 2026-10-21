@@ -444,12 +444,20 @@ def attention_items(snapshot: dict[str, Any]) -> list[str]:
         if not item or str(item).upper() in ("NONE", "NULL"):
             idle_cities.append(pipeline._city_prompt_name(city))
     if idle_cities:
-        items.append(
-            "QUEUE EMPTY: "
-            + ", ".join(idle_cities)
-            + " have nothing in production. Choose an item from each city's catalog this turn. "
-            "Nothing will be queued for you."
-        )
+        from sidecar.civ6_priorities import priorities_supported
+        from sidecar.civ6_wire import _has_queue_production
+
+        names = ", ".join(idle_cities)
+        if _has_queue_production(snapshot):
+            detail = "Choose an item from each city's catalog this turn. Nothing will be queued for you."
+        elif priorities_supported(snapshot):
+            detail = (
+                "The engine AI picks the next item under the current build priorities. "
+                "Change priorities if the mix is wrong. Nothing will be queued for you."
+            )
+        else:
+            detail = "This seat does not take production orders. Nothing will be queued for you."
+        items.append(f"QUEUE EMPTY: {names} have nothing in production. {detail}")
     return items
 
 

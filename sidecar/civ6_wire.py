@@ -26,6 +26,9 @@ CIV6_NATIVE_FALLBACK_POLICY = (
 CIV6_PRIORITY_PRODUCTION_POLICY = (
     "Units left without orders stay where they are; cities keep auto production, steered by build priorities."
 )
+CIV6_HUMAN_SEAT_POLICY = (
+    "Units left without orders stay where they are; the human plays this seat's cities."
+)
 
 
 def prune_settlers_without_sites(snapshot: dict[str, Any]) -> int:
@@ -71,7 +74,7 @@ def native_fallback_policy(snapshot: dict[str, Any] | None = None) -> str:
     from sidecar import civ6_priorities
     if civ6_priorities.priorities_supported(snapshot or {}):
         return CIV6_PRIORITY_PRODUCTION_POLICY
-    return CIV6_NATIVE_FALLBACK_POLICY
+    return CIV6_HUMAN_SEAT_POLICY
 
 
 def chat_dm_examples(snapshot: dict[str, Any] | None) -> str:
@@ -821,7 +824,7 @@ def build_civ6_role_instruction(snapshot: dict[str, Any]) -> str:
         "thought.situation and thought.strategy must each be newly written this turn; lead with new observations "
         "and do not copy or lightly rephrase prior T{n} journal lines. "
         "thought.strategy holds your victory path and this turn's command plan in prose; "
-        "unitId.command and cityName.production keys execute orders — never substitute prose for those keys. "
+        f"{_orders_execute_clause(snapshot)}"
         "Event.*.log should sound like you thinking aloud. "
         "Diplomacy and rival psychology are part of the game — actively cultivate relationships, trades, and "
         "alliances (or rivalries) aligned with your path to victory; every player is trying to win. "
@@ -1573,6 +1576,12 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _orders_execute_clause(snapshot: dict[str, Any] | None) -> str:
+    if _has_queue_production(snapshot):
+        return "unitId.command and cityName.production keys execute orders — never substitute prose for those keys. "
+    return "unitId.command keys execute orders — never substitute prose for those keys. "
+
+
 def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     """RESPONSE INSTRUCTIONS + OPTIONAL COMMANDS + REQUIRED COMMANDS (Civ5 layout)."""
     required = _civ6_required_rows(snapshot)
@@ -1594,7 +1603,12 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         'Prefix JSON keys with the REQUIRED COMMANDS row number (e.g. "3.scout_1.command"); the host strips the numeric prefix.',
         "If the API provides separate thinking/reasoning text, keep prose there if you like; game-order keys must be in the JSON object.",
         "In your JSON object put commands.required.count first (must equal the required row count), then prose keys "
-        "(map reads, thought.*, Event.*), then numbered game-order keys (unitId.command, cityName.production, legal.*, chat.*).",
+        "(map reads, thought.*, Event.*), then numbered game-order keys ("
+        + (
+            "unitId.command, cityName.production, legal.*, chat.*)."
+            if _has_queue_production(snapshot)
+            else "unitId.command, legal.*, chat.*)."
+        ),
         "",
         "Prose and notes (JSON string values; first person as this leader):",
         "strategicmap.read = one paragraph — landmasses, coasts, fog, rivals, expansion lanes.",
@@ -1611,8 +1625,11 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):",
         "unitId.command = MoveTo(x,y) | AttackTo(x,y) | FoundCity | Improve(x,y,IMPROVEMENT_X) (builders) | Fortify | Skip "
         "(one option per unit from its row; MoveTo(x,y) = any destination tile, the unit walks toward it).",
-        "cityName.production = UNIT_* | BUILDING_* | PROJECT_* from that city's listed options (only when "
-        "currentProduction is NONE, or to switch on purpose).",
+        *(
+            ["cityName.production = UNIT_* | BUILDING_* | PROJECT_* from that city's listed options (only when "
+             "currentProduction is NONE, or to switch on purpose)."]
+            if _has_queue_production(snapshot) else []
+        ),
         f"legal.research.tech, legal.research.civic, chat.all, {chat_dm_examples(snapshot)} — see OPTIONAL COMMANDS.",
         "Do not use Skip when another option is listed.",
         "",
@@ -1632,7 +1649,10 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         f"- {coaching.CIV6_MOVE_THEN_ATTACK_GUIDANCE}",
         "- Attacks: AttackTo(x,y) options appear on the unit's own row only when a visible enemy (a civ you are at "
         "war with, or barbarians) is in reach — adjacent for melee, within range for ranged units.",
-        "- A city with currentProduction set: leave cityName.production out unless you really mean to switch.",
+        *(
+            ["- A city with currentProduction set: leave cityName.production out unless you really mean to switch."]
+            if _has_queue_production(snapshot) else []
+        ),
         "- Hybrid control: " + native_fallback_policy(snapshot),
         "- Optional commands (chat, research, civics, remember) are encouraged when useful; chat.all only when you have an original line.",
     ]
@@ -1727,8 +1747,13 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "=== REQUIRED COMMANDS ===",
         *count_lines,
         "Return one JSON object containing every required key below (host strips the numeric prefix on each key).",
-        "Event.* / thought.* / map reads = prose strings; unitId.command / cityName.production = game orders — "
-        "copy exactly one option from the row.",
+        "Event.* / thought.* / map reads = prose strings; "
+        + (
+            "unitId.command / cityName.production = game orders — "
+            if _has_queue_production(snapshot)
+            else "unitId.command = game orders — "
+        )
+        + "copy exactly one option from the row.",
         "",
         "Required JSON keys:",
         "",

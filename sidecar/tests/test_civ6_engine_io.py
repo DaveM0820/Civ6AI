@@ -75,8 +75,9 @@ class Civ6EngineIoTests(unittest.TestCase):
         self.assertTrue(offered)
         self.assertLessEqual(offered, applied)
         self.assertLessEqual(applied, APPLY_KINDS)
-        for kind in ("attack_target", "set_research_civic", "move_unit", "queue_production"):
+        for kind in ("attack_target", "set_research_civic", "move_unit"):
             self.assertIn(kind, offered)
+        self.assertNotIn("queue_production", offered)
 
     def test_remember_round_trip(self):
         snap = civ6_adapter.build_classical_golden_snapshot()
