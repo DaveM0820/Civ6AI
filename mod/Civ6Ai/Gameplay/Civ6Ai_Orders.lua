@@ -380,6 +380,8 @@ function Civ6Ai_Orders._ArrivalAction(owner, unit, intent, extra, sender)
     return Civ6Ai_Orders.Gov.FoundReligion(owner, extra.I, unit:GetID(), extra.V, extra.W)
   elseif intent == Civ6Ai_Orders.INTENT.TRADE then
     return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, unit:GetID(), extra.I)
+  elseif intent == Civ6Ai_Orders.INTENT.IMPROVE and extra.I ~= nil and extra.I >= 0 then
+    return Civ6Ai_Orders.Gov.BuildImprovement(owner, unit:GetID(), extra.I)
   end
   return true, "arrived"
 end
@@ -420,6 +422,9 @@ function Civ6Ai_Orders._DoMove(sender, o)
     end
     if intent == Civ6Ai_Orders.INTENT.TRADE then
       return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, o.U, o.I)
+    end
+    if intent == Civ6Ai_Orders.INTENT.IMPROVE and o.I ~= nil and o.I >= 0 then
+      return Civ6Ai_Orders.Gov.BuildImprovement(owner, o.U, o.I)
     end
     local ok, reason = Civ6Ai_Orders._Route("FinishMovesForPlayer", owner, o.U)
     return ok, "self_target_hold:" .. tostring(reason)

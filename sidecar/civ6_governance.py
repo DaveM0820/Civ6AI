@@ -576,7 +576,7 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
             gid = _match_id(gname, app_ids, ("GOVERNOR_", "GOVERNOR_THE_"))
             city_id = None
             for city in _lst(gv.get("cities")):
-                if isinstance(city, dict) and (_norm(city.get("name")) == _norm(city_text)
+                if isinstance(city, dict) and (_norm(city.get("name")).replace("_", "") == _norm(city_text).replace("_", "")
                                                or str(city.get("city_id")) == city_text.strip()):
                     city_id = str(city.get("city_id"))
             if gid is None:

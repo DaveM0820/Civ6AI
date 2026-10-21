@@ -83,3 +83,26 @@ class BuilderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _improve_cmd(x, y, imp, unit="UNIT_7"):
+    return {"command_id": f"CMD_{unit}_{imp}_improve_{x}_{y}", "kind": "move_unit",
+            "fixed_arguments": {"unit_id": unit, "target_x": x, "target_y": y, "improvement_id": imp,
+                                "intent": "improve", "A": 2, "G": 1, "goal": 1}}
+
+
+def test_improve_token_and_resolve():
+    from sidecar import civ6_command_wire as cw
+    snap = {"legal_commands": [_improve_cmd(3, 4, "IMPROVEMENT_FARM"), _improve_cmd(3, 4, "IMPROVEMENT_MINE"),
+                               _improve_cmd(9, 9, "IMPROVEMENT_FARM")]}
+    assert cw.unit_command_token(snap["legal_commands"][0]) == "Improve(3,4,IMPROVEMENT_FARM)"
+    assert cw.resolve_unit_token(snap, "UNIT_7", "Improve(3,4,IMPROVEMENT_MINE)").endswith("MINE_improve_3_4")
+    assert cw.resolve_unit_token(snap, "UNIT_7", "Improve(3,4,MINE)").endswith("MINE_improve_3_4")
+    assert cw.resolve_unit_token(snap, "UNIT_7", "MoveTo(8,9)").endswith("FARM_improve_9_9")
+
+
+def test_improve_substitute_nearest():
+    from sidecar import civ6_apply_results as ar
+    snap = {"legal_commands": [_improve_cmd(3, 4, "IMPROVEMENT_FARM"), _improve_cmd(9, 9, "IMPROVEMENT_FARM")]}
+    sub = ar._improve_substitute(snap, {"command_id": "x", "kind": "move_unit", "arguments": {"unit_id": "UNIT_7"}}, {}, 10, 9)
+    assert sub["arguments"]["target_x"] == 9 and sub["kind"] == "move_unit"

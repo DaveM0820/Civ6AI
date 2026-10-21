@@ -207,7 +207,10 @@ def _build_approved_record(
     unresolved = civ6_command_wire.take_unresolved()
     dropped = list(repeat_notes) + list(chat_notes)
     for token in unresolved:
-        dropped.append(f"dropped: unresolved token {token}")
+        if str(token).endswith("=Automate(explore)"):
+            continue  # already automated: nothing to do
+        token = str(token)
+        dropped.append(token if token.startswith("dropped:") else f"dropped: unresolved token {token}")
     civ6_apply_results.record_dropped(snapshot, dropped)
     return {
         "status": "approved",

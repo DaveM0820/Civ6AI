@@ -2054,7 +2054,19 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   -- builder AI, so its builders need orders (improve/move offers) or they sit idle.
   if (Civ6Ai_Snapshot._Method(unit, "GetBuildCharges") or 0) > 0 then
     local owner = Players[unit:GetOwner()]
-    return owner ~= nil and owner.IsHuman ~= nil and owner:IsHuman() == true
+    if owner ~= nil and owner.IsHuman ~= nil and owner:IsHuman() == true then return true end
+    -- AI seat: hand the builder to the model only once the game's AI left it idle
+    -- (same tile, same charges) for 2+ snapshots on different turns.
+    Civ6Ai_Snapshot._builderSeen = Civ6Ai_Snapshot._builderSeen or {}
+    local key = tostring(unit:GetOwner()) .. "_" .. tostring(unit:GetID())
+    local turn = Game.GetCurrentGameTurn()
+    local sig = unit:GetX() .. "," .. unit:GetY() .. "," .. tostring(unit:GetBuildCharges())
+    local seen = Civ6Ai_Snapshot._builderSeen[key]
+    if seen == nil or seen.sig ~= sig then
+      Civ6Ai_Snapshot._builderSeen[key] = {sig = sig, turn = turn}
+      return false
+    end
+    return turn - seen.turn >= 2
   end
   return true
 end
@@ -3122,6 +3134,101 @@ function Civ6Ai_Snapshot._AddProgressionCommands(commands, playerID, unit, unitI
   end
 end
 
+-- Builder Improve(x,y,IMP): owned, unimproved, same-landmass tiles within 8 and the
+-- improvements the DB allows there (terrain/feature/resource, tech/civic). A MOVE goal
+-- with intent improve: gameplay walks there and builds on arrival.
+Civ6Ai_Snapshot.IMPROVE_SITES_CAP = 6
+function Civ6Ai_Snapshot._ImproveRules()
+  if Civ6Ai_Snapshot._impRules ~= nil then return Civ6Ai_Snapshot._impRules end
+  local r = {terrain = {}, feature = {}, resource = {}, units = {}}
+  local function put(t, a, b) t[a] = t[a] or {}; t[a][b] = true end
+  for row in GameInfo.Improvement_ValidTerrains() do put(r.terrain, row.ImprovementType, row.TerrainType) end
+  for row in GameInfo.Improvement_ValidFeatures() do put(r.feature, row.ImprovementType, row.FeatureType) end
+  for row in GameInfo.Improvement_ValidResources() do put(r.resource, row.ImprovementType, row.ResourceType) end
+  for row in GameInfo.Improvement_ValidBuildUnits() do put(r.units, row.ImprovementType, row.UnitType) end
+  Civ6Ai_Snapshot._impRules = r
+  return r
+end
+
+function Civ6Ai_Snapshot._AreaId(plot)
+  local ok, a = pcall(function() return plot:GetArea():GetID() end)
+  return ok and a or nil
+end
+
+function Civ6Ai_Snapshot._LegalImprovementsAt(playerID, unitType, plot)
+  local M, p, r = Civ6Ai_Snapshot._Method, Players[playerID], Civ6Ai_Snapshot._ImproveRules()
+  local techs, culture = M(p, "GetTechs"), M(p, "GetCulture")
+  local function known(t, c)
+    if t ~= nil then local row = GameInfo.Technologies[t]; if row == nil or M(techs, "HasTech", row.Index) ~= true then return false end end
+    if c ~= nil then local row = GameInfo.Civics[c]; if row == nil or M(culture, "HasCivic", row.Index) ~= true then return false end end
+    return true
+  end
+  local terrain = GameInfo.Terrains[M(plot, "GetTerrainType") or -1]
+  local feature = GameInfo.Features[M(plot, "GetFeatureType") or -1]
+  local resource = GameInfo.Resources[M(plot, "GetResourceType") or -1]
+  if resource ~= nil and not known(resource.PrereqTech, resource.PrereqCivic) then resource = nil end
+  local out = {}
+  for imp in GameInfo.Improvements() do
+    local t = imp.ImprovementType
+    if imp.Buildable ~= false and imp.TraitType == nil and (r.units[t] or {})[unitType]
+        and known(imp.PrereqTech, imp.PrereqCivic) and (not imp.RequiresRiver or M(plot, "IsRiver") == true) then
+      local ok
+      if resource ~= nil and (r.resource[t] or {})[resource.ResourceType] then
+        ok = true
+      elseif feature ~= nil then
+        ok = (r.feature[t] or {})[feature.FeatureType] == true and resource == nil
+      else
+        ok = terrain ~= nil and (r.terrain[t] or {})[terrain.TerrainType] == true and resource == nil
+      end
+      if ok then table.insert(out, t) end
+    end
+  end
+  return out, resource ~= nil
+end
+
+function Civ6Ai_Snapshot._AddBuilderImproveCommands(commands, playerID, unit, unitId)
+  local M = Civ6Ai_Snapshot._Method
+  if (M(unit, "GetBuildCharges") or 0) <= 0 then return end
+  local urow = GameInfo.Units[unit:GetType()]
+  local ux, uy = unit:GetX(), unit:GetY()
+  local area = Civ6Ai_Snapshot._AreaId(Map.GetPlot(ux, uy))
+  local sites = {}
+  for dx = -8, 8 do
+    for dy = -8, 8 do
+      local plot = Map.GetPlot(ux + dx, uy + dy)
+      if plot ~= nil and M(plot, "GetOwner") == playerID and not M(plot, "IsCity") and not M(plot, "IsWater")
+          and not M(plot, "IsMountain") and (M(plot, "GetImprovementType") or -1) < 0
+          and (M(plot, "GetDistrictType") or -1) < 0 and Civ6Ai_Snapshot._AreaId(plot) == area then
+        local d = Map.GetPlotDistance(ux, uy, plot:GetX(), plot:GetY())
+        if d <= 8 then
+          local imps, res = Civ6Ai_Snapshot._LegalImprovementsAt(playerID, urow.UnitType, plot)
+          if #imps > 0 then
+            table.insert(sites, {x = plot:GetX(), y = plot:GetY(), d = d, res = res, imps = imps})
+          end
+        end
+      end
+    end
+  end
+  table.sort(sites, function(a, b)
+    if a.res ~= b.res then return a.res end
+    if a.d ~= b.d then return a.d < b.d end
+    if a.x ~= b.x then return a.x < b.x end
+    return a.y < b.y
+  end)
+  for i = 1, math.min(#sites, Civ6Ai_Snapshot.IMPROVE_SITES_CAP) do
+    local s = sites[i]
+    for j = 1, math.min(#s.imps, 2) do
+      local imp = s.imps[j]
+      table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+        command_id = "CMD_" .. unitId .. "_" .. imp .. "_improve_" .. s.x .. "_" .. s.y,
+        kind = "move_unit",
+        fixed_arguments = {unit_id = unitId, target_x = s.x, target_y = s.y, improvement_id = imp,
+          intent = "improve", A = 2, G = 1, goal = 1},
+      }))
+    end
+  end
+end
+
 -- City ranged strike: a walled city with an enemy unit within 2 tiles.
 function Civ6Ai_Snapshot._AddCityStrikeCommands(commands, playerID)
   local M = Civ6Ai_Snapshot._Method
@@ -3634,6 +3741,8 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
         Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
         pcall(Civ6Ai_Snapshot._AddTradeRouteCommands, commands, playerID, unit, unitId)
         pcall(Civ6Ai_Snapshot._AddExploreCommand, commands, unit, unitId)
+        local okB, whyB = pcall(Civ6Ai_Snapshot._AddBuilderImproveCommands, commands, playerID, unit, unitId)
+        if not okB then Civ6Ai_Util.Log("snapshot|improve_error|" .. tostring(whyB)) end
         pcall(Civ6Ai_Snapshot._AddActivateCommand, commands, playerID, unit, unitId)
         local okP, whyP = pcall(Civ6Ai_Snapshot._AddProgressionCommands, commands, playerID, unit, unitId)
         if not okP then Civ6Ai_Util.Log("snapshot|progression_error|" .. tostring(whyP)) end

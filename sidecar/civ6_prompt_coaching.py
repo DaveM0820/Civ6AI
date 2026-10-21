@@ -529,7 +529,7 @@ def builder_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
         labels.append(f"({s['x']},{s['y']})" + (f" {res}" if res else "") + f", dist {s['dist']}")
     return [pipeline._wire_line(
         f"{prefix}.improve.sites",
-        "; ".join(labels) + " — MoveTo one; next turn its Improve options appear on that tile (own unimproved land only)",
+        "; ".join(labels) + " — order Improve(x,y,IMPROVEMENT_X) from its legal list: it walks there and builds on arrival",
     )]
 
 

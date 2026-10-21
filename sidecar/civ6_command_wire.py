@@ -209,6 +209,9 @@ def unit_command_token(command: dict[str, Any]) -> str | None:
             return f"FoundReligion({xy[0]},{xy[1]})"
         if (arrival == 4 or intent in ("trade", "4")) and xy:
             return f"TradeRoute({xy[0]},{xy[1]})"
+        build = fixed.get("improvement_id")
+        if (arrival == 2 or intent in ("improve", "2")) and xy and isinstance(build, str) and build:
+            return f"Improve({xy[0]},{xy[1]},{build})"
         return f"MoveTo({xy[0]},{xy[1]})" if xy else None
     if kind in ("attack_target", "range_attack", "melee_attack"):
         return f"AttackTo({xy[0]},{xy[1]})" if xy else None
@@ -375,6 +378,9 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
         verb = "foundcity"
     if verb == "traderoute":
         return _synthesize_trade_route(snapshot, unit_id, value)
+    improves = [(t, c) for t, c in candidates if _verb(t) == "improve" and _COORD_RE.search(t)]
+    if improves and verb in ("improve", "moveto"):
+        return _pick_improve(improves, value, coord)
     for token, cmd_id in candidates:
         if _verb(token) != verb:
             continue
@@ -515,6 +521,37 @@ def _self_tile_command(snapshot: dict[str, Any], unit_id: str) -> str | None:
             return str(command.get("command_id"))
     LAST_UNRESOLVED.append(f"dropped: self-tile move for {unit_id} (no legal action here)")
     return None
+
+
+def _pick_improve(improves: list[tuple[str, str]], value: Any, coord: Any) -> str:
+    """Builder: the Improve offer for that tile (and improvement, if named), else the nearest site."""
+    want = _norm(value)
+    if coord:
+        x, y = int(coord.group(1)), int(coord.group(2))
+        here = [(t, c) for t, c in improves
+                if (int(_COORD_RE.search(t).group(1)), int(_COORD_RE.search(t).group(2))) == (x, y)]
+        for t, c in here:
+            imp = t.rsplit(",", 1)[-1].rstrip(")").lower()
+            if imp in want or imp.replace("improvement_", "") in want:
+                return c
+        if here:
+            return here[0][1]
+
+        def dist(item: tuple[str, str]) -> int:
+            m = _COORD_RE.search(item[0])
+            return _hex_dist(x, y, int(m.group(1)), int(m.group(2)))
+
+        return min(improves, key=dist)[1]
+    return improves[0][1]
+
+
+def _hex_dist(x1: int, y1: int, x2: int, y2: int) -> int:
+    def cube(x: int, y: int) -> tuple[int, int, int]:
+        q = x - (y - (y & 1)) // 2
+        return q, y, -q - y
+
+    a, b = cube(x1, y1), cube(x2, y2)
+    return max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[2] - b[2]))
 
 
 def _synthesize_far_move(

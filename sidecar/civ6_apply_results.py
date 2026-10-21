@@ -882,6 +882,34 @@ def _explore_substitute(snapshot: dict[str, Any], dropped_move: dict[str, Any],
     return sub
 
 
+def _improve_substitute(snapshot: dict[str, Any], dropped_move: dict[str, Any], reverse: dict[str, str],
+                        x: Any, y: Any) -> dict[str, Any] | None:
+    """The builder's listed Improve offer nearest the dropped target."""
+    args = dropped_move.get("arguments") if isinstance(dropped_move.get("arguments"), dict) else {}
+    unit = str(args.get("unit_id") or "")
+    unit = reverse.get(unit, unit)
+    from sidecar.civ6_command_wire import _hex_dist
+
+    best = None
+    for c in snapshot.get("legal_commands") or []:
+        fixed = c.get("fixed_arguments") if isinstance(c, dict) else None
+        if (not isinstance(fixed, dict) or fixed.get("unit_id") != unit or c.get("kind") != "move_unit"
+                or fixed.get("intent") != "improve"):
+            continue
+        try:
+            d = _hex_dist(int(x), int(y), int(fixed["target_x"]), int(fixed["target_y"]))
+        except (TypeError, ValueError, KeyError):
+            d = 0
+        if best is None or d < best[0]:
+            best = (d, c)
+    if best is None:
+        return None
+    c = best[1]
+    sub = {k: v for k, v in dropped_move.items() if k not in ("arguments", "command_id", "kind")}
+    sub.update({"command_id": c["command_id"], "kind": "move_unit", "arguments": dict(c["fixed_arguments"])})
+    return sub
+
+
 def _land_units_cannot_embark(snapshot: dict[str, Any]) -> bool:
     """Shipbuilding not researched yet: Sailing or Shipbuilding is still current or offered."""
     techs = ((snapshot.get("civ6") or {}).get("governance") or {}).get("techs") or {}
@@ -928,6 +956,13 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
             substitutes.append(sub)
             dropped.append(f"note: {unit} explores instead")
 
+    def _improve_instead(command: dict[str, Any], x: Any, y: Any) -> None:
+        unit = str((command.get("arguments") or {}).get("unit_id") or "")
+        sub = _improve_substitute(snapshot, command, reverse, x, y)
+        if sub is not None:
+            substitutes.append(sub)
+            dropped.append(f"note: {unit} goes to improve ({sub['arguments']['target_x']},{sub['arguments']['target_y']}) instead")
+
     for command in commands:
         fp = _command_fingerprint(command)
         matched = None
@@ -939,6 +974,7 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
         if (fp[0] == "move_unit" and (fp[1] in builders or reverse.get(fp[1]) in builders)
                 and (fp[2], fp[3]) in plot_owner and plot_owner[(fp[2], fp[3])] != me):
             dropped.append(f"dropped: builder MoveTo({fp[2]},{fp[3]}) is outside your borders; builders improve only your own tiles")
+            _improve_instead(command, fp[2], fp[3])
             continue
         if fp[0] == "move_unit" and (fp[2], fp[3]) in peak_plots:
             dropped.append(f"dropped: MoveTo({fp[2]},{fp[3]}) is a mountain; no unit can enter it")

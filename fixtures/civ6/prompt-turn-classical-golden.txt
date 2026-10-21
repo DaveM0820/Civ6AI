@@ -131,7 +131,7 @@ remember = text plus duration; store deals, rival impressions, war aims, and mul
 Required Event.* logs this turn: 1 (numbered under REQUIRED COMMANDS).
 
 Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):
-unitId.command = MoveTo(x,y) | AttackTo(x,y) | FoundCity | Fortify | Skip (one option per unit from its row; MoveTo(x,y) = any destination tile, the unit walks toward it).
+unitId.command = MoveTo(x,y) | AttackTo(x,y) | FoundCity | Improve(x,y,IMPROVEMENT_X) (builders) | Fortify | Skip (one option per unit from its row; MoveTo(x,y) = any destination tile, the unit walks toward it).
 cityName.production = UNIT_* | BUILDING_* | PROJECT_* from that city's listed options (only when currentProduction is NONE, or to switch on purpose).
 legal.research.tech, legal.research.civic, chat.all, chat.Cleopatra — see OPTIONAL COMMANDS.
 Do not use Skip when another option is listed.

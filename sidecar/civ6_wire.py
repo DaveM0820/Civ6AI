@@ -1443,7 +1443,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         f"Required Event.* logs this turn: {event_count} (numbered under REQUIRED COMMANDS).",
         "",
         "Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):",
-        "unitId.command = MoveTo(x,y) | AttackTo(x,y) | FoundCity | Fortify | Skip "
+        "unitId.command = MoveTo(x,y) | AttackTo(x,y) | FoundCity | Improve(x,y,IMPROVEMENT_X) (builders) | Fortify | Skip "
         "(one option per unit from its row; MoveTo(x,y) = any destination tile, the unit walks toward it).",
         "cityName.production = UNIT_* | BUILDING_* | PROJECT_* from that city's listed options (only when "
         "currentProduction is NONE, or to switch on purpose).",

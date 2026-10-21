@@ -357,6 +357,11 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
     if target is None:
         return [], [f"{key}={value}: not a met rival"]
     pid, name, text = target["player_id"], target["name"], str(value or "").strip()
+    if not low.startswith("deal.") and text.upper().replace(" ", "_") in ("ACCEPT_DEAL", "ACCEPT"):
+        # legal.diplomacy.X=ACCEPT_DEAL means: accept X's open offer.
+        if any(d.get("from") == pid for d in _open_offers_to_me(snapshot)):
+            return bind_reply(snapshot, f"deal.{name}.respond", "ACCEPT")
+        return [], []
     if low.startswith("deal.") and low.endswith(".respond"):
         deals = load_deals(snapshot)
         offer = next((d for d in reversed(deals) if d in _open_offers_to_me(snapshot) and d.get("from") == pid), None)
@@ -400,6 +405,9 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
             return [], [f"{key}={value}: {problem}"]
         deals = [d for d in load_deals(snapshot)
                  if not (d.get("status") == "pending" and d.get("from") == _me(snapshot) and d.get("to") == pid)]
+        if any(d.get("from") == _me(snapshot) and d.get("to") == pid and d.get("give") == give
+               and d.get("want") == want and _turn(snapshot) - int(d.get("turn") or 0) <= 10 for d in deals):
+            return [], [f"{key}={value}: same offer to {name} was already made in the last 10 turns; not resent"]
         deals.append({"from": _me(snapshot), "to": pid, "give": give, "want": want,
                       "turn": _turn(snapshot), "status": "pending"})
         _save(snapshot, deals)
