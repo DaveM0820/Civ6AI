@@ -440,10 +440,16 @@ def attention_items(snapshot: dict[str, Any]) -> list[str]:
         if not isinstance(city, dict):
             continue
         production = city.get("production") if isinstance(city.get("production"), dict) else {}
-        if not production.get("item_id"):
+        item = production.get("item_id")
+        if not item or str(item).upper() in ("NONE", "NULL"):
             idle_cities.append(pipeline._city_prompt_name(city))
     if idle_cities:
-        items.append(f"***Cities need production: {', '.join(idle_cities)}***")
+        items.append(
+            "QUEUE EMPTY: "
+            + ", ".join(idle_cities)
+            + " have nothing in production. Choose an item from each city's catalog this turn. "
+            "Nothing will be queued for you."
+        )
     return items
 
 
@@ -507,8 +513,11 @@ def production_catalog_lines(snapshot: dict[str, Any], city_tokens: dict[str, di
         if not options:
             continue
         turns = turns_by_city.get(city_id) if isinstance(turns_by_city.get(city_id), dict) else {}
-        parts = []
-        for token in options:
+        from sidecar import civ6_combat_wire as combat_wire
+
+        threatened = city_id in combat_wire.threatened_city_ids(snapshot)
+        ranked: list[tuple[int, int, str]] = []
+        for index, token in enumerate(options):
             base = token.split("@", 1)[0].split(":", 1)[0]
             turn_n = turns.get(token, turns.get(base))
             if isinstance(turn_n, int) and turn_n >= 30:
@@ -517,8 +526,28 @@ def production_catalog_lines(snapshot: dict[str, Any], city_tokens: dict[str, di
             if not isinstance(item, dict):
                 item = {}
             stats = _catalog_stats(item, turn_n if isinstance(turn_n, int) else None)
-            parts.append(f"{token} ({stats})" if stats else token)
-        lines.append(pipeline._wire_line(f"{pipeline._city_prompt_name(city)}.production.catalog", " | ".join(parts)))
+            text = f"{token} ({stats})" if stats else token
+            rank = index
+            if threatened:
+                upper = base.upper()
+                ranged = _num(item.get("ranged")) or 0
+                combat = _num(item.get("combat")) or 0
+                ranged_name = any(k in upper for k in ("ARCHER", "CROSSBOW", "SLINGER", "CANNON", "CATAPULT", "TREBUCHET", "BOMBARD"))
+                if "WALL" in upper:
+                    rank = 0
+                elif ranged > 0 or ranged_name:
+                    rank = 1
+                elif combat > 0 or upper.startswith("UNIT_"):
+                    rank = 2
+                else:
+                    rank = 3
+            ranked.append((rank, index, text))
+        ranked.sort()
+        parts = [text for _, _, text in ranked]
+        prefix = "THREATENED — walls, ranged, then melee first: " if threatened and parts else ""
+        lines.append(pipeline._wire_line(
+            f"{pipeline._city_prompt_name(city)}.production.catalog", prefix + " | ".join(parts),
+        ))
     if lines:
         lines.insert(0, "# Production catalogs (stats only; reply with the bare ID, e.g. UNIT_WARRIOR):")
     return lines

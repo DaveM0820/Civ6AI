@@ -122,6 +122,15 @@ _SIMPLE_REASONS = {
     "trade_unavailable": "the game has no trade-route operation for this unit",
     "explore_unavailable": "the game has no explore operation for this unit",
     "activate_unavailable": "the game could not activate that great person",
+    "no_result_from_gameplay": "the game never reported a result for this order before the turn ended; reissue it if it is still legal",
+    "no_effect:zero_damage": "the combat forecast is 0 damage, so the attack was not made",
+    "not_at_war": "you are not at war with that owner",
+    "no_enemy_on_plot": "no enemy unit or city is on that tile",
+    "no_attacks_left": "this unit has no attacks left this turn",
+    "no_combat_forecast": "the game could not forecast that attack, so it was not made",
+    "forecast_failed": "the game could not forecast that attack, so it was not made",
+    "forecast_empty": "the game could not forecast that attack, so it was not made",
+    "out_of_range": "the target is outside this unit's attack range",
 }
 
 
@@ -157,6 +166,14 @@ def describe_reason(reason: Any) -> str:
                 f"moved toward ({match.group('nx')},{match.group('ny')}) instead")
     if text.startswith("retargeted:"):
         return "destination occupied; the game picked a free neighbouring tile"
+    if text.startswith("no_effect:zero_damage"):
+        return "the combat forecast is 0 damage, so the attack was not made"
+    if text.startswith("no_effect:damage_not_applied"):
+        forecast = text.split("forecast=", 1)[-1] if "forecast=" in text else ""
+        extra = f" (forecast {forecast})" if forecast else ""
+        return "the forecast dealt damage but the game did not apply it" + extra
+    if text.startswith("out_of_range"):
+        return "the target is outside this unit's attack range"
     if text.startswith("gamecore_error:") or text.startswith("move_unit_error:"):
         return "the game raised a script error on that order"
     if text.startswith("gamecore_unavailable:"):
@@ -654,6 +671,46 @@ def dropped_lines(context: dict[str, Any]) -> list[str]:
             seen.add(note)
             out.append(note)
     return out[:12]
+
+
+def strategy_orders_note(strategy: str, commands: list[dict[str, Any]]) -> str | None:
+    """One context line when the stated strategy and the issued orders diverge. Does not change orders."""
+    text = (strategy or "").lower()
+    if not text.strip() or not isinstance(commands, list):
+        return None
+
+    def mentioned(*words: str) -> bool:
+        return any(re.search(rf"\b{re.escape(word)}\b", text) for word in words)
+
+    kinds = {str(c.get("kind") or "") for c in commands if isinstance(c, dict)}
+    notes: list[str] = []
+    if mentioned("peace", "treaty") and not ({"execute_deal", "send_diplomatic_action"} & kinds):
+        notes.append("strategy mentioned peace but no peace or deal order was issued")
+    if mentioned("attack", "assault", "capture", "invade", "strike") and not (
+        {"attack_target", "city_attack"} & kinds
+    ):
+        notes.append("strategy mentioned attacking but no attack or city strike was issued")
+    if mentioned("defend", "garrison", "fortify", "walls") and not (
+        {"unit_posture_fortify", "attack_target", "city_attack", "queue_production"} & kinds
+    ):
+        notes.append("strategy mentioned defense but no fortify, attack, city strike, or production order was issued")
+    if not notes:
+        return None
+    return "; ".join(notes)
+
+
+def attach_strategy_orders_note(thought_memory: dict[str, Any], turn: int, commands: list[dict[str, Any]]) -> None:
+    thoughts = thought_memory.get("thoughts") if isinstance(thought_memory, dict) else None
+    if not isinstance(thoughts, list):
+        return
+    entry = next((item for item in thoughts if isinstance(item, dict) and int(item.get("turn", -1)) == turn), None)
+    if not isinstance(entry, dict):
+        return
+    note = strategy_orders_note(str(entry.get("strategy") or ""), commands)
+    if note:
+        entry["orders_note"] = note
+    else:
+        entry.pop("orders_note", None)
 
 
 def record_dropped(snapshot: dict[str, Any], notes: list[str]) -> None:

@@ -435,7 +435,10 @@ function Civ6Ai_OrderChannel.DrainResults()
   local turn = Game.GetCurrentGameTurn()
   local left = 0
   for seq, entry in pairs(Civ6Ai_OrderChannel._pending) do
-    if turn > entry.turn then
+    -- Queued orders run at the seat's turn start, which can be the same moment
+    -- the turn counter increments. Wait one further turn before telling the
+    -- model the order never ran, so a result written on that tick is kept.
+    if turn > entry.turn + 1 then
       Civ6Ai_OrderChannel._pending[seq] = nil
       Civ6Ai_Apply._RecordResult(entry.playerID, entry.command, false, "no_result_from_gameplay", entry.command.arguments or {})
       log("result_missing|seq=" .. tostring(seq) .. "|for_turn=" .. tostring(entry.turn))

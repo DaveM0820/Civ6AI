@@ -210,7 +210,12 @@ def _build_approved_record(
         if str(token).endswith("=Automate(explore)"):
             continue  # already automated: nothing to do
         token = str(token)
-        dropped.append(token if token.startswith("dropped:") else f"dropped: unresolved token {token}")
+        if token.startswith("dropped:"):
+            dropped.append(token)
+        elif ": " in token:
+            dropped.append(f"dropped: {token}")
+        else:
+            dropped.append(f"dropped: unresolved token {token}")
     civ6_apply_results.record_dropped(snapshot, dropped)
     return {
         "status": "approved",
@@ -765,6 +770,10 @@ def main() -> None:
         thought_memory = _persist_thought_memory(
             snapshot, normalized_response, model, thought_memory, thought_path,
         )
+        if isinstance(thought_memory, dict):
+            civ6_apply_results.attach_strategy_orders_note(
+                thought_memory, int(snapshot["decision"]["turn"]), record.get("commands") or [],
+            )
         breaker.record(player_id, True)
     except Exception as error:
         breaker.record_failure(player_id, getattr(error, "category", "pipeline_failure"), str(error))
@@ -777,6 +786,10 @@ def main() -> None:
             thought_memory = _persist_thought_memory(
                 snapshot, salvaged.get("response", {}), model, thought_memory, thought_path,
             )
+            if isinstance(thought_memory, dict):
+                civ6_apply_results.attach_strategy_orders_note(
+                    thought_memory, int(snapshot["decision"]["turn"]), salvaged.get("commands") or [],
+                )
             breaker.record(player_id, True)
         else:
             record = {

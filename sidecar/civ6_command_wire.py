@@ -397,7 +397,59 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
         )
     if verb == "moveto" and coord:
         return _synthesize_far_move(snapshot, unit_id, int(coord.group(1)), int(coord.group(2)))
+    if verb == "fortify":
+        return _synthesize_fortify(snapshot, unit_id)
     return None
+
+
+_CIVILIAN_MARKERS = (
+    "SETTLER", "BUILDER", "TRADER", "GREAT_", "MISSIONARY", "APOSTLE", "GURU", "INQUISITOR", "ROCK_BAND",
+)
+
+
+def _is_military_unit(unit: dict[str, Any] | None) -> bool:
+    if not isinstance(unit, dict):
+        return False
+    type_id = str(unit.get("unit_type_id") or "").upper()
+    if any(marker in type_id for marker in _CIVILIAN_MARKERS):
+        return False
+    strength = unit.get("strength")
+    if isinstance(strength, dict):
+        for key in ("current", "base", "combat"):
+            value = strength.get(key)
+            if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                return True
+    return type_id.startswith("UNIT_")
+
+
+def _synthesize_fortify(snapshot: dict[str, Any], unit_id: str) -> str | None:
+    """Fortify was omitted when the UI CanStartOperation check failed for an AI seat."""
+    unit = _unit_row(snapshot, unit_id)
+    if not _is_military_unit(unit):
+        return None
+    return _append_legal(snapshot, {
+        "command_id": f"CMD_fortify_{unit_id}",
+        "kind": "unit_posture_fortify",
+        "description": f"Fortify {unit_id}",
+        "fixed_arguments": {"unit_id": unit_id},
+    })
+
+
+def unresolved_unit_note(snapshot: dict[str, Any], unit_id: str, key: str, value: Any) -> str:
+    verb = _verb(value)
+    if verb == "fortify":
+        unit = _unit_row(snapshot, unit_id)
+        if unit is None:
+            return f"{key}={value}: that unit is not in your army"
+        if not _is_military_unit(unit):
+            return f"{key}={value}: Fortify is only for a military unit"
+        return f"{key}={value}: this unit cannot fortify now"
+    if verb in ("attackto", "attack", "rangedattack"):
+        return (
+            f"{key}={value}: no attack is legal at that tile this turn "
+            "(the enemy is outside this unit's attack range, or you are not at war)"
+        )
+    return f"{key}={value}"
 
 
 # WP-A OrderChannel: A=0 move, 1 found, 2 improve, 3 found_religion, 4 trade. N is batch count.
@@ -878,7 +930,7 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
             if cmd_id:
                 bound.append(cmd_id)
             else:
-                unresolved.append(f"{key}={value}")
+                unresolved.append(unresolved_unit_note(snapshot, units[head], key, value))
             continue
         if prop and head.lower() in cities and prop.lower() in {
             p.lower() for p in CITY_PROPS

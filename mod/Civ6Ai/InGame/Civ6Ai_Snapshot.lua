@@ -729,7 +729,7 @@ function Civ6Ai_Snapshot._CityAmenities(city)
 end
 
 function Civ6Ai_Snapshot._CityDefense(city)
-  local defense = {percent = 100, health_percent = 100, bombard_damage = 0}
+  local defense = {percent = 100, health_percent = 100, bombard_damage = 0, wall_hp = 0, wall_max_hp = 0}
   if city == nil then
     return defense
   end
@@ -752,7 +752,32 @@ function Civ6Ai_Snapshot._CityDefense(city)
     defense.health_percent = defense.percent
   end
   defense.bombard_damage = damage
+  local district = Civ6Ai_Snapshot._CityCenterDistrict(city)
+  if district ~= nil and DefenseTypes ~= nil then
+    local wMax = tonumber(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_OUTER)) or 0
+    local wDmg = tonumber(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_OUTER)) or 0
+    defense.wall_max_hp = math.floor(wMax)
+    defense.wall_hp = math.floor(math.max(0, wMax - wDmg))
+  end
   return defense
+end
+
+function Civ6Ai_Snapshot._GarrisonIds(playerID, x, y)
+  local ids = {}
+  local plot = Map.GetPlot ~= nil and Map.GetPlot(x, y) or nil
+  if plot == nil or Units == nil or Units.GetUnitsInPlot == nil then
+    return ids
+  end
+  local ok, list = pcall(function() return Units.GetUnitsInPlot(plot) end)
+  if not ok or list == nil then
+    return ids
+  end
+  for _, unit in ipairs(list) do
+    if unit ~= nil and unit.GetOwner ~= nil and unit:GetOwner() == playerID then
+      table.insert(ids, Civ6Ai_Snapshot._UnitWireId(unit))
+    end
+  end
+  return ids
 end
 
 function Civ6Ai_Snapshot._BuildYourCities(playerID)
@@ -796,7 +821,7 @@ function Civ6Ai_Snapshot._BuildYourCities(playerID)
         espionage = Civ6Ai_Snapshot._EmptyCommerceItem(),
       },
       buildings = {},
-      garrison_unit_ids = {},
+      garrison_unit_ids = Civ6Ai_Snapshot._GarrisonIds(playerID, x, y),
       worked_plot_ids = {},
       automation = {citizens = false, production = true},
       culture = Civ6Ai_Snapshot._EmptyAmounts(),
@@ -1512,6 +1537,16 @@ function Civ6Ai_Snapshot._RelationFacts(playerID, otherID)
   end
   if facts.at_war then
     facts.relationship = "war"
+    local since = Civ6Ai_Snapshot._Method(myDiplo, "GetAtWarTurn", otherID)
+    if type(since) ~= "number" then
+      since = Civ6Ai_Snapshot._Method(myDiplo, "GetDeclaredWarTurn", otherID)
+    end
+    if type(since) ~= "number" then
+      since = Civ6Ai_Snapshot._Method(myDiplo, "GetWarStartTurn", otherID)
+    end
+    if type(since) == "number" and since >= 0 then
+      facts.war_since_turn = math.floor(since)
+    end
   elseif facts.alliance then
     facts.relationship = "alliance"
   elseif facts.state ~= nil then
@@ -1669,6 +1704,7 @@ function Civ6Ai_Snapshot._BuildDiplomacy(playerID)
       relationship = facts.relationship,
       diplomatic_score = facts.score,
       at_war = facts.at_war,
+      war_since_turn = facts.war_since_turn,
       can_declare_war = facts.can_declare_war == true,
       can_make_peace = facts.can_make_peace == true,
       denounced = facts.denounced,
@@ -2911,13 +2947,31 @@ function Civ6Ai_Snapshot._IsEnemyOwner(playerID, ownerID)
   return ok and atWar == true
 end
 
+function Civ6Ai_Snapshot._PlotVisible(playerID, x, y)
+  local vis = PlayersVisibility ~= nil and PlayersVisibility[playerID] or nil
+  if vis == nil or vis.IsVisible == nil then
+    return true
+  end
+  local plot = Map.GetPlot ~= nil and Map.GetPlot(x, y) or nil
+  if plot ~= nil and plot.GetIndex ~= nil then
+    local ok, visible = pcall(function() return vis:IsVisible(plot:GetIndex()) end)
+    if ok then
+      return visible == true
+    end
+  end
+  local ok2, visible2 = pcall(function() return vis:IsVisible(x, y) end)
+  if ok2 and visible2 == false then
+    return false
+  end
+  return true
+end
+
 function Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot)
   if plot == nil then
     return nil
   end
   local x, y = plot:GetX(), plot:GetY()
-  local visOk, visible = pcall(function() return PlayersVisibility[playerID]:IsVisible(x, y) end)
-  if visOk and visible == false then
+  if not Civ6Ai_Snapshot._PlotVisible(playerID, x, y) then
     return nil
   end
   local cityOk, city = pcall(function() return Cities.GetCityInPlot(x, y) end)
@@ -2935,16 +2989,54 @@ function Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot)
   return nil
 end
 
-function Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
-  if UnitOperationTypes == nil or UnitManager == nil or UnitManager.CanStartOperation == nil then
+function Civ6Ai_Snapshot._HostileTargets(playerID)
+  if Civ6Ai_Snapshot._hostileCachePlayer == playerID and Civ6Ai_Snapshot._hostileCache ~= nil then
+    return Civ6Ai_Snapshot._hostileCache
+  end
+  local hostiles, cities = Civ6Ai_Snapshot._VisibleHostiles(playerID)
+  local targets = {}
+  for _, h in ipairs(hostiles) do
+    table.insert(targets, {x = h.x, y = h.y, who = "unit"})
+  end
+  for _, c in ipairs(cities) do
+    table.insert(targets, {x = c.x, y = c.y, who = "city"})
+  end
+  Civ6Ai_Snapshot._hostileCachePlayer = playerID
+  Civ6Ai_Snapshot._hostileCache = targets
+  return targets
+end
+
+function Civ6Ai_Snapshot._OfferAttack(commands, seen, unitId, tx, ty, kind, ranged)
+  local key = tostring(tx) .. "," .. tostring(ty)
+  if seen[key] then
     return
   end
+  seen[key] = true
+  table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+    command_id = "CMD_attack_" .. unitId .. "_" .. tostring(tx) .. "_" .. tostring(ty),
+    kind = "attack_target",
+    fixed_arguments = {
+      unit_id = unitId, target_x = tx, target_y = ty,
+      target_kind = kind, ranged = ranged,
+    },
+  }))
+end
+
+function Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
   local info = Civ6Ai_Snapshot._UnitInfo(unit)
   if not Civ6Ai_Snapshot._IsMilitaryInfo(info) then
     return
   end
   local x, y = unit:GetX(), unit:GetY()
   local ranged = (info.ranged or 0) > 0 and (info.range or 0) > 0
+  local reach = ranged and (tonumber(info.range) or 0) or 1
+  local seen = {}
+  for _, target in ipairs(Civ6Ai_Snapshot._HostileTargets(playerID)) do
+    local dist = Civ6Ai_Snapshot._Dist(x, y, target.x, target.y)
+    if dist >= 1 and dist <= reach then
+      Civ6Ai_Snapshot._OfferAttack(commands, seen, unitId, target.x, target.y, target.who, ranged)
+    end
+  end
   local plots = {}
   if ranged and Map.GetNeighborPlots ~= nil then
     local ok, list = pcall(function() return Map.GetNeighborPlots(x, y, info.range) end)
@@ -2957,36 +3049,8 @@ function Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
   end
   for _, plot in ipairs(plots) do
     local tx, ty = plot:GetX(), plot:GetY()
-    if not (tx == x and ty == y) then
-      local target = Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot)
-      if target ~= nil then
-        local params = {}
-        params[UnitOperationTypes.PARAM_X] = tx
-        params[UnitOperationTypes.PARAM_Y] = ty
-        local op = UnitOperationTypes.MOVE_TO
-        if ranged then
-          op = UnitOperationTypes.RANGE_ATTACK
-        elseif UnitOperationMoveModifiers ~= nil and UnitOperationMoveModifiers.ATTACK ~= nil then
-          params[UnitOperationTypes.PARAM_MODIFIERS] = UnitOperationMoveModifiers.ATTACK
-        end
-        local ok, can = pcall(function()
-          return UnitManager.CanStartOperation(unit, op, nil, params)
-        end)
-        if not (ok and can) then
-          -- CanStartOperation is a local-player UI check; AI seats still see
-          -- the adjacent enemy and apply attack through the synced channel.
-          Civ6Ai_Util.Log("snapshot|attack_ui_false|player=" .. tostring(playerID)
-            .. "|unit=" .. tostring(unitId) .. "|plot=" .. tostring(tx) .. "," .. tostring(ty))
-        end
-        table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-          command_id = "CMD_attack_" .. unitId .. "_" .. tostring(tx) .. "_" .. tostring(ty),
-          kind = "attack_target",
-          fixed_arguments = {
-            unit_id = unitId, target_x = tx, target_y = ty,
-            target_kind = target, ranged = ranged,
-          },
-        }))
-      end
+    if not (tx == x and ty == y) and Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot) ~= nil then
+      Civ6Ai_Snapshot._OfferAttack(commands, seen, unitId, tx, ty, Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot), ranged)
     end
   end
 end
@@ -3341,19 +3405,36 @@ function Civ6Ai_Snapshot._AddBuilderImproveCommands(commands, playerID, unit, un
     .. "|dropped_area=" .. tostring(droppedArea))
 end
 
--- City ranged strike: a walled city with an enemy unit within 2 tiles.
+-- City ranged strike: an enemy unit within 2 tiles. Walls are not required to
+-- offer the order; Gov.CityStrike refuses a zero forecast and says why.
 function Civ6Ai_Snapshot._AddCityStrikeCommands(commands, playerID)
-  local M = Civ6Ai_Snapshot._Method
+  local seen = {}
+  local function offer(city, tx, ty)
+    local dist = Civ6Ai_Snapshot._Dist(city:GetX(), city:GetY(), tx, ty)
+    if dist < 1 or dist > Civ6Ai_Snapshot.CITY_STRIKE_RANGE then
+      return
+    end
+    local key = tostring(city:GetID()) .. ":" .. tostring(tx) .. "," .. tostring(ty)
+    if seen[key] then
+      return
+    end
+    seen[key] = true
+    table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+      command_id = "CMD_citystrike_" .. tostring(city:GetID()) .. "_" .. tostring(tx) .. "_" .. tostring(ty),
+      kind = "city_attack",
+      fixed_arguments = {city_id = Civ6Ai_Production._WireCityId(city), target_x = tx, target_y = ty},
+    }))
+  end
   for _, city in Players[playerID]:GetCities():Members() do
-    local d = Civ6Ai_Snapshot._CityCenterDistrict(city)
-    if d ~= nil and (tonumber(M(d, "GetMaxDamage", DefenseTypes.DISTRICT_OUTER)) or 0) > 0 then
+    for _, target in ipairs(Civ6Ai_Snapshot._HostileTargets(playerID)) do
+      if target.who == "unit" then
+        offer(city, target.x, target.y)
+      end
+    end
+    if Map.GetNeighborPlots ~= nil then
       for _, plot in ipairs(Map.GetNeighborPlots(city:GetX(), city:GetY(), Civ6Ai_Snapshot.CITY_STRIKE_RANGE) or {}) do
         if Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot) == "unit" then
-          table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-            command_id = "CMD_citystrike_" .. tostring(city:GetID()) .. "_" .. plot:GetX() .. "_" .. plot:GetY(),
-            kind = "city_attack",
-            fixed_arguments = {city_id = Civ6Ai_Production._WireCityId(city), target_x = plot:GetX(), target_y = plot:GetY()},
-          }))
+          offer(city, plot:GetX(), plot:GetY())
         end
       end
     end
@@ -3443,7 +3524,14 @@ function Civ6Ai_Snapshot._CombatUnitStats(unit)
   local info = Civ6Ai_Snapshot._UnitInfo(unit)
   local cur, maxHp = Civ6Ai_Snapshot._UnitHealth(unit)
   local bombard = Civ6Ai_Snapshot._Method(unit, "GetBombardCombat") or 0
-  local maxMoves = Civ6Ai_Snapshot._Method(unit, "GetMaxMoves") or 0
+  local maxMoves = tonumber(Civ6Ai_Snapshot._Method(unit, "GetMaxMoves")) or 0
+  if maxMoves <= 0 then
+    local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+    maxMoves = row ~= nil and (tonumber(row.BaseMoves) or tonumber(row.Moves)) or 2
+    if maxMoves == nil or maxMoves <= 0 then
+      maxMoves = 2
+    end
+  end
   local ranged = math.max(tonumber(info.ranged) or 0, tonumber(bombard) or 0)
   return {
     strength = Civ6Ai_Snapshot._CombatNum(info.combat) or 0,
@@ -3825,6 +3913,8 @@ end
 
 function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
   -- Priority order under the sidecar schema cap (512): unit orders, research/civics, then production.
+  Civ6Ai_Snapshot._hostileCache = nil
+  Civ6Ai_Snapshot._hostileCachePlayer = nil
   local commands = {}
   local prodCommands = {}
   Civ6Ai_Snapshot._AddProductionCommands(prodCommands, playerID)
@@ -3848,10 +3938,11 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
           kind = "unit_skip",
           fixed_arguments = {unit_id = unitId},
         }))
-        local canFortify = UnitManager ~= nil and UnitManager.CanStartOperation ~= nil
-          and UnitOperationTypes ~= nil and UnitOperationTypes.FORTIFY ~= nil
-          and UnitManager.CanStartOperation(unit, UnitOperationTypes.FORTIFY)
-        if canFortify then
+        -- CanStartOperation(FORTIFY) is a local-player UI check and is false for
+        -- an AI seat, so the token never reached the option list. A military
+        -- unit with movement left can fortify; gameplay applies FinishMoves.
+        local info = Civ6Ai_Snapshot._UnitInfo(unit)
+        if Civ6Ai_Snapshot._IsMilitaryInfo(info) and Civ6Ai_Snapshot._UnitMoves(unit) > 0 then
           table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
             command_id = "CMD_fortify_" .. unitId,
             kind = "unit_posture_fortify",

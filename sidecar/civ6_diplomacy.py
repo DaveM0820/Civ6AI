@@ -97,6 +97,7 @@ def _targets(snapshot: dict) -> list[dict[str, Any]]:
         out.append({
             "player_id": pid,
             "name": name,
+            "at_war": row.get("at_war") is True,
             "can_declare_war": row.get("can_declare_war") is True,
             "can_make_peace": row.get("can_make_peace") is True,
         })
@@ -105,6 +106,8 @@ def _targets(snapshot: dict) -> list[dict[str, Any]]:
 
 
 DEALS_NAME = "deals.json"
+RELATIONS_NAME = "relations.json"
+PEACE_WORDS = frozenset({"peace", "peace_treaty", "peacetreaty", "make_peace", "makepace"})
 GPT_TURNS = 10
 OFFER_TTL = 3
 # Pact -> (Gov.Deal bit, civic/tech this seat needs). Applied both ways; peace needs war, the rest peace.
@@ -159,12 +162,13 @@ def parse_items(text: str) -> list[dict[str, Any]] | str:
     items: list[dict[str, Any]] = []
     for part in re.split(r",|;|\||\band\b|\+", str(text or "")):
         part = _LABEL.sub("", part)
-        word = part.strip().lower()
+        word = part.strip().lower().replace(" ", "_")
         if not word or word in ("nothing", "none"):
             continue
-        if word.replace(" ", "_") in PACTS:
-            if {"kind": word.replace(" ", "_")} not in items:
-                items.append({"kind": word.replace(" ", "_")})
+        if word in PEACE_WORDS or word in PACTS:
+            kind = "peace" if word in PEACE_WORDS else word
+            if {"kind": kind} not in items:
+                items.append({"kind": kind})
             continue
         m, rev = _ITEM.match(part), _ITEM_REV.match(part)
         if rev:
@@ -273,7 +277,9 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     names = []
     for target in _targets(snapshot):
-        if target["can_declare_war"]:
+        if target["at_war"] or target["can_make_peace"]:
+            out.append((f"legal.diplomacy.{target['name']}", "PEACE_TREATY"))
+        elif target["can_declare_war"]:
             out.append((f"legal.diplomacy.{target['name']}", "DECLARE_WAR"))
         if target["player_id"].startswith("PLAYER_") and target in _majors(snapshot):
             names.append(target["name"])
@@ -490,6 +496,115 @@ def city_state_lines(snapshot: dict) -> list[str]:
     return lines
 
 
+def _relations_path(snapshot: dict) -> Path | None:
+    path = _deals_path(snapshot)
+    return path.with_name(RELATIONS_NAME) if path is not None else None
+
+
+def _load_relations(snapshot: dict) -> dict[str, Any]:
+    path = _relations_path(snapshot)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8")) if path and path.is_file() else {}
+    except (OSError, ValueError):
+        raw = {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def remember_wars(snapshot: dict) -> dict[str, Any]:
+    """First turn each war is seen, shared by both seats. An engine turn wins when earlier."""
+    data = _load_relations(snapshot)
+    diplo = diplomacy(snapshot)
+    if "majors" not in diplo:
+        return data
+    me, turn = _me(snapshot), _turn(snapshot)
+    if not me:
+        return data
+    live: set[str] = set()
+    changed = False
+    for major in _lst(diplo.get("majors")):
+        if not isinstance(major, dict) or not major.get("at_war"):
+            continue
+        pid = str(major.get("player_id") or "")
+        if not pid:
+            continue
+        key = "|".join(sorted((me, pid)))
+        live.add(key)
+        row = data.get(key) if isinstance(data.get(key), dict) else {}
+        since = row.get("since") if isinstance(row.get("since"), int) else None
+        engine = major.get("war_since_turn")
+        if isinstance(engine, int) and engine >= 0 and (since is None or engine < since):
+            since = engine
+        if since is None:
+            since = turn
+        if row.get("since") != since:
+            data[key] = {"since": since}
+            changed = True
+    for key in list(data):
+        parts = str(key).split("|")
+        if me in parts and key not in live:
+            data.pop(key, None)
+            changed = True
+    path = _relations_path(snapshot)
+    if changed and path is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
+        os.replace(tmp, path)
+    return data
+
+
+def _peace_items(deal: dict) -> bool:
+    for side in ("give", "want"):
+        for item in deal.get(side) or []:
+            if isinstance(item, dict) and item.get("kind") == "peace":
+                return True
+    return False
+
+
+def rival_status_line(snapshot: dict, rival_id: str) -> str | None:
+    """One line: at war since T81; peace offered T96 pending/rejected."""
+    major = next((m for m in _lst(diplomacy(snapshot).get("majors")) if isinstance(m, dict)
+                  and str(m.get("player_id")) == str(rival_id)), None)
+    if major is None:
+        return None
+    wars = remember_wars(snapshot)
+    me, turn = _me(snapshot), _turn(snapshot)
+    key = "|".join(sorted((me, str(rival_id))))
+    row = wars.get(key) if isinstance(wars.get(key), dict) else {}
+    since = row.get("since") if isinstance(row.get("since"), int) else None
+    if major.get("at_war"):
+        bits = [f"at war since T{since}" if since is not None else "at war"]
+    else:
+        bits = []
+    name = pipeline._player_chat_name(snapshot, str(rival_id))
+    latest: tuple[int, str] | None = None
+    for deal in load_deals(snapshot):
+        if {deal.get("from"), deal.get("to")} != {me, str(rival_id)} or not _peace_items(deal):
+            continue
+        status = deal.get("status")
+        offered = int(deal.get("turn") or 0)
+        age = turn - offered
+        done_age = turn - int(deal.get("done_turn") or offered)
+        text = ""
+        if status == "pending" and age <= OFFER_TTL:
+            whose = "you must answer" if deal.get("to") == me else "waiting on them"
+            text = f"peace offered T{offered} pending ({whose})"
+        elif status == "rejected" and done_age <= OFFER_TTL:
+            why = deal.get("reason") or "rejected"
+            text = f"peace offered T{offered} rejected ({why})"
+        elif status == "accepted" and done_age <= 1:
+            text = f"peace accepted T{deal.get('done_turn') or offered}"
+        if text and (latest is None or offered >= latest[0]):
+            latest = (offered, text)
+    if latest:
+        bits.append(latest[1])
+    if not bits:
+        return None
+    if major.get("at_war") and latest and "you must answer" in latest[1]:
+        bits[-1] += f"; deal.{name}.respond = ACCEPT | REJECT"
+    return "; ".join(bits)
+
+
 def deal_status_lines(snapshot: dict) -> list[str]:
     """Civ5 diplomacy.proposal / pending / deal lines, shared from deals.json."""
     lines = [
@@ -632,9 +747,18 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
                       "turn": _turn(snapshot), "status": "pending"})
         _save(snapshot, deals)
         return [], []
+    if _norm(text) in {w.upper().replace("_", "") for w in PEACE_WORDS} or str(text).strip().upper().replace(" ", "_") in {
+        "PEACE", "PEACE_TREATY", "MAKE_PEACE",
+    }:
+        # Same offer as deal.<Leader> = peace. The other seat accepts it next turn.
+        return bind_reply(snapshot, f"deal.{name}", "peace")
     action = _action_id(value)
     if action is None:
-        return [], [f"{key}={value}: only DECLARE_WAR is available here; trades, peace and friendship use deal.{name}"]
+        return [], [
+            f"{key}={value}: that is not a legal diplomacy order for {name}. "
+            f"At peace use DECLARE_WAR. At war use PEACE_TREATY (or deal.{name} = peace). "
+            "Trades and friendship use deal." + name + " = give <items> for <items>."
+        ]
     if not target["can_declare_war"]:
         return [], [f"{key}: you cannot declare war on {name} now"]
     return [_add_command(

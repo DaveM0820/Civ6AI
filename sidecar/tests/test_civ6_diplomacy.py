@@ -108,6 +108,38 @@ class DiplomacyWireTests(unittest.TestCase):
         self.assertEqual(token, ("purchase", "UNIT_MISSIONARY:faith"))
 
 
+    def test_peace_treaty_on_legal_diplomacy_is_the_deal_offer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = _snap(session=tmp, turn=96)
+            snap["civ6"]["diplomacy"]["majors"][0]["at_war"] = True
+            snap["civ6"]["diplomacy"]["majors"][0]["can_declare_war"] = False
+            snap["civ6"]["diplomacy"]["majors"][0]["can_make_peace"] = True
+            snap["civ6"]["diplomacy"]["majors"][0]["war_since_turn"] = 81
+            keys = dict(diplo.optional_key_hints(snap))
+            self.assertEqual(keys["legal.diplomacy.Cleopatra"], "PEACE_TREATY")
+            ids, notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "PEACE_TREATY")
+            self.assertEqual((ids, notes), ([], []))
+            status = diplo.rival_status_line(snap, "PLAYER_1")
+            self.assertIn("at war since T81", status)
+            self.assertIn("peace offered T96 pending", status)
+            other = _snap(me="PLAYER_1", other="PLAYER_0", other_name="Montezuma", session=tmp, turn=97)
+            other["civ6"]["diplomacy"]["majors"][0]["at_war"] = True
+            other["civ6"]["diplomacy"]["majors"][0]["can_make_peace"] = True
+            other["civ6"]["diplomacy"]["majors"][0]["can_declare_war"] = False
+            seen = diplo.rival_status_line(other, "PLAYER_0")
+            self.assertIn("at war since T81", seen)
+            self.assertIn("pending", seen)
+            self.assertIn("you must answer", seen)
+
+    def test_structural_deal_rejection_names_the_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = _snap(session=tmp)
+            notes = diplo.bind_reply(snap, "deal.Cleopatra", "peace")[1]
+            self.assertTrue(notes)
+            self.assertIn("peace needs a war", notes[0])
+            notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "PEACE_TREATY")[1]
+            self.assertIn("peace needs a war", notes[0])
+
     def test_items_tolerate_copied_pact_label(self):
         # T100 live: the model copied the hint's 'pacts (both ways):' label into its value.
         self.assertEqual(diplo.parse_items("100 gold; pacts: open_borders"), [{"gold": 100}, {"kind": "open_borders"}])

@@ -185,6 +185,7 @@
                   "relationship": {"type": ["string", "null"]},
                   "diplomatic_score": {"type": ["integer", "null"]},
                   "at_war": {"type": "boolean"},
+                  "war_since_turn": {"type": "integer", "minimum": 0},
                   "can_declare_war": {"type": "boolean"},
                   "can_make_peace": {"type": "boolean"},
                   "denounced": {"type": "boolean"},

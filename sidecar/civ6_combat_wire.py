@@ -91,6 +91,22 @@ def _owner_label(context: dict[str, Any], owner: Any) -> str:
     return civ6_wire._player_display(context, owner_id)
 
 
+def enemy_reach(hostile: dict[str, Any]) -> int:
+    """Tiles this enemy can attack from, using its move range.
+
+    Held AI-seat units often report max_moves 0. A melee unit still moves 2
+    unless the snapshot already carried a positive budget.
+    """
+    moves = _int(hostile.get("max_moves")) or 0
+    if moves <= 0:
+        moves = 2
+    ranged = _int(hostile.get("range")) or 0
+    ranged_strength = _int(hostile.get("ranged_strength")) or 0
+    if hostile.get("is_ranged") or (ranged > 0 and ranged_strength > 0):
+        return ranged + max(0, moves - 1)
+    return max(1, moves)
+
+
 def _tiles(value: Any) -> str:
     n = _int(value)
     if n is None:
@@ -327,13 +343,116 @@ def war_section_lines(context: dict[str, Any]) -> list[str]:
         lines.append(pipeline._wire_line(
             f"war.city.{c.get('name') or 'city'}",
             f"{_owner_label(context, c.get('owner_player_id'))} ({_int(c.get('x'))},{_int(c.get('y'))}) {', '.join(stat)}"))
+    lines.extend(city_threat_lines(context))
     strikes = strike_lines(context)
     if strikes:
         lines.append("# == Attack previews (engine combat simulation, same as the in-game hover preview) ==")
         lines.extend(strikes)
-    elif hostiles:
-        lines.append("# No enemy is within reach of your military this turn.")
+    elif hostiles or _rows(block, "threats"):
+        if enemies_within_their_reach(context):
+            lines.append("# Enemies are within their move range of your units or cities, but none of your units can strike this turn.")
+        else:
+            lines.append("# No enemy is within reach of your military this turn.")
     return lines
+
+
+def _own_military_plots(context: dict[str, Any]) -> list[tuple[int, int]]:
+    stats = _own_stats(context)
+    plots: list[tuple[int, int]] = []
+    for unit in context.get("your_units", []) or []:
+        if not isinstance(unit, dict) or not _is_military(unit, stats.get(str(unit.get("unit_id")))):
+            continue
+        xy = pipeline._parse_plot_coords(unit.get("plot_id"))
+        if xy is not None:
+            plots.append(xy)
+    return plots
+
+
+def _city_plot(city: dict[str, Any]) -> tuple[int, int] | None:
+    return pipeline._parse_plot_coords(city.get("plot_id")) if isinstance(city, dict) else None
+
+
+def enemies_within_their_reach(context: dict[str, Any]) -> bool:
+    """True when a visible enemy's own move/attack range covers one of our units or cities."""
+    if _rows(_combat(context), "threats"):
+        return True
+    hostiles = [(h, (_int(h.get("x")), _int(h.get("y")))) for h in _rows(_combat(context), "hostiles")]
+    targets = _own_military_plots(context)
+    for city in context.get("your_cities", []) or []:
+        xy = _city_plot(city) if isinstance(city, dict) else None
+        if xy is not None:
+            targets.append(xy)
+    for hostile, hxy in hostiles:
+        if hxy[0] is None or hxy[1] is None:
+            continue
+        reach = enemy_reach(hostile)
+        if any(_distance(context, hxy, xy) <= reach for xy in targets):
+            return True
+    return False
+
+
+def threatened_city_ids(context: dict[str, Any]) -> set[str]:
+    ids: set[str] = set()
+    hostiles = [(h, (_int(h.get("x")), _int(h.get("y")))) for h in _rows(_combat(context), "hostiles")]
+    for city in context.get("your_cities", []) or []:
+        if not isinstance(city, dict):
+            continue
+        xy = _city_plot(city)
+        if xy is None:
+            continue
+        for hostile, hxy in hostiles:
+            if hxy[0] is None:
+                continue
+            dist = _distance(context, xy, hxy)
+            if 1 <= dist <= enemy_reach(hostile):
+                ids.add(str(city.get("city_id")))
+                break
+    return ids
+
+
+def city_threat_lines(context: dict[str, Any]) -> list[str]:
+    """One line per city: garrison, walls, adjacent enemies, enemies inside their move range."""
+    cities = [c for c in context.get("your_cities", []) or [] if isinstance(c, dict)]
+    if not cities:
+        return []
+    wire_ids = _wire_ids(context)
+    hostiles = [(h, (_int(h.get("x")), _int(h.get("y")))) for h in _rows(_combat(context), "hostiles")]
+    ranked: list[tuple[int, str]] = []
+    for city in cities:
+        xy = _city_plot(city)
+        adjacent: list[str] = []
+        nearby: list[str] = []
+        if xy is not None:
+            for hostile, hxy in hostiles:
+                if hxy[0] is None:
+                    continue
+                dist = _distance(context, xy, hxy)
+                if dist < 1 or dist > enemy_reach(hostile):
+                    continue
+                who = (f"{_owner_label(context, hostile.get('owner_player_id'))} "
+                       f"{hostile.get('name') or 'unit'} ({hxy[0]},{hxy[1]}) {_tiles(dist)}")
+                if dist == 1:
+                    adjacent.append(who)
+                else:
+                    nearby.append(who)
+        garrison_ids = [str(u) for u in city.get("garrison_unit_ids") or [] if u]
+        garrison = ", ".join(wire_ids.get(u, u) for u in garrison_ids) or "none"
+        defense = city.get("defense") if isinstance(city.get("defense"), dict) else {}
+        wall_max = _int(defense.get("wall_max_hp")) or 0
+        if wall_max > 0:
+            walls = f"{_int(defense.get('wall_hp')) or 0}/{wall_max}"
+        else:
+            buildings = [str(b) for b in city.get("buildings") or []]
+            walls = "yes" if any("WALL" in b for b in buildings) else "no"
+        name = city.get("name") or pipeline._city_prompt_name(city)
+        text = (f"garrison={garrison}; walls={walls}; "
+                f"adjacent={', '.join(adjacent) or 'none'}; nearby={', '.join(nearby) or 'none'}")
+        ranked.append((0 if adjacent or nearby else 1, pipeline._wire_line(f"war.city.{name}.threat", text)))
+    ranked.sort(key=lambda item: item[0])
+    rendered = [line for _, line in ranked[:12]]
+    if not rendered:
+        return []
+    return ["# == Your cities (garrison, walls, enemies within their move range) =="] + rendered
 
 
 def _threat_lines(context: dict[str, Any]) -> list[str]:
@@ -436,7 +555,8 @@ def _undefended_city_lines(context: dict[str, Any]) -> list[str]:
             h, d = min(near, key=lambda item: item[1])
             build = (city.get("production") or {}).get("item_id") or "nothing"
             out.append(f"undefended: {city.get('name')} has no garrison, {h.get('name') or 'enemy'} is {_tiles(d)} away, "
-                       f"building {build} — switch production to a military unit")
+                       f"building {build}. Walls and military units are listed first in that city's catalog; "
+                       "nothing will be queued for you.")
     return out
 
 

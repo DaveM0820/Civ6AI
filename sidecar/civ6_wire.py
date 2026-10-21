@@ -400,6 +400,13 @@ def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any])
             plot_id = city.get("plot_id")
             if isinstance(plot_id, str) and plot_id.strip():
                 lines.append(pipeline._wire_line(f"{name}.position", pipeline._plot_coords_text(plot_id)))
+            production = city.get("production", {})
+            item = production.get("item_id") if isinstance(production, dict) else None
+            if not item or str(item).upper() in ("NONE", "NULL"):
+                lines.append(pipeline._wire_line(
+                    f"{name}.currentProduction",
+                    "NONE (queue empty — choose from the catalog; nothing will be queued for you)",
+                ))
             continue
         lines.append(pipeline._wire_line(f"{name}.population", int(city.get("population", 1))))
         if is_capital:
@@ -418,8 +425,15 @@ def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any])
             if isinstance(hp, int) and hp < 100:
                 lines.append(pipeline._wire_line(f"{name}.hp", hp))
         production = city.get("production", {})
-        if isinstance(production, dict) and production.get("item_id"):
-            lines.append(pipeline._wire_line(f"{name}.currentProduction", _production_label(production["item_id"])))
+        item = production.get("item_id") if isinstance(production, dict) else None
+        if item and str(item).upper() not in ("NONE", "NULL"):
+            if not (many_cities and not is_capital):
+                lines.append(pipeline._wire_line(f"{name}.currentProduction", _production_label(item)))
+        else:
+            lines.append(pipeline._wire_line(
+                f"{name}.currentProduction",
+                "NONE (queue empty — choose from the catalog; nothing will be queued for you)",
+            ))
 
 
 def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None:
@@ -1380,8 +1394,6 @@ def _civ6_trade_lines(context: dict[str, Any], rivals: list[dict[str, Any]], dip
         wants = sorted(_resource_label(r) for r in my_lux - _luxury_ids(trade))
         if trade is not None and wants:
             text += " ; wants: " + ", ".join(wants)
-        if major.get("at_war"):
-            text += " ; at war with you (peace first)"
         lines.append(pipeline._wire_line(f"diplomacy.request.{label}", text))
     lines.extend(diplomacy_wire.city_state_lines(context))
     lines.extend(diplomacy_wire.deal_status_lines(context))
@@ -1433,8 +1445,15 @@ def _opponents_section(context: dict[str, Any]) -> list[str]:
             attitude = _attitude_label(relation.get("attitude_id"))
             if attitude:
                 lines.append(pipeline._wire_line(f"rival.{name}.attitude", attitude))
+        status = None
+        if diplo is not None:
+            from sidecar import civ6_diplomacy as diplomacy_wire
+
+            status = diplomacy_wire.rival_status_line(context, str(rival.get("player_id")))
+        if status:
+            lines.append(pipeline._wire_line(f"rival.{name}.status", status))
         if isinstance(relation, dict):
-            if relation.get("at_war"):
+            if relation.get("at_war") and not status:
                 lines.append(pipeline._wire_line(f"rival.{name}.atWar", True))
             if relation.get("open_borders"):
                 lines.append(pipeline._wire_line(f"rival.{name}.openBorders", True))
@@ -1487,6 +1506,9 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
                 text = entry.get(field)
                 if isinstance(text, str) and text.strip():
                     chunk.append(pipeline._wire_line(f"T{turn}.{field}", pipeline._clip_thought(text)))
+            note = entry.get("orders_note")
+            if isinstance(note, str) and note.strip():
+                chunk.append(pipeline._wire_line(f"T{turn}.strategy.vs.orders", note.strip()))
             extra = sum(len(row) + 1 for row in chunk)
             if used + extra > budget and kept_thoughts:
                 break
@@ -1509,9 +1531,19 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
 
 
 def _advice_section(context: dict[str, Any]) -> list[str]:
+    if combat_wire.war_active(context):
+        opening = (
+            "- You are at war. Ignore peacetime explore-and-fortify advice. Use the WAR section: "
+            "strike enemies in range, garrison threatened cities, and build walls or military units "
+            "where the city threat table shows an enemy within its move range."
+        )
+    else:
+        opening = (
+            "- In peacetime, scouts and warriors explore fog. Do not fortify the whole army, because units left "
+            "without orders stay where they are."
+        )
     lines = [
-        "- In peacetime, scouts and warriors explore fog. Do not fortify the whole army, because units left "
-        "without orders stay where they are.",
+        opening,
         "- Settlers should found or walk toward a settle tile; do not sleep on your own city.",
         f"- {coaching.CIV6_EXPANSION_COACHING}",
         "- Before you finish: issue one command for each entry under REQUIRED COMMANDS.",

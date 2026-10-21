@@ -338,6 +338,17 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertEqual(self.rt.eval("Players[2].units[1].dmg"), 20)
         self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
 
+    def test_zero_melee_forecast_retries_without_combat_type(self):
+        self.rt.execute(
+            "Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,3,10,11,0));"
+            "CombatManager.SimulateAttackVersus=function(a, d, ctype)"
+            " if ctype == nil then return {A={dmg=4}, D={dmg=12}} end"
+            " return {A={dmg=0}, D={dmg=0}} end"
+        )
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=15)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertIn("def_dmg=0>12", self.last()["reason"])
+
     def test_melee_kill_advances_into_plot(self):
         self.rt.execute("Players[2].war = {[1]=true}; local e = MkUnit(1,3,10,11,0); e.dmg = 80;"
                         " table.insert(Players[1].units, e)")
@@ -592,7 +603,11 @@ class OrderChannelTests(unittest.TestCase):
         rt.execute("TURN = 6")
         self.assertEqual(rt.globals().Civ6Ai_OrderChannel.DrainResults(), 1)
         self.assertIsNone(rt.eval("recorded[1]"))
+        # The turn the order was for can end on the same tick the result is written.
         rt.execute("TURN = 7")
+        self.assertEqual(rt.globals().Civ6Ai_OrderChannel.DrainResults(), 1)
+        self.assertIsNone(rt.eval("recorded[1]"))
+        rt.execute("TURN = 8")
         self.assertEqual(rt.globals().Civ6Ai_OrderChannel.DrainResults(), 0)
         self.assertEqual(rt.eval("recorded[1].reason"), "no_result_from_gameplay")
 

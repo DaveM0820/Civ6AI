@@ -652,20 +652,39 @@ end
 
 -- Damage each side takes, from the engine's forecast. Returns
 -- attackerDamage, defenderDamage, or nil, reason.
-function Civ6Ai_Orders._Forecast(unit, defender, combatType)
-  if CombatManager == nil or CombatManager.SimulateAttackVersus == nil or CombatResultParameters == nil then
-    return nil, "no_combat_forecast"
-  end
+function Civ6Ai_Orders._ForecastOnce(unit, defender, combatType)
   local ok, res = pcall(CombatManager.SimulateAttackVersus, unit:GetComponentID(), defender:GetComponentID(), combatType)
   if not ok or type(res) ~= "table" then
-    return nil, "forecast_failed"
+    return nil
   end
   local a = res[CombatResultParameters.ATTACKER]
   local d = res[CombatResultParameters.DEFENDER]
   if type(a) ~= "table" or type(d) ~= "table" then
-    return nil, "forecast_empty"
+    return nil
   end
-  return num(a[CombatResultParameters.DAMAGE_TO]) or 0, num(d[CombatResultParameters.DAMAGE_TO]) or 0
+  local P = CombatResultParameters
+  local toDef = num(d[P.DAMAGE_TO]) or 0
+  local wall = P.DEFENSE_DAMAGE_TO ~= nil and (num(d[P.DEFENSE_DAMAGE_TO]) or 0) or 0
+  return num(a[P.DAMAGE_TO]) or 0, math.max(toDef, wall)
+end
+
+-- The unit panel's hover preview passes nil for melee. A MELEE type that
+-- forecasts 0 is retried with nil before the attack is refused.
+function Civ6Ai_Orders._Forecast(unit, defender, combatType)
+  if CombatManager == nil or CombatManager.SimulateAttackVersus == nil or CombatResultParameters == nil then
+    return nil, "no_combat_forecast"
+  end
+  local toA, toD = Civ6Ai_Orders._ForecastOnce(unit, defender, combatType)
+  if toA == nil or (toD or 0) <= 0 then
+    local a2, d2 = Civ6Ai_Orders._ForecastOnce(unit, defender, nil)
+    if a2 ~= nil and (d2 or 0) > (toD or 0) then
+      toA, toD = a2, d2
+    end
+  end
+  if toA == nil then
+    return nil, "forecast_failed"
+  end
+  return toA, toD
 end
 
 function Civ6Ai_Orders._ChangeDamage(target, amount)
@@ -732,6 +751,9 @@ function Civ6Ai_Orders._ResolveAttack(unit, x, y)
   local killed = Civ6Ai_Orders._IsDead(defender)
   local lost = Civ6Ai_Orders._IsDead(unit)
   local defAfter = call(defender, "GetDamage") or 0
+  if not killed and toDefender > 0 and defAfter == defBefore then
+    return false, "no_effect:damage_not_applied:forecast=" .. tostring(toDefender)
+  end
   if killed and call(defender, "IsDead") ~= true then
     pcall(UnitManager.Kill, defender)
   end
@@ -791,6 +813,9 @@ function Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
     Civ6Ai_Orders._ChangeDamage(unit, toAttacker)
   end
   local after, captured = left(walls) + left(garrison), false
+  if after >= before then
+    return false, "no_effect:damage_not_applied:forecast=" .. tostring(toCity)
+  end
   if not ranged and after <= 0 and not Civ6Ai_Orders._IsDead(unit) then
     for _, other in ipairs(Units.GetUnitsInPlot(Map.GetPlot(x, y)) or {}) do
       if other:GetOwner() ~= owner then pcall(UnitManager.Kill, other) end
