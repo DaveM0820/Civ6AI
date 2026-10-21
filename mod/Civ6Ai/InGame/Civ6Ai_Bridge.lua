@@ -999,11 +999,19 @@ function Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
   local waitTurn = Game.GetCurrentGameTurn()
   local attempts = 0
   local lastWaitLog = nil
+  Civ6Ai_Bridge._inboxWaiting = Civ6Ai_Bridge._inboxWaiting or {}
+  Civ6Ai_Bridge._inboxWaiting[playerID] = waitTurn
+  local function done()
+    if Civ6Ai_Bridge._inboxWaiting[playerID] == waitTurn then
+      Civ6Ai_Bridge._inboxWaiting[playerID] = nil
+    end
+    return false
+  end
   Civ6Ai_Util.ScheduleTick(function()
     attempts = attempts + 1
     if Game.GetCurrentGameTurn() ~= waitTurn then
       Civ6Ai_Util.Log("bridge|inbox_wait_abandoned|player=" .. tostring(playerID) .. "|turn=" .. tostring(waitTurn))
-      return false
+      return done()
     end
     Civ6Ai_Bridge._TryPendingApplyFromMod(playerID)
     Civ6Ai_Bridge._TryInboxApply(playerID)
@@ -1015,7 +1023,7 @@ function Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
       if not Civ6Ai_Bridge._WasPulseFinished(playerID) then
         Civ6Ai_Bridge._FinishTurnPulse(playerID)
       end
-      return false
+      return done()
     end
     local now = Civ6Ai_Bridge._WallClock()
     if attempts == 1 or (now ~= nil and lastWaitLog ~= nil and now - lastWaitLog >= 120) then
@@ -1030,10 +1038,18 @@ function Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
       if not Civ6Ai_Bridge._WasPulseFinished(playerID) then
         Civ6Ai_Bridge._FinishTurnPulse(playerID)
       end
-      return false
+      return done()
     end
     return true
   end)
+end
+
+-- True while the local seat's own model answer for this turn is still awaited
+-- (inbox wait armed and not timed out). The autotest stall watch must not
+-- skip its units and end the turn meanwhile: that dropped the T1 answer as stale.
+function Civ6Ai_Bridge.LocalInboxWaiting(playerID)
+  local w = Civ6Ai_Bridge._inboxWaiting
+  return w ~= nil and Game ~= nil and w[playerID] ~= nil and w[playerID] == Game.GetCurrentGameTurn()
 end
 
 -- The host asks the model for one seat at a time, so the last managed seat's

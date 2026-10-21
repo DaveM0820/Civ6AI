@@ -1002,6 +1002,10 @@ function Civ6Ai_Autotest._SameTurnWaitActive()
     return true
   end
   local playerID = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or nil
+  if playerID ~= nil and Civ6Ai_Bridge ~= nil and Civ6Ai_Bridge.LocalInboxWaiting ~= nil
+      and Civ6Ai_Bridge.LocalInboxWaiting(playerID) then
+    return true
+  end
   if playerID == nil or Civ6Ai_Autotest._PendingSeats == nil then
     return false
   end

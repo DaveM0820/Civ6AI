@@ -418,7 +418,9 @@ function Civ6Ai_Apply._RequestPlayerOperation(playerID, opType, params)
   if UI == nil or UI.RequestPlayerOperation == nil then
     return false, "ui_unavailable"
   end
-  if UI.RequestPlayerOperation(playerID, opType, params or {}) then
+  -- UI.RequestPlayerOperation returns no value; only an error means it failed.
+  local ok = pcall(UI.RequestPlayerOperation, playerID, opType, params or {})
+  if ok then
     return true, ""
   end
   return false, "request_rejected"
@@ -443,7 +445,9 @@ function Civ6Ai_Apply._SetResearchTech(playerID, args)
   end
   local params = {}
   if PlayerOperationTypes ~= nil then
-    params[PlayerOperationTypes.PARAM_TECH_TYPE] = hash.Index
+    -- Firaxis TechTree passes the tech Hash (not Index) and an insert mode.
+    params[PlayerOperationTypes.PARAM_TECH_TYPE] = hash.Hash
+    params[PlayerOperationTypes.PARAM_INSERT_MODE] = PlayerOperationTypes.VALUE_EXCLUSIVE
     local ok, reason = Civ6Ai_Apply._RequestPlayerOperation(playerID, PlayerOperationTypes.RESEARCH, params)
     if ok then
       return true, "", args
@@ -471,7 +475,8 @@ function Civ6Ai_Apply._SetResearchCivic(playerID, args)
   end
   local params = {}
   if PlayerOperationTypes ~= nil then
-    params[PlayerOperationTypes.PARAM_CIVIC_TYPE] = hash.Index
+    params[PlayerOperationTypes.PARAM_CIVIC_TYPE] = hash.Hash
+    params[PlayerOperationTypes.PARAM_INSERT_MODE] = PlayerOperationTypes.VALUE_EXCLUSIVE
     local ok = Civ6Ai_Apply._RequestPlayerOperation(playerID, PlayerOperationTypes.PROGRESS_CIVIC, params)
     if ok then
       return true, "", args
@@ -842,6 +847,9 @@ Civ6Ai_Apply.SYNCED_KINDS = {
   change_government = true, found_pantheon = true, found_religion = true, recruit_great_person = true,
   patronize_great_person = true, send_diplomatic_action = true, propose_peace = true, purchase_item = true,
   purchase_tile = true, pillage_improvement = true, worker_improve = true, build_fort = true,
+  -- The local seat's UI research request returns nothing (not true), so every
+  -- P0 research order was logged research_rejected. Use the synced channel.
+  set_research_tech = true, set_research_civic = true,
 }
 
 local function gcall(obj, name, ...)

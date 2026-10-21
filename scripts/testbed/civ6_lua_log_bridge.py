@@ -470,6 +470,12 @@ def _note_build_stamp(chunk: str, repo: Path) -> None:
         )
 
 
+# Seat dirs with a Lua-log job submitted to the pool and not finished yet.
+# process_pending_snapshots must not start a second (serial) run for them.
+_QUEUED_SEATS: set[str] = set()
+_QUEUED_LOCK = threading.Lock()
+
+
 def process_lua_log_blobs(
     lua_log: Path | None,
     civ6ai_root: Path,
@@ -577,6 +583,8 @@ def process_lua_log_blobs(
         job, player, is_chat, player_dir = item
         claim = claim_sidecar_slot(player_dir)
         if claim is None:
+            with _QUEUED_LOCK:
+                _QUEUED_SEATS.discard(str(player_dir))
             return False
         try:
             try:
@@ -597,7 +605,14 @@ def process_lua_log_blobs(
             return True
         finally:
             release_sidecar_slot(claim)
+            if not is_chat:
+                with _QUEUED_LOCK:
+                    _QUEUED_SEATS.discard(str(player_dir))
 
+    with _QUEUED_LOCK:
+        for _job, _player, _is_chat, _dir in jobs:
+            if not _is_chat:
+                _QUEUED_SEATS.add(str(_dir))
     workers = max(1, min(len(jobs), _parallel_seats(), parallel_seat_limit()))
     if workers <= 1:
         ran = sum(1 for item in jobs if _one(item))
@@ -671,6 +686,13 @@ def process_pending_snapshots(
         session_id = player_dir.parent.name
         if active_session and session_id != active_session:
             continue
+        with _QUEUED_LOCK:
+            queued = str(player_dir) in _QUEUED_SEATS
+        if queued:
+            # Its Lua-log job is still queued or running in the pool. Running it
+            # here too doubled every seat's model call and blocked this loop
+            # (the local seat's T1 answer then arrived after its turn ended).
+            continue
         if decision_suppresses_sidecar(player_dir):
             try:
                 from civ6_pending_apply import publish_from_player_dir
@@ -680,12 +702,17 @@ def process_pending_snapshots(
                 log.warning("Pending apply publish (suppressed sidecar) failed %s: %s", player_dir, error)
             continue
         job = _sidecar_job(repo_path, python_exe, player_dir, session_id, live, timeout_seconds)
+        claim = claim_sidecar_slot(player_dir)
+        if claim is None:
+            continue
         try:
             _run_job(job, repo_path)
             ran += 1
         except Exception as error:
             log.warning("Pending snapshot sidecar failed %s: %s | %s", player_dir, error, getattr(error, "stderr", "") or "")
             continue
+        finally:
+            release_sidecar_slot(claim)
         sync_session_files(civ6ai_root)
         try:
             from civ6_pending_apply import publish_from_player_dir

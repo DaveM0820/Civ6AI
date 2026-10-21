@@ -858,6 +858,15 @@ def _result_fingerprint(item: dict[str, Any]) -> tuple[str, str, Any, Any] | Non
     return (order_kind, unit, None, None)
 
 
+def _land_units_cannot_embark(snapshot: dict[str, Any]) -> bool:
+    """Shipbuilding not researched yet: Sailing or Shipbuilding is still current or offered."""
+    techs = ((snapshot.get("civ6") or {}).get("governance") or {}).get("techs") or {}
+    if not isinstance(techs, dict):
+        return False
+    ids = {techs.get("current")} | {o.get("id") for o in techs.get("options") or [] if isinstance(o, dict)}
+    return bool(ids & {"TECH_SAILING", "TECH_SHIPBUILDING"})
+
+
 def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
     """Drop orders that replay a non-transient failure from the last two decisions."""
     kept: list[dict[str, Any]] = []
@@ -873,9 +882,18 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
     reverse = {v: k for k, v in wire_ids.items()}
     combat = (snapshot.get("civ6") or {}).get("combat") or {}
     enemy_plots = {(h.get("x"), h.get("y")) for key in ("hostiles", "hostile_cities") for h in combat.get(key) or [] if isinstance(h, dict)}
+    water_blocked = _land_units_cannot_embark(snapshot)
+    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    water_plots = {(p.get("x"), p.get("y")) for p in known.get("plots") or [] if isinstance(p, dict) and p.get("water")}
+    land_units = {u.get("unit_id") for u in units if u.get("domain_id") == "DOMAIN_LAND"}
+    land_units |= {wire_ids.get(uid) for uid in list(land_units) if wire_ids.get(uid)}
     for command in commands:
         fp = _command_fingerprint(command)
         matched = None
+        if (water_blocked and fp[0] == "move_unit" and (fp[2], fp[3]) in water_plots
+                and (fp[1] in land_units or reverse.get(fp[1]) in land_units)):
+            dropped.append(f"dropped: MoveTo({fp[2]},{fp[3]}) is water; land units cannot embark before Shipbuilding")
+            continue
         if fp[0] == "attack_target" and (fp[2], fp[3]) not in enemy_plots:
             dropped.append(f"dropped: AttackTo({fp[2]},{fp[3]}) has no visible enemy unit or city to hit")
             continue
