@@ -557,8 +557,18 @@ function Civ6Ai_Apply._MoveUnit(playerID, args)
   if unit == nil then
     return false, "unit_not_found", args
   end
-  if unit:GetX() == x and unit:GetY() == y and args.improvement_id ~= nil
-      and (args.intent == "improve" or tonumber(args.A) == 2) then
+  if args.improvement_id ~= nil and (unit:GetX() ~= x or unit:GetY() ~= y)
+      and Civ6Ai_OrderChannel ~= nil and Civ6Ai_OrderChannel.SendDecision ~= nil then
+    -- Improve(x,y) away from the tile: a synced goal move, so gameplay keeps walking
+    -- the builder there on later turns and builds on arrival (a local move would not).
+    local a2 = {}
+    for k, v in pairs(args) do a2[k] = v end
+    a2.intent, a2.goal = "improve", 1
+    local n = Civ6Ai_OrderChannel.SendDecision(playerID, {commands = {{kind = "move_unit", arguments = a2,
+      command_id = "CMD_" .. tostring(args.unit_id) .. "_improve_goal"}}}, Game.GetCurrentGameTurn())
+    return (n or 0) > 0, "sent_synced_goal", args
+  end
+  if unit:GetX() == x and unit:GetY() == y and args.improvement_id ~= nil then
     -- Improve(x,y) on the builder's own tile: build now instead of "already_there".
     local f, why = Civ6Ai_OrderChannel._Fields(playerID, {kind = "worker_improve", arguments = args})
     if f == nil then

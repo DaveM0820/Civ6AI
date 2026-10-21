@@ -941,6 +941,7 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
     land_units |= {wire_ids.get(uid) for uid in list(land_units) if wire_ids.get(uid)}
     peak_plots = {(p.get("x"), p.get("y")) for p in known.get("plots") or [] if isinstance(p, dict) and p.get("peak")}
     substitutes: list[dict[str, Any]] = []
+    failed_tiles: set[tuple[Any, Any]] = {(f[0][2], f[0][3]) for f in fails if f[0][0] == "move_unit"}
     me = str((snapshot.get("decision") or {}).get("player_id") or "")
     plot_owner = {(p.get("x"), p.get("y")): p.get("revealed_owner_id") for p in known.get("plots") or [] if isinstance(p, dict)}
     builders = {u.get("unit_id") for u in units if u.get("unit_type_id") == "UNIT_BUILDER"}
@@ -998,17 +999,19 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
             )
             if fp[0] == "move_unit":
                 _explore_instead(command)
+                failed_tiles.add((fp[2], fp[3]))
             continue
         kept.append(command)
     kept_units = {str((c.get("arguments") or {}).get("unit_id") or "") for c in kept if isinstance(c.get("arguments"), dict)}
     kept.extend(s for s in substitutes if s["arguments"]["unit_id"] not in kept_units)
-    return _one_site_per_builder(snapshot, kept, dropped), dropped
+    return _one_site_per_builder(snapshot, kept, dropped, failed_tiles), dropped
 
 
 def _one_site_per_builder(snapshot: dict[str, Any], commands: list[dict[str, Any]],
-                          dropped: list[str]) -> list[dict[str, Any]]:
-    """Two builders sent to one Improve tile: the later one takes its next free listed site."""
-    claimed: set[tuple[Any, Any]] = set()
+                          dropped: list[str], failed: set | None = None) -> list[dict[str, Any]]:
+    """Two builders sent to one Improve tile: the later one takes its next free listed site.
+    A builder left with no order (or whose order was dropped) gets its first free listed site."""
+    claimed: set[tuple[Any, Any]] = set(failed or ())
     out: list[dict[str, Any]] = []
     for c in commands:
         args = c.get("arguments") if isinstance(c.get("arguments"), dict) else {}
@@ -1036,6 +1039,23 @@ def _one_site_per_builder(snapshot: dict[str, Any], commands: list[dict[str, Any
                        f"another builder has ({xy[0]},{xy[1]})")
         sub = {k: v for k, v in c.items() if k not in ("arguments", "command_id")}
         sub.update({"command_id": alt["command_id"], "arguments": dict(f)})
+        out.append(sub)
+    ordered = {str((c.get("arguments") or {}).get("unit_id") or "") for c in out if isinstance(c.get("arguments"), dict)}
+    for lc in snapshot.get("legal_commands") or []:
+        f = lc.get("fixed_arguments") if isinstance(lc, dict) else None
+        if not isinstance(f, dict) or f.get("intent") != "improve" or lc.get("kind") != "move_unit":
+            continue
+        uid = str(f.get("unit_id") or "")
+        xy = (f.get("target_x"), f.get("target_y"))
+        if uid in ordered or xy in claimed:
+            continue
+        ordered.add(uid)
+        claimed.add(xy)
+        dropped.append(f"note: idle {uid} auto-assigned Improve({xy[0]},{xy[1]},{f.get('improvement_id')})")
+        template = out[0] if out else {}
+        sub = {k: v for k, v in template.items() if k not in ("arguments", "command_id", "kind", "sequence")}
+        sub.update({"command_id": lc["command_id"], "kind": "move_unit", "arguments": dict(f),
+                    "sequence": max([int(c.get("sequence") or 0) for c in out] or [0]) + 1})
         out.append(sub)
     return out
 

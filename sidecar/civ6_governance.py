@@ -404,6 +404,21 @@ def _split_pair(value: Any, seps: str = ":@=") -> tuple[str, str]:
     return text, ""
 
 
+def _fill_empty(free: dict, slot_type: dict, card_ids: list, card_type: dict) -> None:
+    """Never leave a slot empty: put an unused unlocked card of that type (any card in a wildcard)."""
+    used = {c for c in free.values() if c}
+    for idx in sorted(free):
+        if free[idx]:
+            continue
+        st = slot_type.get(idx, "")
+        cid = next((c for c in card_ids if c not in used and card_type.get(c) == st), None)
+        if cid is None and st == "SLOT_WILDCARD":
+            cid = next((c for c in card_ids if c not in used), None)
+        if cid is not None:
+            free[idx] = cid
+            used.add(cid)
+
+
 def plan_policies(slots: list[dict], cards: list[dict], value: Any) -> tuple[dict[int, str] | None, list[str]]:
     """Wanted slot -> card ('NONE' empties) from the reply; only changed slots are kept."""
     problems: list[str] = []
@@ -465,8 +480,18 @@ def plan_policies(slots: list[dict], cards: list[dict], value: Any) -> tuple[dic
                 problems.append(f"no free {_short(ctype, 'SLOT_').lower()} or wildcard slot for {cid}")
                 continue
             free[spot] = cid
+        _fill_empty(free, slot_type, card_ids, card_type)
         for idx in slot_type:
             wanted[idx] = free[idx] or "NONE"
+    # Slots the reply left untouched and that are empty: fill them too.
+    rest = {i: (wanted.get(i) if i in wanted else (None if current.get(i) in (None, "NONE") else current.get(i)))
+            for i in slot_type}
+    rest = {i: (None if c == "NONE" and i not in wanted else c) for i, c in rest.items()}
+    before = dict(rest)
+    _fill_empty(rest, slot_type, card_ids, card_type)
+    for i, c in rest.items():
+        if before[i] is None and c and i not in wanted:
+            wanted[i] = c
     changed = {i: c for i, c in wanted.items() if current.get(i, "NONE") != c}
     return changed, problems
 

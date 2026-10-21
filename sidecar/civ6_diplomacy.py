@@ -419,6 +419,8 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         if problem:
             return [], [f"{key}={value}: {problem}"]
         problem = _stock_problem(snapshot, give) or _usable_problem(snapshot, want)
+        if not problem and len([i for i in give + want if "res" in i]) > 2:
+            problem = "a deal can carry at most 2 resource kinds in total (both sides); drop one"
         if problem:
             return [], [f"{key}={value}: {problem}"]
         deals = [d for d in load_deals(snapshot)
