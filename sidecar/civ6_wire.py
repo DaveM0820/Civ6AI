@@ -919,6 +919,8 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
                         lines.append(pipeline._wire_line(f"{prefix}.maxMovement", movement["maximum"]))
                 if "SETTLER" in str(unit.get("unit_type_id") or ""):
                     lines.extend(coaching.settler_fact_lines(prefix, unit, context))
+                if str(unit.get("unit_type_id") or "") == "UNIT_BUILDER" and unit.get("needs_orders"):
+                    lines.extend(coaching.builder_fact_lines(prefix, unit, context))
                 lines.append("")
             if lines[-1] == "":
                 lines.pop()

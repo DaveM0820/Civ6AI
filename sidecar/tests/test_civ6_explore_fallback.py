@@ -48,5 +48,38 @@ class ExploreFallbackTests(unittest.TestCase):
                          wire.resolve_unit_token(snap, "UNIT_262146", "Settle(44,12)"))
 
 
+class BuilderTests(unittest.TestCase):
+    def _snap(self):
+        return {
+            "decision": {"player_id": "PLAYER_0", "turn": 40},
+            "your_units": [{"unit_id": "UNIT_5", "unit_type_id": "UNIT_BUILDER", "domain_id": "DOMAIN_LAND",
+                            "plot_id": "PLOT_45_14", "needs_orders": True}],
+            "known_map": {"plots": [
+                {"x": 43, "y": 14, "water": False, "peak": False, "revealed_owner_id": "PLAYER_0", "resource_id": "RESOURCE_WHEAT"},
+                {"x": 44, "y": 15, "water": False, "peak": False, "revealed_owner_id": "PLAYER_0"},
+                {"x": 45, "y": 14, "water": False, "peak": False, "revealed_owner_id": "PLAYER_0", "city_id": "CITY_1"},
+                {"x": 40, "y": 11, "water": False, "peak": False, "revealed_owner_id": None},
+            ]},
+            "legal_commands": [],
+            "history": {"command_results": []},
+        }
+
+    def test_builder_sites_listed_resource_first(self):
+        from sidecar import civ6_prompt_coaching as coaching
+        snap = self._snap()
+        line = coaching.builder_fact_lines("builder_1", snap["your_units"][0], snap)[0]
+        self.assertIn("(43,14) Wheat", line)
+        self.assertLess(line.index("(43,14)"), line.index("(44,15)"))
+        self.assertNotIn("(45,14)", line)
+
+    def test_builder_move_outside_borders_dropped(self):
+        snap = self._snap()
+        out = {"command_id": "CMD_UNIT_5_moveto_40_11", "kind": "move_unit", "arguments": {"unit_id": "UNIT_5", "target_x": 40, "target_y": 11}}
+        ok = {"command_id": "CMD_UNIT_5_moveto_43_14", "kind": "move_unit", "arguments": {"unit_id": "UNIT_5", "target_x": 43, "target_y": 14}}
+        kept, dropped = ar.filter_repeat_failures(snap, [out, ok])
+        self.assertEqual([c["command_id"] for c in kept], ["CMD_UNIT_5_moveto_43_14"])
+        self.assertTrue(any("outside your borders" in d for d in dropped))
+
+
 if __name__ == "__main__":
     unittest.main()

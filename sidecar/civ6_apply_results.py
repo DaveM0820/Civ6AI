@@ -913,6 +913,10 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
     land_units |= {wire_ids.get(uid) for uid in list(land_units) if wire_ids.get(uid)}
     peak_plots = {(p.get("x"), p.get("y")) for p in known.get("plots") or [] if isinstance(p, dict) and p.get("peak")}
     substitutes: list[dict[str, Any]] = []
+    me = str((snapshot.get("decision") or {}).get("player_id") or "")
+    plot_owner = {(p.get("x"), p.get("y")): p.get("revealed_owner_id") for p in known.get("plots") or [] if isinstance(p, dict)}
+    builders = {u.get("unit_id") for u in units if u.get("unit_type_id") == "UNIT_BUILDER"}
+    builders |= {wire_ids.get(uid) for uid in list(builders) if wire_ids.get(uid)}
 
     def _explore_instead(command: dict[str, Any]) -> None:
         unit = str((command.get("arguments") or {}).get("unit_id") or "")
@@ -931,6 +935,10 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
                 and (fp[1] in land_units or reverse.get(fp[1]) in land_units)):
             dropped.append(f"dropped: MoveTo({fp[2]},{fp[3]}) is water; land units cannot embark before Shipbuilding")
             _explore_instead(command)
+            continue
+        if (fp[0] == "move_unit" and (fp[1] in builders or reverse.get(fp[1]) in builders)
+                and (fp[2], fp[3]) in plot_owner and plot_owner[(fp[2], fp[3])] != me):
+            dropped.append(f"dropped: builder MoveTo({fp[2]},{fp[3]}) is outside your borders; builders improve only your own tiles")
             continue
         if fp[0] == "move_unit" and (fp[2], fp[3]) in peak_plots:
             dropped.append(f"dropped: MoveTo({fp[2]},{fp[3]}) is a mountain; no unit can enter it")

@@ -473,6 +473,59 @@ def _plot_fresh_coast(snapshot: dict[str, Any], plot_id: str) -> tuple[bool | No
     return None, None
 
 
+def _hex_dist(ax: int, ay: int, bx: int, by: int) -> int:
+    """Odd-r offset hex distance (no X wrap)."""
+    def cube(x: int, y: int) -> tuple[int, int, int]:
+        q = x - (y - (y & 1)) // 2
+        return q, y, -q - y
+    a, b = cube(ax, ay), cube(bx, by)
+    return max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[2] - b[2]))
+
+
+def builder_improve_sites(snapshot: dict[str, Any], x: int, y: int, cap: int = 6) -> list[dict[str, Any]]:
+    """Own, unimproved, non-city land tiles (resources first, then nearest) a builder can work."""
+    me = str((snapshot.get("decision") or {}).get("player_id") or "")
+    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    rows = []
+    for p in known.get("plots") or []:
+        if not isinstance(p, dict) or p.get("water") or p.get("peak") or p.get("city_id") or p.get("improvement_id"):
+            continue
+        if not me or p.get("revealed_owner_id") != me:
+            continue
+        try:
+            px, py = int(p["x"]), int(p["y"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        rows.append({"x": px, "y": py, "resource": p.get("resource_id"), "dist": _hex_dist(x, y, px, py)})
+    rows.sort(key=lambda r: (r["resource"] is None, r["dist"]))
+    return rows[:cap]
+
+
+def builder_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, Any]) -> list[str]:
+    """Where a builder can improve: Improve options only appear once it stands on such a tile."""
+    from sidecar import pipeline_v2 as pipeline
+
+    plot = str(unit.get("plot_id") or "")
+    parts = plot.split("_")
+    if len(parts) < 3:
+        return []
+    try:
+        x, y = int(parts[1]), int(parts[2])
+    except ValueError:
+        return []
+    sites = builder_improve_sites(snapshot, x, y)
+    if not sites:
+        return [pipeline._wire_line(f"{prefix}.improve.sites", "none inside your borders; move toward a city's tiles")]
+    labels = []
+    for s in sites:
+        res = str(s["resource"] or "").replace("RESOURCE_", "").title()
+        labels.append(f"({s['x']},{s['y']})" + (f" {res}" if res else "") + f", dist {s['dist']}")
+    return [pipeline._wire_line(
+        f"{prefix}.improve.sites",
+        "; ".join(labels) + " — MoveTo one; next turn its Improve options appear on that tile (own unimproved land only)",
+    )]
+
+
 def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, Any]) -> list[str]:
     """Unranked settle facts from WP-B `unit.settle` when present; otherwise plot flags."""
     from sidecar import pipeline_v2 as pipeline
