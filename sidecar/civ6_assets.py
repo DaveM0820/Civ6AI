@@ -428,6 +428,17 @@ def _save_png(image: Any, path: Path, size: int | None = None) -> None:
     work.save(path)
 
 
+_SHEET_CACHE: dict[str, Any] = {}
+
+
+def _load_sheet(path: Path) -> Any | None:
+    """Decoded icon sheet, once per path per process (many icons share a sheet)."""
+    key = str(path)
+    if key not in _SHEET_CACHE:
+        _SHEET_CACHE[key] = load_rgba_image(path)
+    return _SHEET_CACHE[key]
+
+
 def extract_icon(icon_name: str, out_size: int = 32) -> Path | None:
     catalog = _parse_icon_catalog()
     entry = catalog.get(icon_name)
@@ -435,10 +446,14 @@ def extract_icon(icon_name: str, out_size: int = 32) -> Path | None:
     if entry is None or pantry is None:
         return None
     filename, icon_size, per_row, index = entry
+    out_path = ICON_CACHE_DIR / f"{icon_name}_atlas{icon_size}.png"
+    if out_path.is_file():
+        # Already extracted: decoding the DDS sheet again cost ~0.13 s per icon.
+        return out_path
     dds_path = pantry / filename
     if not dds_path.is_file():
         return None
-    image = load_rgba_image(dds_path)
+    image = _load_sheet(dds_path)
     if image is None:
         return None
     column = index % per_row
@@ -449,7 +464,6 @@ def extract_icon(icon_name: str, out_size: int = 32) -> Path | None:
         (column + 1) * icon_size,
         (row + 1) * icon_size,
     ))
-    out_path = ICON_CACHE_DIR / f"{icon_name}_atlas{icon_size}.png"
     _save_png(tile, out_path, out_size)
     return out_path
 
@@ -631,7 +645,21 @@ def ensure_civ6_assets(
     extract_resources: bool = True,
     extract_districts: bool = True,
 ) -> dict[str, int]:
-    """Extract real Civ6 pantry icons into sidecar/assets/civ6/icons/."""
+    """Extract real Civ6 pantry icons into sidecar/assets/civ6/icons/ (once per process)."""
+    key = (icon_size, extract_units, extract_resources, extract_districts)
+    if key in _ENSURED:
+        return dict(_ENSURED[key])
+    counts = _ensure_civ6_assets(icon_size, extract_units, extract_resources, extract_districts)
+    _ENSURED[key] = dict(counts)
+    return counts
+
+
+_ENSURED: dict[tuple, dict[str, int]] = {}
+
+
+def _ensure_civ6_assets(
+    icon_size: int, extract_units: bool, extract_resources: bool, extract_districts: bool
+) -> dict[str, int]:
     counts = {"units": 0, "resources": 0, "districts": 0, "buildings": 0}
     if resolve_pantry_textures() is None or icons_xml_dir() is None:
         return counts
