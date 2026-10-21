@@ -135,15 +135,15 @@ def unit_strength_text(unit: dict[str, Any], context: dict[str, Any]) -> str | N
     hp, max_hp = (stats.get("hp"), stats.get("max_hp")) if stats else (None, None)
     if hp is None and isinstance(unit.get("health"), dict):
         hp, max_hp = unit["health"].get("current"), unit["health"].get("maximum")
+    if not _is_military(unit, stats):
+        return None
     parts: list[str] = []
     if strength:
         parts.append(f"{strength} str")
     if ranged and rng:
         parts.append(f"ranged {ranged} range {rng}")
-    if not parts and not _is_military(unit, stats):
-        parts.append("civilian (no combat)")
     hp_text = _hp_text(hp, max_hp)
-    if hp_text:
+    if hp_text and hp_text not in ("100hp", "100/100hp"):
         parts.append(hp_text)
     if _int(unit.get("experience")):
         parts.append(f"xp {_int(unit['experience'])} level {_int(unit.get('level')) or 1}")

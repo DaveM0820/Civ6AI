@@ -626,7 +626,35 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
             if dist is not None:
                 bits.append(f"dist {dist}")
             labels.append(", ".join(bits) if len(bits) > 1 else bits[0])
-        lines.append(pipeline._wire_line(f"{prefix}.settle.nearby", "; ".join(labels) or "none reachable from here"))
+        if labels:
+            lines.append(pipeline._wire_line(f"{prefix}.settle.nearby", "; ".join(labels)))
+        else:
+            from sidecar.civ6_command_wire import site_obeys_founding_rules
+            from sidecar.civ6_wire import _odd_r_distance
+
+            origin = _unit_xy(unit)
+            known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+            game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+            width = game.get("map_width") if isinstance(game.get("map_width"), int) else None
+            wrap = game.get("wrap_x") is not False
+            far: list[tuple[int, int, int]] = []
+            if origin is not None:
+                for plot in known.get("plots") or []:
+                    if not isinstance(plot, dict):
+                        continue
+                    try:
+                        x, y = int(plot["x"]), int(plot["y"])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if not site_obeys_founding_rules(snapshot, x, y):
+                        continue
+                    far.append((_odd_r_distance(origin, (x, y), width, wrap), x, y))
+            far.sort()
+            nearest = "; ".join(f"({x},{y}) path {dist}" for dist, x, y in far[:6])
+            lines.append(pipeline._wire_line(
+                f"{prefix}.settle.nearby",
+                f"none reachable from here; nearest legal sites: {nearest}" if nearest else "none reachable from here",
+            ))
     return lines
 
 

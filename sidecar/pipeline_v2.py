@@ -42,7 +42,7 @@ THOUGHT_MEMORY_MILESTONE_INTERVAL = 10
 THOUGHT_MAX_CHARS_DEFAULT = 8000
 JOURNAL_WIRE_CHAR_BUDGET = 2500
 CHAT_TEXT_MAX_LENGTH = 800
-CIV6_REMEMBER_MAX_NOTES = 6
+CIV6_REMEMBER_MAX_NOTES = 4
 WIRE_COMPACT_UNITS_THRESHOLD = 6
 WIRE_COMPACT_CITIES_THRESHOLD = 10
 ADVCIV_FALLBACK_POLICY = (
@@ -2510,6 +2510,10 @@ _REMEMBER_DURATION_RE = re.compile(
     r"\(?\s*(?:duration\s*)?(?:(\d{1,4})\s*turns?|(forever|permanent|always))\s*\)?\s*$",
     re.IGNORECASE,
 )
+_REMEMBER_LABELED_RE = re.compile(
+    r"\bduration\s*[:=]\s*(?:(\d{1,4})\s*turns?|(forever|permanent|always))\b",
+    re.IGNORECASE,
+)
 
 
 def append_remembered(
@@ -2536,13 +2540,19 @@ def append_remembered(
         if not text:
             continue
         expires: int | None = int(turn) + REMEMBER_DEFAULT_TURNS
-        match = _REMEMBER_DURATION_RE.search(text)
-        if match:
-            if match.group(2):
+        labeled = _REMEMBER_LABELED_RE.search(text)
+        match = None if labeled else _REMEMBER_DURATION_RE.search(text)
+        if labeled or match:
+            hit = labeled or match
+            if hit.group(2):
                 expires = None
             else:
-                expires = int(turn) + max(1, int(match.group(1)))
-            text = text[: match.start()].rstrip(" ,;-") or text
+                expires = int(turn) + max(1, int(hit.group(1)))
+            if labeled:
+                text = _REMEMBER_LABELED_RE.sub("", text)
+                text = re.sub(r"\s{2,}", " ", text).strip(" ,;-()") or text
+            else:
+                text = text[: match.start()].rstrip(" ,;-") or text
         text = text[:300]
         if any(item.get("text") == text for item in stored):
             continue

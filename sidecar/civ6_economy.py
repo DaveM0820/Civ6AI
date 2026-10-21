@@ -214,60 +214,42 @@ def gold_lines(snapshot: dict[str, Any]) -> list[str]:
     net = _num(gold.get("net"))
     if net is None and gross is not None and total is not None:
         net = gross - total
-    head = f"{_fmt(treasury)} ({_fmt(net, signed=True)}/turn)"
-    if net is not None and net < 0:
-        lines.append(f"***empire.gold.treasury = {head}***")
-    else:
-        lines.append(pipeline._wire_line("empire.gold.treasury", head))
-    if gross is not None:
-        lines.append(pipeline._wire_line("empire.gold.income.total", _fmt(gross, signed=True)))
-    income_tip = clean_game_text(gold.get("income_tooltip"))
-    if income_tip:
-        lines.append(pipeline._wire_line("empire.gold.income.sources", income_tip))
-    if total is not None:
-        lines.append(pipeline._wire_line("empire.gold.expense.total", _fmt(-total)))
     parts: list[tuple[str, float | None]] = [
         ("units", _num(gold.get("maintenance_units"))),
         ("buildings", _num(gold.get("maintenance_buildings"))),
         ("districts", _num(gold.get("maintenance_districts"))),
+        ("wmd", _num(gold.get("maintenance_wmd"))),
     ]
-    known = sum(v for _, v in parts if v is not None)
-    wmd = _num(gold.get("maintenance_wmd"))
-    if wmd:
-        parts.append(("wmd", wmd))
-        known += wmd
+    bits = [f"treasury {_fmt(treasury)}", f"net {_fmt(net, signed=True)}/turn"]
+    if gross:
+        bits.append(f"income {_fmt(gross, signed=True)}")
     for name, value in parts:
-        if value is not None:
-            lines.append(pipeline._wire_line(f"empire.gold.expense.{name}", _fmt(-value)))
-    if total is not None and total - known > 0.05:
-        lines.append(pipeline._wire_line("empire.gold.expense.other", _fmt(-(total - known))
-                                         + " (e.g. enemy spies siphoning funds)"))
-    discount = _num(gold.get("unit_maint_discount"))
-    if discount:
-        lines.append(pipeline._wire_line("empire.gold.expense.unit_discount", f"{_fmt(discount)} per unit"))
-    expense_tip = clean_game_text(gold.get("expense_tooltip"))
-    if expense_tip:
-        lines.append(pipeline._wire_line("empire.gold.expense.detail", expense_tip))
-    if net is not None:
-        lines.append(pipeline._wire_line("empire.gold.net", f"{_fmt(net, signed=True)}/turn"))
-    lost = sum(int(_num(c.get("amenities_lost_bankruptcy")) or 0) for c in _cities_by_id(snapshot).values())
+        if value:
+            bits.append(f"{name} {_fmt(-value)}")
+    if total is not None:
+        known = sum(v for _, v in parts if v)
+        if total - known > 0.05:
+            bits.append(f"other {_fmt(-(total - known))}")
+    empire = snapshot.get("your_empire") if isinstance(snapshot.get("your_empire"), dict) else {}
+    anarchy = empire.get("anarchy_turns") if isinstance(empire.get("anarchy_turns"), int) else 0
+    gov = ((snapshot.get("civ6") or {}).get("governance") or {}).get("government") if isinstance(snapshot.get("civ6"), dict) else {}
+    gov = gov if isinstance(gov, dict) else {}
+    tip = clean_game_text(gold.get("income_tooltip")) or ""
+    in_anarchy = anarchy > 0 or gov.get("in_anarchy") is True or "anarchy" in tip.lower()
+    if in_anarchy:
+        left = anarchy or gov.get("anarchy_turns_left")
+        bits.append(f"anarchy, {left} turns left" if left else "anarchy, yields paused until it ends")
+    line = "; ".join(bits)
+    lines.append(f"***empire.gold = {line}***" if net is not None and net < 0 else pipeline._wire_line("empire.gold", line))
     if net is not None and net < 0:
         if treasury is not None and treasury > 0:
             turns = int(math.floor(treasury / -net))
-            lines.append(pipeline._wire_line("empire.gold.turns_until_bankrupt", turns))
-            lines.append(
-                f"***empire.effects.gold = NEGATIVE GOLD: {_fmt(net, signed=True)}/turn with {_fmt(treasury)} in the "
-                f"treasury — about {turns} turns until it hits 0. In Civ6 {BANKRUPTCY_RULE}. HOW TO: raise gold "
-                "(Commercial Hub/Harbor, trade routes, work gold tiles, gold policy cards), cut costs (delete "
-                "obsolete units, fewer buildings with upkeep), or trade for gold per turn.***"
-            )
+            lines.append(f"***empire.effects.gold = negative gold, about {turns} turns until the treasury hits 0***")
         else:
-            lines.append(
-                f"***empire.effects.gold = BANKRUPT: treasury {_fmt(treasury)} and {_fmt(net, signed=True)}/turn — "
-                f"{BANKRUPTCY_RULE}. Fix gold income or delete units this turn.***"
-            )
+            lines.append("***empire.effects.gold = bankrupt; raise income or delete units this turn***")
+    lost = sum(int(_num(c.get("amenities_lost_bankruptcy")) or 0) for c in _cities_by_id(snapshot).values())
     if lost > 0:
-        lines.append(f"***empire.gold.bankruptcy_amenity_loss = -{lost} amenities across cities (engine)***")
+        lines.append(f"***empire.gold.bankruptcy_amenity_loss = -{lost} amenities across cities***")
     return lines
 
 
@@ -371,8 +353,10 @@ def notification_lines(snapshot: dict[str, Any]) -> list[str]:
         if not text or text in seen:
             continue
         seen.add(text)
-        turn = turns.get(_notification_key(note), current)
-        kept.append((int(turn), int(_num(note.get("id")) or 0), text))
+        turn = int(turns.get(_notification_key(note), current) or current)
+        if current - turn > 5:
+            continue
+        kept.append((turn, int(_num(note.get("id")) or 0), text))
     kept.sort()
     kept = kept[-NOTIFICATION_LIMIT:]
     return [pipeline._wire_line(f"notification.t{turn}.{index}", text)
@@ -398,11 +382,16 @@ def city_lines(snapshot: dict[str, Any], city: dict[str, Any], name: str) -> lis
     if not row:
         return []
     lines: list[str] = []
+    anarchy = (snapshot.get("your_empire") or {}).get("anarchy_turns") if isinstance(snapshot.get("your_empire"), dict) else 0
     yields = []
     for key, label in (("food", "food"), ("production", "prod"), ("gold", "gold"),
                        ("science", "science"), ("culture", "culture"), ("faith", "faith")):
         value = _num(row.get(key))
-        if value is not None:
+        if value is None or value == 0 and not (anarchy and label in ("gold", "science", "culture", "faith")):
+            continue
+        if value == 0 and anarchy:
+            yields.append(f"{label}=0/turn due to anarchy")
+        else:
             yields.append(f"{label}={_fmt(value)}")
     if yields:
         lines.append(pipeline._wire_line(f"{name}.yields", " ".join(yields)))
@@ -425,22 +414,22 @@ def city_lines(snapshot: dict[str, Any], city: dict[str, Any], name: str) -> lis
             text += f" (growth x{int(round(mult * 100))}%)"
         lines.append(pipeline._wire_line(f"{name}.housing", text))
     have, need = _num(row.get("amenities")), _num(row.get("amenities_needed"))
-    if have is not None and need is not None:
-        text = f"{_fmt(have)} of {_fmt(need)} needed ({_fmt(have - need, signed=True)}) -> {_mood_text(row)}"
+    # A shortage is one empire line (empire.amenities.short). A city at or above its need has no mood line.
+    if have is not None and need is not None and have - need >= 0:
         lost = [f"-{int(_num(row.get(k)) or 0)} {label}" for k, label in
                 (("amenities_lost_bankruptcy", "bankruptcy"), ("amenities_lost_war_weariness", "war weariness"))
                 if (_num(row.get(k)) or 0) > 0]
         if lost:
-            text += " incl. " + ", ".join(lost)
-        lines.append(f"***{name}.mood = {text}***" if have - need < 0 else pipeline._wire_line(f"{name}.mood", text))
+            lines.append(pipeline._wire_line(f"{name}.mood", f"{_fmt(have)} of {_fmt(need)} needed, incl. " + ", ".join(lost)))
     turns = row.get("production_turns")
     if row.get("production_item") and isinstance(turns, int):
         lines.append(pipeline._wire_line(f"{name}.currentProduction.turnsLeft", turns))
     buildings = [str(b) for b in row.get("built_buildings") or [] if b]
-    lines.append(pipeline._wire_line(f"{name}.buildings", ", ".join(buildings) if buildings else "none"))
+    if buildings:
+        lines.append(pipeline._wire_line(f"{name}.buildings", ", ".join(buildings)))
     districts = [str(d) for d in row.get("built_districts") or [] if d]
-    lines.append(pipeline._wire_line(f"{name}.districts", ", ".join(districts) if districts
-                                     else "none (city center only): queue a district, districts drive science, gold and defence"))
+    if districts and not pipeline.map_image_attach_turn(snapshot):
+        lines.append(pipeline._wire_line(f"{name}.districts", ", ".join(districts)))
     return lines
 
 
@@ -455,16 +444,6 @@ def attention_items(snapshot: dict[str, Any]) -> list[str]:
             idle_cities.append(pipeline._city_prompt_name(city))
     if idle_cities:
         items.append(f"***Cities need production: {', '.join(idle_cities)}***")
-    gold = economy_block(snapshot).get("gold")
-    if isinstance(gold, dict):
-        net = _num(gold.get("net"))
-        treasury = _num(gold.get("treasury"))
-        if net is not None and net < 0:
-            eta = ""
-            if treasury is not None and treasury > 0:
-                eta = f", ~{int(math.floor(treasury / -net))} turns to bankruptcy"
-            items.append(f"***Gold: {_fmt(net, signed=True)}/turn (treasury {_fmt(treasury)}{eta}) — see "
-                         "empire.effects.gold***")
     return items
 
 
@@ -530,8 +509,14 @@ def production_catalog_lines(snapshot: dict[str, Any], city_tokens: dict[str, di
         turns = turns_by_city.get(city_id) if isinstance(turns_by_city.get(city_id), dict) else {}
         parts = []
         for token in options:
-            item = catalog.get(token) if isinstance(catalog.get(token), dict) else {}
-            stats = _catalog_stats(item, turns.get(token))
+            base = token.split("@", 1)[0].split(":", 1)[0]
+            turn_n = turns.get(token, turns.get(base))
+            if isinstance(turn_n, int) and turn_n >= 30:
+                continue
+            item = catalog.get(token) if isinstance(catalog.get(token), dict) else catalog.get(base, {})
+            if not isinstance(item, dict):
+                item = {}
+            stats = _catalog_stats(item, turn_n if isinstance(turn_n, int) else None)
             parts.append(f"{token} ({stats})" if stats else token)
         lines.append(pipeline._wire_line(f"{pipeline._city_prompt_name(city)}.production.catalog", " | ".join(parts)))
     if lines:

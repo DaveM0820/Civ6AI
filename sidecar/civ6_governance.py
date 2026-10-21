@@ -133,6 +133,35 @@ def _research_lines(block: dict, label: str, prefix: str, yield_name: str, boost
             out.append(text)
     return out
 
+_GP_DISTRICTS = (
+    ("holy site", "DISTRICT_HOLY_SITE"),
+    ("campus", "DISTRICT_CAMPUS"),
+    ("theater square", "DISTRICT_THEATER"),
+    ("commercial hub", "DISTRICT_COMMERCIAL_HUB"),
+    ("industrial zone", "DISTRICT_INDUSTRIAL_ZONE"),
+    ("harbor", "DISTRICT_HARBOR"),
+    ("encampment", "DISTRICT_ENCAMPMENT"),
+)
+
+
+def _gp_activation_note(snapshot: dict, person: dict) -> str:
+    """What the person needs to activate, and whether this seat has that district."""
+    effect = str(person.get("effect") or "").lower()
+    needed = [(label, did) for label, did in _GP_DISTRICTS if label in effect]
+    if not needed:
+        return ""
+    built: set[str] = set()
+    for city in snapshot.get("your_cities") or []:
+        if not isinstance(city, dict):
+            continue
+        for district in city.get("built_districts") or []:
+            built.add(str(district).split("@", 1)[0].split("|", 1)[0].upper())
+    missing = [label for label, did in needed if did not in built]
+    if missing:
+        return f"; needs a {missing[0]}; no valid activation site"
+    return f"; needs a {needed[0][0]}"
+
+
 def prompt_lines(snapshot: dict) -> list[str]:
     gov = governance(snapshot)
     if not gov:
@@ -141,6 +170,9 @@ def prompt_lines(snapshot: dict) -> list[str]:
     lines: list[str] = []
     g = _dct(gov.get("government"))
     if g:
+        if g.get("in_anarchy") or g.get("anarchy_turns_left"):
+            left = g.get("anarchy_turns_left") or "some"
+            lines.append(f"ANARCHY: {left} turns left. Yields are 0 until it ends. You cannot change government.")
         cur = _short(g.get("current"), "GOVERNMENT_") or "none yet"
         extra = f" (slots {g['current_slots']})" if g.get("current_slots") else ""
         bonus = f" — bonus: {g['current_bonus']}" if g.get("current_bonus") else ""
@@ -166,6 +198,10 @@ def prompt_lines(snapshot: dict) -> list[str]:
                 f"{s.get('index')}:{_short(s.get('slot_type'), 'SLOT_')}="
                 f"{_short(s.get('policy'), 'POLICY_') if s.get('policy') else 'EMPTY'}" for s in slots)
             lines.append(f"Policy slots: {desc}")
+            empty = [s for s in slots if not s.get("policy")]
+            if empty:
+                lines.append(f"  EMPTY POLICY SLOTS: {len(empty)} slot(s) have no card. "
+                             "Name the cards you want with the policies key; unnamed slots stay empty.")
             if routes.get("policies", True) and p.get("change_allowed"):
                 lines.append("  You may change cards this turn.")
             elif routes.get("policies", True):
@@ -174,8 +210,10 @@ def prompt_lines(snapshot: dict) -> list[str]:
         if cards and routes.get("policies", True) and not snapshot.get("_policy_review"):
             lines.append('  Write "policies": "review" to see every unlocked card next turn.')
         elif cards and routes.get("policies", True):
-            lines.append("  Unlocked policy cards (type — effect):")
-            for c in cards:
+            slot_types = {str(s.get("slot_type") or "") for s in slots}
+            shown = [c for c in cards if str(c.get("slot_type") or "") in slot_types]
+            lines.append("  Unlocked policy cards that fit a current slot (type — effect):")
+            for c in shown:
                 mark = " [slotted]" if c.get("active") else ""
                 eff = f" — {c['effect']}" if c.get("effect") else ""
                 lines.append(f"    {_short(c.get('id'), 'POLICY_')} ({_short(c.get('slot_type'), 'SLOT_')}){mark}{eff}")
@@ -269,9 +307,10 @@ def prompt_lines(snapshot: dict) -> list[str]:
                 if x.get("faith_cost") and x["faith_cost"] < UNAVAILABLE_COST:
                     opts.append(f"patronize {x['faith_cost']} faith" + (" (affordable)" if x.get("can_patronize_faith") else ""))
                 eff = f" — {x['effect']}" if x.get("effect") else ""
+                need = _gp_activation_note(snapshot, x)
                 lines.append(f"    {_short(x.get('id'), 'GREAT_PERSON_INDIVIDUAL_')} "
                              f"({_short(x.get('class'), 'GREAT_PERSON_CLASS_')}, cost {x.get('cost')} points"
-                             + (f"; {', '.join(opts)}" if opts else "") + f"){eff}")
+                             + (f"; {', '.join(opts)}" if opts else "") + f"){eff}{need}")
     if gov.get("favor") is not None:
         rate = f" (+{gov['favor_per_turn']}/turn)" if gov.get("favor_per_turn") is not None else ""
         lines.append(f"Diplomatic favor: {gov['favor']}{rate}")
@@ -404,21 +443,6 @@ def _split_pair(value: Any, seps: str = ":@=") -> tuple[str, str]:
     return text, ""
 
 
-def _fill_empty(free: dict, slot_type: dict, card_ids: list, card_type: dict) -> None:
-    """Never leave a slot empty: put an unused unlocked card of that type (any card in a wildcard)."""
-    used = {c for c in free.values() if c}
-    for idx in sorted(free):
-        if free[idx]:
-            continue
-        st = slot_type.get(idx, "")
-        cid = next((c for c in card_ids if c not in used and card_type.get(c) == st), None)
-        if cid is None and st == "SLOT_WILDCARD":
-            cid = next((c for c in card_ids if c not in used), None)
-        if cid is not None:
-            free[idx] = cid
-            used.add(cid)
-
-
 def plan_policies(slots: list[dict], cards: list[dict], value: Any) -> tuple[dict[int, str] | None, list[str]]:
     """Wanted slot -> card ('NONE' empties) from the reply; only changed slots are kept."""
     problems: list[str] = []
@@ -480,18 +504,8 @@ def plan_policies(slots: list[dict], cards: list[dict], value: Any) -> tuple[dic
                 problems.append(f"no free {_short(ctype, 'SLOT_').lower()} or wildcard slot for {cid}")
                 continue
             free[spot] = cid
-        _fill_empty(free, slot_type, card_ids, card_type)
         for idx in slot_type:
             wanted[idx] = free[idx] or "NONE"
-    # Slots the reply left untouched and that are empty: fill them too.
-    rest = {i: (wanted.get(i) if i in wanted else (None if current.get(i) in (None, "NONE") else current.get(i)))
-            for i in slot_type}
-    rest = {i: (None if c == "NONE" and i not in wanted else c) for i, c in rest.items()}
-    before = dict(rest)
-    _fill_empty(rest, slot_type, card_ids, card_type)
-    for i, c in rest.items():
-        if before[i] is None and c and i not in wanted:
-            wanted[i] = c
     changed = {i: c for i, c in wanted.items() if current.get(i, "NONE") != c}
     return changed, problems
 
@@ -528,11 +542,17 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
     if ckey == "government":
         g = _dct(gov.get("government"))
         avail = [str(a.get("id")) for a in _lst(g.get("available")) if isinstance(a, dict)]
-        gid = _match_id(value, avail, ("GOVERNMENT_",))
-        if gid is None:
-            notes.append(f"{key}={value}: not an unlocked government")
+        current = str(g.get("current") or "")
+        if g.get("in_anarchy"):
+            notes.append(f"{key}: you are in anarchy; wait until it ends before changing government")
+        elif current and _match_id(value, [current], ("GOVERNMENT_",)):
+            notes.append(f"{key}={value}: you already have { _short(current, 'GOVERNMENT_') }; switching to it is blocked")
         else:
-            ids.append(_add_command(snapshot, "change_government", {"government_id": gid}, f"change government to {gid}"))
+            gid = _match_id(value, avail, ("GOVERNMENT_",))
+            if gid is None:
+                notes.append(f"{key}={value}: not an unlocked government")
+            else:
+                ids.append(_add_command(snapshot, "change_government", {"government_id": gid}, f"change government to {gid}"))
     elif ckey == "policies" and str(value).strip().lower() == "review":
         snapshot["_policy_review_requested"] = True
     elif ckey == "policies":

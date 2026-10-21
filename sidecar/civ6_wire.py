@@ -431,8 +431,16 @@ def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None
     cities = [city for city in snapshot.get("your_cities", []) if isinstance(city, dict)]
     if cities:
         lines.append(pipeline._wire_line("empire.cities", len(cities)))
-    pipeline._append_int_wire(lines, "empire.gold", empire.get("gold"))
-    pipeline._append_int_wire(lines, "empire.gold_per_turn", empire.get("gold_per_turn"))
+    anarchy = empire.get("anarchy_turns") if isinstance(empire.get("anarchy_turns"), int) else 0
+    economy = ((snapshot.get("civ6") or {}).get("economy") or {}) if isinstance(snapshot.get("civ6"), dict) else {}
+    if not isinstance(economy.get("gold"), dict):
+        pipeline._append_int_wire(lines, "empire.gold", empire.get("gold"))
+        if anarchy and empire.get("gold_per_turn") == 0:
+            lines.append(pipeline._wire_line("empire.gold_per_turn", "0/turn due to anarchy"))
+        else:
+            pipeline._append_int_wire(lines, "empire.gold_per_turn", empire.get("gold_per_turn"))
+    if anarchy:
+        lines.append(pipeline._wire_line("empire.anarchy", f"{anarchy} turns left"))
     amenities = empire.get("amenities")
     if isinstance(amenities, dict):
         pipeline._append_int_wire(lines, "empire.amenities.net", amenities.get("net"))
@@ -442,7 +450,10 @@ def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None
     for field in ("science", "culture", "faith", "favor"):
         value = yields.get(field)
         if isinstance(value, int):
-            lines.append(pipeline._wire_line(f"empire.{field}", value))
+            if anarchy and value == 0 and field != "favor":
+                lines.append(pipeline._wire_line(f"empire.{field}", "0/turn due to anarchy"))
+            else:
+                lines.append(pipeline._wire_line(f"empire.{field}", value))
     research = empire.get("research", {})
     if isinstance(research, dict):
         pipeline._append_id_wire(lines, "empire.research.tech", research.get("tech_id"))
@@ -536,6 +547,38 @@ def _civ6_unit_tokens(snapshot: dict[str, Any]) -> dict[str, list[str]]:
     return out
 
 
+_DISTRICT_AT = re.compile(r"^(DISTRICT_[A-Z0-9_]+)@\((\d+),(\d+)\)$")
+
+
+def _production_turns(snapshot: dict[str, Any], city_id: str, token: str) -> int | None:
+    economy = ((snapshot.get("civ6") or {}).get("economy") or {}) if isinstance(snapshot.get("civ6"), dict) else {}
+    by_city = economy.get("build_turns") if isinstance(economy.get("build_turns"), dict) else {}
+    turns = by_city.get(city_id) if isinstance(by_city.get(city_id), dict) else {}
+    base = token.split("@", 1)[0].split(":", 1)[0]
+    value = turns.get(token, turns.get(base))
+    return value if isinstance(value, int) else None
+
+
+def _collapse_district_tokens(tokens: list[str]) -> list[str]:
+    """DISTRICT_X@(a,b) and DISTRICT_X@(c,d) become DISTRICT_X@(a,b)|(c,d)."""
+    groups: dict[str, list[str]] = {}
+    out: list[str] = []
+    for token in tokens:
+        match = _DISTRICT_AT.match(token)
+        if match is None:
+            out.append(token)
+            continue
+        key = match.group(1)
+        groups.setdefault(key, []).append(f"({match.group(2)},{match.group(3)})")
+        if key not in out:
+            out.append(key)
+    collapsed: list[str] = []
+    for token in out:
+        coords = groups.get(token)
+        collapsed.append(f"{token}@{('|'.join(coords))}" if coords else token)
+    return collapsed
+
+
 def _civ6_city_tokens(snapshot: dict[str, Any]) -> dict[str, dict[str, list[str]]]:
     """city_id -> {prop: [tokens]} for legal city orders."""
     out: dict[str, dict[str, list[str]]] = {}
@@ -550,9 +593,14 @@ def _civ6_city_tokens(snapshot: dict[str, Any]) -> dict[str, dict[str, list[str]
         if not pair:
             continue
         prop, token = pair
+        if prop == "production" and (_production_turns(snapshot, city_id, token) or 0) >= 30:
+            continue
         bucket = out.setdefault(city_id, {}).setdefault(prop, [])
         if token not in bucket:
             bucket.append(token)
+    for props in out.values():
+        if "production" in props:
+            props["production"] = _collapse_district_tokens(props["production"])
     return out
 
 
@@ -619,7 +667,8 @@ def _required_city_rows(snapshot: dict[str, Any]) -> list[tuple[str, list[str]]]
         options = city_tokens.get(city_id, {}).get("production", [])
         if building or not options:
             continue
-        rows.append((pipeline._city_prompt_name(city), options))
+        name = pipeline._city_prompt_name(city)
+        rows.append((name, [f"bare ID from {name}.production.catalog"]))
     return rows
 
 
@@ -628,7 +677,10 @@ def _event_log_rows(snapshot: dict[str, Any]) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
     idle = [u for u in snapshot.get("your_units", []) if isinstance(u, dict) and u.get("needs_orders")]
     if idle:
-        rows.append(("Idle", "(write this turn's thought on this item)"))
+        wire_ids = pipeline._build_unit_wire_id_map(idle)
+        names = [wire_ids.get(str(u.get("unit_id")), str(u.get("unit_id"))) for u in idle[:8]]
+        extra = f" (+{len(idle) - 8} more)" if len(idle) > 8 else ""
+        rows.append(("Idle", f"{len(idle)} units idle: {', '.join(names)}{extra}"))
     if civ6_apply_results.blocked_attention_lines(snapshot):
         rows.append(("Blocked", "(last turn's failed order: what went wrong and what you do differently)"))
     for note in coaching.collect_civ6_attention_items(snapshot):
@@ -838,7 +890,7 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
     return lines
 
 
-_MILITARY_ALERT_RE = re.compile(r"unit|attack|war|enemy|barbarian|army|siege|defen|pillag|captur|threat|need orders", re.I)
+_MILITARY_ALERT_RE = re.compile(r"unit|attack|war|enemy|barbarian|army|siege|defen|pillag|captur|threat", re.I)
 _PLAYER_RE = re.compile(r"\bPLAYER_(\d+)\b")
 
 
@@ -955,7 +1007,8 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
                 if isinstance(movement, dict):
                     if isinstance(movement.get("current"), int):
                         lines.append(pipeline._wire_line(f"{prefix}.moves", movement["current"]))
-                    if isinstance(movement.get("maximum"), int) and movement["maximum"] > 0:
+                    if (isinstance(movement.get("maximum"), int) and movement["maximum"] > 0
+                            and movement.get("maximum") != movement.get("current")):
                         lines.append(pipeline._wire_line(f"{prefix}.maxMovement", movement["maximum"]))
                 if "SETTLER" in str(unit.get("unit_type_id") or ""):
                     lines.extend(coaching.settler_fact_lines(prefix, unit, context))
@@ -1015,6 +1068,9 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
                 history.get("public_events", []), pipeline.chat_history_max_messages())):
             if not isinstance(event, dict):
                 continue
+            kind = str(event.get("kind", "")).upper()
+            if kind and kind != "CHAT_PUBLIC":
+                continue
             text = pipeline._format_public_chat_line(context, event)
             if text:
                 text = _PLAYER_RE.sub(lambda m: leaders.get(m.group(0), "an unmet leader"), text)
@@ -1030,6 +1086,10 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
             continue
         text = pipeline.trim_chat_text(str(message.get("text", "")))
         if text:
+            body = text.strip()[:120]
+            if body in seen_chat:
+                continue
+            seen_chat.add(body)
             from_id = str(message.get("from_player_id", ""))
             sender = pipeline._player_chat_name(context, from_id) if from_id else "Rival"
             chat_lines.append(pipeline._wire_line(
@@ -1242,7 +1302,7 @@ def _resource_label(resource_id: Any) -> str:
     return pipeline._readable_id(str(resource_id or ""), "RESOURCE_").lower()
 
 
-def _trade_stock_text(stock: dict[str, Any] | None) -> str:
+def _trade_stock_text(stock: dict[str, Any] | None, snapshot: dict[str, Any] | None = None) -> str:
     if not isinstance(stock, dict):
         return ""
     parts: list[str] = []
@@ -1253,7 +1313,11 @@ def _trade_stock_text(stock: dict[str, Any] | None) -> str:
     for key in ("luxuries", "strategics"):
         for row in stock.get(key, []) or []:
             if isinstance(row, dict) and row.get("resource_id"):
-                parts.append(f"{_resource_label(row['resource_id'])}:{int(row.get('amount') or 1)}")
+                extra = ""
+                if key == "strategics" and snapshot is not None:
+                    from sidecar.civ6_diplomacy import _usable_mark
+                    extra = _usable_mark(snapshot, str(row["resource_id"]))
+                parts.append(f"{_resource_label(row['resource_id'])}:{int(row.get('amount') or 1)}{extra}")
     return " | ".join(parts)
 
 
@@ -1267,6 +1331,7 @@ def _civ6_trade_lines(context: dict[str, Any], rivals: list[dict[str, Any]], dip
     """Civ5-style # == Diplomacy == block from civ6.diplomacy (absent with older mods)."""
     if not diplomacy:
         return []
+    from sidecar import civ6_diplomacy as diplomacy_wire
     lines = ["# == Diplomacy =="]
     wars = [pair for pair in diplomacy.get("wars", []) or [] if isinstance(pair, list) and len(pair) == 2]
     if wars:
@@ -1277,12 +1342,12 @@ def _civ6_trade_lines(context: dict[str, Any], rivals: list[dict[str, Any]], dip
     if isinstance(diplomacy.get("envoys_to_give"), int) and diplomacy["envoys_to_give"] > 0:
         lines.append(pipeline._wire_line("diplomacy.envoys.available", diplomacy["envoys_to_give"]))
     mine = diplomacy.get("your_trade") if isinstance(diplomacy.get("your_trade"), dict) else None
-    offer = _trade_stock_text(mine)
+    offer = _trade_stock_text(mine, context)
     lines.append(pipeline._wire_line("diplomacy.offer.you", offer or "(nothing tradable)"))
     lines.append(pipeline._wire_line(
         "diplomacy.offer.note",
-        "Your stock that could go into a deal (luxuries, strategics, gold, gold per turn). Deals are made in chat; "
-        "the engine only applies the legal commands listed for you."))
+        "Your stock that could go into a deal (luxuries, strategics, gold, gold per turn). "
+        "Chat never executes a trade; use deal.<Leader> or a propose_cmd."))
     lines.append(pipeline._wire_line(
         "diplomacy.request.note",
         "What each rival holds that you could ask for; 'wants' lists your luxuries they lack (trade bait)."))
@@ -1295,13 +1360,15 @@ def _civ6_trade_lines(context: dict[str, Any], rivals: list[dict[str, Any]], dip
         rival = names.get(pid)
         label = f"{pipeline._rival_leader_name(rival) if rival else pid} ({pid})"
         trade = major.get("trade") if isinstance(major.get("trade"), dict) else None
-        text = _trade_stock_text(trade) or "(nothing tradable seen)"
+        text = _trade_stock_text(trade, context) or "(nothing tradable seen)"
         wants = sorted(_resource_label(r) for r in my_lux - _luxury_ids(trade))
         if trade is not None and wants:
             text += " ; wants: " + ", ".join(wants)
         if major.get("at_war"):
             text += " ; at war with you (peace first)"
         lines.append(pipeline._wire_line(f"diplomacy.request.{label}", text))
+    lines.extend(diplomacy_wire.city_state_lines(context))
+    lines.extend(diplomacy_wire.deal_status_lines(context))
     return lines
 
 
@@ -1415,7 +1482,9 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
                 continue
             expires = note.get("expires_turn")
             until = "forever" if expires is None else f"until T{expires}"
-            text = re.sub(r"\s*\((?:until T\d+|forever)\)", "", str(note["text"])).strip()
+            text = re.sub(r"\s*\((?:until T\d+|forever)\)", "", str(note["text"]))
+            text = re.sub(r"\bduration\s*[:=]\s*(?:\d{1,4}\s*turns?|forever|permanent|always)\b", "", text, flags=re.I)
+            text = re.sub(r"\s{2,}", " ", text).strip(" ,;-")
             lines.append(pipeline._wire_line(
                 f"remembered.T{int(note.get('turn', 0))}", f"{text} ({until})"
             ))
@@ -1574,6 +1643,9 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
             key = f"{name}.{prop}"
             if key in required_keys:
                 continue
+            if prop == "production":
+                optional_keys.append((key, f"bare ID from {name}.production.catalog"))
+                continue
             optional_keys.append((key, " | ".join(tokens)))
 
     opt = [
@@ -1654,7 +1726,15 @@ def build_civ6_wire_prompt(context: dict[str, Any], map_stats: list[str] | None 
     attention.extend(gs_wire.attention_items(context))
     attention.extend(governance_wire.attention_items(context))
     if attention:
-        sections.append(pipeline._wire_section("ATTENTION", attention))
+        seen_attention: set[str] = set()
+        unique_attention: list[str] = []
+        for line in attention:
+            key = re.sub(r"\s+", " ", str(line).strip().lower())
+            if key in seen_attention:
+                continue
+            seen_attention.add(key)
+            unique_attention.append(line)
+        sections.append(pipeline._wire_section("ATTENTION", unique_attention))
     thoughts = _thoughts_section(context)
     if thoughts:
         sections.append(pipeline._wire_section("THOUGHTS", thoughts))

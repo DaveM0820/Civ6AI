@@ -59,23 +59,17 @@ units.inventory = Scout 1, Settler 1, Spearman 1
 # SCOUT legalCommands = MoveTo(x,y)
 # SPEARMAN legalCommands = MoveTo(x,y), Fortify, Skip
 scout_1.position = (14,22)
-scout_1.combat = 100hp
 ***scout_1.needsOrders = true***
 scout_1.moves = 2
-scout_1.maxMovement = 2
 
 spearman_1.position = (15,23)
-spearman_1.combat = 100hp
 ***spearman_1.needsOrders = true***
 spearman_1.moves = 2
-spearman_1.maxMovement = 2
 # == Units — Civilian ==
 # SETTLER legalCommands = MoveTo(x,y)
 settler_1.position = (16,24)
-settler_1.combat = civilian (no combat), 100hp
 ***settler_1.needsOrders = true***
 settler_1.moves = 2
-settler_1.maxMovement = 2
 # Settle: Carefully observe the attached map to choose a settle location, and remember it for as many turns as the walk takes. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold).
 
 === DIPLOMACY ===
@@ -166,7 +160,7 @@ Optional JSON keys:
   "9.legal.research.tech": "TECH_POTTERY",
   "10.chat": "chat.all | chat.Cleopatra",
   "11.remember": "text (duration N turns | forever)",
-  "12.Athens.production": "UNIT_SETTLER | BUILDING_MONUMENT",
+  "12.Athens.production": "bare ID from Athens.production.catalog",
 
 Reference catalogs (not numbered JSON keys):
 legal.validUnits = scout_1 | settler_1 | spearman_1
@@ -189,7 +183,7 @@ Required JSON keys:
   "2.tacticalmap.read": "one short paragraph on the attached tactical map (key (x,y) for units, cities, resources)",
   "3.thought.situation": "one paragraph board read this turn (economy, science, amenities, military, geography; new observations only)",
   "4.thought.strategy": "one paragraph: long-term path to victory, then this turn's plan for each required and optional command you will issue",
-  "5.Event.Idle.log": "(write this turn's thought on this item)",
+  "5.Event.Idle.log": "3 units idle: scout_1, settler_1, spearman_1",
   # --- UNIT / CITY ORDERS ---
   "6.scout_1.command": "MoveTo(x,y)",
   "7.settler_1.command": "MoveTo(x,y)",

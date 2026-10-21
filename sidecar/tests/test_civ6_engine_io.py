@@ -20,7 +20,7 @@ def _legal(command_id, kind, fixed):
 APPLY_KINDS = {
     "set_research_tech", "set_research_civic", "move_unit", "queue_production",
     "unit_skip", "unit_posture_fortify", "found_city", "attack_target",
-    "send_diplomatic_action", "execute_deal", "purchase_item", "purchase_tile",
+    "send_diplomatic_action", "execute_deal", "send_envoy", "purchase_item", "purchase_tile",
     "worker_improve", "pillage_improvement", "explore", "activate_great_person",
     "upgrade_unit", "promote_unit", "join_formation", "city_attack", "build_fort",
 }
