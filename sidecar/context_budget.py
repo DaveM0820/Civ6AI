@@ -24,7 +24,7 @@ Degradation ladder (maps LAST — David 2026-09-06):
   3. own_units truncated too (position + type/id)
   4. chat log capped to 5 messages
   5. cities truncated (name + currently building for self)
-  6. map images: omit tactical, then 768→512 on remaining
+  6. map images: omit tactical, then 1536→1024→768→512 on remaining
 """
 from __future__ import annotations
 
@@ -47,7 +47,8 @@ DEFAULT_THINKING_PARAGRAPH_TOKENS = 900  # generous per thinking paragraph
 DEFAULT_CONTENT_BLOCK_TOKENS = 600  # numbered commands block
 THINKING_PARAGRAPH_COUNT = 4
 CONTENT_BLOCK_COUNT = 1
-IMAGE_SIZE_LADDER = (768, 512)
+# Descending. The first candidate strictly below the current size is the next step.
+IMAGE_SIZE_LADDER = (2048, 1536, 1024, 768, 512)
 STORY_MIN_ENTRIES = 3
 CHAT_BUDGET_MAX_MESSAGES = 5
 CHARS_PER_TOKEN = 4.0
@@ -82,8 +83,8 @@ class BudgetPlan:
     story_min_entries: int = STORY_MIN_ENTRIES
     chat_max_messages: int | None = None  # None = default window
     cities: str = "full"  # full | truncated
-    overview_image_size: int = 768
-    tactical_image_size: int = 1024  # 0 = omit tactical
+    overview_image_size: int = 1536
+    tactical_image_size: int = 2048  # 0 = omit tactical
     focus_image_size: int = 0
     omit_tactical: bool = False
     omit_focus: bool = True
@@ -474,8 +475,8 @@ def clear_context_limit_cache() -> None:
 
 
 def default_image_sizes() -> tuple[int, int, int]:
-    overview = _env_int("CIV5_OVERVIEW_MODEL_IMAGE_SIZE", "CIV5AI_OVERVIEW_MODEL_IMAGE_SIZE", default=768) or 768
-    tactical = _env_int("CIV5_TACTICAL_MODEL_IMAGE_SIZE", "CIV5AI_TACTICAL_MODEL_IMAGE_SIZE", default=1024) or 1024
+    overview = _env_int("CIV5_OVERVIEW_MODEL_IMAGE_SIZE", "CIV5AI_OVERVIEW_MODEL_IMAGE_SIZE", default=1536) or 1536
+    tactical = _env_int("CIV5_TACTICAL_MODEL_IMAGE_SIZE", "CIV5AI_TACTICAL_MODEL_IMAGE_SIZE", default=2048) or 2048
     overview = max(256, min(2048, overview))
     tactical = max(256, min(2048, tactical))
     return overview, tactical, 0

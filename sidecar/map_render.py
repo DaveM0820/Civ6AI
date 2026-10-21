@@ -24,8 +24,8 @@ MAX_COORD_LABEL_CELLS = 128
 TERRITORY_TINT_ALPHA = 0.22
 MODEL_IMAGE_SIZE = 512
 MODEL_IMAGE_MIME = "image/png"
-CIV5_OVERVIEW_MODEL_IMAGE_SIZE = 768
-CIV5_TACTICAL_MODEL_IMAGE_SIZE = 1024
+CIV5_OVERVIEW_MODEL_IMAGE_SIZE = 1536
+CIV5_TACTICAL_MODEL_IMAGE_SIZE = 2048
 CIV5_FOCUS_MODEL_IMAGE_SIZE = 384
 GRID_MERGE_THRESHOLD = 4  # legacy wire inflation guard; renderer always merges grid when present
 LEGEND_HEIGHT = 96
@@ -1451,12 +1451,16 @@ def _letterbox_model_image(image: Any, target_size: int | None = None, max_upsca
 def encode_model_image_bytes(
     image: Any, *, target_size: int | None = None, max_upscale: float | None = None,
 ) -> tuple[bytes, str]:
-    """Encode a fixed-size PNG for LLM vision APIs."""
+    """Encode a fixed-size lossless PNG for LLM vision APIs.
+
+    zlib level 6, not optimize=True. The optimizer's extra filter search
+    saved about 2% on a 2048 square and spent most of a warm render doing it.
+    """
     import io
 
     buf = io.BytesIO()
     _letterbox_model_image(image, target_size=target_size, max_upscale=max_upscale).save(
-        buf, format="PNG", optimize=True,
+        buf, format="PNG", compress_level=6,
     )
     return buf.getvalue(), MODEL_IMAGE_MIME
 

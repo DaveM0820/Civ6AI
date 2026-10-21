@@ -415,19 +415,19 @@ class Civ6MapRenderTests(unittest.TestCase):
         _BASE_LAYER_CACHE.clear()
         with tempfile.TemporaryDirectory() as tmp:
             render_civ6_map_png(
-                snapshot, Path(tmp) / "warm-overview.png", viewport=overview_vp, image_role="overview", target_size=768,
+                snapshot, Path(tmp) / "warm-overview.png", viewport=overview_vp, image_role="overview", target_size=1536,
             )
             render_civ6_map_png(
-                snapshot, Path(tmp) / "warm-tactical.png", viewport=tactical_vp, image_role="viewport", target_size=1024,
+                snapshot, Path(tmp) / "warm-tactical.png", viewport=tactical_vp, image_role="viewport", target_size=2048,
             )
             started = time.perf_counter()
             render_civ6_map_png(
-                snapshot, Path(tmp) / "overview.png", viewport=overview_vp, image_role="overview", target_size=768,
+                snapshot, Path(tmp) / "overview.png", viewport=overview_vp, image_role="overview", target_size=1536,
             )
             overview_s = time.perf_counter() - started
             started = time.perf_counter()
             render_civ6_map_png(
-                snapshot, Path(tmp) / "tactical.png", viewport=tactical_vp, image_role="viewport", target_size=1024,
+                snapshot, Path(tmp) / "tactical.png", viewport=tactical_vp, image_role="viewport", target_size=2048,
             )
             tactical_s = time.perf_counter() - started
         self.assertLess(overview_s, 1.0)
@@ -530,6 +530,79 @@ class Civ6MapRenderTests(unittest.TestCase):
             {"decision": {"player_id": "PLAYER_0"}, "known_players": []}, "PLAYER_62",
         )
         self.assertEqual("Free Cities", label)
+
+    def test_default_model_images_are_double_and_high_detail(self):
+        from unittest.mock import patch
+
+        from sidecar import context_budget
+        from sidecar import map_situational
+
+        import os
+
+        self.assertEqual(1536, map_render.CIV5_OVERVIEW_MODEL_IMAGE_SIZE)
+        self.assertEqual(2048, map_render.CIV5_TACTICAL_MODEL_IMAGE_SIZE)
+        saved = {
+            name: os.environ.pop(name, None)
+            for name in (
+                "CIV5_OVERVIEW_MODEL_IMAGE_SIZE",
+                "CIV5AI_OVERVIEW_MODEL_IMAGE_SIZE",
+                "CIV5_TACTICAL_MODEL_IMAGE_SIZE",
+                "CIV5AI_TACTICAL_MODEL_IMAGE_SIZE",
+            )
+        }
+        try:
+            self.assertEqual((1536, 2048, 0), context_budget.default_image_sizes())
+        finally:
+            for name, value in saved.items():
+                if value is not None:
+                    os.environ[name] = value
+
+        def fake_render(snapshot, path, prefer_civ5_sprites=False, **kwargs):
+            from PIL import Image
+
+            Image.new("RGBA", (32, 32), (20, 20, 20, 255)).save(path, format="PNG")
+            return {
+                "data_url": "data:image/png;base64,AAAA",
+                "label": kwargs.get("image_role") or "map",
+                "legend": [],
+            }
+
+        snapshot = civ6_adapter.load_golden_snapshot(GOLDEN)
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "sidecar.map_situational.render_civ6_map_png", fake_render,
+        ):
+            bundle = map_situational.prepare_civ6_situational_maps(
+                snapshot, Path(tmp), attach=True, omit_focus=True,
+            )
+        by_role = {item["role"]: item for item in bundle["manifest"]}
+        self.assertEqual("high", by_role["overview"]["detail"])
+        self.assertEqual("high", by_role["viewport"]["detail"])
+        self.assertEqual(1536, by_role["overview"]["image_size"])
+        self.assertEqual(2048, by_role["viewport"]["image_size"])
+        sent = {item["role"]: item["detail"] for item in bundle["data_urls"]}
+        self.assertEqual("high", sent["overview"])
+        self.assertEqual("high", sent["viewport"])
+
+    def test_larger_target_is_drawn_finer_not_stretched(self):
+        snapshot = civ6_adapter.load_golden_snapshot(GOLDEN)
+        viewport = {"x0": 0, "y0": 0, "width": 14, "height": 12}
+        with tempfile.TemporaryDirectory() as tmp:
+            small = render_civ6_map_png(
+                snapshot, Path(tmp) / "small.png", viewport=viewport, target_size=1024, image_role="viewport",
+            )
+            large = render_civ6_map_png(
+                snapshot, Path(tmp) / "large.png", viewport=viewport, target_size=2048, image_role="viewport",
+            )
+            raw = (Path(tmp) / "large.png").read_bytes()
+        self.assertTrue(raw.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertGreater(large["tile_px"], small["tile_px"])
+        small_long = max(small["source_width"], small["source_height"])
+        large_long = max(large["source_width"], large["source_height"])
+        self.assertGreater(large_long, small_long * 1.5)
+        self.assertGreater(large_long, 1600)
+        self.assertEqual(2048, large["width"])
+        self.assertEqual(2048, large["height"])
+        self.assertEqual("image/png", large["mime_type"])
 
 
 if __name__ == "__main__":

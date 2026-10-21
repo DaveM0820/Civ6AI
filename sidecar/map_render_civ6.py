@@ -176,6 +176,65 @@ def _odd_r_map_size(vw: int, vh: int, tile_px: int, gutter: int) -> tuple[int, i
     return gutter + map_w, gutter + map_h
 
 
+def _axis_gutter_for_tile(
+    tile_px: int,
+    x0: int,
+    y0: int,
+    vw: int,
+    vh: int,
+    *,
+    show_axis: bool,
+    prefer_civ5_sprites: bool,
+) -> int:
+    if not show_axis or vw <= 0 or vh <= 0:
+        return 0
+    axis_font = map_render._axis_label_font(tile_px, x0, y0, vw, vh)
+    if prefer_civ5_sprites:
+        axis_font = max(axis_font, 10)
+    axis_gutter = map_render._axis_gutter_size(axis_font)
+    return max(axis_gutter, axis_font * 2 + 8)
+
+
+def _tile_px_for_model_target(
+    current: int,
+    vw: int,
+    vh: int,
+    target_size: int | None,
+    *,
+    x0: int,
+    y0: int,
+    show_axis: bool,
+    prefer_civ5_sprites: bool,
+) -> int:
+    """Draw hexes near the PNG size that is sent, instead of stretching a smaller canvas.
+
+    Fonts and icons are sized from tile_px. A letterbox upscale of a ~960px
+    drawing does not add detail, so when a model image size is set the hex
+    field is rasterized to about 88% of that square (the legend uses the rest).
+    """
+    if not isinstance(target_size, int) or target_size < 256 or vw <= 0 or vh <= 0:
+        return current
+    budget = max(128, int(target_size * 0.88))
+    lo, hi = 12, 320
+    best = 12
+    found = False
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        gutter = _axis_gutter_for_tile(
+            mid, x0, y0, vw, vh, show_axis=show_axis, prefer_civ5_sprites=prefer_civ5_sprites,
+        )
+        map_w, map_h = _odd_r_map_size(vw, vh, mid, gutter)
+        if max(map_w, map_h) <= budget:
+            best = mid
+            found = True
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    if not found:
+        return current
+    return max(current, best)
+
+
 def _hex_edge_segment(
     corners: list[tuple[float, float]],
     edge: int,
@@ -1435,12 +1494,16 @@ def render_civ6_map_png(
         show_axis, show_tile_coords = vw > 0 and vh > 0, False
     else:
         show_axis, show_tile_coords = _hex_coord_label_flags(vw, vh)
+    tile_px = _tile_px_for_model_target(
+        tile_px, vw, vh, target_size,
+        x0=x0, y0=y0, show_axis=show_axis, prefer_civ5_sprites=prefer_civ5_sprites,
+    )
     axis_font = map_render._axis_label_font(tile_px, x0, y0, vw, vh)
     if prefer_civ5_sprites:
         axis_font = max(axis_font, 10)
-    axis_gutter = map_render._axis_gutter_size(axis_font) if show_axis else 0
-    if show_axis:
-        axis_gutter = max(axis_gutter, axis_font * 2 + 8)
+    axis_gutter = _axis_gutter_for_tile(
+        tile_px, x0, y0, vw, vh, show_axis=show_axis, prefer_civ5_sprites=prefer_civ5_sprites,
+    )
     cell_font, legend_font, legend_swatch, legend_icon, _ = map_render._scaled_fonts(tile_px)
     if prefer_civ5_sprites:
         legend_font = max(legend_font, 11)
@@ -1913,11 +1976,13 @@ def render_civ6_map_png(
             draw.text((lx + legend_icon + 3, row_y), meaning, fill="#bbbbbb", font=legend_font_pil, anchor="ls")
         legend_y += icon_strip_h
 
-    # Close-ups stop scaling once a hex is about 72px so a small window is padded
-    # instead of blown up until banners and badges turn into blobs.
+    # The hex field is already drawn near target_size. Allow a little grow so
+    # the legend does not leave a short canvas, and no more: a bigger scale
+    # would blur fonts and icons that were rasterized smaller.
     encode_kwargs: dict[str, Any] = {"target_size": target_size}
-    if zoomed and tile_px > 0:
-        # Stop scaling once a hex is about 72px; the rest of the square is padding.
+    if isinstance(target_size, int) and target_size > 0:
+        encode_kwargs["max_upscale"] = 1.35
+    elif zoomed and tile_px > 0:
         encode_kwargs["max_upscale"] = 72 / tile_px
     raw, mime = map_render.encode_model_image_bytes(canvas, **encode_kwargs)
     digest = hashlib.sha256(raw).hexdigest()

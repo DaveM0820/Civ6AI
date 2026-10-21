@@ -970,7 +970,7 @@ def prepare_civ5_situational_maps(
         "role": "overview",
         "label": overview_meta["label"],
         "viewport": overview_viewport,
-        "detail": "low",
+        "detail": "high",
         "image_size": resolved_overview,
     })
 
@@ -992,8 +992,8 @@ def prepare_civ5_situational_maps(
         tactical_rect = viewport_focused_on_tile(focus[0], focus[1], map_width, map_height)
         tactical_label = f"Auto tactical viewport centered on ({focus[0]},{focus[1]})"
 
-    # Always send the close-up: David wants both maps every turn, and early on the
-    # strategic crop goes out at low detail, too small to read single units.
+    # Always send the close-up. Both the strategic map and this one go out at
+    # high detail; the focus crop, when it is attached, stays low.
     omit_tactical_flag, omit_reason = False, ""
     if force_omit_tactical:
         omit_tactical_flag = True
@@ -1099,6 +1099,7 @@ def prepare_civ5_situational_maps(
         "data_urls": [
             {
                 "data_url": item["data_url"],
+                # Overview and tactical are high. Focus stays low.
                 "detail": "low" if item.get("role") == "focus" else "high",
                 "role": item.get("role", "map"),
                 "label": item.get("label", ""),
