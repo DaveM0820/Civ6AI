@@ -2795,9 +2795,21 @@ def _rival_leader_name(rival: dict[str, Any]) -> str:
     if not isinstance(rival, dict):
         return "Rival"
     raw = rival.get("leader_name")
-    if isinstance(raw, str) and raw.strip() and not _is_catalog_leader_token(raw):
-        return raw.strip()
-    return _leader_id_display_name(str(rival.get("leader_id", "") or raw or ""))
+    if isinstance(raw, str) and raw.strip() and raw.strip().lower() not in ("leader", "player", "unknown", "rival"):
+        if not _is_catalog_leader_token(raw):
+            return raw.strip()
+    civ = str(rival.get("civilization_id") or "").upper()
+    leader_id = str(rival.get("leader_id") or "").upper()
+    if civ == "CIVILIZATION_FREE_CITIES" or leader_id == "LEADER_FREE_CITIES":
+        return "Free Cities"
+    if civ == "CIVILIZATION_BARBARIAN" or "BARBARIAN" in leader_id:
+        return "Barbarians"
+    named = _leader_id_display_name(str(rival.get("leader_id", "") or raw or ""))
+    if named and named.strip().lower() not in ("leader", "unknown", "rival", ""):
+        return named
+    if civ.startswith("CIVILIZATION_") and civ not in ("CIVILIZATION_UNKNOWN",):
+        return civ.removeprefix("CIVILIZATION_").replace("_", " ").title()
+    return "Rival"
 
 
 def _player_chat_name(snapshot: dict[str, Any], player_id: str) -> str:
@@ -5238,9 +5250,11 @@ def normalize_model_response(snapshot: dict[str, Any], response: dict[str, Any])
     if str(snapshot.get("schema_version", "")).startswith("civ6ai-input/"):
         from sidecar import civ6_command_wire
         remembered = civ6_command_wire.extract_remember(response)
+        map_viewport_reply = civ6_command_wire.extract_map_viewport(response)
         response = civ6_command_wire.expand_civ6_command_wire(snapshot, response)
     else:
         remembered = []
+        map_viewport_reply = None
     response = resolve_property_wire(snapshot, response)
     response = expand_flat_response(response, snapshot)
     normalized = copy.deepcopy(response)
@@ -5398,6 +5412,8 @@ def normalize_model_response(snapshot: dict[str, Any], response: dict[str, Any])
         normalized["remember"] = remembered
     else:
         normalized.pop("remember", None)
+    if map_viewport_reply is not None:
+        normalized["_map_viewport"] = map_viewport_reply
 
     return normalized
 

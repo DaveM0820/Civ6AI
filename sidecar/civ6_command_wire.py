@@ -152,6 +152,19 @@ def labeled_settle_sites(snapshot: dict[str, Any], radius: int | None = None) ->
     return collected
 
 
+def extract_map_viewport(response: dict[str, Any]) -> Any:
+    """The model's map.viewport reply, if this turn set one."""
+    if not isinstance(response, dict):
+        return None
+    for key, value in response.items():
+        if not isinstance(key, str):
+            continue
+        base = pipeline.normalize_wire_property_key(key)
+        if base in ("map.viewport", "map.focus", "viewport"):
+            return value
+    return None
+
+
 def extract_remember(response: dict[str, Any]) -> list[str]:
     """Collect `remember` / `N.remember` / `remember.N` notes from a wire reply."""
     notes: list[str] = []

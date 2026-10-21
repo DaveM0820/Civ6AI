@@ -4765,7 +4765,7 @@ function Civ6Ai_Snapshot.Build(playerID, options)
   end
   local publicEvents = Civ6Ai_Util.JsonArrayList()
   if Civ6Ai_Chat ~= nil and Civ6Ai_Chat.GetPublicEvents ~= nil then
-    for _, event in ipairs(Civ6Ai_Chat.GetPublicEvents()) do
+    for _, event in ipairs(Civ6Ai_Chat.GetPublicEvents(playerID)) do
       table.insert(publicEvents, event)
     end
   end

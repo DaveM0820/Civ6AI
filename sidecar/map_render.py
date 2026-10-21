@@ -610,6 +610,34 @@ def _player_color(player_id: str) -> str:
     return "#888888"
 
 
+# Firaxis reserves these slots when the snapshot has no civilization id.
+_FREE_CITY_SLOT = "PLAYER_62"
+_BARBARIAN_SLOT = "PLAYER_63"
+_USELESS_LEADER_NAMES = frozenset({"", "leader", "player", "unknown", "rival"})
+
+
+def _named_player_label(player: dict[str, Any]) -> str:
+    """Leader, city-state, Free Cities, or Barbarians — never a raw Player N."""
+    leader_id = str(player.get("leader_id") or "").upper()
+    civ = str(player.get("civilization_id") or "").upper()
+    pid = str(player.get("player_id") or "")
+    if civ == "CIVILIZATION_BARBARIAN" or "BARBARIAN" in leader_id or pid == _BARBARIAN_SLOT:
+        return "Barbarians"
+    if civ == "CIVILIZATION_FREE_CITIES" or leader_id == "LEADER_FREE_CITIES" or pid == _FREE_CITY_SLOT:
+        return "Free Cities"
+    leader = str(player.get("leader_name") or "").strip()
+    if leader and leader.lower() not in _USELESS_LEADER_NAMES and not leader.upper().startswith("PLAYER"):
+        return leader
+    if leader_id.startswith("LEADER_MINOR_CIV_"):
+        token = leader_id[len("LEADER_MINOR_CIV_"):].replace("_", " ").title()
+        return token or "City-state"
+    if civ.startswith("CIVILIZATION_") and civ not in ("CIVILIZATION_UNKNOWN",):
+        return civ.removeprefix("CIVILIZATION_").replace("_", " ").title()
+    if leader_id.startswith("LEADER_") and leader_id not in ("LEADER_UNKNOWN",):
+        return leader_id.removeprefix("LEADER_").replace("_", " ").title()
+    return "Rival"
+
+
 def _player_label(snapshot: dict[str, Any], player_id: str) -> str:
     decision_player = str(snapshot.get("decision", {}).get("player_id", ""))
     if player_id == decision_player:
@@ -621,10 +649,11 @@ def _player_label(snapshot: dict[str, Any], player_id: str) -> str:
         return "You"
     for player in snapshot.get("known_players", []):
         if isinstance(player, dict) and str(player.get("player_id", "")) == player_id:
-            civ = player.get("civilization_id")
-            if civ:
-                return str(civ).removeprefix("CIVILIZATION_")
-            return player_id
+            return _named_player_label(player)
+    if player_id == _FREE_CITY_SLOT:
+        return "Free Cities"
+    if player_id == _BARBARIAN_SLOT:
+        return "Barbarians"
     return player_id
 
 
@@ -1088,6 +1117,22 @@ def _stack_unit_count(stack: dict[str, Any]) -> int:
     return max(1, int(stack.get("unit_count", stack.get("count", 1))))
 
 
+_CIVILIAN_UNIT_MARKERS = (
+    "SETTLER", "BUILDER", "WORKER", "TRADER", "MISSIONARY", "APOSTLE", "GURU",
+    "INQUISITOR", "ARCHAEOLOGIST", "SPY", "NATURALIST", "ROCK_BAND", "GREAT_",
+)
+
+
+def _unit_is_civilian(unit: dict[str, Any]) -> bool:
+    if unit.get("civilian") is True or unit.get("is_civilian") is True:
+        return True
+    kind = str(unit.get("unit_class") or unit.get("formation_class") or "").upper()
+    if "CIVILIAN" in kind:
+        return True
+    type_id = str(unit.get("unit_type_id") or "").upper()
+    return any(mark in type_id for mark in _CIVILIAN_UNIT_MARKERS)
+
+
 def _unit_health_percent(unit: dict[str, Any]) -> int | None:
     raw = unit.get("health_percent")
     if isinstance(raw, int) and not isinstance(raw, bool):
@@ -1185,6 +1230,7 @@ def build_tile_markers(snapshot: dict[str, Any], viewport: dict[str, int]) -> di
             foreign=False,
             owner_player_id=player_id,
             health_percent=_unit_health_percent(unit),
+            civilian=_unit_is_civilian(unit),
         )
 
     for unit in snapshot.get("visible_other_units", []):
@@ -1200,6 +1246,7 @@ def build_tile_markers(snapshot: dict[str, Any], viewport: dict[str, int]) -> di
             foreign=True,
             owner_player_id=str(owner) if isinstance(owner, str) else "",
             health_percent=_unit_health_percent(unit),
+            civilian=_unit_is_civilian(unit),
         )
 
     for coords, stack in stack_by_plot.items():
@@ -1213,6 +1260,7 @@ def build_tile_markers(snapshot: dict[str, Any], viewport: dict[str, int]) -> di
             coords[0] - x0, coords[1] - y0, "unit",
             unit_type_id=unit_type,
             foreign=foreign,
+            civilian=_unit_is_civilian({"unit_type_id": unit_type}),
         )
 
     return tile_markers
@@ -1383,13 +1431,15 @@ def _paste_resource_corner(canvas: Any, plot: dict[str, Any] | None, px: int, py
     _paste_icon_raster(canvas, slug, ox, oy, icon_px)
 
 
-def _letterbox_model_image(image: Any, target_size: int | None = None) -> Any:
+def _letterbox_model_image(image: Any, target_size: int | None = None, max_upscale: float | None = None) -> Any:
     """Scale the rendered minimap to a fixed square canvas for vision APIs."""
     from PIL import Image
 
     target = target_size or MODEL_IMAGE_SIZE
     work = image.convert("RGBA")
     scale = min(target / work.width, target / work.height)
+    if max_upscale is not None:
+        scale = min(scale, max_upscale)
     new_w = max(1, int(work.width * scale))
     new_h = max(1, int(work.height * scale))
     resized = work.resize((new_w, new_h), Image.Resampling.LANCZOS)
@@ -1398,12 +1448,16 @@ def _letterbox_model_image(image: Any, target_size: int | None = None) -> Any:
     return out
 
 
-def encode_model_image_bytes(image: Any, *, target_size: int | None = None) -> tuple[bytes, str]:
+def encode_model_image_bytes(
+    image: Any, *, target_size: int | None = None, max_upscale: float | None = None,
+) -> tuple[bytes, str]:
     """Encode a fixed-size PNG for LLM vision APIs."""
     import io
 
     buf = io.BytesIO()
-    _letterbox_model_image(image, target_size=target_size).save(buf, format="PNG", optimize=True)
+    _letterbox_model_image(image, target_size=target_size, max_upscale=max_upscale).save(
+        buf, format="PNG", optimize=True,
+    )
     return buf.getvalue(), MODEL_IMAGE_MIME
 
 

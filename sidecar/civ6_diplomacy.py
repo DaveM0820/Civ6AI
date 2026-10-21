@@ -9,8 +9,10 @@ the order channel already knows how to pack.
 War is one-sided (Diplomacy:DeclareWarOn). Trades, peace and friendship are
 two-turn deals: a seat offers with deal.<Leader>, the offer waits in the
 session's deals.json, and the receiver must answer deal.<From>.respond as a
-required row. An accept becomes one execute_deal order on the synced channel
-(Gov.Deal moves gold/resources and applies peace or friendship).
+required row. An accept becomes execute_deal orders on the synced channel
+(Gov.Deal moves gold/resources and applies peace or friendship). Every
+resource in the offer is sent; the packet carries two resource legs, so
+further resources are further orders, not a reason to drop the deal.
 """
 from __future__ import annotations
 
@@ -284,8 +286,9 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
         if target["player_id"].startswith("PLAYER_") and target in _majors(snapshot):
             names.append(target["name"])
     if names:
-        out.append(("deal.<Leader>", "give <items> for <items>  (items: <n> gold, <n> gpt, <n> RESOURCE_X, or a pact "
-                    "that binds both sides: peace, friendship, alliance, open_borders, embassy, delegation; "
+        out.append(("deal.<Leader>", "give <items> for <items>  (any number of items: <n> gold, <n> gpt, "
+                    "<n> RESOURCE_X, or a pact that binds both sides: peace, friendship, alliance, "
+                    "open_borders, embassy, delegation; "
                     f"answered next turn; Leader = {' | '.join(names)})"))
         out.append(("cmd", "CMD_propose_PROPOSAL_* | CMD_accept_* | CMD_reject_* from the DIPLOMACY deal-status lines"))
     diplo = diplomacy(snapshot)
@@ -359,8 +362,9 @@ def _add_command(snapshot: dict, kind: str, fixed: dict, description: str) -> st
 def _deal_commands(snapshot: dict, other: str, give: list, want: list, name: str) -> list[str]:
     """execute_deal orders from this seat's side: + = this seat gives.
 
-    The synced packet carries two resource legs. Extra resources are further
-    orders; gold and pact mode ride on the first order only.
+    The synced packet has two resource fields, which is a transport width,
+    not a limit on the deal. Every resource kind is sent; gold and pact mode
+    ride on the first order only.
     """
     res: dict[str, int] = {}
     for i in give:

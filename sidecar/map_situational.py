@@ -788,6 +788,27 @@ def resolve_tactical_viewport(
     return memory
 
 
+def store_agent_viewport(memory: dict[str, Any], snapshot: dict[str, Any], raw: Any) -> dict[str, Any]:
+    """Keep a seat's map.viewport until it goes stale. auto clears the pin."""
+    text = str(raw).strip().lower() if not isinstance(raw, dict) else ""
+    if text in ("auto", "none", "reset", ""):
+        memory.pop("map_viewport", None)
+        memory.pop("last_agent_viewport_turn", None)
+        return memory
+    parsed = map_viewport_from_flat({"map.viewport": raw}, snapshot)
+    if parsed is None:
+        return memory
+    try:
+        turn = int(snapshot.get("decision", {}).get("turn", 0) or 0)
+    except (TypeError, ValueError):
+        turn = 0
+    parsed["turn"] = turn
+    parsed["auto"] = False
+    memory["map_viewport"] = parsed
+    memory["last_agent_viewport_turn"] = turn
+    return memory
+
+
 def map_viewport_from_flat(flat: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any] | None:
     raw = flat.get("map.viewport")
     if raw is None:

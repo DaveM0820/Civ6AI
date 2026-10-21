@@ -263,6 +263,17 @@ def _normalize_history_wire(history: dict[str, Any]) -> None:
             history[key] = [_normalize_history_item(event) for event in events]
 
 
+def _keep_history_event_for_seat(event: dict[str, Any], player_id: str) -> bool:
+    """Private lines live in the shared event list. A seat only sees its own."""
+    kind = str(event.get("kind") or "").upper()
+    if kind != "CHAT_PRIVATE":
+        return True
+    if not player_id:
+        return False
+    affected = event.get("affected_ids") or []
+    return player_id in {str(item) for item in affected if isinstance(item, str)}
+
+
 def _normalize_decision_wire(decision: dict[str, Any]) -> None:
     reason = decision.get("reason")
     if isinstance(reason, str):
@@ -361,6 +372,14 @@ def _normalize_wire_shapes(snapshot: dict[str, Any]) -> None:
     history = snapshot.get("history")
     if isinstance(history, dict):
         _normalize_history_wire(history)
+        decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
+        seat = str(decision.get("player_id") or "")
+        events = history.get("public_events")
+        if isinstance(events, list):
+            history["public_events"] = [
+                event for event in events
+                if isinstance(event, dict) and _keep_history_event_for_seat(event, seat)
+            ]
     _normalize_private_inbox(snapshot)
     _normalize_upgrade_options(snapshot)
     _normalize_amenities(snapshot)

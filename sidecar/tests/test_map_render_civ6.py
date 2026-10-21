@@ -451,9 +451,9 @@ class Civ6MapRenderTests(unittest.TestCase):
         saved: dict[str, Image.Image] = {}
         original = map_render.encode_model_image_bytes
 
-        def _capture(image, *, target_size=None):
+        def _capture(image, *, target_size=None, **kwargs):
             saved["canvas"] = image.copy()
-            return original(image, target_size=target_size)
+            return original(image, target_size=target_size, **kwargs)
 
         map_render.encode_model_image_bytes = _capture
         try:
@@ -494,6 +494,42 @@ class Civ6MapRenderTests(unittest.TestCase):
                 if image.getpixel((x, y)) == river:
                     covered += 1
         self.assertEqual(0, covered)
+
+
+    def test_tactical_role_uses_axis_ticks_not_every_hex(self):
+        snapshot = civ6_adapter.load_golden_snapshot(GOLDEN)
+        viewport = {"x0": 0, "y0": 0, "width": 8, "height": 6}
+        with tempfile.TemporaryDirectory() as tmp:
+            meta = render_civ6_map_png(
+                snapshot, Path(tmp) / "tac.png", viewport=viewport, target_size=1024, image_role="viewport",
+            )
+        self.assertTrue(meta["show_axis_labels"])
+        self.assertFalse(meta["show_tile_coords"])
+
+    def test_agent_viewport_survives_the_next_turn(self):
+        from sidecar import map_situational
+
+        snapshot = {
+            "decision": {"turn": 20, "player_id": "PLAYER_1"},
+            "game": {"map_width": 40, "map_height": 30},
+            "your_units": [],
+            "your_cities": [],
+        }
+        memory: dict = {}
+        map_situational.store_agent_viewport(memory, snapshot, "(22,16)")
+        snapshot["decision"]["turn"] = 21
+        memory = map_situational.resolve_tactical_viewport(memory, snapshot)
+        self.assertEqual(22, memory["map_viewport"]["focus_x"])
+        self.assertEqual(16, memory["map_viewport"]["focus_y"])
+        self.assertFalse(memory["map_viewport"]["auto"])
+
+    def test_free_city_slot_is_named(self):
+        from sidecar import map_render
+
+        label = map_render._player_label(
+            {"decision": {"player_id": "PLAYER_0"}, "known_players": []}, "PLAYER_62",
+        )
+        self.assertEqual("Free Cities", label)
 
 
 if __name__ == "__main__":

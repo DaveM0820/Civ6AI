@@ -79,6 +79,7 @@ Use private DMs (chat.Cleopatra) on relationship milestones: first meeting, decl
 Never reveal military plans, weak cities, or hidden ambitions in chat.all (those go in private DMs).
 Be original and occasionally funny — in-character wit beats generic filler.
 chat.all is public. Send it when you have something original to say (opening, taunt, deal, war). If many turns pass with no chat.all, send one. Prefer chat.Cleopatra for targeted talk.
+Players in this match, by name: Cleopatra of EGYPT. Address them by these names. There is no one called Player N. Write in English.
 You have met Cleopatra — send chat.Cleopatra on first contact, war, and before/during deal talks.
 In thought.strategy, name which rivals you are courting, isolating, or appeasing and why.
 # == Chat Log ==
@@ -116,7 +117,7 @@ In your JSON object put commands.required.count first (must equal the required r
 
 Prose and notes (JSON string values; first person as this leader):
 strategicmap.read = one paragraph — landmasses, coasts, fog, rivals, expansion lanes.
-tacticalmap.read = one short paragraph on the attached tactical close-up — exact (x,y) of your units, threats, terrain and the tiles you will move to.
+tacticalmap.read = one short paragraph on image 2, the tactical close-up — exact (x,y) of your units, threats, terrain and the tiles you will move to.
 thought.situation = what matters on the board this turn.
 thought.freethinking = optional extended inner monologue.
 thought.strategy = long-term path to victory, then this turn's plan: for each REQUIRED COMMANDS row (and each optional command you will issue), state what you will command and why — prose only, no wire keys here.
@@ -147,11 +148,11 @@ Command rules:
 - DM recipients: Cleopatra
 - You have not spoken publicly yet — an optional punchy opener is fine; skip solemn welcomes.
 - Chat: do not repeat your opening introduction every turn. After first contact, send a fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or silence via no chat). Prefer a private chat.<rival leader> key for one met major rival; use chat.all sparingly. A near-copy or re-introduction after your first public line is dropped, not sent. thought.strategy is planning prose — do not paste it into chat.
-- Private DMs use a rival's name as the key (chat.Cleopatra), or chat.player.PLAYER_n / chat.PLAYER_n. chat.all is public. Keep each line under 800 characters.
+- Private DMs use a rival's leader name as the key (chat.Cleopatra). chat.all is public. Address people by those leader names, never as Player N. Write the line in English, in your own words — do not send another player's line back to them. Keep each line under 800 characters.
 
 === OPTIONAL COMMANDS ===
 OPTIONAL COMMANDS are encouraged every turn — not leftovers. Required rows are only the minimum.
-Issue as many optional commands as you want this turn: chat.all, chat.Cleopatra, research, civics, remember, extra unit/city orders, and any other listed shape.
+Issue as many optional commands as you want this turn: chat.all, chat.Cleopatra, research, civics, remember, map.viewport, extra unit/city orders, and any other listed shape.
 There is no cap. Use numbered JSON keys that continue after the last required row.
 Use only shapes listed here or on unit/city rows.
 
@@ -159,8 +160,9 @@ Optional JSON keys:
 
   "9.legal.research.tech": "TECH_POTTERY",
   "10.chat": "chat.all | chat.Cleopatra",
-  "11.remember": "text (duration N turns | forever)",
-  "12.Athens.production": "bare ID from Athens.production.catalog",
+  "11.map.viewport": "(x,y) to center image 2 next turn, or auto",
+  "12.remember": "text (duration N turns | forever)",
+  "13.Athens.production": "bare ID from Athens.production.catalog",
 
 Reference catalogs (not numbered JSON keys):
 legal.validUnits = scout_1 | settler_1 | spearman_1

@@ -860,7 +860,8 @@ def is_near_duplicate_chat(text: str, recent: list[str], threshold: float = CHAT
     return False
 
 
-def _recent_other_public(snapshot: dict[str, Any]) -> list[str]:
+def _recent_other_lines(snapshot: dict[str, Any]) -> list[str]:
+    """Lines this seat heard from someone else (public, and private to this seat)."""
     me = str((snapshot.get("decision") or {}).get("player_id") or "")
     texts: list[str] = []
     history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
@@ -868,7 +869,7 @@ def _recent_other_public(snapshot: dict[str, Any]) -> list[str]:
         if not isinstance(event, dict):
             continue
         kind = str(event.get("kind") or "").upper()
-        if kind and kind != "CHAT_PUBLIC":
+        if kind and kind not in ("CHAT_PUBLIC", "CHAT_PRIVATE"):
             continue
         affected = event.get("affected_ids") or []
         sender = str(affected[0]) if isinstance(affected, list) and affected else ""
@@ -877,7 +878,16 @@ def _recent_other_public(snapshot: dict[str, Any]) -> list[str]:
         text = str(event.get("text") or event.get("summary") or "").strip()
         if text:
             texts.append(text)
-    return texts[-8:]
+    inbox = snapshot.get("diplomacy", {}).get("private_inbox") if isinstance(snapshot.get("diplomacy"), dict) else None
+    for message in inbox or []:
+        if not isinstance(message, dict):
+            continue
+        if str(message.get("from_player_id") or "") == me:
+            continue
+        text = str(message.get("text") or "").strip()
+        if text:
+            texts.append(text)
+    return texts[-12:]
 
 
 def filter_repeat_public_chat(
@@ -909,9 +919,9 @@ def filter_repeat_public_chat(
         if leader and (low.startswith(f"friend {leader}") or low.startswith(leader + ",") or low.startswith(leader + ":")):
             dropped.append("dropped: public chat addressed your own leader and was not sent")
             continue
-        others = _recent_other_public(snapshot)
+        others = _recent_other_lines(snapshot)
         if others and is_near_duplicate_chat(text, others):
-            dropped.append("dropped: public chat repeated a rival's recent line and was not sent")
+            dropped.append("dropped: chat repeated another player's recent line and was not sent")
             continue
         kept.append(message)
         if text.strip():

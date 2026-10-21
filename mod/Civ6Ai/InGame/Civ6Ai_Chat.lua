@@ -31,8 +31,25 @@ function Civ6Ai_Chat._PersistRecord(record)
   Civ6Ai_Util.AppendTextLine(path, Civ6Ai_Util.EncodeJsonValue(record))
 end
 
-function Civ6Ai_Chat.GetPublicEvents()
-  return Civ6Ai_Chat._publicEvents
+function Civ6Ai_Chat.GetPublicEvents(playerID)
+  -- Private lines are stored on the shared list so a replay can rebuild them.
+  -- A seat's snapshot only receives private lines that seat sent or received.
+  if playerID == nil then
+    return Civ6Ai_Chat._publicEvents
+  end
+  local me = Civ6Ai_Util ~= nil and Civ6Ai_Util.PlayerId(playerID) or ("PLAYER_" .. tostring(playerID))
+  local out = {}
+  for _, event in ipairs(Civ6Ai_Chat._publicEvents) do
+    if event.kind ~= "CHAT_PRIVATE" then
+      table.insert(out, event)
+    else
+      local ids = event.affected_ids or {}
+      if ids[1] == me or ids[2] == me then
+        table.insert(out, event)
+      end
+    end
+  end
+  return out
 end
 
 function Civ6Ai_Chat.GetPrivateInbox(playerID)

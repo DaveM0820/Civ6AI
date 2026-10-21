@@ -289,6 +289,11 @@ def _persist_thought_memory(
         )
     if snapshot.get("_policy_review_requested"):
         thought_memory["policy_review_turn"] = int(snapshot["decision"]["turn"])
+    viewport_reply = normalized_response.pop("_map_viewport", None) if isinstance(normalized_response, dict) else None
+    if viewport_reply is not None:
+        from sidecar import map_situational
+
+        thought_memory = map_situational.store_agent_viewport(thought_memory, snapshot, viewport_reply)
     histories = normalized_response.get("player_histories", {})
     if isinstance(histories, dict) and histories:
         thought_memory = pipeline.update_player_histories(

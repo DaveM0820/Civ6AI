@@ -203,6 +203,21 @@ class ChatRobustnessTests(unittest.TestCase):
         self.assertEqual(1, len(kept))
         self.assertEqual(dropped, [])
 
+    def test_echo_of_a_received_private_line_is_dropped(self):
+        snap = _snap(decision={"turn": 122, "player_id": "PLAYER_1"})
+        snap["diplomacy"] = {"private_inbox": [{
+            "from_player_id": "PLAYER_0",
+            "turn": 121,
+            "text": "Your polders will not hold.",
+        }]}
+        chats = [{
+            "target": "player", "target_player_id": "PLAYER_0",
+            "text": "Your polders will not hold.",
+        }]
+        kept, dropped = results.filter_repeat_public_chat(snap, chats)
+        self.assertEqual(kept, [])
+        self.assertTrue(any("another player" in note for note in dropped))
+
     def test_intro_coaching_after_first_public_line(self):
         snap = _snap(decision={"turn": 2, "player_id": "PLAYER_1"})
         snap["personality"] = {

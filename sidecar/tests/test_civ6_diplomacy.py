@@ -147,5 +147,37 @@ class DiplomacyWireTests(unittest.TestCase):
         self.assertEqual(diplo.parse_items("tobacco:1"), [{"res": "RESOURCE_TOBACCO", "n": 1}])
         self.assertIsInstance(diplo.parse_items("banana"), str)
 
+    def test_three_resource_kinds_are_all_sent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            a = _snap(session=tmp)
+            a["civ6"]["diplomacy"]["your_trade"]["luxuries"] = [
+                {"resource_id": "RESOURCE_COTTON", "amount": 1},
+                {"resource_id": "RESOURCE_SILK", "amount": 1},
+                {"resource_id": "RESOURCE_DYES", "amount": 1},
+            ]
+            ids, notes = diplo.bind_reply(
+                a, "deal.Cleopatra",
+                "give 1 RESOURCE_COTTON, 1 RESOURCE_SILK, 1 RESOURCE_DYES for 10 gold",
+            )
+            self.assertEqual((ids, notes), ([], []))
+            b = _snap(me="PLAYER_1", other="PLAYER_0", other_name="Amanitore", session=tmp, turn=13)
+            b["civ6"]["diplomacy"]["your_trade"]["gold"] = 80
+            ids, notes = diplo.bind_reply(b, "deal.Amanitore.respond", "ACCEPT")
+            self.assertEqual(notes, [])
+            legs = []
+            for cmd in b["legal_commands"]:
+                if cmd.get("kind") != "execute_deal":
+                    continue
+                fixed = cmd["fixed_arguments"]
+                for key, amt in (("res1", "amt1"), ("res2", "amt2")):
+                    if fixed.get(key):
+                        legs.append((fixed[key], fixed[amt]))
+            self.assertEqual(
+                sorted(legs),
+                [("RESOURCE_COTTON", -1), ("RESOURCE_DYES", -1), ("RESOURCE_SILK", -1)],
+            )
+            self.assertGreater(len(ids), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

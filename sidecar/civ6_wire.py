@@ -796,11 +796,69 @@ def _civ6_chat_rules(snapshot: dict[str, Any]) -> list[str]:
             "respond to what they said or say something new."
         )
     keep.append(
-        f"Private DMs use a rival's name as the key ({chat_dm_examples(snapshot)}), "
-        "or chat.player.PLAYER_n / chat.PLAYER_n. chat.all is public. "
+        f"Private DMs use a rival's leader name as the key ({chat_dm_examples(snapshot)}). "
+        "chat.all is public. Address people by those leader names, never as Player N. "
+        "Write the line in English, in your own words — do not send another player's line back to them. "
         f"Keep each line under {pipeline.CHAT_TEXT_MAX_LENGTH} characters."
     )
     return keep
+
+
+def _tactical_image_where(snapshot: dict[str, Any]) -> str:
+    """Where image 2 is looking, so the reply can talk about that picture."""
+    advciv = snapshot.get("advciv")
+    manifest = advciv.get("map_images") if isinstance(advciv, dict) else None
+    if not isinstance(manifest, list):
+        return ""
+    for row in manifest:
+        if not isinstance(row, dict) or row.get("role") != "viewport":
+            continue
+        label = str(row.get("label") or "").strip()
+        rect = row.get("viewport") if isinstance(row.get("viewport"), dict) else {}
+        window = ""
+        if rect:
+            try:
+                x0, y0 = int(rect["x0"]), int(rect["y0"])
+                x1 = x0 + int(rect["width"]) - 1
+                y1 = y0 + int(rect["height"]) - 1
+                window = f"tiles x {x0}-{x1}, y {y0}-{y1}"
+            except (KeyError, TypeError, ValueError):
+                window = ""
+        auto = "auto" if row.get("auto") is not False else "your last map.viewport"
+        bits = [bit for bit in (label, window, auto) if bit]
+        return ", ".join(bits)
+    return ""
+
+
+def _player_roster_line(snapshot: dict[str, Any]) -> str:
+    """Every known seat by leader name, so replies do not invent Player N."""
+    names: list[str] = []
+    for rival in snapshot.get("known_players") or []:
+        if not isinstance(rival, dict):
+            continue
+        if rival.get("is_you") is True:
+            continue
+        pid = str(rival.get("player_id") or "")
+        decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
+        if pid and pid == str(decision.get("player_id") or ""):
+            continue
+        name = pipeline._rival_leader_name(rival)
+        kind = civ6_player_kind(rival)
+        if kind == "city-state":
+            names.append(f"{name} (city-state)")
+        elif kind == "free cities":
+            names.append("Free Cities")
+        elif kind == "barbarians":
+            names.append("Barbarians")
+        else:
+            civ = pipeline._readable_id(rival.get("civilization_id"), "CIVILIZATION_")
+            names.append(f"{name} of {civ}" if civ and civ.lower() not in name.lower() else name)
+    if not names:
+        return ""
+    return (
+        "Players in this match, by name: " + ", ".join(names) + ". "
+        "Address them by these names. There is no one called Player N. Write in English."
+    )
 
 
 def build_civ6_role_instruction(snapshot: dict[str, Any]) -> str:
@@ -810,12 +868,25 @@ def build_civ6_role_instruction(snapshot: dict[str, Any]) -> str:
     if civ_label:
         role += f", playing as the {civ_label} civilization"
     attach_map = pipeline.map_image_attach_turn(snapshot)
-    map_clause = (
-        " A labeled map image is attached each turn — read geography, resources, improvements, "
-        "districts, and unit positions from it. On owned tiles an improvement sits lower-left and a "
-        "district lower-right; a tile with neither mark is unimproved. Hex labels use (x,y) like move commands. "
-        if attach_map else " Use EMPIRE unit coordinates for movement this turn (no map image attached). "
-    )
+    where = _tactical_image_where(snapshot)
+    if attach_map:
+        where_bit = f" ({where})" if where else ""
+        map_clause = (
+            " Two map images are attached. Image 1 is the strategic map of the whole front. "
+            f"Image 2 is the tactical close-up{where_bit}. "
+            "Read both, and say what image 2 shows in tacticalmap.read. "
+            "Move image 2 next turn with map.viewport = (x,y) centered on the tile you care about, "
+            "or map.viewport = auto. "
+            "On the tactical close-up a military unit sits at the top of the hex, the resource icon in the center, "
+            "a civilian unit at the bottom, an improvement on the left and a district on the right. "
+            "A health bar under a unit is its hit points. Edge numbers are the (x,y) axes. "
+            "Write every word of your reply in English. "
+        )
+    else:
+        map_clause = (
+            " Use EMPIRE unit coordinates for movement this turn (no map image attached). "
+            "Write every word of your reply in English. "
+        )
     gandhi_clause = pipeline._gandhi_role_clause() if pipeline._is_gandhi_leader(snapshot) else ""
     return (
         f"{role}, in a live Civilization VI match. "
@@ -1086,6 +1157,9 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
         "chat.all is public. Send it when you have something original to say (opening, taunt, deal, war). "
         f"If many turns pass with no chat.all, send one. Prefer {chat_dm_examples(context)} for targeted talk.",
     ]
+    roster = _player_roster_line(context)
+    if roster:
+        lines.append(roster)
     if met:
         names = ", ".join(pipeline._rival_leader_name(r) for r in met)
         lines.append(
@@ -1616,8 +1690,10 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "",
         "Prose and notes (JSON string values; first person as this leader):",
         "strategicmap.read = one paragraph — landmasses, coasts, fog, rivals, expansion lanes.",
-        *(["tacticalmap.read = one short paragraph on the attached tactical close-up — exact (x,y) of your units, "
-            "threats, terrain and the tiles you will move to."] if "tacticalmap.read" in {k for k, _ in required} else []),
+        *(["tacticalmap.read = one short paragraph on image 2, the tactical close-up"
+            + (f" ({_tactical_image_where(snapshot)})" if _tactical_image_where(snapshot) else "")
+            + " — exact (x,y) of your units, threats, terrain and the tiles you will move to."]
+           if "tacticalmap.read" in {k for k, _ in required} else []),
         "thought.situation = what matters on the board this turn.",
         "thought.freethinking = optional extended inner monologue.",
         "thought.strategy = long-term path to victory, then this turn's plan: for each REQUIRED COMMANDS row (and each "
@@ -1690,6 +1766,11 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
 
     optional_keys.extend(diplomacy_wire.optional_key_hints(snapshot))
     optional_keys.append(("chat", f"chat.all | {chat_dm_examples(snapshot)}"))
+    where = _tactical_image_where(snapshot)
+    viewport_hint = "(x,y) to center image 2 next turn, or auto"
+    if where:
+        viewport_hint = f"{viewport_hint}. Image 2 is now {where}"
+    optional_keys.append(("map.viewport", viewport_hint))
     optional_keys.append(("remember", "text (duration N turns | forever)"))
     from sidecar import civ6_priorities
 
@@ -1724,7 +1805,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "=== OPTIONAL COMMANDS ===",
         "OPTIONAL COMMANDS are encouraged every turn — not leftovers. Required rows are only the minimum.",
         f"Issue as many optional commands as you want this turn: chat.all, {chat_dm_examples(snapshot)}, research, civics, remember, "
-        "extra unit/city orders, and any other listed shape.",
+        "map.viewport, extra unit/city orders, and any other listed shape.",
         "There is no cap. Use numbered JSON keys that continue after the last required row.",
         "Use only shapes listed here or on unit/city rows.",
         "",
