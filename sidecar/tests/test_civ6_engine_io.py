@@ -1,5 +1,6 @@
 """Civ6 prompt inputs/outputs line up with what the Civ6 Lua can apply."""
 import unittest
+from pathlib import Path
 
 from sidecar import civ6_adapter, civ6_wire, pipeline_v2 as pipeline
 
@@ -27,6 +28,12 @@ APPLY_KINDS = {
 
 
 class Civ6EngineIoTests(unittest.TestCase):
+    def test_autotest_does_not_change_government(self):
+        text = (Path(__file__).resolve().parents[2] / "mod/Civ6Ai/InGame/Civ6Ai_Autotest.lua").read_text(encoding="utf-8")
+        self.assertNotIn("RequestChangeGovernment", text)
+        self.assertNotIn("_ChangeGovernment", text)
+        self.assertNotIn("_PickFallbackGovernment", text)
+        self.assertNotIn("GOVERNMENT_CHIEFDOM", text)
     def _snapshot(self):
         snap = civ6_adapter.build_classical_golden_snapshot()
         unit_id = next(u["unit_id"] for u in snap["your_units"] if "SPEARMAN" in u["unit_type_id"])

@@ -655,6 +655,15 @@ def _required_unit_options(tokens: list[str]) -> list[str]:
     return options
 
 
+def _example_command_value(value: str) -> str:
+    """One sample for the example JSON. A builder row demonstrates Improve."""
+    options = [part.strip() for part in str(value).split(" | ") if part.strip()]
+    for option in options:
+        if option.startswith("Improve("):
+            return option
+    return options[0] if options else str(value)
+
+
 def _required_city_rows(snapshot: dict[str, Any]) -> list[tuple[str, list[str]]]:
     city_tokens = _civ6_city_tokens(snapshot)
     rows: list[tuple[str, list[str]]] = []
@@ -978,7 +987,14 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
                 kinds: list[str] = []
                 for token in unit_tokens.get(str(unit.get("unit_id")), []):
                     verb = token.split("(", 1)[0]
-                    shape = f"{verb}(x,y)" if "(" in token and verb in ("MoveTo", "AttackTo") else token
+                    # Coordinates stay on each unit's own row. A shared type line of
+                    # every Improve(x,y) made every builder look like the same two tiles.
+                    if verb == "Improve":
+                        shape = "Improve(x,y,IMPROVEMENT_X)"
+                    elif "(" in token and verb in ("MoveTo", "AttackTo"):
+                        shape = f"{verb}(x,y)"
+                    else:
+                        shape = token
                     if shape not in kinds:
                         kinds.append(shape)
                 bucket = seen_types.setdefault(_unit_type_label(unit), [])
@@ -1535,7 +1551,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     example_rows = ['"commands.required.count":' + str(count)]
     for index, (key, value) in enumerate(required, start=1):
         if key.endswith(".command") or key.endswith(".production"):
-            example_rows.append(f'"{index}.{key}":"{value.split(" | ")[0]}"')
+            example_rows.append(f'"{index}.{key}":"{_example_command_value(value)}"')
         else:
             example_rows.append(f'"{index}.{key}":"..."')
     example_rows.append(f'"{count + 1}.chat.all":"Hello rivals."')

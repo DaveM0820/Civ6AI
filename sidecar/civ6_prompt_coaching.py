@@ -523,9 +523,11 @@ def _improve_offer_tokens(unit: dict[str, Any], snapshot: dict[str, Any]) -> lis
         if not isinstance(command, dict) or command.get("kind") != "move_unit":
             continue
         fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
-        if str(fixed.get("unit_id") or "") != uid or fixed.get("intent") != "improve":
+        if str(fixed.get("unit_id") or "") != uid:
             continue
         token = unit_command_token(command)
+        if not token or not token.startswith("Improve("):
+            continue
         if token and token not in tokens:
             tokens.append(token)
     return tokens

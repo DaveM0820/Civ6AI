@@ -3205,8 +3205,11 @@ function Civ6Ai_Snapshot._AddProgressionCommands(commands, playerID, unit, unitI
   end
 end
 
--- Builder Improve(x,y,IMP): owned, unimproved, same-landmass tiles within 8 and the
--- improvements the DB allows there (terrain/feature/resource, tech/civic). A MOVE goal
+-- Builder Improve(x,y,IMP): this builder's nearest owned, unimproved, same-landmass
+-- tiles within 8, and the improvements the DB allows there (terrain/feature/resource,
+-- tech/civic). A removable feature (woods, rainforest, marsh) does not hide an
+-- improvement the terrain allows. Sites are this unit's, nearest first: a shared
+-- luxury across the city must not be the only offer for every builder. A MOVE goal
 -- with intent improve: gameplay walks there and builds on arrival.
 Civ6Ai_Snapshot.IMPROVE_SITES_CAP = 6
 function Civ6Ai_Snapshot._ImproveRules()
@@ -3238,22 +3241,42 @@ function Civ6Ai_Snapshot._LegalImprovementsAt(playerID, unitType, plot)
   local feature = GameInfo.Features[M(plot, "GetFeatureType") or -1]
   local resource = GameInfo.Resources[M(plot, "GetResourceType") or -1]
   if resource ~= nil and not known(resource.PrereqTech, resource.PrereqCivic) then resource = nil end
-  local out = {}
+  -- DB booleans are true or nil. 0 is truthy in Lua, so `not RequiresRiver` would
+  -- reject every non-river tile when the column is stored as 0.
+  local function flagged(v)
+    return v == true or v == 1
+  end
+  local removable = feature ~= nil and flagged(feature.Removable)
+  local ranked = {}
   for imp in GameInfo.Improvements() do
     local t = imp.ImprovementType
-    if imp.Buildable ~= false and imp.TraitType == nil and (r.units[t] or {})[unitType]
-        and known(imp.PrereqTech, imp.PrereqCivic) and (not imp.RequiresRiver or M(plot, "IsRiver") == true) then
-      local ok
-      if resource ~= nil and (r.resource[t] or {})[resource.ResourceType] then
+    local needsRiver = flagged(imp.RequiresRiver)
+    if imp.Buildable ~= false and imp.Buildable ~= 0 and imp.TraitType == nil and (r.units[t] or {})[unitType]
+        and known(imp.PrereqTech, imp.PrereqCivic) and (not needsRiver or M(plot, "IsRiver") == true) then
+      local onResource = resource ~= nil and (r.resource[t] or {})[resource.ResourceType] == true
+      local onFeature = feature ~= nil and (r.feature[t] or {})[feature.FeatureType] == true
+      local onTerrain = terrain ~= nil and (r.terrain[t] or {})[terrain.TerrainType] == true
+      local ok = false
+      if resource ~= nil then
+        ok = onResource
+      elseif onFeature then
         ok = true
-      elseif feature ~= nil then
-        ok = (r.feature[t] or {})[feature.FeatureType] == true and resource == nil
-      else
-        ok = terrain ~= nil and (r.terrain[t] or {})[terrain.TerrainType] == true and resource == nil
+      elseif onTerrain and (feature == nil or removable) then
+        ok = true
       end
-      if ok then table.insert(out, t) end
+      if ok then
+        local rank = 1
+        if onResource or onFeature then rank = 0 end
+        ranked[#ranked + 1] = { t = t, rank = rank }
+      end
     end
   end
+  table.sort(ranked, function(a, b)
+    if a.rank ~= b.rank then return a.rank < b.rank end
+    return a.t < b.t
+  end)
+  local out = {}
+  for i = 1, #ranked do out[i] = ranked[i].t end
   return out, resource ~= nil
 end
 
@@ -3295,8 +3318,8 @@ function Civ6Ai_Snapshot._AddBuilderImproveCommands(commands, playerID, unit, un
     end
   end
   table.sort(sites, function(a, b)
-    if a.res ~= b.res then return a.res end
     if a.d ~= b.d then return a.d < b.d end
+    if a.res ~= b.res then return a.res end
     if a.x ~= b.x then return a.x < b.x end
     return a.y < b.y
   end)

@@ -243,6 +243,9 @@ class Civ6MapRenderTests(unittest.TestCase):
             pixels = list(img.getdata())
             yellow = sum(1 for px in pixels if px[0] > 200 and 140 < px[1] < 230 and px[2] < 120)
             self.assertGreater(yellow, 20)
+            overview = render_civ6_map_png(snapshot, Path(tmp) / "overview.png", image_role="overview")
+            self.assertEqual(0, overview.get("settle_rings_drawn", 0))
+            self.assertEqual([], overview.get("settle_labels") or [])
 
     def test_settle_overlay_skipped_when_vision_off(self):
         from unittest import mock

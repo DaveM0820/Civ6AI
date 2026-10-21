@@ -1321,7 +1321,9 @@ def render_civ6_map_png(
         tile_px = max(52, min(tile_px_base, cap))
     flip_y = prefer_civ5_sprites or civ6_map_north_up(snapshot)
     rivers_trusted = prefer_civ5_sprites or civ6_river_edges_trusted(snapshot)
-    _ = image_role
+    # S1..Sn settle labels belong on the tactical close-up and in the prompt.
+    # The strategic overview is the whole front; a dozen S-labels hide the land.
+    show_settle_labels = image_role != "overview"
     show_axis, show_tile_coords = _hex_coord_label_flags(vw, vh)
     axis_font = map_render._axis_label_font(tile_px, x0, y0, vw, vh)
     if prefer_civ5_sprites:
@@ -1395,7 +1397,7 @@ def render_civ6_map_png(
     river_items, river_strip_h = map_render._layout_legend_items(
         [(river_label, RIVER_STROKE)], map_w, legend_font, legend_swatch, legend_font_pil,
     ) if show_river_legend else ([], 0)
-    settle_markers = collect_settle_markers(snapshot)
+    settle_markers = collect_settle_markers(snapshot) if show_settle_labels else []
     settle_legend_rows: list[tuple[str, str]] = []
     if settle_markers:
         settle_legend_rows.append(("settle S1.. (coast / fresh)", SETTLE_LOOK_COLOR))

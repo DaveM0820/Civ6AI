@@ -212,6 +212,108 @@ class SnapshotLuaOffersTests(unittest.TestCase):
         self.assertEqual(0, len(self.lua.globals().CMDS))
 
 
+    def test_improve_sites_are_each_builders_nearest_tiles(self):
+        """A far quarry must not be the only Improve offer for every builder."""
+        self.lua.execute(
+            r"""
+            local function iter(list)
+              local i = 0
+              return function() i = i + 1; return list[i] end
+            end
+            local plots = {}
+            local function plot(x, y, terrain, feature, resource)
+              plots[x .. "," .. y] = {
+                GetX=function() return x end, GetY=function() return y end,
+                GetOwner=function() return 0 end,
+                IsCity=function() return false end, IsWater=function() return false end,
+                IsMountain=function() return false end, IsRiver=function() return false end,
+                GetImprovementType=function() return -1 end,
+                GetDistrictType=function() return -1 end,
+                GetTerrainType=function() return terrain end,
+                GetFeatureType=function() return feature end,
+                GetResourceType=function() return resource end,
+              }
+            end
+            plot(11, 10, 0, 1, -1)
+            for y = 12, 18 do plot(10, y, 0, -1, 3) end
+            plot(12, 12, 0, -1, 3)
+            plot(41, 40, 0, -1, -1)
+            Map = {
+              GetPlot = function(x, y) return plots[x .. "," .. y] end,
+              GetPlotDistance = function(ax, ay, bx, by)
+                return math.max(math.abs(ax - bx), math.abs(ay - by))
+              end,
+            }
+            Players = { [0] = {
+              GetTechs = function() return { HasTech = function(_, idx) return idx ~= 5 end } end,
+              GetCulture = function() return { HasCivic = function() return true end } end,
+            }}
+            GameInfo = {
+              Units = { [0] = { UnitType = "UNIT_BUILDER" } },
+              Terrains = { [0] = { TerrainType = "TERRAIN_GRASS" } },
+              Features = { [1] = { FeatureType = "FEATURE_FOREST", Removable = true } },
+              Resources = { [3] = { ResourceType = "RESOURCE_STONE" } },
+              Technologies = { TECH_MACHINERY = { Index = 5 } },
+              Improvements = function()
+                return iter({
+                  { ImprovementType = "IMPROVEMENT_FARM", Buildable = true },
+                  { ImprovementType = "IMPROVEMENT_QUARRY", Buildable = true },
+                  { ImprovementType = "IMPROVEMENT_LUMBER_MILL", Buildable = true, PrereqTech = "TECH_MACHINERY" },
+                })
+              end,
+              Improvement_ValidTerrains = function()
+                return iter({ { ImprovementType = "IMPROVEMENT_FARM", TerrainType = "TERRAIN_GRASS" } })
+              end,
+              Improvement_ValidFeatures = function()
+                return iter({ { ImprovementType = "IMPROVEMENT_LUMBER_MILL", FeatureType = "FEATURE_FOREST" } })
+              end,
+              Improvement_ValidResources = function()
+                return iter({ { ImprovementType = "IMPROVEMENT_QUARRY", ResourceType = "RESOURCE_STONE" } })
+              end,
+              Improvement_ValidBuildUnits = function()
+                return iter({
+                  { ImprovementType = "IMPROVEMENT_FARM", UnitType = "UNIT_BUILDER" },
+                  { ImprovementType = "IMPROVEMENT_QUARRY", UnitType = "UNIT_BUILDER" },
+                  { ImprovementType = "IMPROVEMENT_LUMBER_MILL", UnitType = "UNIT_BUILDER" },
+                })
+              end,
+            }
+            local function unit(id, x, y)
+              return {
+                GetID = function() return id end, GetOwner = function() return 0 end,
+                GetType = function() return 0 end, GetX = function() return x end, GetY = function() return y end,
+                GetBuildCharges = function() return 3 end,
+              }
+            end
+            UNIT_A = unit(1, 10, 10)
+            UNIT_B = unit(2, 40, 40)
+            Civ6Ai_Snapshot._impRules = nil
+            CMDS_A = {}
+            CMDS_B = {}
+            Civ6Ai_Snapshot._AddBuilderImproveCommands(CMDS_A, 0, UNIT_A, "UNIT_A")
+            Civ6Ai_Snapshot._impRules = nil
+            Civ6Ai_Snapshot._AddBuilderImproveCommands(CMDS_B, 0, UNIT_B, "UNIT_B")
+            """
+        )
+
+        def sites(table):
+            found = []
+            n = len(table)
+            for i in range(1, n + 1):
+                fixed = table[i].fixed_arguments
+                found.append((int(fixed.target_x), int(fixed.target_y), str(fixed.improvement_id)))
+            return found
+
+        a = sites(self.lua.globals().CMDS_A)
+        b = sites(self.lua.globals().CMDS_B)
+        self.assertIn((11, 10, "IMPROVEMENT_FARM"), a)
+        self.assertEqual((11, 10, "IMPROVEMENT_FARM"), a[0])
+        self.assertNotIn((11, 10, "IMPROVEMENT_FARM"), b)
+        self.assertIn((41, 40, "IMPROVEMENT_FARM"), b)
+        self.assertTrue(all(item[2] != "IMPROVEMENT_QUARRY" for item in b))
+        self.assertLess(sum(1 for item in a if item[2] == "IMPROVEMENT_QUARRY"), len(a))
+
+
 class CommandWireVocabTests(unittest.TestCase):
     def test_far_move_without_adjacent_offer(self):
         snap = {
@@ -346,6 +448,7 @@ class CommandWireVocabTests(unittest.TestCase):
         row = snap["history"]["command_results"][0]
         self.assertEqual(36, row["decision_turn"])
         self.assertEqual("failed", row["effect"])
+
 
 
 if __name__ == "__main__":

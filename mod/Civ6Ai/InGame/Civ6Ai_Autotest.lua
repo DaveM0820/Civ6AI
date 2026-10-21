@@ -582,62 +582,17 @@ function Civ6Ai_Autotest._ClearProductionBlockers(playerID)
   end
 end
 
--- Auto-fill empty policy slots / pick a government when FILL_CIVIC_SLOT or
--- CONSIDER_GOVERNMENT_CHANGE would leave GovernmentScreen (Change Policies) up.
+-- Auto-fill empty policy slots when FILL_CIVIC_SLOT would leave Change Policies up.
 -- Bare notification dismiss does not Confirm policies, so NEXT TURN stays blocked.
+-- Government is never chosen here. A negative current government (anarchy, or the
+-- chooser opening when anarchy ends) is not "no government": confirming one for it
+-- starts another anarchy and yields stay at 0.
 local function _policySlotFits(slotType, policyRow)
   local cardType = policyRow ~= nil and policyRow.GovernmentSlotType or nil
   if slotType == cardType or slotType == "SLOT_WILDCARD" then
     return true
   end
   return false
-end
-
-function Civ6Ai_Autotest._PickFallbackGovernment(playerID)
-  local player = Players ~= nil and Players[playerID] or nil
-  if player == nil or player.GetCulture == nil or GameInfo == nil or GameInfo.Governments == nil then
-    return nil
-  end
-  local culture = player:GetCulture()
-  if culture == nil then
-    return nil
-  end
-  local cur = nil
-  pcall(function() cur = culture:GetCurrentGovernment() end)
-  if cur ~= nil and cur >= 0 then
-    return nil
-  end
-  local can = nil
-  pcall(function() can = culture:CanChangeGovernmentAtAll() end)
-  if can ~= true then
-    return nil
-  end
-  local made = false
-  pcall(function() made = culture:GovernmentChangeMade() == true end)
-  if made then
-    return nil
-  end
-  -- Prefer Chiefdom when unlocked; else first unlocked government.
-  local prefer = GameInfo.Governments["GOVERNMENT_CHIEFDOM"]
-  if prefer ~= nil then
-    local ok, unlocked = pcall(function()
-      return culture:IsGovernmentUnlocked(prefer.Hash) == true
-        or culture:IsGovernmentUnlocked(prefer.Index) == true
-    end)
-    if ok and unlocked then
-      return prefer.GovernmentType
-    end
-  end
-  for row in GameInfo.Governments() do
-    local ok, unlocked = pcall(function()
-      return culture:IsGovernmentUnlocked(row.Hash) == true
-        or culture:IsGovernmentUnlocked(row.Index) == true
-    end)
-    if ok and unlocked then
-      return row.GovernmentType
-    end
-  end
-  return nil
 end
 
 function Civ6Ai_Autotest._BuildFallbackPolicySlots(playerID)
@@ -724,39 +679,6 @@ function Civ6Ai_Autotest._ClearPolicyGovernmentBlockers(playerID)
   if culture == nil then
     return
   end
-
-  local govId = Civ6Ai_Autotest._PickFallbackGovernment(playerID)
-  if govId ~= nil then
-    local ok, reason = false, "no_apply"
-    if Civ6Ai_Apply ~= nil and Civ6Ai_Apply._ChangeGovernment ~= nil then
-      ok, reason = Civ6Ai_Apply._ChangeGovernment(
-        playerID,
-        { kind = "change_government", id = "autotest_fallback" },
-        { government_id = govId })
-      if ok == Civ6Ai_Apply.DEFERRED then
-        ok = true
-        reason = reason or "deferred"
-      end
-    else
-      local row = GameInfo.Governments[govId]
-      if row ~= nil then
-        local okCall, okReq = pcall(function()
-          return culture:RequestChangeGovernment(row.Hash)
-        end)
-        ok = okCall and okReq == true
-        reason = ok and "" or tostring(okReq)
-      end
-    end
-    Civ6Ai_Autotest._LogLine(
-      "auto_government|player=" .. tostring(playerID)
-      .. "|government=" .. tostring(govId) .. "|ok=" .. tostring(ok)
-      .. "|reason=" .. tostring(reason or ""))
-    Civ6Ai_Util.Log(
-      "autotest|auto_government|player=" .. tostring(playerID)
-      .. "|government=" .. tostring(govId) .. "|ok=" .. tostring(ok)
-      .. "|reason=" .. tostring(reason or ""))
-  end
-
   local slots, why = Civ6Ai_Autotest._BuildFallbackPolicySlots(playerID)
   if slots == nil then
     if why ~= nil and why ~= "already_changed" and why ~= "change_not_allowed" then
@@ -830,8 +752,9 @@ Civ6Ai_Autotest.BLOCKER_HANDLERS = {
   FILL_CIVIC_SLOT = function(playerID)
     Civ6Ai_Autotest._ClearPolicyGovernmentBlockers(playerID)
   end,
-  CONSIDER_GOVERNMENT_CHANGE = function(playerID)
-    Civ6Ai_Autotest._ClearPolicyGovernmentBlockers(playerID)
+  -- Close the chooser. Do not confirm a government; that restarts anarchy.
+  CONSIDER_GOVERNMENT_CHANGE = function()
+    Civ6Ai_Autotest._CloseQueuedPopups()
   end,
   UNITS = function(playerID)
     Civ6Ai_Autotest._SkipUnitMoves(playerID)

@@ -203,6 +203,32 @@ class Civ6WirePromptTests(unittest.TestCase):
         self.assertIn("chat.John Curtin", examples)
         self.assertNotIn("Free Cities", examples)
 
+    def test_builder_example_demonstrates_improve(self):
+        self.assertEqual(
+            "Improve(11,10,IMPROVEMENT_FARM)",
+            civ6_wire._example_command_value(
+                "MoveTo(x,y) | Improve(11,10,IMPROVEMENT_FARM) | Improve(40,9,IMPROVEMENT_QUARRY)"
+            ),
+        )
+        self.assertEqual("MoveTo(x,y)", civ6_wire._example_command_value("MoveTo(x,y) | AttackTo(3,4)"))
+
+    def test_reselecting_current_government_is_blocked(self):
+        from sidecar import civ6_governance as gov
+
+        snap = {"civ6": {"governance": {"government": {
+            "current": "GOVERNMENT_CHIEFDOM",
+            "available": [{"id": "GOVERNMENT_CHIEFDOM"}, {"id": "GOVERNMENT_AUTOCRACY"}],
+        }}}, "legal_commands": []}
+        ids, notes = gov.bind_reply(snap, "government", "CHIEFDOM")
+        self.assertEqual([], ids)
+        self.assertTrue(any("already have" in note for note in notes))
+        ids, notes = gov.bind_reply(snap, "government", "AUTOCRACY")
+        self.assertEqual(1, len(ids))
+        snap["civ6"]["governance"]["government"]["in_anarchy"] = True
+        ids, notes = gov.bind_reply(snap, "government", "AUTOCRACY")
+        self.assertEqual([], ids)
+        self.assertTrue(any("anarchy" in note for note in notes))
+
 
 
 if __name__ == "__main__":
