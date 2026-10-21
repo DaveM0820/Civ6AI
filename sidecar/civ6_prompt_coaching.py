@@ -513,10 +513,39 @@ def _unit_xy(unit: dict[str, Any]) -> tuple[int, int] | None:
         return None
 
 
+def _improve_offer_tokens(unit: dict[str, Any], snapshot: dict[str, Any]) -> list[str]:
+    """Improve(x,y,IMPROVEMENT_X) tokens this builder was actually offered. Coordinates are the command."""
+    from sidecar.civ6_command_wire import unit_command_token
+
+    uid = str(unit.get("unit_id") or "")
+    tokens: list[str] = []
+    for command in snapshot.get("legal_commands") or []:
+        if not isinstance(command, dict) or command.get("kind") != "move_unit":
+            continue
+        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+        if str(fixed.get("unit_id") or "") != uid or fixed.get("intent") != "improve":
+            continue
+        token = unit_command_token(command)
+        if token and token not in tokens:
+            tokens.append(token)
+    return tokens
+
+
 def builder_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, Any]) -> list[str]:
-    """Where a builder can improve: Improve options only appear once it stands on such a tile."""
+    """Improve commands for this builder. Plot dumps stay off the prompt when the map image shows them."""
     from sidecar import pipeline_v2 as pipeline
 
+    offers = _improve_offer_tokens(unit, snapshot)
+    if offers:
+        return [pipeline._wire_line(
+            f"{prefix}.improve",
+            "; ".join(offers) + " — it walks there and builds on arrival",
+        )]
+    if pipeline.map_image_attach_turn(snapshot):
+        return [pipeline._wire_line(
+            f"{prefix}.improve",
+            "no Improve command this turn; the map marks improved owned tiles lower-left, so a blank owned tile is unimproved",
+        )]
     xy = _unit_xy(unit)
     if xy is None:
         return []

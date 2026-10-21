@@ -767,6 +767,186 @@ def _plot_has_ruins(plot: dict[str, Any] | None) -> bool:
     return isinstance(improvement, str) and improvement == "IMPROVEMENT_GOODY_HUT"
 
 
+# Owned-territory tile state the map image carries so the prompt does not list it.
+# Goody huts and barb camps already have their own markers and are not builder improvements.
+_SKIP_IMPROVEMENT = {"IMPROVEMENT_GOODY_HUT", "IMPROVEMENT_BARBARIAN_CAMP"}
+_SKIP_DISTRICT = {"DISTRICT_CITY_CENTER"}
+_MARK_LETTERS = {
+    "IMPROVEMENT_FARM": "F",
+    "IMPROVEMENT_MINE": "M",
+    "IMPROVEMENT_PASTURE": "Pa",
+    "IMPROVEMENT_PLANTATION": "Pl",
+    "IMPROVEMENT_QUARRY": "Q",
+    "IMPROVEMENT_CAMP": "C",
+    "IMPROVEMENT_FISHING_BOATS": "Fb",
+    "IMPROVEMENT_LUMBER_MILL": "Lm",
+    "IMPROVEMENT_FORT": "Ft",
+    "IMPROVEMENT_OIL_WELL": "Ow",
+    "IMPROVEMENT_OFFSHORE_OIL_RIG": "Or",
+    "IMPROVEMENT_GEOTHERMAL_PLANT": "Gp",
+    "IMPROVEMENT_SOLAR_FARM": "Sf",
+    "IMPROVEMENT_WIND_FARM": "Wf",
+    "IMPROVEMENT_SEASIDE_RESORT": "Sr",
+    "IMPROVEMENT_BEACH_RESORT": "Br",
+    "IMPROVEMENT_SKI_RESORT": "Sk",
+}
+_ICON_FILE: dict[str, Path | None] = {}
+
+
+def _icon_file(slug: str) -> Path | None:
+    """Resolved icon path, once per slug. Missing icons stay missing (letter badge instead)."""
+    if not slug:
+        return None
+    if slug not in _ICON_FILE:
+        path = map_icons.icon_path(slug)
+        _ICON_FILE[slug] = path if path.is_file() else None
+    return _ICON_FILE[slug]
+
+
+def _owned_plot(plot: dict[str, Any] | None) -> bool:
+    if not isinstance(plot, dict):
+        return False
+    owner = plot.get("revealed_owner_id")
+    return isinstance(owner, str) and owner not in ("", "None")
+
+
+def _mark_label(type_id: str, prefix: str) -> str:
+    token = type_id[len(prefix):] if type_id.startswith(prefix) else type_id
+    return token.replace("_", " ").lower()
+
+
+def _mark_letters(type_id: str) -> str:
+    known = _MARK_LETTERS.get(type_id)
+    if known:
+        return known
+    parts = [part for part in type_id.split("_")[1:] if part]
+    if len(parts) >= 2:
+        return parts[0][0].upper() + parts[1][0].lower()
+    return (parts[0][:1] if parts else "?").upper()
+
+
+def _plot_marks(
+    plot: dict[str, Any] | None,
+) -> tuple[tuple[str, str, str] | None, tuple[str, str, str] | None]:
+    """Improvement and district on an owned tile: (type id, legend label, letter badge)."""
+    if not _owned_plot(plot) or not isinstance(plot, dict):
+        return None, None
+    improvement = plot.get("improvement_id")
+    district = plot.get("district_id")
+    improvement_mark = None
+    district_mark = None
+    if isinstance(improvement, str) and improvement and improvement not in _SKIP_IMPROVEMENT:
+        label = _mark_label(improvement, "IMPROVEMENT_")
+        if plot.get("improvement_pillaged") is True:
+            label += " (pillaged)"
+        improvement_mark = (improvement, label, _mark_letters(improvement))
+    if isinstance(district, str) and district and district not in _SKIP_DISTRICT:
+        district_mark = (district, _mark_label(district, "DISTRICT_"), _mark_letters(district))
+    return improvement_mark, district_mark
+
+
+def _draw_letter_badge(
+    draw: Any,
+    cx: float,
+    cy: float,
+    px: int,
+    letters: str,
+    pillaged: bool = False,
+) -> None:
+    radius = max(5, px // 2)
+    outline = (220, 64, 48, 255) if pillaged else (240, 240, 240, 255)
+    draw.ellipse(
+        (cx - radius, cy - radius, cx + radius, cy + radius),
+        fill=(28, 28, 32, 230),
+        outline=outline,
+    )
+    font = map_render._coord_label_font(max(7, int(px * 0.55)))
+    _draw_outlined_text(draw, (cx, cy), letters, font, fill="#f4f4f4")
+    if pillaged:
+        draw.line((cx - radius, cy - radius, cx + radius, cy + radius), fill=outline, width=2)
+
+
+def _paste_mark(
+    canvas: Any,
+    draw: Any,
+    slug: str,
+    letters: str,
+    cx: float,
+    cy: float,
+    icon_px: int,
+    pillaged: bool = False,
+) -> str:
+    """Icon from the cached atlas when one exists, otherwise a letter badge. Returns the legend slug."""
+    if _icon_file(slug) is not None:
+        from PIL import ImageDraw
+
+        badge = icon_px * 0.58
+        ImageDraw.Draw(canvas).ellipse(
+            (cx - badge, cy - badge, cx + badge, cy + badge),
+            fill=(22, 22, 26, 255),
+            outline=(220, 64, 48, 255) if pillaged else (230, 230, 230, 255),
+        )
+        map_render._paste_icon_raster(canvas, slug, int(cx - icon_px / 2), int(cy - icon_px / 2), icon_px)
+        return slug
+    _draw_letter_badge(draw, cx, cy, icon_px, letters, pillaged)
+    return f"__mk:{letters}"
+
+
+def _paste_tile_marks(
+    canvas: Any,
+    draw: Any,
+    plot: dict[str, Any] | None,
+    cx: float,
+    cy: float,
+    hex_radius: float,
+    tile_px: int,
+) -> None:
+    improvement, district = _plot_marks(plot)
+    if improvement is None and district is None:
+        return
+    icon_px = max(11, int(tile_px * 0.38))
+    if improvement is not None:
+        _paste_mark(
+            canvas, draw, map_icons.improvement_icon_slug(improvement[0]), improvement[2],
+            cx - hex_radius * 0.42, cy + hex_radius * 0.28, icon_px,
+            pillaged=bool(isinstance(plot, dict) and plot.get("improvement_pillaged")),
+        )
+    if district is not None:
+        _paste_mark(
+            canvas, draw, map_icons.district_icon_slug(district[0]), district[2],
+            cx + hex_radius * 0.42, cy + hex_radius * 0.28, icon_px,
+        )
+
+
+def _viewport_mark_legend(
+    plot_index: dict[tuple[int, int], dict[str, Any]],
+    viewport: dict[str, int],
+) -> tuple[list[tuple[str, str]], list[str], int, int]:
+    """Legend rows for improvement and district types actually drawn, plus tile counts."""
+    seen: list[tuple[str, str, str]] = []
+    seen_ids: set[str] = set()
+    improvements = 0
+    districts = 0
+    x0, y0 = viewport["x0"], viewport["y0"]
+    for vy in range(viewport["height"]):
+        for vx in range(viewport["width"]):
+            improvement, district = _plot_marks(plot_index.get((x0 + vx, y0 + vy)))
+            for mark, kind in ((improvement, "improvement"), (district, "district")):
+                if mark is None:
+                    continue
+                if kind == "improvement":
+                    improvements += 1
+                    slug = map_icons.improvement_icon_slug(mark[0])
+                else:
+                    districts += 1
+                    slug = map_icons.district_icon_slug(mark[0])
+                if mark[1] in seen_ids:
+                    continue
+                seen_ids.add(mark[1])
+                seen.append((mark[1], "#888888", slug if _icon_file(slug) else f"__mk:{mark[2]}"))
+    return [(label, color) for label, color, _slug in seen], [slug for _label, _color, slug in seen], improvements, districts
+
+
 def _paste_ruins_marker(
     canvas: Any,
     plot: dict[str, Any] | None,
@@ -864,7 +1044,8 @@ def _draw_outlined_text(
     draw.text((x, y), text, fill=fill, font=font, anchor=anchor)
 
 
-# Legend under each map image lists only resource icons (David, 2026-09-27).
+# Terrain swatches stay off the strip (they read off the map). Resource, improvement,
+# and district marks stay, because the model uses them to tell tiles apart.
 LEGEND_RESOURCES_ONLY = True
 
 
@@ -1187,6 +1368,7 @@ def render_civ6_map_png(
         territory_labels, map_w, legend_font, legend_swatch, legend_font_pil,
     ) if territory_labels else ([], 0)
     resource_legend = map_render.collect_civ6_viewport_resource_legend(plot_index, viewport)
+    mark_rows, mark_slugs, improvements_drawn, districts_drawn = _viewport_mark_legend(plot_index, viewport)
     has_ruins = any(_plot_has_ruins(plot) for plot in plot_index.values())
     if prefer_civ5_sprites:
         marker_entries = []
@@ -1194,6 +1376,7 @@ def render_civ6_map_png(
         marker_entries = _civ6_marker_legend_entries(tile_markers, snapshot, plot_index, viewport)
     icon_legend_rows = [(meaning, "#888888") for _, meaning in marker_entries]
     icon_legend_rows.extend([(label, "#888888") for _, label in resource_legend])
+    icon_legend_rows.extend(mark_rows)
     if has_ruins:
         icon_legend_rows.append(("ruins", "#e8c448"))
     icon_items, icon_strip_h = map_render._layout_legend_items(
@@ -1204,6 +1387,7 @@ def render_civ6_map_png(
         icon_slugs_for_draw.extend("_" for _ in resource_legend)
     else:
         icon_slugs_for_draw.extend(slug for slug, _ in resource_legend)
+    icon_slugs_for_draw.extend(mark_slugs)
     if has_ruins:
         icon_slugs_for_draw.append("")
     show_river_legend = map_render.viewport_has_river_edges(plot_index, viewport)
@@ -1226,6 +1410,7 @@ def render_civ6_map_png(
         river_items, river_strip_h = [], 0
         settle_items, settle_strip_h = [], 0
         resource_rows = [(label, "#888888") for _, label in resource_legend]
+        resource_rows.extend(mark_rows)
         icon_items, icon_strip_h = map_render._layout_legend_items(
             resource_rows, map_w, legend_font, legend_icon, legend_font_pil,
         ) if resource_rows else ([], 0)
@@ -1233,6 +1418,7 @@ def render_civ6_map_png(
             ["_" for _ in resource_legend] if prefer_civ5_sprites
             else [slug for slug, _ in resource_legend]
         )
+        icon_slugs_for_draw.extend(mark_slugs)
     # Header line plus room for the first legend row (whose baseline sits one
     # swatch below the header); the old value let row 1 overlap the header text.
     viewport_header_h = legend_font + map_render.LEGEND_HEADER_GAP + max(legend_font, legend_swatch)
@@ -1271,9 +1457,17 @@ def render_civ6_map_png(
                 revealed_in_view += 1
             terrain = ""
             owner = owner_index.get((wx, wy), "") if state == "revealed" else ""
+            improvement_id = district_id = resource_id = ""
+            pillaged = 0
             if isinstance(plot, dict):
                 terrain = str(plot.get("terrain") or plot.get("terrain_type") or plot.get("terrain_id") or "")
-            hasher.update(f"{wx},{wy},{state},{terrain},{owner}".encode())
+                improvement_id = str(plot.get("improvement_id") or "")
+                district_id = str(plot.get("district_id") or "")
+                resource_id = str(plot.get("resource_id") or "")
+                pillaged = 1 if plot.get("improvement_pillaged") else 0
+            hasher.update(
+                f"{wx},{wy},{state},{terrain},{owner},{improvement_id},{district_id},{resource_id},{pillaged}".encode()
+            )
     cache_key = hasher.hexdigest()
     cached = _BASE_LAYER_CACHE.get(cache_key)
     used_base_cache = False
@@ -1332,6 +1526,7 @@ def render_civ6_map_png(
                         if not rivers_trusted and isinstance(plot, dict) and plot.get("river_edges"):
                             _draw_river_tile_mark(draw, cx, cy, hex_radius)
                     _paste_resource_icon(canvas, plot, cx, cy, hex_radius, tile_px)
+                    _paste_tile_marks(canvas, draw, plot, cx, cy, hex_radius, tile_px)
                     _paste_ruins_marker(canvas, plot, cx, cy, hex_radius)
                     if territory_owner is not None:
                         owner_color = map_render._player_color(territory_owner)
@@ -1445,6 +1640,7 @@ def render_civ6_map_png(
         direction = "north up (y grows up)" if flip_y else "y grows down"
         header_text = (
             f"x {x0}-{x0 + vw - 1}, y {y0}-{y0 + vh - 1} | {direction} | odd rows shifted right"
+            " | owned tiles: improvement lower-left, district lower-right (blank = unimproved)"
         )
     draw.text((4, ly_header), header_text, fill="#cccccc", font=font)
     legend_y = ly_header + viewport_header_h
@@ -1506,7 +1702,11 @@ def render_civ6_map_png(
         legend_y += map_render.LEGEND_HEADER_GAP
         for (lx, ly_row, meaning, _), slug in zip(icon_items, icon_slugs_for_draw):
             row_y = legend_y + ly_row
-            if slug.startswith("__"):
+            if slug.startswith("__mk:"):
+                _draw_letter_badge(
+                    draw, lx + legend_icon / 2, row_y - legend_icon / 2, legend_icon, slug.split(":", 1)[1],
+                )
+            elif slug.startswith("__"):
                 _draw_legend_special(
                     canvas, draw, slug, lx, row_y - legend_icon, legend_icon, snapshot,
                 )
@@ -1550,7 +1750,10 @@ def render_civ6_map_png(
         "show_axis_labels": show_axis,
         "show_tile_coords": show_tile_coords,
         "legend_has_terrain": bool(terrain_items),
-        "legend_has_markers": bool(marker_entries),
+        "legend_has_markers": bool(marker_entries) or bool(mark_rows),
+        "improvements_drawn": improvements_drawn,
+        "districts_drawn": districts_drawn,
+        "tile_mark_legend": [label for label, _color in mark_rows],
         "north_up": bool(flip_y),
         "river_edges_trusted": bool(rivers_trusted),
     }

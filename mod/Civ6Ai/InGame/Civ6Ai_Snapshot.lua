@@ -254,6 +254,22 @@ function Civ6Ai_Snapshot._ImprovementTypeName(plot)
   return nil
 end
 
+-- District on this tile. City center is the city marker, not a second icon.
+function Civ6Ai_Snapshot._DistrictTypeName(plot)
+  if plot == nil or plot.GetDistrictType == nil then
+    return nil
+  end
+  local ok, idx = pcall(function() return plot:GetDistrictType() end)
+  if not ok or idx == nil or idx < 0 or GameInfo.Districts == nil then
+    return nil
+  end
+  local row = GameInfo.Districts[idx]
+  if row == nil or row.DistrictType == nil or row.DistrictType == "DISTRICT_CITY_CENTER" then
+    return nil
+  end
+  return row.DistrictType
+end
+
 function Civ6Ai_Snapshot._VisibilityChar(plot)
   if plot:IsMountain() or plot:IsNaturalWonder() then
     return "^"
@@ -526,7 +542,7 @@ function Civ6Ai_Snapshot._BuildPlotRecord(plot, playerID, turn, vis)
   local terrain_id = Civ6Ai_Snapshot._TerrainTypeName(plot)
   local fresh_water = plot:IsFreshWater() or plot:IsRiver()
   local river_edges = Civ6Ai_Snapshot._RiverEdges(plot)
-  return {
+  local rec = {
     plot_id = Civ6Ai_Util.PlotId(x, y),
     x = x,
     y = y,
@@ -542,6 +558,7 @@ function Civ6Ai_Snapshot._BuildPlotRecord(plot, playerID, turn, vis)
     revealed_owner_id = Civ6Ai_Snapshot._NullableId(Civ6Ai_Snapshot._PlotOwnerPlayerId(plot)),
     feature_id = Civ6Ai_Snapshot._NullableId(Civ6Ai_Snapshot._FeatureTypeName(plot)),
     improvement_id = Civ6Ai_Snapshot._NullableId(Civ6Ai_Snapshot._ImprovementTypeName(plot)),
+    district_id = Civ6Ai_Snapshot._NullableId(Civ6Ai_Snapshot._DistrictTypeName(plot)),
     route_id = Civ6Ai_Util.JsonNull(),
     resource_id = Civ6Ai_Snapshot._NullableId(Civ6Ai_Snapshot._ResourceTypeName(plot)),
     yields = {food = 0, production = 0, commerce = 0},
@@ -550,6 +567,13 @@ function Civ6Ai_Snapshot._BuildPlotRecord(plot, playerID, turn, vis)
     worked_by_city_id = Civ6Ai_Util.JsonNull(),
     visible_stack_ids = {},
   }
+  if plot.IsImprovementPillaged ~= nil then
+    local okP, pillaged = pcall(function() return plot:IsImprovementPillaged() end)
+    if okP and pillaged == true then
+      rec.improvement_pillaged = true
+    end
+  end
+  return rec
 end
 
 function Civ6Ai_Snapshot._BuildKnownMap(playerID, turn, yourUnits, yourCities)

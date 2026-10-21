@@ -18,7 +18,7 @@ map.world.width = 44
 map.world.height = 26
 map.hex = odd-r
 map.script = Continents
-# minimap attached — coast, islands, fog, and unit positions visible in image
+# minimap attached — terrain, coast, fog, resources, improvements and districts are on the image; an owned tile with no improvement mark is unimproved
 
 === EMPIRE ===
 # == Summary ==

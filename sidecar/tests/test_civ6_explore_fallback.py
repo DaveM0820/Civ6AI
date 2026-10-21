@@ -65,12 +65,37 @@ class BuilderTests(unittest.TestCase):
         }
 
     def test_builder_sites_listed_resource_first(self):
+        import os
+
         from sidecar import civ6_prompt_coaching as coaching
         snap = self._snap()
-        line = coaching.builder_fact_lines("builder_1", snap["your_units"][0], snap)[0]
+        previous = os.environ.get("CIV4AI_MAP_IMAGE_CADENCE")
+        os.environ["CIV4AI_MAP_IMAGE_CADENCE"] = "100"
+        try:
+            line = coaching.builder_fact_lines("builder_1", snap["your_units"][0], snap)[0]
+        finally:
+            if previous is None:
+                os.environ.pop("CIV4AI_MAP_IMAGE_CADENCE", None)
+            else:
+                os.environ["CIV4AI_MAP_IMAGE_CADENCE"] = previous
         self.assertIn("(43,14) Wheat", line)
         self.assertLess(line.index("(43,14)"), line.index("(44,15)"))
         self.assertNotIn("(45,14)", line)
+
+    def test_builder_tile_list_dropped_when_map_image_attached(self):
+        from sidecar import civ6_prompt_coaching as coaching
+        snap = self._snap()
+        line = coaching.builder_fact_lines("builder_1", snap["your_units"][0], snap)[0]
+        self.assertNotIn("(43,14)", line)
+        self.assertIn("blank owned tile", line)
+
+    def test_builder_improve_commands_keep_coordinates(self):
+        from sidecar import civ6_prompt_coaching as coaching
+        snap = self._snap()
+        snap["legal_commands"] = [_improve_cmd(43, 14, "IMPROVEMENT_FARM", unit="UNIT_5")]
+        line = coaching.builder_fact_lines("builder_1", snap["your_units"][0], snap)[0]
+        self.assertIn("Improve(43,14,IMPROVEMENT_FARM)", line)
+        self.assertNotIn("(44,15)", line)
 
     def test_builder_move_outside_borders_dropped(self):
         snap = self._snap()

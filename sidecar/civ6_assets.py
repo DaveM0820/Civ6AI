@@ -17,6 +17,7 @@ _ICON_XML_GLOBS = (
     "Icons_Units.xml",
     "Icons_Resources.xml",
     "Icons_Districts.xml",
+    "Icons_Improvements.xml",
     "Icons_Buildings.xml",
     "Icons_Features.xml",
 )
@@ -387,6 +388,26 @@ def icon_name_for_resource(resource_id: str) -> str:
     if resource.startswith("RESOURCE_"):
         return f"ICON_{resource}"
     return f"ICON_RESOURCE_{resource}"
+
+
+def _icon_name_for_typed_id(type_id: str, prefix: str) -> str:
+    """ICON_<PREFIX>_<NAME> from a gameplay type, or the name when it is already an icon."""
+    token = str(type_id or "").strip().upper()
+    if not token:
+        return ""
+    if token.startswith("ICON_"):
+        return token
+    if token.startswith(prefix):
+        return f"ICON_{token}"
+    return f"ICON_{prefix}{token}"
+
+
+def icon_name_for_improvement(improvement_id: str) -> str:
+    return _icon_name_for_typed_id(improvement_id, "IMPROVEMENT_")
+
+
+def icon_name_for_district(district_id: str) -> str:
+    return _icon_name_for_typed_id(district_id, "DISTRICT_")
 
 
 def icon_slug(icon_name: str) -> str:

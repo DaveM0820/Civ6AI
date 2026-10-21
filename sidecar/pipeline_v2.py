@@ -3297,8 +3297,10 @@ def _map_wire_stats_from_snapshot(snapshot: dict[str, Any]) -> list[str]:
     known_map = snapshot.get("known_map", {})
     if not isinstance(known_map, dict):
         return lines
+    # Civ6 attaches a map image that already draws ruins, improvements, and districts.
+    tiles_on_image = isinstance(snapshot.get("civ6"), dict) and map_image_attach_turn(snapshot)
     ruin_coords = _map_ruin_coords(known_map)
-    if ruin_coords:
+    if ruin_coords and not tiles_on_image:
         lines.append(_wire_line("map.ruins", " | ".join(ruin_coords)))
     if compact_situation_wire_enabled():
         return lines
@@ -3325,7 +3327,7 @@ def _map_wire_stats_from_snapshot(snapshot: dict[str, Any]) -> list[str]:
         if isinstance(tile_px, int):
             lines.append(_wire_line("map.tile_px", tile_px))
         legend = image.get("legend", [])
-        if isinstance(legend, list):
+        if isinstance(legend, list) and not tiles_on_image:
             for index, entry in enumerate(legend):
                 if isinstance(entry, dict) and entry.get("meaning"):
                     symbol = entry.get("symbol", "")
@@ -3358,11 +3360,17 @@ def _append_map_wire_stats(lines: list[str], context: dict[str, Any], map_stats:
                 count = int(area.get("revealed_plot_count", 0))
                 lines.append(_wire_line(f"map.area.{label}", f"{kind}:{count}"))
         if image_attached or any(line.startswith("map.image_attached = true") for line in lines):
-            lines.append("# minimap attached — coast, islands, fog, and unit positions visible in image")
+            lines.append(
+                "# minimap attached — terrain, coast, fog, resources, improvements and districts are on the image; "
+                "an owned tile with no improvement mark is unimproved"
+            )
         return
     if compact_situation_wire_enabled():
         if image_attached:
-            lines.append("# minimap attached — coast, islands, fog, and unit positions visible in image")
+            lines.append(
+                "# minimap attached — terrain, coast, fog, resources, improvements and districts are on the image; "
+                "an owned tile with no improvement mark is unimproved"
+            )
         return
     if isinstance(game, dict):
         _append_int_wire(lines, "map.width", game.get("map_width"))
@@ -3386,7 +3394,10 @@ def _append_map_wire_stats(lines: list[str], context: dict[str, Any], map_stats:
         count = int(area.get("revealed_plot_count", 0))
         lines.append(_wire_line(f"map.area.{label}", f"{kind}:{count}"))
     if image_attached:
-        lines.append("# minimap attached — coast, islands, fog, and unit positions visible in image")
+        lines.append(
+            "# minimap attached — terrain, coast, fog, resources, improvements and districts are on the image; "
+            "an owned tile with no improvement mark is unimproved"
+        )
 
 
 def _append_advciv_wire(lines: list[str], context: dict[str, Any]) -> None:

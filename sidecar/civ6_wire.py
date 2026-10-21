@@ -729,8 +729,9 @@ def build_civ6_role_instruction(snapshot: dict[str, Any]) -> str:
         role += f", playing as the {civ_label} civilization"
     attach_map = pipeline.map_image_attach_turn(snapshot)
     map_clause = (
-        " A labeled map image is attached each turn — read geography and unit positions from it; "
-        "hex labels use (x,y) like move commands. "
+        " A labeled map image is attached each turn — read geography, resources, improvements, "
+        "districts, and unit positions from it. On owned tiles an improvement sits lower-left and a "
+        "district lower-right; a tile with neither mark is unimproved. Hex labels use (x,y) like move commands. "
         if attach_map else " Use EMPIRE unit coordinates for movement this turn (no map image attached). "
     )
     gandhi_clause = pipeline._gandhi_role_clause() if pipeline._is_gandhi_leader(snapshot) else ""
@@ -819,14 +820,20 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
     for x, y in held:
         if 0 <= y < len(grid) and grid[y]:
             grid[y][x % len(grid[y])] = "@"
-    for name, pattern in (("land", r"\*+"), ("island", r"[.#]+"), ("coast", r"~+"))[:3 if naval else 2]:
-        for y, row in enumerate("".join(r) for r in grid):
-            runs = [m.span() for m in re.finditer(pattern, row)]
-            if runs:
-                map_lines.append(pipeline._wire_line(f"map.{name}.y{y}", ", ".join(
-                    str(a) if b - a == 1 else f"{a}-{b - 1}" for a, b in runs)))
+    # Land/island/coast coordinate runs repeat the attached image. Keep them only when there is no image.
+    if not pipeline.map_image_attach_turn(context):
+        for name, pattern in (("land", r"\*+"), ("island", r"[.#]+"), ("coast", r"~+"))[:3 if naval else 2]:
+            for y, row in enumerate("".join(r) for r in grid):
+                runs = [m.span() for m in re.finditer(pattern, row)]
+                if runs:
+                    map_lines.append(pipeline._wire_line(f"map.{name}.y{y}", ", ".join(
+                        str(a) if b - a == 1 else f"{a}-{b - 1}" for a, b in runs)))
     if pipeline.map_image_attach_turn(context) and not any("attached" in l for l in map_lines):
-        map_lines.append(pipeline._wire_line("map.images", "attached — fog, terrain, coast, unit positions"))
+        map_lines.append(pipeline._wire_line(
+            "map.images",
+            "attached — fog, terrain, coast, resources, improvements (lower-left on owned tiles), "
+            "districts (lower-right); a blank owned tile is unimproved",
+        ))
     lines.extend(map_lines)
     return lines
 

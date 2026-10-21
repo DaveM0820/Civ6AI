@@ -284,6 +284,63 @@ class Civ6MapRenderTests(unittest.TestCase):
         self.assertLess(second, first)
         print(f"map_render first={first:.4f}s second={second:.4f}s")
 
+    def test_owned_improvements_and_districts_are_marked(self):
+        import time
+
+        snapshot = civ6_adapter.load_golden_snapshot(GOLDEN)
+        snapshot["game"]["map_width"] = 4
+        snapshot["game"]["map_height"] = 3
+
+        def plot(x: int, y: int, **extra: object) -> dict:
+            row = {
+                "plot_id": f"PLOT_{x}_{y}",
+                "x": x,
+                "y": y,
+                "knowledge": "visible",
+                "terrain_id": "TERRAIN_GRASS",
+                "water": False,
+                "hills": False,
+                "peak": False,
+                "revealed_owner_id": "PLAYER_0",
+                "improvement_id": None,
+                "district_id": None,
+                "resource_id": None,
+                "city_id": None,
+            }
+            row.update(extra)
+            return row
+
+        snapshot["known_map"]["plots"] = [
+            plot(0, 0, improvement_id="IMPROVEMENT_FARM"),
+            plot(1, 0, district_id="DISTRICT_CAMPUS"),
+            plot(2, 0),
+            plot(3, 0, improvement_id="IMPROVEMENT_MINE", revealed_owner_id=None),
+            plot(0, 1, improvement_id="IMPROVEMENT_GOODY_HUT", revealed_owner_id=None),
+            plot(1, 1, improvement_id="IMPROVEMENT_FARM", improvement_pillaged=True),
+        ]
+        snapshot["known_map"]["visibility_grid"] = ["....", "....", "...."]
+        snapshot["known_map"]["viewport"] = {"x0": 0, "y0": 0, "width": 4, "height": 3}
+        started = time.perf_counter()
+        meta = render_civ6_map_png(snapshot, None)
+        self.assertLess(time.perf_counter() - started, 1.0)
+        self.assertEqual(2, meta["improvements_drawn"])
+        self.assertEqual(1, meta["districts_drawn"])
+        legend = " ".join(meta["tile_mark_legend"])
+        self.assertIn("farm", legend)
+        self.assertIn("pillaged", legend)
+        self.assertIn("campus", legend)
+        self.assertNotIn("mine", legend)
+        bare = civ6_adapter.load_golden_snapshot(GOLDEN)
+        bare["game"]["map_width"] = 4
+        bare["game"]["map_height"] = 3
+        bare["known_map"]["plots"] = [plot(x, y) for y in range(3) for x in range(4)]
+        bare["known_map"]["visibility_grid"] = ["....", "....", "...."]
+        bare["known_map"]["viewport"] = {"x0": 0, "y0": 0, "width": 4, "height": 3}
+        blank = render_civ6_map_png(bare, None)
+        self.assertNotEqual(meta["sha256"], blank["sha256"])
+        self.assertEqual(0, blank["improvements_drawn"])
+        self.assertEqual(0, blank["districts_drawn"])
+
 
 
 if __name__ == "__main__":

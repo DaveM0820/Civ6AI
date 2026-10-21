@@ -83,6 +83,16 @@ def resource_icon_slug(resource_id: str) -> str:
     return ""
 
 
+def improvement_icon_slug(improvement_id: str) -> str:
+    """Civ6 improvement atlas name. Empty when there is nothing to look up."""
+    return civ6_assets.icon_name_for_improvement(improvement_id)
+
+
+def district_icon_slug(district_id: str) -> str:
+    """Civ6 district atlas name. Empty when there is nothing to look up."""
+    return civ6_assets.icon_name_for_district(district_id)
+
+
 def city_icon_slug(is_capital: bool = False) -> str:
     if _use_civ5_icons():
         return civ5_assets.icon_slug_for_city(is_capital)
