@@ -212,6 +212,7 @@
                   "city_state_type": {"type": ["string", "null"]},
                   "suzerain_id": {"type": ["string", "null"]},
                   "your_envoys": {"type": ["integer", "null"]},
+                  "suzerain_envoys": {"type": ["integer", "null"], "minimum": 0},
                   "at_war": {"type": "boolean"},
                   "can_declare_war": {"type": "boolean"},
                   "can_make_peace": {"type": "boolean"}

@@ -471,6 +471,9 @@ def normalize_civ6_diplomacy(snapshot: dict[str, Any]) -> None:
         envoys = _as_schema_int(row.get("your_envoys"))
         if envoys is not None:
             cs["your_envoys"] = envoys
+        suzerain_envoys = _as_schema_int(row.get("suzerain_envoys"))
+        if suzerain_envoys is not None and suzerain_envoys >= 0:
+            cs["suzerain_envoys"] = suzerain_envoys
         if isinstance(row.get("at_war"), bool):
             cs["at_war"] = row["at_war"]
         for key in ("can_declare_war", "can_make_peace"):
