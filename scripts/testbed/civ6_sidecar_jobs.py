@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"), strict=False)
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
