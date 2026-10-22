@@ -112,6 +112,8 @@ RELATIONS_NAME = "relations.json"
 PEACE_WORDS = frozenset({"peace", "peace_treaty", "peacetreaty", "make_peace", "makepace"})
 GPT_TURNS = 10
 OFFER_TTL = 3
+# Identical offer (same sides, same items) cannot be sent again until this many turns later.
+DEAL_COOLDOWN = 4
 # Pact -> (Gov.Deal bit, civic/tech this seat needs). Applied both ways; peace needs war, the rest peace.
 PACTS = {
     "peace": (1, None), "friendship": (2, None), "alliance": (4, "CIVIC_DIPLOMATIC_SERVICE"),
@@ -271,7 +273,8 @@ def has_orders(snapshot: dict) -> bool:
 def required_rows(snapshot: dict) -> list[tuple[str, str]]:
     """Every open offer to this seat must be answered this turn."""
     return [(f"deal.{pipeline._player_chat_name(snapshot, d['from'])}.respond",
-             f"ACCEPT | REJECT  # they give {_items_text(d.get('give', []))}; you give {_items_text(d.get('want', []))}")
+             "ACCEPT | REJECT | COUNTER give <items> for <items>  # they give "
+             f"{_items_text(d.get('give', []))}; you give {_items_text(d.get('want', []))}")
             for d in _open_offers_to_me(snapshot)]
 
 
@@ -288,14 +291,11 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
     if names:
         out.append(("deal.<Leader>", "give <items> for <items>  (any number of items: <n> gold, <n> gpt, "
                     "<n> RESOURCE_X, or a pact that binds both sides: peace, friendship, alliance, "
-                    "open_borders, embassy, delegation; "
-                    f"answered next turn; Leader = {' | '.join(names)})"))
+                    "open_borders, embassy, delegation; a peace proposal must also include gold, gpt, "
+                    "or a resource; answered next turn with ACCEPT, REJECT, or COUNTER; "
+                    f"Leader = {' | '.join(names)})"))
         out.append(("cmd", "CMD_propose_* or CMD_accept_* copied from a DIPLOMACY deal-status line"))
-    diplo = diplomacy(snapshot)
-    if int(diplo.get("envoys_to_give") or 0) > 0:
-        for row in _lst(diplo.get("city_states")):
-            if isinstance(row, dict) and row.get("name"):
-                out.append((f"envoy.{row['name']}", "1"))
+    # Envoy token setters are not available in a gameplay script. Do not offer them.
     return out
 
 
@@ -320,6 +320,8 @@ def trade_lines(snapshot: dict, rival_id: str) -> str:
             bits.append(f"T{d.get('done_turn')} accepted: {text}")
         elif d.get("status") == "rejected" and turn - int(d.get("done_turn") or 0) <= 1:
             bits.append(f"T{d.get('done_turn')} rejected: {text}")
+        elif d.get("status") == "countered" and turn - int(d.get("done_turn") or 0) <= 1:
+            bits.append(f"T{d.get('done_turn')} countered: {text}")
     return " | ".join(bits) or "none"
 
 
@@ -432,23 +434,10 @@ def _usable_mark(snapshot: dict, res_id: str) -> str:
 
 
 def _bind_envoy(snapshot: dict, key: str, text: str) -> tuple[list[str], list[str]]:
+    # Every live send failed: the token setters are not in the gameplay script.
     if text.lower() in ("", "0", "none", "skip", "no"):
         return [], []
-    diplo = diplomacy(snapshot)
-    if int(diplo.get("envoys_to_give") or 0) < 1:
-        return [], [f"{key}: you have no envoys to send"]
-    tail = key.split(".", 1)[-1]
-    row = None
-    for cs in _lst(diplo.get("city_states")):
-        if not isinstance(cs, dict):
-            continue
-        if _norm(tail) in (_norm(cs.get("name")), _norm(cs.get("player_id"))):
-            row = cs
-            break
-    if row is None:
-        return [], [f"{key}: not a met city-state"]
-    pid = str(row.get("player_id"))
-    return [_add_command(snapshot, "send_envoy", {"target_player_id": pid}, f"send an envoy to {row.get('name')}")], []
+    return [], [f"{key}: envoys are not offered; the game sends them"]
 
 
 def _bind_civ5_command(snapshot: dict, text: str) -> tuple[list[str], list[str]]:
@@ -494,8 +483,6 @@ def city_state_lines(snapshot: dict) -> list[str]:
             f"suzerain_envoys={row['suzerain_envoys'] if row.get('suzerain_envoys') is not None else 'unknown'}",
             f"at_war={'yes' if row.get('at_war') else 'no'}",
         ]
-        if int(diplo.get("envoys_to_give") or 0) > 0:
-            bits.append(f"envoy_cmd=envoy.{name}")
         lines.append(pipeline._wire_line(f"diplomacy.citystate.{name}", " ".join(bits)))
     return lines
 
@@ -565,6 +552,54 @@ def _peace_items(deal: dict) -> bool:
     return False
 
 
+def _item_key(item: dict[str, Any]) -> tuple:
+    if "kind" in item:
+        return ("k", str(item["kind"]))
+    if "gold" in item:
+        return ("g", int(item["gold"]))
+    if "gpt" in item:
+        return ("p", int(item["gpt"]))
+    if "res" in item:
+        return ("r", str(item["res"]), int(item["n"]))
+    return ("?",)
+
+
+def _fingerprint(frm: Any, to: Any, give: list, want: list) -> tuple:
+    return (
+        str(frm), str(to),
+        tuple(sorted(_item_key(i) for i in give if isinstance(i, dict))),
+        tuple(sorted(_item_key(i) for i in want if isinstance(i, dict))),
+    )
+
+
+def _has_transfer(items: list) -> bool:
+    return any(isinstance(i, dict) and ("gold" in i or "gpt" in i or "res" in i) for i in items)
+
+
+def _peace_substance_problem(give: list, want: list) -> str | None:
+    kinds = {i.get("kind") for i in give + want if isinstance(i, dict)}
+    if "peace" not in kinds:
+        return None
+    if _has_transfer(give) or _has_transfer(want):
+        return None
+    return "a peace proposal must include gold, gpt, or a resource"
+
+
+def _cooldown_problem(snapshot: dict, frm: str, to: str, give: list, want: list) -> str | None:
+    """The same items between the same seats cannot be sent again inside DEAL_COOLDOWN."""
+    turn = _turn(snapshot)
+    needle = _fingerprint(frm, to, give, want)
+    for deal in load_deals(snapshot):
+        if deal.get("status") not in ("pending", "rejected", "accepted", "countered"):
+            continue
+        if _fingerprint(deal.get("from"), deal.get("to"), deal.get("give") or [], deal.get("want") or []) != needle:
+            continue
+        seen = int(deal.get("done_turn") or deal.get("turn") or 0)
+        if turn - seen < DEAL_COOLDOWN:
+            return f"that deal was already sent; wait until T{seen + DEAL_COOLDOWN}"
+    return None
+
+
 def rival_status_line(snapshot: dict, rival_id: str) -> str | None:
     """One line: at war since T81; peace offered T96 pending/rejected."""
     major = next((m for m in _lst(diplomacy(snapshot).get("majors")) if isinstance(m, dict)
@@ -596,16 +631,24 @@ def rival_status_line(snapshot: dict, rival_id: str) -> str | None:
         elif status == "rejected" and done_age <= OFFER_TTL:
             why = deal.get("reason") or "rejected"
             text = f"peace offered T{offered} rejected ({why})"
-        elif status == "accepted" and done_age <= 1:
+        elif status == "accepted" and done_age <= 2:
             text = f"peace accepted T{deal.get('done_turn') or offered}"
         if text and (latest is None or offered >= latest[0]):
             latest = (offered, text)
     if latest:
         bits.append(latest[1])
+    if major.get("at_war") and any(
+        _peace_items(deal) and deal.get("status") == "accepted"
+        and {deal.get("from"), deal.get("to")} == {me, str(rival_id)}
+        and turn - int(deal.get("done_turn") or deal.get("turn") or 0) <= 2
+        for deal in load_deals(snapshot)
+    ):
+        # The engine is still at war. Do not describe the relation as peace.
+        bits.append("accepted peace did not end the war")
     if not bits:
         return None
     if major.get("at_war") and latest and "you must answer" in latest[1]:
-        bits[-1] += f"; deal.{name}.respond = ACCEPT | REJECT"
+        bits[-1] += f"; deal.{name}.respond = ACCEPT | REJECT | COUNTER"
     return "; ".join(bits)
 
 
@@ -708,9 +751,25 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         offer = next((d for d in reversed(deals) if d in _open_offers_to_me(snapshot) and d.get("from") == pid), None)
         if offer is None:
             return [], [f"{key}: no open offer from {name}"]
+        if text.upper().startswith("COUNTER"):
+            rest = text[len("COUNTER"):].strip().lstrip(":").strip()
+            if not rest:
+                return [], [f"{key}: COUNTER needs new terms, for example COUNTER give 40 gold for peace"]
+            ids, notes = bind_reply(snapshot, f"deal.{name}", rest)
+            if notes:
+                return [], notes
+            deals = load_deals(snapshot)
+            for row in reversed(deals):
+                if row.get("status") == "pending" and row.get("from") == pid and row.get("to") == _me(snapshot):
+                    row["status"] = "countered"
+                    row["reason"] = "countered"
+                    row["done_turn"] = _turn(snapshot)
+                    break
+            _save(snapshot, deals)
+            return ids, []
         answer = text.upper()
         if answer not in ("ACCEPT", "REJECT", "YES", "NO"):
-            return [], [f"{key}={value}: use ACCEPT or REJECT"]
+            return [], [f"{key}={value}: use ACCEPT, REJECT, or COUNTER give <items> for <items>"]
         offer["done_turn"] = _turn(snapshot)
         ids: list[str] = []
         if answer in ("ACCEPT", "YES"):
@@ -742,7 +801,13 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         problem = _pact_problem(snapshot, pid, {i.get("kind") for i in give + want} - {None})
         if problem:
             return [], [f"{key}={value}: {problem}"]
+        problem = _peace_substance_problem(give, want)
+        if problem:
+            return [], [f"{key}={value}: {problem}"]
         problem = _stock_problem(snapshot, give)
+        if problem:
+            return [], [f"{key}={value}: {problem}"]
+        problem = _cooldown_problem(snapshot, _me(snapshot), pid, give, want)
         if problem:
             return [], [f"{key}={value}: {problem}"]
         deals = [d for d in load_deals(snapshot)
