@@ -492,9 +492,13 @@ def war_section_lines(context: dict[str, Any]) -> list[str]:
         if cxy[0] is not None and cxy[1] is not None:
             sx, sy = _staging_tile(context, cxy[0], cxy[1])
             stage = f"; mass at ({sx},{sy}) and bring siege"
+        capture = ""
+        city_hp, city_max = _int(c.get("hp")), _int(c.get("max_hp"))
+        if city_hp == 0 and city_max:
+            capture = f"; capture with a melee unit adjacent at ({_int(c.get('x'))},{_int(c.get('y'))})"
         lines.append(pipeline._wire_line(
             f"war.city.{c.get('name') or 'city'}",
-            f"{_owner_label(context, c.get('owner_player_id'))} ({_int(c.get('x'))},{_int(c.get('y'))}) {', '.join(stat)}{stage}"))
+            f"{_owner_label(context, c.get('owner_player_id'))} ({_int(c.get('x'))},{_int(c.get('y'))}) {', '.join(stat)}{stage}{capture}"))
     lines.extend(city_threat_lines(context))
     siege = siege_guidance_line(context)
     if siege:
@@ -831,6 +835,12 @@ def attention_items(context: dict[str, Any]) -> list[str]:
         items.append(focus)
     items.extend(_isolated_lines(context))
     items.extend(_undefended_city_lines(context))
+    for city in _rows(_combat(context), "hostile_cities"):
+        hp, max_hp = _int(city.get("hp")), _int(city.get("max_hp"))
+        x, y = _int(city.get("x")), _int(city.get("y"))
+        if hp == 0 and max_hp and x is not None and y is not None:
+            name = city.get("name") or "city"
+            items.append(f"{name} is at 0 city HP: capture with a melee unit adjacent at ({x},{y})")
     types = {str(u.get("unit_type_id")) for u in context.get("your_units", []) or [] if isinstance(u, dict)}
     if major_wars(context) and "UNIT_GREAT_GENERAL" in types:
         items.append("great generals: keep each within 2 tiles of your attacking units (+5 str, +1 move)")

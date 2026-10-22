@@ -755,38 +755,53 @@ function Civ6Ai_Snapshot._CityAmenities(city)
 end
 
 function Civ6Ai_Snapshot._CityDefense(city)
-  local defense = {percent = 100, health_percent = 100, bombard_damage = 0, wall_hp = 0, wall_max_hp = 0}
+  local defense = {
+    percent = 100, health_percent = 100, bombard_damage = 0,
+    wall_hp = 0, wall_max_hp = 0, hp = 200, max_hp = 200,
+  }
   if city == nil then
     return defense
   end
-  local maxHp = 200
-  local damage = 0
-  if city.GetMaxHitPoints ~= nil then
-    maxHp = city:GetMaxHitPoints() or maxHp
-  elseif city.GetMaxDamage ~= nil then
-    maxHp = city:GetMaxDamage() or maxHp
-  end
-  if city.GetDamage ~= nil then
-    damage = city:GetDamage() or 0
-  end
-  local current = maxHp - damage
-  if current < 0 then
-    current = 0
-  end
-  if maxHp > 0 then
-    defense.percent = math.floor(100 * current / maxHp)
-    defense.health_percent = defense.percent
-  end
-  defense.bombard_damage = Civ6Ai_Snapshot._NonNegative(damage)
+  -- City HP is the centre district's garrison, the same pool the city banner
+  -- uses. city:GetDamage stays at 0 while that garrison is already gone, which
+  -- left every city at 100%. Walls are DISTRICT_OUTER (0 when the city has none).
+  local maxHp, damage = nil, 0
   local district = Civ6Ai_Snapshot._CityCenterDistrict(city)
   if district ~= nil and DefenseTypes ~= nil then
+    local gMax = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_GARRISON))
+    local gDmg = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_GARRISON))
     local wMax = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_OUTER))
     local wDmg = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_OUTER))
     defense.wall_max_hp = wMax
-    defense.wall_hp = math.max(0, wMax - wDmg)
+    defense.wall_hp = wMax > 0 and math.max(0, wMax - wDmg) or 0
+    if gMax > 0 then
+      maxHp = gMax
+      damage = gDmg
+    end
   end
+  if maxHp == nil then
+    maxHp = 200
+    if city.GetMaxHitPoints ~= nil then
+      maxHp = city:GetMaxHitPoints() or maxHp
+    elseif city.GetMaxDamage ~= nil then
+      maxHp = city:GetMaxDamage() or maxHp
+    end
+    if city.GetDamage ~= nil then
+      damage = city:GetDamage() or 0
+    end
+  end
+  damage = Civ6Ai_Snapshot._NonNegative(damage)
+  maxHp = math.max(1, Civ6Ai_Snapshot._NonNegative(maxHp))
+  local current = math.max(0, maxHp - damage)
+  defense.hp = current
+  defense.max_hp = maxHp
+  defense.percent = math.floor(100 * current / maxHp)
+  defense.health_percent = defense.percent
+  defense.bombard_damage = damage
   defense.percent = math.max(0, math.min(100, Civ6Ai_Snapshot._NonNegative(defense.percent)))
   defense.health_percent = math.max(0, math.min(100, Civ6Ai_Snapshot._NonNegative(defense.health_percent)))
+  defense.hp = math.max(0, Civ6Ai_Snapshot._NonNegative(defense.hp))
+  defense.max_hp = math.max(0, Civ6Ai_Snapshot._NonNegative(defense.max_hp))
   return defense
 end
 
@@ -3967,15 +3982,11 @@ function Civ6Ai_Snapshot._VisibleHostiles(playerID)
               name = tostring(Civ6Ai_Snapshot._Try(function() return Locale.Lookup(city:GetName()) end) or "City"),
               strength = Civ6Ai_Snapshot._CombatNum(Civ6Ai_Snapshot._Method(city, "GetStrength")),
             }
+            local defense = Civ6Ai_Snapshot._CityDefense(city)
+            row.hp, row.max_hp = defense.hp, defense.max_hp
+            row.wall_hp, row.wall_max_hp = defense.wall_hp, defense.wall_max_hp
             if district ~= nil and DefenseTypes ~= nil then
-              local gMax = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_GARRISON))
-              local gDmg = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_GARRISON))
-              local wMax = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_OUTER))
-              local wDmg = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_OUTER))
-              if gMax > 0 then row.hp, row.max_hp = math.max(0, gMax - gDmg), gMax end
               row.strength = row.strength or Civ6Ai_Snapshot._CombatNum(Civ6Ai_Snapshot._Method(district, "GetDefenseStrength"))
-              row.wall_max_hp = wMax
-              row.wall_hp = wMax > 0 and math.max(0, wMax - wDmg) or 0
             end
             table.insert(cities, row)
           end
@@ -3990,6 +4001,60 @@ function Civ6Ai_Snapshot._Dist(ax, ay, bx, by)
   local ok, d = pcall(Map.GetPlotDistance, ax, ay, bx, by)
   if ok and type(d) == "number" then return d end
   return 999
+end
+
+-- Real garrison and wall HP for every city this seat can see, including its own.
+-- Fogged cities are left out: last-seen banners are not the engine's current HP.
+function Civ6Ai_Snapshot._FillCityDefenses(playerID, out)
+  out.city_defenses = Civ6Ai_Util.JsonArrayList()
+  local function add(city, ownerID)
+    if city == nil or city.GetX == nil or #out.city_defenses >= 80 then
+      return
+    end
+    local defense = Civ6Ai_Snapshot._CityDefense(city)
+    local name = tostring(Civ6Ai_Snapshot._Try(function() return Locale.Lookup(city:GetName()) end) or "City")
+    table.insert(out.city_defenses, {
+      name = name,
+      owner_player_id = Civ6Ai_Util.PlayerId(ownerID),
+      x = city:GetX(),
+      y = city:GetY(),
+      hp = defense.hp,
+      max_hp = defense.max_hp,
+      health_percent = defense.health_percent,
+      wall_hp = defense.wall_hp,
+      wall_max_hp = defense.wall_max_hp,
+      visible = true,
+    })
+  end
+  local player = Players ~= nil and Players[playerID] or nil
+  if player ~= nil then
+    local ok, cities = pcall(function() return player:GetCities() end)
+    if ok and cities ~= nil and cities.Members ~= nil then
+      for _, city in cities:Members() do
+        add(city, playerID)
+      end
+    end
+  end
+  local vis = PlayersVisibility ~= nil and PlayersVisibility[playerID] or nil
+  if vis == nil or vis.IsVisible == nil then
+    return
+  end
+  for _, otherID in ipairs(Civ6Ai_Snapshot._OtherCityPlayerIds(playerID)) do
+    local ok, cities = pcall(function() return Players[otherID]:GetCities() end)
+    if ok and cities ~= nil and cities.Members ~= nil then
+      for _, city in cities:Members() do
+        local plot = city ~= nil and Map ~= nil and Map.GetPlot ~= nil and Map.GetPlot(city:GetX(), city:GetY()) or nil
+        local seen = false
+        if plot ~= nil and plot.GetIndex ~= nil then
+          local okV, visible = pcall(function() return vis:IsVisible(plot:GetIndex()) end)
+          seen = okV and visible == true
+        end
+        if seen then
+          add(city, otherID)
+        end
+      end
+    end
+  end
 end
 
 function Civ6Ai_Snapshot._BuildCombat(playerID)
@@ -4031,6 +4096,7 @@ function Civ6Ai_Snapshot._BuildCombat(playerID)
       hp = c.hp, max_hp = c.max_hp, wall_hp = c.wall_hp, wall_max_hp = c.wall_max_hp,
     })
   end
+  Civ6Ai_Snapshot._FillCityDefenses(playerID, out)
   if #hostiles == 0 and #cities == 0 then
     return out
   end

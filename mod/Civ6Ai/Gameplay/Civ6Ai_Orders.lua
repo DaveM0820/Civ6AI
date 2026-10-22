@@ -515,10 +515,70 @@ function Civ6Ai_Orders._CanFight(unit)
   return row ~= nil and (num(row.Combat) or 0) > 0
 end
 
--- MoveTo onto an enemy tile is an attack when this unit can fight it this turn.
--- Melee and anti-cavalry attack when adjacent. Ranged attacks if in range.
--- nil means the tile has no enemy and the move continues. Otherwise
--- true, "attack_instead:..." or false, "enemy_on_tile:...".
+function Civ6Ai_Orders._AttackReach(unit)
+  if Civ6Ai_Orders._IsRanged(unit) then
+    return call(unit, "GetRange") or num(GameInfo.Units[unit:GetType()].Range) or 1
+  end
+  return 1
+end
+
+function Civ6Ai_Orders._InAttackRange(unit, x, y)
+  if unit == nil or x == nil or y == nil or Map == nil or Map.GetPlotDistance == nil then
+    return false
+  end
+  local dist = Map.GetPlotDistance(unit:GetX(), unit:GetY(), x, y)
+  if Civ6Ai_Orders._IsRanged(unit) then
+    return dist >= 1 and dist <= Civ6Ai_Orders._AttackReach(unit)
+  end
+  return dist == 1
+end
+
+-- The enterable tile in attack range of tx,ty that is closest to the unit.
+-- The enemy tile itself is the attack, not a step of the path.
+function Civ6Ai_Orders._ApproachTile(unit, tx, ty)
+  local reach = Civ6Ai_Orders._AttackReach(unit)
+  local ranged = Civ6Ai_Orders._IsRanged(unit)
+  local owner = unit:GetOwner()
+  local ux, uy = unit:GetX(), unit:GetY()
+  local best, bestD = nil, nil
+  for dx = -reach, reach do
+    for dy = -reach, reach do
+      local x, y = tx + dx, ty + dy
+      if not (x == tx and y == ty) then
+        local dist = Map.GetPlotDistance(tx, ty, x, y)
+        local inReach = (ranged and dist >= 1 and dist <= reach) or ((not ranged) and dist == 1)
+        if inReach then
+          local plot = Map.GetPlot(x, y)
+          if plot ~= nil and Civ6Ai_Orders._SameDomain(unit, plot) then
+            local okEnter = Civ6Ai_Orders._PlotEnterOk(owner, unit, x, y)
+            if okEnter and Civ6Ai_Orders._EnemyOnPlot(owner, x, y) == nil then
+              local occupied = false
+              if Units ~= nil and Units.GetUnitsInPlot ~= nil then
+                for _, other in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+                  if other:GetID() ~= unit:GetID() then
+                    occupied = true
+                    break
+                  end
+                end
+              end
+              if not occupied then
+                local d = Map.GetPlotDistance(ux, uy, x, y)
+                if best == nil or d < bestD or (d == bestD and (x < best.x or (x == best.x and y < best.y))) then
+                  best, bestD = { x = x, y = y }, d
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  return best
+end
+
+-- MoveTo onto an enemy tile attacks when this unit can fight it this turn.
+-- Already in reach: attack from here. Out of reach: path to the nearest tile
+-- in reach, then attack if a move is left. nil means the tile has no enemy.
 function Civ6Ai_Orders._MoveAsAttack(unit, x, y)
   if Civ6Ai_Orders._EnemyOnPlot(unit:GetOwner(), x, y) == nil then
     return nil
@@ -526,11 +586,42 @@ function Civ6Ai_Orders._MoveAsAttack(unit, x, y)
   if not Civ6Ai_Orders._CanFight(unit) then
     return false, "enemy_on_tile: this unit cannot attack; pick a different tile"
   end
-  local ok, why = Civ6Ai_Orders._ResolveAttack(unit, x, y)
-  if ok then
-    return true, "attack_instead:" .. tostring(why)
+  if Civ6Ai_Orders._InAttackRange(unit, x, y) then
+    local ok, why = Civ6Ai_Orders._ResolveAttack(unit, x, y)
+    if ok then
+      return true, "attack_instead:" .. tostring(why)
+    end
+    return false, "enemy_on_tile:" .. tostring(why)
   end
-  return false, "enemy_on_tile:" .. tostring(why)
+  local tile = Civ6Ai_Orders._ApproachTile(unit, x, y)
+  if tile == nil then
+    return false, "enemy_on_tile:no_approach"
+  end
+  local owner = unit:GetOwner()
+  local startX, startY = unit:GetX(), unit:GetY()
+  if tile.x == startX and tile.y == startY then
+    return false, "enemy_on_tile:out_of_range:" .. tostring(Map.GetPlotDistance(startX, startY, x, y))
+  end
+  local okMove, whyMove = Civ6Ai_Orders._MoveOnce(owner, unit:GetID(), tile.x, tile.y)
+  local movedUnit = Civ6Ai_Orders._Unit(owner, unit:GetID())
+  if movedUnit ~= nil then
+    unit = movedUnit
+  end
+  local moved = unit:GetX() ~= startX or unit:GetY() ~= startY
+  local here = tostring(unit:GetX()) .. "," .. tostring(unit:GetY())
+  local attacksLeft = call(unit, "GetAttacksRemaining")
+  if moved and Civ6Ai_Orders._InAttackRange(unit, x, y) and (call(unit, "GetMovesRemaining") or 0) > 0
+      and (attacksLeft == nil or attacksLeft > 0) then
+    local ok, why = Civ6Ai_Orders._ResolveAttack(unit, x, y)
+    if ok then
+      return true, "approached:" .. here .. ":attack_instead:" .. tostring(why)
+    end
+    return true, "approached:" .. here .. ":attack_failed:" .. tostring(why)
+  end
+  if okMove or moved then
+    return true, "approached:" .. here .. ":" .. tostring(whyMove or "moved")
+  end
+  return false, "enemy_on_tile:" .. tostring(whyMove)
 end
 
 function Civ6Ai_Orders._DoMove(sender, o)
@@ -731,13 +822,12 @@ function Civ6Ai_Orders._DoCommand(sender, o)
   return false, "unknown_kind"
 end
 
--- An AI seat's attack, melee or ranged. The gameplay script has no attack
--- operation (UnitManager.RequestOperation is UI-only, and MoveUnit into an
--- enemy does nothing: MP test T4 melee_no_effect), so the fight is resolved
--- here with the engine's own numbers: CombatManager.SimulateAttackVersus gives
--- the damage each side takes (the same forecast the combat preview shows),
--- which is applied to both units. The same code runs on every PC in the game,
--- so the outcome stays in sync.
+-- An AI seat's attack, melee or ranged. The fight is the engine's own unit
+-- operation (RANGE_ATTACK, or MOVE_TO with the attack modifier), checked with
+-- CanStartOperation and issued with RequestOperation from this gameplay script
+-- so every PC runs the same call. Direct damage and Kill are not used: they
+-- skip the capture a 0 HP city is waiting for, and they crash the way city
+-- strikes used to. If the operation API is missing, the attack fails closed.
 function Civ6Ai_Orders._Attack(owner, o)
   local unit = Civ6Ai_Orders._Unit(owner, o.U)
   if unit == nil then
@@ -928,7 +1018,84 @@ function Civ6Ai_Orders._IsDead(target)
   return call(target, "IsDead") == true or (call(target, "GetDamage") or 0) >= max
 end
 
-Civ6Ai_Orders.ATTACK_XP = { melee = 3, ranged = 2, kill_bonus = 2 }
+-- The operation Civ6Common would issue for a strike on x,y. CanStartOperation
+-- is the four-argument form (unit, op, nil, params). Nil when none can start.
+function Civ6Ai_Orders._AttackParams(x, y, modifiers)
+  local params = {}
+  if UnitOperationTypes == nil then
+    return params
+  end
+  params[UnitOperationTypes.PARAM_X] = x
+  params[UnitOperationTypes.PARAM_Y] = y
+  if modifiers ~= nil and UnitOperationTypes.PARAM_MODIFIERS ~= nil then
+    params[UnitOperationTypes.PARAM_MODIFIERS] = modifiers
+  end
+  return params
+end
+
+function Civ6Ai_Orders._CanStartOp(unit, op, params)
+  if unit == nil or op == nil or UnitManager == nil or UnitManager.CanStartOperation == nil then
+    return false
+  end
+  local ok, can = pcall(UnitManager.CanStartOperation, unit, op, nil, params)
+  return ok and can == true
+end
+
+function Civ6Ai_Orders._AttackPlan(unit, x, y)
+  if unit == nil or x == nil or y == nil or UnitOperationTypes == nil then
+    return nil, nil
+  end
+  local moveMods = UnitOperationMoveModifiers
+  local function tryOp(op, modifiers)
+    if op == nil then
+      return nil, nil
+    end
+    local params = Civ6Ai_Orders._AttackParams(x, y, modifiers)
+    if Civ6Ai_Orders._CanStartOp(unit, op, params) then
+      return op, params
+    end
+    return nil, nil
+  end
+  local domain = nil
+  if GameInfo ~= nil and GameInfo.Units ~= nil and unit.GetType ~= nil then
+    local row = GameInfo.Units[unit:GetType()]
+    if row ~= nil then
+      domain = row.Domain
+    end
+  end
+  local attackMods = nil
+  if moveMods ~= nil then
+    attackMods = (moveMods.ATTACK or 0) + (moveMods.MOVE_IGNORE_UNEXPLORED_DESTINATION or 0)
+  end
+  if domain == "DOMAIN_AIR" then
+    return tryOp(UnitOperationTypes.AIR_ATTACK, moveMods ~= nil and moveMods.ATTACK or nil)
+  end
+  local op, params = tryOp(UnitOperationTypes.RANGE_ATTACK, moveMods ~= nil and moveMods.NONE or nil)
+  if op ~= nil then
+    return op, params
+  end
+  op, params = tryOp(UnitOperationTypes.COASTAL_RAID, attackMods)
+  if op ~= nil then
+    return op, params
+  end
+  return tryOp(UnitOperationTypes.MOVE_TO, attackMods)
+end
+
+function Civ6Ai_Orders._RequestEngineAttack(unit, x, y)
+  if UnitManager == nil or UnitManager.RequestOperation == nil or UnitOperationTypes == nil then
+    return false, "request_operation_unavailable"
+  end
+  local op, params = Civ6Ai_Orders._AttackPlan(unit, x, y)
+  if op == nil then
+    return false, "operation_illegal"
+  end
+  local requested, err = pcall(UnitManager.RequestOperation, unit, op, params)
+  if not requested or err == false then
+    return false, "operation_rejected:" .. tostring(err)
+  end
+  local kind = Civ6Ai_Orders._IsRanged(unit) and "ranged" or "melee"
+  return true, "engine:" .. kind
+end
 
 function Civ6Ai_Orders._ResolveAttack(unit, x, y)
   local owner = unit:GetOwner()
@@ -942,11 +1109,12 @@ function Civ6Ai_Orders._ResolveAttack(unit, x, y)
   end
   local city = Cities ~= nil and Cities.GetCityInPlot ~= nil and Cities.GetCityInPlot(x, y) or nil
   local defender = Civ6Ai_Orders._Defender(x, y, owner)
-  if defender == nil or (city ~= nil and city:GetOwner() ~= owner) then
-    -- A city tile is fought as the city; its garrison only adds strength.
-    return Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
+  local cityTarget = city ~= nil and city:GetOwner() ~= owner
+  if not cityTarget and defender == nil then
+    return false, "no_enemy_on_plot"
   end
-  if not Civ6Ai_Orders._AtWar(owner, defender:GetOwner()) then
+  local enemyOwner = cityTarget and city:GetOwner() or defender:GetOwner()
+  if not Civ6Ai_Orders._AtWar(owner, enemyOwner) then
     return false, "not_at_war"
   end
   if (call(unit, "GetMovesRemaining") or 0) <= 0 then
@@ -956,100 +1124,13 @@ function Civ6Ai_Orders._ResolveAttack(unit, x, y)
   if attacks ~= nil and attacks <= 0 then
     return false, "no_attacks_left"
   end
-  local combatType = Civ6Ai_Orders._CombatType(unit)
-  local toAttacker, toDefender = Civ6Ai_Orders._Forecast(unit, defender, combatType)
-  if toAttacker == nil then
-    return false, toDefender
+  -- The engine applies damage, kills, and captures. A city already at 0 HP is
+  -- captured by MOVE_TO/ATTACK; we do not measure HP and refuse first.
+  local ok, why = Civ6Ai_Orders._RequestEngineAttack(unit, x, y)
+  if not ok then
+    return false, why
   end
-  if ranged then
-    toAttacker = 0
-  end
-  if toDefender <= 0 and toAttacker <= 0 then
-    return false, "no_effect:zero_damage"
-  end
-  local defBefore = call(defender, "GetDamage") or 0
-  local attBefore = call(unit, "GetDamage") or 0
-  Civ6Ai_Orders._ChangeDamage(defender, toDefender)
-  Civ6Ai_Orders._ChangeDamage(unit, toAttacker)
-  local killed = Civ6Ai_Orders._IsDead(defender)
-  local lost = Civ6Ai_Orders._IsDead(unit)
-  local defAfter = call(defender, "GetDamage") or 0
-  if not killed and toDefender > 0 and defAfter == defBefore then
-    return false, "no_effect:damage_not_applied:forecast=" .. tostring(toDefender)
-  end
-  if killed and call(defender, "IsDead") ~= true then
-    pcall(UnitManager.Kill, defender)
-  end
-  if lost then
-    pcall(UnitManager.Kill, unit)
-  else
-    local exp = call(unit, "GetExperience")
-    local xp = (ranged and Civ6Ai_Orders.ATTACK_XP.ranged or Civ6Ai_Orders.ATTACK_XP.melee)
-      + (killed and Civ6Ai_Orders.ATTACK_XP.kill_bonus or 0)
-    if exp ~= nil and exp.ChangeExperience ~= nil then
-      pcall(exp.ChangeExperience, exp, xp)
-    end
-    -- A melee winner moves into the emptied plot, as in a normal attack.
-    local _, left = Civ6Ai_Orders._DefenderDamage(x, y, owner)
-    if killed and not ranged and left == 0 then
-      pcall(UnitManager.MoveUnit, unit, x, y)
-    end
-    pcall(UnitManager.FinishMoves, unit)
-  end
-  return true, (ranged and "ranged" or "melee") .. ":def_dmg=" .. defBefore .. ">" .. defAfter
-    .. ":att_dmg=" .. attBefore .. ">" .. (lost and "dead" or tostring(call(unit, "GetDamage") or 0))
-    .. ":killed=" .. tostring(killed)
-end
-
--- No unit on X,Y: fight the enemy city there (its centre district, walls first),
--- with the engine's forecast. A melee hit that leaves no walls or city HP takes it.
-function Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
-  local owner = unit:GetOwner()
-  local city = Cities ~= nil and Cities.GetCityInPlot ~= nil and Cities.GetCityInPlot(x, y) or nil
-  if city == nil or city:GetOwner() == owner then
-    return false, "no_enemy_on_plot"
-  end
-  if not Civ6Ai_Orders._AtWar(owner, city:GetOwner()) then
-    return false, "not_at_war"
-  end
-  if (call(unit, "GetMovesRemaining") or 0) <= 0 or (call(unit, "GetAttacksRemaining") or 1) <= 0 then
-    return false, "no_moves_left"
-  end
-  local district = Civ6Ai_Orders._CityCenterDistrict(city)
-  if district == nil or DefenseTypes == nil then
-    return false, "no_city_district"
-  end
-  local toAttacker, toCity = Civ6Ai_Orders._Forecast(unit, district, Civ6Ai_Orders._CombatType(unit))
-  if toAttacker == nil then
-    return false, toCity
-  end
-  if toCity <= 0 then
-    return false, "no_effect:zero_damage"
-  end
-  local walls, garrison = DefenseTypes.DISTRICT_OUTER, DefenseTypes.DISTRICT_GARRISON
-  local function left(t) return (call(district, "GetMaxDamage", t) or 0) - (call(district, "GetDamage", t) or 0) end
-  local before = left(walls) + left(garrison)
-  local w = math.min(toCity, left(walls))
-  call(district, "ChangeDamage", walls, w)
-  call(district, "ChangeDamage", garrison, toCity - w)
-  if not ranged then
-    Civ6Ai_Orders._ChangeDamage(unit, toAttacker)
-  end
-  local after, captured = left(walls) + left(garrison), false
-  if after >= before then
-    return false, "no_effect:damage_not_applied:forecast=" .. tostring(toCity)
-  end
-  if not ranged and after <= 0 and not Civ6Ai_Orders._IsDead(unit) then
-    for _, other in ipairs(Units.GetUnitsInPlot(Map.GetPlot(x, y)) or {}) do
-      if other:GetOwner() ~= owner then pcall(UnitManager.Kill, other) end
-    end
-    captured = pcall(Players[owner].AcquireCity, Players[owner], city, true, false)
-    if captured then
-      pcall(UnitManager.MoveUnit, unit, x, y)
-    end
-  end
-  pcall(UnitManager.FinishMoves, unit)
-  return true, (ranged and "ranged" or "melee") .. ":city_hp=" .. before .. ">" .. after .. ":captured=" .. tostring(captured)
+  return true, why .. (cityTarget and ":city" or ":unit")
 end
 
 function Civ6Ai_Orders._MeleeStep(unit, x, y)
@@ -1120,6 +1201,47 @@ function Civ6Ai_Orders._AttacksBeforeMoves(orders)
     attacks[#attacks + 1] = o
   end
   return attacks
+end
+
+-- A move that sets up an attack this unit cannot reach yet runs first.
+-- An attack already in range stays ahead of that unit's move: the move would
+-- spend the unit and the attack would never fire.
+function Civ6Ai_Orders._SetupMovesFirst(orders)
+  local info = {}
+  for _, o in ipairs(orders or {}) do
+    if o.U ~= nil and (o.K == Civ6Ai_Orders.K.ATTACK or o.K == Civ6Ai_Orders.K.MOVE) then
+      local row = info[o.U]
+      if row == nil then
+        row = { attack = false, move = false, attackInRange = false }
+        info[o.U] = row
+      end
+      if o.K == Civ6Ai_Orders.K.ATTACK then
+        row.attack = true
+        local unit = Civ6Ai_Orders._Unit(o.P, o.U)
+        if unit ~= nil and Civ6Ai_Orders._InAttackRange(unit, o.X, o.Y) then
+          row.attackInRange = true
+        end
+      else
+        row.move = true
+      end
+    end
+  end
+  local function setsUp(o)
+    local row = o.U ~= nil and info[o.U] or nil
+    return row ~= nil and row.attack and row.move and not row.attackInRange and o.K == Civ6Ai_Orders.K.MOVE
+  end
+  local first, rest = {}, {}
+  for _, o in ipairs(orders or {}) do
+    if setsUp(o) then
+      first[#first + 1] = o
+    else
+      rest[#rest + 1] = o
+    end
+  end
+  for _, o in ipairs(rest) do
+    first[#first + 1] = o
+  end
+  return first
 end
 
 local function noteAttack(counts, o, ok)
@@ -1275,7 +1397,7 @@ end
 -- After the model's orders: unused ranged, siege, and naval ranged units, plus
 -- city and encampment strikes. Melee is left alone. Runs inside _ApplyOrders,
 -- so every PC plays the same shots. The host chooses the mode on the batch.
-function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFailed, mode)
+function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFailed, mode, moveOk, moveFailed)
   if not Civ6Ai_Orders._AutoRangedEnabled(owner, mode) then
     return
   end
@@ -1285,12 +1407,19 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
     Civ6Ai_Orders._Record(sender, order, true, reason)
     Civ6Ai_Orders._AutoJson(owner, kind, reason, commandId, fixed)
   end
+  moveOk = moveOk or {}
+  moveFailed = moveFailed or {}
   local p = Players[owner]
   for _, unit in ipairs(sortedMembers(call(p, "GetUnits"))) do
     local uid = unit:GetID()
-    local failedAttack = attackFailed[uid] == true and attackOk[uid] ~= true
+    -- A successful attack already spent the shot. A move that failed, or one
+    -- that left the unit in range with moves still on it, still gets the shot.
+    local attacked = attackOk[uid] == true
     local untouched = ordered[uid] ~= true
-    if Civ6Ai_Orders._IsRanged(unit) and (untouched or failedAttack)
+    local failedAttack = attackFailed[uid] == true and not attacked
+    local failedMove = moveFailed[uid] == true and moveOk[uid] ~= true
+    local moved = moveOk[uid] == true
+    if Civ6Ai_Orders._IsRanged(unit) and not attacked and (untouched or failedAttack or failedMove or moved)
         and (call(unit, "GetMovesRemaining") or 0) > 0
         and (call(unit, "GetAttacksRemaining") == nil or (call(unit, "GetAttacksRemaining") or 0) > 0) then
       local row = GameInfo.Units[unit:GetType()]
@@ -1416,7 +1545,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
       end
     end
   end
-  orders = Civ6Ai_Orders._AttacksBeforeMoves(orders)
+  orders = Civ6Ai_Orders._SetupMovesFirst(Civ6Ai_Orders._AttacksBeforeMoves(orders))
   local ordered = {}
   for _, o in ipairs(orders) do
     if o.U ~= nil and o.U >= 0 then
@@ -1427,6 +1556,18 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
   local pending, okUnits = orders, {}
   local cityStrikeFailed = false
   local attackOk, attackFailed = {}, {}
+  local moveOk, moveFailed = {}, {}
+  local function markMove(o, succeeded)
+    if o.U == nil or o.K ~= Civ6Ai_Orders.K.MOVE then
+      return
+    end
+    if succeeded then
+      moveOk[o.U] = true
+      moveFailed[o.U] = nil
+    elseif not moveOk[o.U] then
+      moveFailed[o.U] = true
+    end
+  end
   local function markAttack(o, succeeded, reason)
     if o.U == nil then
       return
@@ -1472,12 +1613,14 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
       if ok then
         progress = true
         okUnits[o.U or -1] = o.K ~= Civ6Ai_Orders.K.SKIP or nil
+        markMove(o, true)
         markAttack(o, true, reason)
         Civ6Ai_Orders._Record(sender, o, true, reason)
         noteAttack(counts, o, true)
       elseif retryable(o.K, reason) and pass < Civ6Ai_Orders.MAX_PASSES then
         nextPending[#nextPending + 1] = o
       else
+        markMove(o, false)
         markAttack(o, false, reason)
         Civ6Ai_Orders._Record(sender, o, false, reason)
         noteAttack(counts, o, false)
@@ -1487,6 +1630,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
     if not progress then
       for _, o in ipairs(nextPending) do
         local unit = Civ6Ai_Orders._Unit(owner, o.U)
+        local moveSucceeded = false
         if o.K == Civ6Ai_Orders.K.MOVE and unit ~= nil then
           local nx, ny = Civ6Ai_Orders._RetargetPlot(owner, unit, o.X, o.Y)
           if nx ~= nil then
@@ -1494,6 +1638,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
             if not ran then
               Civ6Ai_Orders._Record(sender, o, false, "order_error:" .. trimErr(rok))
             else
+              moveSucceeded = rok == true
               Civ6Ai_Orders._Record(sender, o, rok, (rok and "retargeted:" or "plot_occupied_exhausted:")
                 .. tostring(o.X) .. "," .. tostring(o.Y) .. ">" .. tostring(nx) .. "," .. tostring(ny)
                 .. ":" .. tostring(rreason))
@@ -1504,6 +1649,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
         else
           Civ6Ai_Orders._Record(sender, o, false, "plot_occupied_exhausted")
         end
+        markMove(o, moveSucceeded)
         markAttack(o, false)
         noteAttack(counts, o, false)
       end
@@ -1518,7 +1664,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
   -- After the model's orders, before goals and finish-moves. Empty queues never
   -- reach here, so a seat the model did not answer stays with the game's AI.
   local ranAuto, autoErr = pcall(
-    Civ6Ai_Orders._AutoRanged, sender, owner, ordered, attackOk, attackFailed, autoMode)
+    Civ6Ai_Orders._AutoRanged, sender, owner, ordered, attackOk, attackFailed, autoMode, moveOk, moveFailed)
   if not ranAuto then
     log("auto_error|player=" .. tostring(owner) .. "|" .. trimErr(autoErr))
   end
