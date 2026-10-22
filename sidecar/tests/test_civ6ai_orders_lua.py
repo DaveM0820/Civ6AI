@@ -126,6 +126,9 @@ Units = {GetUnitsInPlot=function(plot)
   for id=0,63 do local p=Players[id]; if p then for _,u in ipairs(p.units) do
     if u.x==plot.x and u.y==plot.y then out[#out+1]=u end end end end
   return out end}
+UnitOperationTypes = {MOVE_TO=1, RANGE_ATTACK=2, AIR_ATTACK=3, COASTAL_RAID=4, PARAM_X="x", PARAM_Y="y", PARAM_MODIFIERS="mods"}
+UnitOperationMoveModifiers = {ATTACK=1, MOVE_IGNORE_UNEXPLORED_DESTINATION=2, NONE=0}
+attackOps = {}
 CombatTypes = {MELEE=0, RANGED=1, BOMBARD=2}
 CombatResultParameters = {ATTACKER="A", DEFENDER="D", DAMAGE_TO="dmg"}
 CombatManager = {SimulateAttackVersus=function(a, d, ctype)
@@ -136,6 +139,18 @@ UnitManager = {
   MoveUnit=function(u,x,y) u.x=x; u.y=y; u.moves=u.moves-1 end,
   FinishMoves=function(u) u.moves=0 end,
   RestoreMovement=function(u) u.moves=2 end,
+  CanStartOperation=function(unit, op, _, params)
+    local row = GameInfo.Units[unit:GetType()]
+    local ranged = row and (row.Range or 0) > 0 and ((row.RangedCombat or 0) > 0 or (row.Bombard or 0) > 0)
+    if op == UnitOperationTypes.RANGE_ATTACK then return ranged == true end
+    if op == UnitOperationTypes.MOVE_TO then return not ranged end
+    return false
+  end,
+  RequestOperation=function(unit, op, params)
+    attackOps[#attackOps+1] = {id=unit.id, op=op, x=params.x, y=params.y}
+    unit.moves = 0
+    return true
+  end,
   InitUnit=function(pid, typ, x, y)
     local p=Players[pid]; local id=100+#p.units; local u=MkUnit(pid,id,x,y,0); table.insert(p.units,u); return u end,
 }
@@ -147,6 +162,10 @@ ImprovementBuilder = {
 ExposedMembers.Civ6Ai = {
   MoveUnitForPlayer=function(p,uid,x,y)
     for _,u in ipairs(Players[p].units) do if u.x==x and u.y==y then return false, "plot_occupied" end end
+    for _,u in ipairs(Players[p].units) do if u.id==uid then u.x=x; u.y=y; u.moves=0; return true, "moved" end end
+    return false, "unit_not_found" end,
+  MoveUnitAlongPathForPlayer=function(p,uid,x,y)
+    for _,u in ipairs(Players[p].units) do if u.x==x and u.y==y and u.id~=uid then return false, "plot_occupied" end end
     for _,u in ipairs(Players[p].units) do if u.id==uid then u.x=x; u.y=y; u.moves=0; return true, "moved" end end
     return false, "unit_not_found" end,
   SetResearchForPlayer=function(p,i) Players[p].tech=i; return true, "tech="..i end,
@@ -318,8 +337,10 @@ class OrdersGameplayTests(unittest.TestCase):
         self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,4,13,10,0))")
         self.order(0, K=7, P=2, U=9, X=13, Y=10, S=11)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertTrue(self.last()["reason"].startswith("ranged:def_dmg=0>30:att_dmg=0>0"))
+        self.assertTrue(self.last()["reason"].startswith("engine:ranged:unit"), self.last()["reason"])
         self.assertEqual(self.rt.eval("Players[2].units[3].moves"), 0)
+        self.assertEqual(self.rt.eval("Players[1].units[#Players[1].units].dmg"), 0)
+        self.assertEqual(self.rt.eval("attackOps[#attackOps].op"), 2)
 
     def test_ranged_attack_respects_range(self):
         self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,4,15,10,0))")
@@ -335,8 +356,10 @@ class OrdersGameplayTests(unittest.TestCase):
         self.rt.execute("Players[2].war = {[1]=true}")
         self.order(0, K=7, P=2, U=7, X=10, Y=11, S=14)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertEqual(self.rt.eval("Players[2].units[1].dmg"), 20)
-        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
+        self.assertTrue(self.last()["reason"].startswith("engine:melee:unit"), self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[2].units[1].dmg"), 0)
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 0)
+        self.assertEqual(self.rt.eval("attackOps[#attackOps].op"), 1)
 
     def test_attack_and_city_strike_run_before_a_move(self):
         # The move is listed first and would spend the unit (moves left = 0).
@@ -350,9 +373,11 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertEqual([r["kind"] for r in res[:3]], [31, 7, 1])
         attack = next(r for r in res if r["kind"] == 7)
         self.assertTrue(attack["ok"], attack["reason"])
-        # Melee 35, then the idle archer's ranged auto-shot for 30.
-        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 65)
+        self.assertTrue(str(attack["reason"]).startswith("engine:melee:unit"), attack["reason"])
+        # The melee order and the idle archer's auto shot both go through the engine.
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 0)
         self.assertEqual(self.rt.eval("Players[2].units[2].dmg"), 0)
+        self.assertGreaterEqual(self.rt.eval("#attackOps"), 2)
         logs = list(self.rt.eval("logs").values())
         self.assertTrue(any(
             "CIV6AI|attacks|player=2|turn=6|executed=1|failed=1|unit=1|city=0" in line
@@ -365,11 +390,11 @@ class OrdersGameplayTests(unittest.TestCase):
         self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,3,10,11,0))")
         self.order(0, K=1, P=2, U=7, X=10, Y=11, S=40)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertTrue(str(self.last()["reason"]).startswith("attack_instead:"), self.last()["reason"])
-        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
+        self.assertTrue(str(self.last()["reason"]).startswith("attack_instead:engine:melee"), self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 0)
         self.order(0, K=1, P=2, U=9, X=10, Y=11, S=41)
-        self.assertTrue(str(self.last()["reason"]).startswith("attack_instead:"), self.last()["reason"])
-        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 65)
+        self.assertTrue(str(self.last()["reason"]).startswith("attack_instead:engine:ranged"), self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 0)
         self.rt.execute(
             "Map.GetPlot(10,11):SetOwner(2); "
             "GameInfo.Units[2] = {BuildCharges=3, Combat=0}; "
@@ -380,8 +405,99 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertIn("cannot attack", str(self.last()["reason"]))
         self.rt.execute("table.insert(Players[1].units, MkUnit(1,5,15,15,0))")
         self.order(0, K=1, P=2, U=8, X=15, Y=15, S=43)
-        self.assertFalse(self.last()["ok"])
-        self.assertTrue(str(self.last()["reason"]).startswith("enemy_on_tile:"), self.last()["reason"])
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertTrue(str(self.last()["reason"]).startswith("approached:"), self.last()["reason"])
+        self.assertNotEqual(
+            (self.rt.eval("Players[2].units[2].x"), self.rt.eval("Players[2].units[2].y")),
+            (11, 10),
+        )
+
+    def test_out_of_reach_move_attacks_when_a_move_remains(self):
+        self.rt.execute(
+            "Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,5,15,15,0)); "
+            "ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = function(p,uid,x,y) "
+            "for _,u in ipairs(Players[p].units) do if u.id==uid then u.x=x; u.y=y; "
+            "if u.moves > 0 then u.moves = u.moves - 1 end; return true, 'moved' end end "
+            "return false, 'missing' end"
+        )
+        self.order(0, K=1, P=2, U=8, X=15, Y=15, S=44)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertIn("attack_instead:engine:melee", str(self.last()["reason"]))
+        self.assertTrue(str(self.last()["reason"]).startswith("approached:"), self.last()["reason"])
+        self.assertEqual(self.rt.eval("attackOps[#attackOps].x"), 15)
+        self.assertEqual(self.rt.eval("attackOps[#attackOps].y"), 15)
+        self.assertEqual(self.rt.eval("Players[1].units[#Players[1].units].dmg"), 0)
+
+    def test_zero_hp_city_is_an_engine_attack_not_a_refused_capture(self):
+        self.rt.execute(r"""
+          DefenseTypes = {DISTRICT_OUTER=1, DISTRICT_GARRISON=2}
+          local district = {id=42, x=20, y=20, wdmg=0, gdmg=200}
+          function district:GetID() return self.id end
+          function district:GetX() return self.x end
+          function district:GetY() return self.y end
+          function district:GetType() return 0 end
+          function district:GetMaxDamage(t) if t == 1 then return 0 end return 200 end
+          function district:GetDamage(t) if t == 1 then return self.wdmg end return self.gdmg end
+          function district:ChangeDamage(t, n)
+            if t == 1 then self.wdmg = self.wdmg + n else self.gdmg = self.gdmg + n end
+          end
+          local city = {id=7, owner=1, x=20, y=20}
+          function city:GetID() return self.id end
+          function city:GetOwner() return self.owner end
+          function city:GetX() return self.x end
+          function city:GetY() return self.y end
+          function city:GetDistricts()
+            return {Members=function()
+              local i=0
+              return function() i=i+1; if i==1 then return i, district end end
+            end}
+          end
+          Cities = {GetCityInPlot=function(x, y) if x == 20 and y == 20 then return city end end}
+          Players[1].war = {[2]=true}
+          Players[2].war = {[1]=true}
+          table.insert(Players[2].units, MkUnit(2, 30, 20, 21, 0))
+          zeroCity = district
+        """)
+        self.order(0, K=7, P=2, U=30, X=20, Y=20, S=72)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertTrue(str(self.last()["reason"]).startswith("engine:melee:city"), self.last()["reason"])
+        self.assertNotIn("damage_not_applied", str(self.last()["reason"]))
+        self.assertNotIn("zero_damage", str(self.last()["reason"]))
+        self.assertEqual(self.rt.eval("zeroCity.gdmg"), 200)
+        self.assertEqual(self.rt.eval("attackOps[#attackOps].op"), 1)
+        self.assertEqual(self.rt.eval("attackOps[#attackOps].x"), 20)
+
+    def test_ranged_auto_fires_after_a_failed_move(self):
+        self.rt.execute(r"""
+          Players[2].war = {[1]=true}
+          table.insert(Players[1].units, MkUnit(1,4,13,10,0))
+          local peak = Map.GetPlot(12, 11)
+          function peak:IsImpassable() return true end
+          function peak:IsMountain() return true end
+        """)
+        self.order(0, K=1, P=2, U=9, X=12, Y=11, S=60, B=1, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        self.assertIn("impassable", [r["reason"] for r in self.results()])
+        logs = [str(s) for s in _vals(self.rt.eval("logs"))]
+        self.assertTrue(any("AUTO_U_9_13_10" in line for line in logs), logs)
+
+    def test_ranged_auto_fires_when_the_move_leaves_a_target_in_range(self):
+        self.rt.execute(r"""
+          Players[2].war = {[1]=true}
+          table.insert(Players[1].units, MkUnit(1,4,14,10,0))
+          ExposedMembers.Civ6Ai.MoveUnitForPlayer = function(p,uid,x,y)
+            for _,u in ipairs(Players[p].units) do
+              if u.id==uid then u.x=x; u.y=y; u.moves=u.moves-1; return true, "moved" end
+            end
+            return false, "missing"
+          end
+        """)
+        self.order(0, K=1, P=2, U=9, X=12, Y=9, S=61, B=1, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        self.assertEqual(self.rt.eval("Players[2].units[3].x"), 12)
+        self.assertEqual(self.rt.eval("Players[2].units[3].y"), 9)
+        logs = [str(s) for s in _vals(self.rt.eval("logs"))]
+        self.assertTrue(any("AUTO_U_9_14_10" in line for line in logs), logs)
 
     def test_ranged_auto_skips_melee_humans_and_lethal_forecasts(self):
         self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,3,10,11,0))")
@@ -525,8 +641,9 @@ class OrdersGameplayTests(unittest.TestCase):
         self.turn_start(2, turn=6)
         by_seq = {r["seq"]: r for r in self.results()}
         self.assertTrue(by_seq[70]["ok"], by_seq[70]["reason"])
-        self.assertIn("city_hp", by_seq[70]["reason"])
-        self.assertGreater(self.rt.eval("centerA.wdmg"), 0)
+        self.assertTrue(str(by_seq[70]["reason"]).startswith("engine:melee:city"), by_seq[70]["reason"])
+        self.assertEqual(self.rt.eval("centerA.wdmg"), 0)
+        self.assertEqual(self.rt.eval("centerA.gdmg"), 0)
         self.assertTrue(by_seq[71]["ok"], by_seq[71]["reason"])
         self.assertEqual(by_seq[71]["reason"], "city_strike")
         self.assertEqual(self.rt.eval("Players[1].units[#Players[1].units].dmg"), 0)
@@ -654,9 +771,10 @@ class OrdersGameplayTests(unittest.TestCase):
         self.order(0, K=7, P=2, U=30, X=20, Y=20, S=80, B=4, J=1, N=1, T=6)
         self.turn_start(2, turn=6)
         row = {r["seq"]: r for r in self.results()}[80]
-        self.assertFalse(row["ok"])
-        self.assertIn("forecast_failed", str(row["reason"]))
+        self.assertTrue(row["ok"], row["reason"])
+        self.assertTrue(str(row["reason"]).startswith("engine:melee:city"), row["reason"])
         self.assertNotIn("function expected instead of nil", str(row["reason"]))
+        self.assertEqual(self.rt.eval("centerThrow.wdmg"), 0)
         logs = [str(s) for s in _vals(self.rt.eval("logs"))]
         self.assertFalse(any("turn_start_error" in s for s in logs))
 
@@ -695,17 +813,24 @@ class OrdersGameplayTests(unittest.TestCase):
             " if ctype == nil then return {A={dmg=4}, D={dmg=12}} end"
             " return {A={dmg=0}, D={dmg=0}} end"
         )
+        forecast_a, forecast_d = self.rt.eval(
+            "function() return Civ6Ai_Orders._Forecast(Players[2].units[1], Players[1].units[2], CombatTypes.MELEE) end"
+        )()
+        self.assertEqual(forecast_d, 12)
+        self.assertEqual(forecast_a, 4)
         self.order(0, K=7, P=2, U=7, X=10, Y=11, S=15)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertIn("def_dmg=0>12", self.last()["reason"])
+        self.assertTrue(self.last()["reason"].startswith("engine:melee:unit"), self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 0)
 
     def test_melee_kill_advances_into_plot(self):
         self.rt.execute("Players[2].war = {[1]=true}; local e = MkUnit(1,3,10,11,0); e.dmg = 80;"
                         " table.insert(Players[1].units, e)")
         self.order(0, K=7, P=2, U=7, X=10, Y=11, S=13)
-        self.assertIn("killed=true", self.last()["reason"])
-        self.assertEqual(self.rt.eval("#Players[1].units"), 1)
-        self.assertEqual(self.rt.eval("Players[2].units[1].y"), 11)
+        self.assertTrue(self.last()["reason"].startswith("engine:melee:unit"), self.last()["reason"])
+        self.assertNotIn("killed=", self.last()["reason"])
+        self.assertEqual(self.rt.eval("#Players[1].units"), 2)
+        self.assertEqual(self.rt.eval("Players[2].units[1].y"), 10)
 
     def test_far_move_uses_path_route(self):
         self.rt.execute("ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = function(p,u,x,y) path_called = {p,u,x,y}; return true, 'path' end")
@@ -885,8 +1010,9 @@ class OrdersGameplayTests(unittest.TestCase):
         self.rt.execute("Players[0].war = {[1] = true}")
         ok, reason = self.rt.eval("function() return Civ6Ai_Orders.Gov.AttackUnit(0, 1, 6, 6) end")()
         self.assertTrue(ok, reason)
-        self.assertIn("melee", str(reason))
-        self.assertGreater(int(self.rt.eval("Players[1].units[1].dmg")), 0)
+        self.assertIn("engine:melee", str(reason))
+        self.assertEqual(int(self.rt.eval("Players[1].units[1].dmg")), 0)
+        self.assertEqual(self.rt.eval("attackOps[#attackOps].op"), 1)
 
 
 CHANNEL_ENV = r"""

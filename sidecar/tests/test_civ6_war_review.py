@@ -45,6 +45,43 @@ def _war_context():
 
 
 class WarReviewTests(unittest.TestCase):
+    def test_zero_hp_city_tells_the_model_to_capture(self):
+        ctx = _war_context()
+        ctx["civ6"]["combat"]["hostile_cities"] = [{
+            "name": "Eindhoven", "owner_player_id": "PLAYER_1", "x": 31, "y": 17,
+            "hp": 0, "max_hp": 200, "wall_hp": 40, "wall_max_hp": 100, "strength": 20,
+        }]
+        text = "\n".join(combat.war_section_lines(ctx))
+        self.assertIn("capture with a melee unit adjacent at (31,17)", text)
+        attention = "\n".join(combat.attention_items(ctx))
+        self.assertIn("capture with a melee unit adjacent at (31,17)", attention)
+        ctx["your_cities"][0]["defense"] = {
+            "percent": 40, "health_percent": 40, "bombard_damage": 120,
+            "hp": 80, "max_hp": 200, "wall_hp": 50, "wall_max_hp": 100,
+        }
+        lines: list[str] = []
+        civ6_wire._append_civ6_city_situation_wire(lines, ctx)
+        self.assertIn("Utrecht.hp = 80/200, walls 50/100", "\n".join(lines))
+        ctx["your_cities"][0]["defense"] = {
+            "percent": 100, "health_percent": 100, "bombard_damage": 0,
+            "hp": 200, "max_hp": 200, "wall_hp": 0, "wall_max_hp": 0,
+        }
+        lines = []
+        civ6_wire._append_civ6_city_situation_wire(lines, ctx)
+        self.assertNotIn("Utrecht.hp", "\n".join(lines))
+        ctx["known_other_cities"] = [{
+            "city_id": "CITY_1_8", "name": "Eindhoven", "owner_player_id": "PLAYER_1",
+            "plot_id": "PLOT_31_17", "knowledge": "visible", "population": 4, "is_capital": False,
+        }]
+        ctx["civ6"]["combat"]["city_defenses"] = [{
+            "x": 31, "y": 17, "hp": 0, "max_hp": 200, "wall_hp": 40, "wall_max_hp": 100,
+        }]
+        foreign = "\n".join(civ6_wire._other_player_lines(ctx))
+        self.assertIn("0/200, walls 40/100", foreign)
+        ctx["known_other_cities"][0]["knowledge"] = "remembered"
+        fogged = "\n".join(civ6_wire._other_player_lines(ctx))
+        self.assertNotIn("0/200", fogged)
+
     def test_enemy_with_unreported_moves_is_within_reach_of_the_city(self):
         ctx = _war_context()
         self.assertEqual(combat.enemy_reach(ctx["civ6"]["combat"]["hostiles"][0]), 2)

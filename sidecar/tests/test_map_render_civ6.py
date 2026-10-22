@@ -807,5 +807,52 @@ class PeakGlyphTests(unittest.TestCase):
         self.assertGreater(dark, 8, "mountain peak has no dark ridge on a pale tile")
 
 
+class CityHealthBarTests(unittest.TestCase):
+    def test_wall_bar_sits_above_the_city_bar_and_is_omitted_without_walls(self):
+        from PIL import Image, ImageDraw
+
+        from sidecar.map_render_civ6 import (
+            _CITY_HP_GREEN,
+            _WALL_HP_BLUE,
+            _city_bar_index,
+            _draw_city_defense_bars,
+        )
+
+        image = Image.new("RGB", (80, 40), (0, 0, 0))
+        draw = ImageDraw.Draw(image)
+        _draw_city_defense_bars(draw, 40, 36, 40, 50, 25)
+        self.assertEqual(image.getpixel((30, 33)), _CITY_HP_GREEN)
+        self.assertEqual(image.getpixel((24, 29)), _WALL_HP_BLUE)
+        self.assertNotEqual(image.getpixel((36, 29)), _WALL_HP_BLUE)
+        bare = Image.new("RGB", (80, 40), (0, 0, 0))
+        _draw_city_defense_bars(ImageDraw.Draw(bare), 40, 36, 40, 100, None)
+        self.assertEqual(bare.getpixel((30, 33)), _CITY_HP_GREEN)
+        blue = 0
+        for x in range(80):
+            for y in range(40):
+                if bare.getpixel((x, y)) == _WALL_HP_BLUE:
+                    blue += 1
+        self.assertEqual(0, blue)
+        index = _city_bar_index({
+            "your_cities": [{
+                "plot_id": "PLOT_2_3",
+                "defense": {"hp": 100, "max_hp": 200, "health_percent": 50, "wall_hp": 10, "wall_max_hp": 100},
+            }],
+            "known_other_cities": [
+                {"plot_id": "PLOT_4_5", "knowledge": "visible"},
+                {"plot_id": "PLOT_6_7", "knowledge": "remembered"},
+            ],
+            "civ6": {"combat": {"city_defenses": [
+                {"x": 4, "y": 5, "hp": 0, "max_hp": 200, "wall_hp": 0, "wall_max_hp": 0},
+                {"x": 6, "y": 7, "hp": 10, "max_hp": 200, "wall_hp": 10, "wall_max_hp": 100},
+            ]}},
+        })
+        self.assertEqual(50, index[(2, 3)]["city"])
+        self.assertEqual(10, index[(2, 3)]["wall"])
+        self.assertEqual(0, index[(4, 5)]["city"])
+        self.assertIsNone(index[(4, 5)]["wall"])
+        self.assertNotIn((6, 7), index)
+
+
 if __name__ == "__main__":
     unittest.main()

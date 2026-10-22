@@ -838,6 +838,101 @@ def _draw_river_tile_mark(draw: Any, cx: float, cy: float, hex_radius: float) ->
     draw.line(points, fill=map_render._rgb_tuple(RIVER_STROKE), width=width)
 
 
+_CITY_HP_GREEN = (72, 210, 74)
+_WALL_HP_BLUE = (66, 148, 232)
+_BAR_TRACK = (24, 24, 24)
+
+
+def _percent_bar(current: Any, maximum: Any) -> int | None:
+    if isinstance(current, bool) or isinstance(maximum, bool):
+        return None
+    if not isinstance(current, int) or not isinstance(maximum, int) or maximum <= 0:
+        return None
+    return max(0, min(100, int(round(100 * current / maximum))))
+
+
+def _bars_from_defense(defense: dict[str, Any] | None) -> dict[str, int | None] | None:
+    """Green city percent, and blue wall percent only when the city has walls."""
+    if not isinstance(defense, dict):
+        return None
+    city = _percent_bar(defense.get("hp"), defense.get("max_hp"))
+    if city is None and isinstance(defense.get("health_percent"), int) and not isinstance(defense.get("health_percent"), bool):
+        city = max(0, min(100, defense["health_percent"]))
+    if city is None:
+        return None
+    wall = None
+    wall_max = defense.get("wall_max_hp")
+    wall_hp = defense.get("wall_hp")
+    if isinstance(wall_max, int) and not isinstance(wall_max, bool) and wall_max > 0 and isinstance(wall_hp, int) and not isinstance(wall_hp, bool):
+        wall = max(0, min(100, int(round(100 * wall_hp / wall_max))))
+    return {"city": city, "wall": wall}
+
+
+def _city_bar_index(snapshot: dict[str, Any]) -> dict[tuple[int, int], dict[str, int | None]]:
+    """Visible cities only. Own cities are in view; foreign cities need knowledge == visible."""
+    by_xy: dict[tuple[int, int], dict[str, Any]] = {}
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    combat = civ6.get("combat") if isinstance(civ6, dict) else {}
+    if isinstance(combat, dict):
+        for key in ("city_defenses", "hostile_cities"):
+            for row in combat.get(key) or []:
+                if isinstance(row, dict) and isinstance(row.get("x"), int) and isinstance(row.get("y"), int):
+                    by_xy.setdefault((row["x"], row["y"]), row)
+    index: dict[tuple[int, int], dict[str, int | None]] = {}
+    for city in snapshot.get("your_cities") or []:
+        if not isinstance(city, dict):
+            continue
+        coords = map_render._parse_plot_coords(city.get("plot_id"))
+        bars = _bars_from_defense(city.get("defense") if isinstance(city.get("defense"), dict) else None)
+        if coords is not None and bars is not None:
+            index[coords] = bars
+    for city in snapshot.get("known_other_cities") or []:
+        if not isinstance(city, dict) or city.get("knowledge") != "visible":
+            continue
+        coords = map_render._parse_plot_coords(city.get("plot_id"))
+        if coords is None or coords in index:
+            continue
+        bars = _bars_from_defense(by_xy.get(coords))
+        if bars is not None:
+            index[coords] = bars
+    return index
+
+
+def _draw_city_defense_bars(
+    draw: Any,
+    cx: float,
+    above_y: float,
+    width: float,
+    city_hp: Any,
+    wall_hp: Any,
+) -> None:
+    """In-game banner: blue wall HP on top, green city HP under it, just above the name."""
+    if city_hp is None:
+        return
+    try:
+        city_frac = max(0.0, min(1.0, float(city_hp) / 100.0))
+    except (TypeError, ValueError):
+        return
+    height = max(3, int(width / 16))
+    gap = max(1, height // 3)
+    left = cx - width / 2
+
+    def bar(top: float, frac: float, color: tuple[int, int, int]) -> None:
+        draw.rectangle((left, top, left + width, top + height), fill=_BAR_TRACK)
+        if frac > 0:
+            draw.rectangle((left, top, left + max(1.0, width * frac), top + height), fill=color)
+
+    green_top = above_y - gap - height
+    bar(green_top, city_frac, _CITY_HP_GREEN)
+    if wall_hp is None:
+        return
+    try:
+        wall_frac = max(0.0, min(1.0, float(wall_hp) / 100.0))
+    except (TypeError, ValueError):
+        return
+    bar(green_top - gap - height, wall_frac, _WALL_HP_BLUE)
+
+
 def _draw_city_nameplate(
     draw: Any,
     font: Any,
@@ -847,6 +942,8 @@ def _draw_city_nameplate(
     name: str,
     population: Any,
     confine: bool = False,
+    city_hp: Any = None,
+    wall_hp: Any = None,
 ) -> None:
     pop_text = ""
     if population is not None:
@@ -857,7 +954,10 @@ def _draw_city_nameplate(
     label = f"{name}  {pop_text}" if pop_text else name
     label = label[:22]
     if confine:
-        _draw_label_inside_hex(draw, font, cx, cy + hex_radius * 0.55, hex_radius, label)
+        label_y = cy + hex_radius * 0.55
+        _draw_label_inside_hex(draw, font, cx, label_y, hex_radius, label)
+        bbox = draw.textbbox((cx, label_y), label, font=font, anchor="mm")
+        _draw_city_defense_bars(draw, cx, bbox[1], max(28.0, hex_radius), city_hp, wall_hp)
         return
     text_y = cy - hex_radius * 1.05
     bbox = draw.textbbox((cx, text_y), label, font=font, anchor="mm")
@@ -867,6 +967,7 @@ def _draw_city_nameplate(
         fill=(72, 32, 24, 220),
     )
     draw.text((cx, text_y), label, fill="#f0ece0", font=font, anchor="mm")
+    _draw_city_defense_bars(draw, cx, bbox[1] - pad, max(28.0, bbox[2] - bbox[0]), city_hp, wall_hp)
 
 
 def _paste_civ5_overlay(
@@ -1366,9 +1467,13 @@ def _draw_civ6_nameplate(
     label: str,
     fill_rgb: tuple[int, int, int],
     confine: bool = False,
+    city_hp: Any = None,
+    wall_hp: Any = None,
 ) -> None:
     if confine:
         _draw_label_inside_hex(draw, font, cx, top_y, hex_radius, label)
+        bbox = draw.textbbox((cx, top_y), label, font=font, anchor="mm")
+        _draw_city_defense_bars(draw, cx, bbox[1], max(28.0, hex_radius), city_hp, wall_hp)
         return
     bbox = draw.textbbox((cx, top_y), label, font=font, anchor="mm")
     pad = 2
@@ -1378,6 +1483,7 @@ def _draw_civ6_nameplate(
         outline=(12, 12, 12),
     )
     draw.text((cx, top_y), label, fill=_text_rgb_for(fill_rgb), font=font, anchor="mm")
+    _draw_city_defense_bars(draw, cx, bbox[1] - pad, max(28.0, bbox[2] - bbox[0]), city_hp, wall_hp)
 
 
 def _compact_city_label(name: str, pop: Any, civ: str) -> str:
@@ -1412,6 +1518,7 @@ def _draw_civ6_tile_markers(
     *,
     stacked: bool = False,
     confine_label: bool = False,
+    city_bars: dict[str, int | None] | None = None,
 ) -> None:
     for marker in cities:
         owner = str(marker.get("owner_player_id") or "")
@@ -1435,7 +1542,9 @@ def _draw_civ6_tile_markers(
             label = f"{label}*"
         font = map_render._load_bitmap_font(max(8, min(11, tile_px // 5)))
         label_y = cy + hex_radius * 0.55 if confine_label else cy - hex_radius * 0.92
-        nameplates.append((font, cx, label_y, hex_radius, label, owner_rgb, confine_label))
+        city_hp = city_bars.get("city") if isinstance(city_bars, dict) else None
+        wall_hp = city_bars.get("wall") if isinstance(city_bars, dict) else None
+        nameplates.append((font, cx, label_y, hex_radius, label, owner_rgb, confine_label, city_hp, wall_hp))
 
     units = [m for m in others if m.get("kind") in ("unit", "stack")]
     if not units:
@@ -1942,12 +2051,14 @@ def render_civ6_map_png(
 
     nameplates: list[tuple[Any, float, float, float, str, tuple[int, int, int]]] = []
     civ5_nameplates: list[tuple[Any, ...]] = []
+    city_bars = _city_bar_index(snapshot)
     for (vx, vy), markers in sorted(tile_markers.items(), key=lambda item: (item[0][1], item[0][0])):
         wx, wy = x0 + vx, y0 + vy
         cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
         cities = [m for m in markers if m.get("kind") == "city"]
         others = [m for m in markers if m.get("kind") != "city"]
         confine_label = (wx, wy) in isolated_cities
+        bars = city_bars.get((wx, wy))
         if prefer_civ5_sprites:
             for marker in cities:
                 slug = map_icons.city_icon_slug(bool(marker.get("is_capital")))
@@ -1957,6 +2068,8 @@ def render_civ6_map_png(
                     name_font, cx, cy, hex_radius,
                     str(marker.get("name", "City")), marker.get("population"),
                     confine_label,
+                    None if bars is None else bars.get("city"),
+                    None if bars is None else bars.get("wall"),
                 ))
             player_id = str(snapshot.get("decision", {}).get("player_id", "PLAYER_0"))
             own_rgb = map_render._hex_to_rgb(map_render._player_color(player_id))
@@ -1979,7 +2092,7 @@ def render_civ6_map_png(
             continue
         _draw_civ6_tile_markers(
             canvas, draw, snapshot, cities, others, cx, cy, hex_radius, tile_px, nameplates,
-            stacked=zoomed, confine_label=confine_label,
+            stacked=zoomed, confine_label=confine_label, city_bars=bars,
         )
 
     settle_rings_drawn = 0

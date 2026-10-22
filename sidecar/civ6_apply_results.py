@@ -184,6 +184,21 @@ def describe_reason(reason: Any) -> str:
         detail = describe_reason(text[len("auto:"):])
         base = "the host fired this unused ranged shot or city strike"
         return f"{base} ({detail})" if detail else base
+    if text.startswith("approached:"):
+        rest = text[len("approached:"):]
+        if ":attack_instead:" in rest:
+            detail = describe_reason("attack_instead:" + rest.split(":attack_instead:", 1)[1])
+            where = rest.split(":", 1)[0]
+            base = f"moved to ({where}), the nearest tile in reach, then attacked"
+            return f"{base} ({detail})" if detail else base
+        where = rest.split(":", 1)[0]
+        return f"moved toward that enemy and stopped at ({where}), the nearest tile in reach"
+    if text.startswith("engine:"):
+        kind = text.split(":")
+        label = kind[1] if len(kind) > 1 else "attack"
+        target = kind[2] if len(kind) > 2 else ""
+        noun = "city" if target == "city" else "unit"
+        return f"the game's own {label} attack ran against that {noun}"
     if text.startswith("attack_instead:"):
         detail = describe_reason(text[len("attack_instead:"):])
         base = "the destination held an enemy, so the unit attacked instead"

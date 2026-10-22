@@ -405,6 +405,47 @@ def _append_civ6_unit_situation_wire(lines: list[str], snapshot: dict[str, Any])
     lines.extend(command_wire.sitrep_offer_lines(snapshot))
 
 
+def _visible_city_defense(context: dict[str, Any], xy: tuple[int, int]) -> dict[str, Any] | None:
+    """Engine HP for a city the seat can see right now, from combat.city_defenses or hostile_cities."""
+    civ6 = context.get("civ6") if isinstance(context.get("civ6"), dict) else {}
+    combat = civ6.get("combat") if isinstance(civ6, dict) else {}
+    if not isinstance(combat, dict):
+        return None
+    for key in ("city_defenses", "hostile_cities"):
+        for row in combat.get(key) or []:
+            if not isinstance(row, dict):
+                continue
+            if row.get("x") == xy[0] and row.get("y") == xy[1]:
+                return row
+    return None
+
+
+def city_defense_text(defense: dict[str, Any] | None) -> str | None:
+    """Real city HP and wall HP when either is below full. Walls are omitted when the city has none."""
+    if not isinstance(defense, dict):
+        return None
+    hp = defense.get("hp") if isinstance(defense.get("hp"), int) and not isinstance(defense.get("hp"), bool) else None
+    max_hp = defense.get("max_hp") if isinstance(defense.get("max_hp"), int) and not isinstance(defense.get("max_hp"), bool) else None
+    pct = defense.get("health_percent") if isinstance(defense.get("health_percent"), int) and not isinstance(defense.get("health_percent"), bool) else None
+    wall = defense.get("wall_hp") if isinstance(defense.get("wall_hp"), int) and not isinstance(defense.get("wall_hp"), bool) else None
+    wall_max = defense.get("wall_max_hp") if isinstance(defense.get("wall_max_hp"), int) and not isinstance(defense.get("wall_max_hp"), bool) else None
+    if hp is not None and max_hp is not None and max_hp > 0:
+        city_full = hp >= max_hp
+        city_text = f"{hp}/{max_hp}"
+    elif pct is not None:
+        city_full = pct >= 100
+        city_text = f"{pct}%"
+    else:
+        return None
+    has_walls = wall_max is not None and wall_max > 0 and wall is not None
+    walls_full = (not has_walls) or wall >= wall_max
+    if city_full and walls_full:
+        return None
+    if has_walls:
+        return f"{city_text}, walls {wall}/{wall_max}"
+    return city_text
+
+
 def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any]) -> None:
     cities = [city for city in snapshot.get("your_cities", []) if isinstance(city, dict)]
     many_cities = len(cities) >= pipeline.WIRE_COMPACT_CITIES_THRESHOLD
@@ -417,6 +458,9 @@ def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any])
             plot_id = city.get("plot_id")
             if isinstance(plot_id, str) and plot_id.strip():
                 lines.append(pipeline._wire_line(f"{name}.position", pipeline._plot_coords_text(plot_id)))
+            damaged = city_defense_text(city.get("defense") if isinstance(city.get("defense"), dict) else None)
+            if damaged:
+                lines.append(pipeline._wire_line(f"{name}.hp", damaged))
             production = city.get("production", {})
             item = production.get("item_id") if isinstance(production, dict) else None
             if not item or str(item).upper() in ("NONE", "NULL"):
@@ -436,11 +480,9 @@ def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any])
             net = amenities.get("net")
             if isinstance(net, int):
                 lines.append(pipeline._wire_line(f"{name}.amenities", net))
-        defense = city.get("defense")
-        if isinstance(defense, dict):
-            hp = defense.get("health_percent")
-            if isinstance(hp, int) and hp < 100:
-                lines.append(pipeline._wire_line(f"{name}.hp", hp))
+        damaged = city_defense_text(city.get("defense") if isinstance(city.get("defense"), dict) else None)
+        if damaged:
+            lines.append(pipeline._wire_line(f"{name}.hp", damaged))
         production = city.get("production", {})
         item = production.get("item_id") if isinstance(production, dict) else None
         if item and str(item).upper() not in ("NONE", "NULL"):
@@ -1377,6 +1419,12 @@ def _other_player_lines(context: dict[str, Any]) -> list[str]:
             if city.get("is_capital") is True:
                 parts.append("capital")
             parts.append("in view" if city.get("knowledge") == "visible" else "last seen (fogged)")
+            if city.get("knowledge") == "visible":
+                xy = pipeline._parse_plot_coords(city.get("plot_id"))
+                defense = _visible_city_defense(context, xy) if xy is not None else None
+                damaged = city_defense_text(defense)
+                if damaged:
+                    parts.append(damaged)
             lines.append(pipeline._wire_line(f"city.{key}", ", ".join(parts)))
     units = [u for u in context.get("visible_other_units", []) or [] if isinstance(u, dict)]
     if units:
