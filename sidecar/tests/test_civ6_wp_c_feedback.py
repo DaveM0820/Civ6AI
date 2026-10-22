@@ -90,6 +90,46 @@ class RepeatFailureTests(unittest.TestCase):
         self.assertIn("T36", dropped[0])
         self.assertIn("no_path", dropped[0])
 
+    def test_repeated_policy_failure_states_the_reason_and_the_count(self):
+        snap = _snap()
+        snap["history"]["command_results"] = [{
+            "kind": results.KIND_FAILED,
+            "turn": 36,
+            "summary": "policies: FAILED — the game rejected it",
+            "reason": "slot 1 still holds nothing",
+            "order_kind": "set_policies",
+            "identity": "set_policies|slots=1:POLICY_URBAN_PLANNING",
+            "repeats": 19,
+        }]
+        blob = "\n".join(results.thoughts_lines(snap))
+        self.assertIn("slot 1 still holds nothing", blob)
+        self.assertNotIn("the game rejected it", blob)
+        self.assertIn("failed 19 times", blob)
+        self.assertIn("do not send it again until that changes", blob)
+
+    def test_inject_counts_identical_failures_from_the_log(self):
+        snap = _snap(decision={"turn": 37, "player_id": "PLAYER_1"})
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / results.APPLY_RESULTS_NAME
+            rows = []
+            for index in range(19):
+                rows.append(json.dumps({
+                    "player_id": "PLAYER_1",
+                    "turn": 36 if index == 0 else index,
+                    "kind": "set_policies",
+                    "ok": False,
+                    "reason": "slot 1 still holds nothing",
+                    "command_id": f"CMD_{index}",
+                    "fixed_arguments": {"slots": "1:POLICY_URBAN_PLANNING"},
+                }))
+            path.write_text("\n".join(rows), encoding="utf-8")
+            results.inject_command_results(snap, Path(tmp))
+        item = snap["history"]["command_results"][0]
+        self.assertEqual(19, item["repeats"])
+        self.assertIn("slot 1 still holds nothing", item["summary"])
+        blob = "\n".join(results.thoughts_lines(snap))
+        self.assertIn("failed 19 times", blob)
+
 
 class ChatRobustnessTests(unittest.TestCase):
     def test_chat_gilgamesh_resolves(self):

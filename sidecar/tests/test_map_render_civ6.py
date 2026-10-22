@@ -738,6 +738,57 @@ class LoneRevealedCapitalTests(unittest.TestCase):
         normalized = map_render._normalize_visibility_grid(known["visibility_grid"], 7, 7)
         self.assertEqual(set(), isolated_revealed_cities(snapshot, index, normalized, known, True))
 
+    def test_column_labels_are_drawn_once_on_the_unshifted_column(self):
+        import io
+        from unittest import mock
+        from PIL import Image
+
+        from sidecar.map_render_civ6 import _BASE_LAYER_CACHE, _axis_gutter_for_tile, render_civ6_map_png
+
+        def keep_source(image, **_kwargs):
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            return buf.getvalue(), "image/png"
+
+        snapshot = civ6_adapter.load_golden_snapshot(GOLDEN)
+        viewport = {"x0": 0, "y0": 0, "width": 6, "height": 4}
+        _BASE_LAYER_CACHE.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "axis.png"
+            with mock.patch("sidecar.map_render.encode_model_image_bytes", keep_source):
+                meta = render_civ6_map_png(
+                    snapshot, path, viewport=viewport, target_size=256, image_role="viewport",
+                )
+            image = Image.open(path).convert("RGB")
+        self.assertTrue(meta["show_axis_labels"])
+        tile_px = int(meta["tile_px"])
+        gutter = _axis_gutter_for_tile(
+            tile_px, 0, 0, 6, 4, show_axis=True, prefer_civ5_sprites=False,
+        )
+        from sidecar.map_render_civ6 import _odd_r_cell_center
+
+        # Bitmap text is antialiased, so the ink is near #9a9a9a rather than that exact gray.
+        xs: list[int] = []
+        for y in range(gutter):
+            for x in range(image.width):
+                pixel = image.getpixel((x, y))
+                if min(pixel) >= 100:
+                    xs.append(x)
+        xs.sort()
+        groups: list[list[int]] = []
+        gap = max(4, tile_px // 3)
+        for x in xs:
+            if not groups or x - groups[-1][-1] > gap:
+                groups.append([x])
+            else:
+                groups[-1].append(x)
+        self.assertEqual(6, len(groups))
+        for column, group in enumerate(groups):
+            mid = (group[0] + group[-1]) / 2
+            even, _, _, _ = _odd_r_cell_center(column, 0, 0, 0, tile_px, gutter, flip_y=False, vh=4)
+            odd, _, _, _ = _odd_r_cell_center(column, 1, 0, 0, tile_px, gutter, flip_y=False, vh=4)
+            self.assertLess(abs(mid - even), abs(mid - odd))
+
 
 if __name__ == "__main__":
     unittest.main()

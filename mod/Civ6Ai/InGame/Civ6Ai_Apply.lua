@@ -393,16 +393,25 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
   if command.kind == "explore" then
     return Civ6Ai_Apply._Work(playerID, command, args)
   end
-  if command.kind == "activate_great_person" or command.kind == "upgrade_unit" or command.kind == "promote_unit"
-      or command.kind == "join_formation" or command.kind == "city_attack" or command.kind == "build_fort"
-      or command.kind == "worker_improve" then
+  if command.kind == "trade_route" then
     local f, why = Civ6Ai_OrderChannel._Fields(playerID, command)
     if f == nil then
       return false, why, args
     end
-    local route = ({ [26] = { "ActivateGreatPerson", f.U }, [27] = { "UpgradeUnit", f.U, f.I, f.V },
+    local ok, reason = Civ6Ai_Apply._GovRoute("MakeTradeRoute", playerID, f.U, f.I)
+    return ok, reason, args
+  end
+  if command.kind == "activate_great_person" or command.kind == "upgrade_unit" or command.kind == "promote_unit"
+      or command.kind == "join_formation" or command.kind == "city_attack" or command.kind == "build_fort"
+      or command.kind == "worker_improve" or command.kind == "spread_religion" then
+    local f, why = Civ6Ai_OrderChannel._Fields(playerID, command)
+    if f == nil then
+      return false, why, args
+    end
+    local route = ({ [26] = { "ActivateGreatPerson", f.U, f.V }, [27] = { "UpgradeUnit", f.U, f.I, f.V },
       [28] = { "PromoteUnit", f.U, f.I }, [29] = { "JoinFormation", f.U, f.I },
-      [31] = { "CityStrike", f.I, f.X, f.Y }, [32] = { "BuildFort", f.U, f.I }, [21] = { "BuildImprovement", f.U, f.I } })[f.K]
+      [31] = { "CityStrike", f.I, f.X, f.Y }, [32] = { "BuildFort", f.U, f.I }, [21] = { "BuildImprovement", f.U, f.I },
+      [35] = { "SpreadReligion", f.U, f.X, f.Y, f.A } })[f.K]
     local ok, reason = Civ6Ai_Apply._GovRoute(route[1], playerID, route[2], route[3], route[4])
     return ok, reason, args
   end

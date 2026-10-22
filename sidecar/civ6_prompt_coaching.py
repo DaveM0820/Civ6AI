@@ -646,6 +646,24 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
         if labels:
             lines.append(pipeline._wire_line(f"{prefix}.settle.nearby", "; ".join(labels)))
         else:
+            embark = settle.get("embark_site") if isinstance(settle.get("embark_site"), dict) else None
+            if embark is not None:
+                try:
+                    ex, ey = int(embark["x"]), int(embark["y"])
+                except (KeyError, TypeError, ValueError):
+                    embark = None
+            if embark is not None:
+                dist = embark.get("dist")
+                where = f"({ex},{ey})" + (f", dist {dist}" if dist is not None else "")
+                if embark.get("can_embark") is False:
+                    how = "this settler cannot embark yet (Shipbuilding for coast, Cartography for ocean)"
+                else:
+                    how = "embarking can reach it; FoundCity stays illegal until the settler is on that tile"
+                lines.append(pipeline._wire_line(
+                    f"{prefix}.settle.nearby",
+                    f"none on foot; nearest legal site on another landmass is {where}; {how}",
+                ))
+                return lines
             from sidecar.civ6_command_wire import site_obeys_founding_rules
             from sidecar.civ6_wire import _odd_r_distance
 

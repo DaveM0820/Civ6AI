@@ -17,7 +17,7 @@ Civ6Ai_OrderChannel.K = {
   GOVERNMENT = 10, POLICY = 11, PANTHEON = 12, RELIGION = 13, GP_RECRUIT = 14, GP_PATRONIZE = 15, GOVERNOR = 16,
   WAR = 17, DEAL = 33, ENVOY = 34, BUY = 19, BUY_TILE = 20, IMPROVE = 21, PILLAGE = 22,
   FINISH_SEAT = 23, TRADE = 24, EXPLORE = 25, ACTIVATE_GP = 26,
-  UPGRADE = 27, PROMOTE = 28, FORMATION = 29, CITY_STRIKE = 31, FORT = 32,
+  UPGRADE = 27, PROMOTE = 28, FORMATION = 29, CITY_STRIKE = 31, FORT = 32, SPREAD = 35,
   REPORT = 30, PING = 40, TEST_MODE = 49, TEST_INTROSPECT = 50, TEST_SPAWN_ENEMY = 51,
   TEST_MELEE_MOVE = 52, TEST_SCRIPTED_COMBAT = 53, TEST_SCRIPTED_PRODUCTION = 54, TEST_IMPROVEMENT = 55,
   TEST_EXPERIENCE = 56, TEST_FAR_MOVE = 57, TEST_COMBAT_PROBE = 58, TEST_DAMAGE_CHECK = 59,
@@ -33,6 +33,7 @@ Civ6Ai_OrderChannel.KIND_BY_COMMAND = {
   worker_improve = 21, pillage_improvement = 22,
   trade_route = 24, explore = 25, activate_great_person = 26,
   upgrade_unit = 27, promote_unit = 28, join_formation = 29, city_attack = 31, build_fort = 32,
+  spread_religion = 35,
 }
 Civ6Ai_OrderChannel.REPORT_DELAY_SECONDS = 5
 Civ6Ai_OrderChannel._counter = Civ6Ai_OrderChannel._counter or 0
@@ -362,6 +363,19 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
     if f.U == nil then
       return nil, "missing_unit_id"
     end
+    if kind == 26 and (args.retire == true or args.retire == 1 or tonumber(args.retire) == 1) then
+      f.V = 1
+    end
+  elseif kind == 35 then
+    if f.U == nil then
+      return nil, "missing_unit_id"
+    end
+    local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
+    if x == nil or y == nil then
+      return nil, "missing_target"
+    end
+    f.X, f.Y = x, y
+    f.A = (args.action == "heal" or tonumber(args.action) == 1) and 1 or 0
   elseif f.U == nil then
     return nil, "missing_unit_id"
   end

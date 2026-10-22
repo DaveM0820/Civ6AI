@@ -488,8 +488,39 @@ def build_command_results(snapshot: dict[str, Any], rows: list[dict[str, Any]], 
             "reason": reason,
             "order_kind": str(row.get("kind") or ""),
             "unit": actor,
+            "identity": _failure_identity(row),
         })
     return items
+
+
+def _failure_identity(row: dict[str, Any]) -> str:
+    """Stable identity of one order, so the same failed policy can be counted."""
+    fixed = row.get("fixed_arguments") if isinstance(row.get("fixed_arguments"), dict) else {}
+    keys = (
+        "unit_id", "city_id", "slots", "target_x", "target_y", "tech_id", "civic_id",
+        "promotion_id", "unit_type_id", "government_id", "belief_id", "other_unit_id",
+    )
+    bits = [str(row.get("kind") or "")]
+    for key in keys:
+        if key in fixed and fixed[key] is not None:
+            bits.append(f"{key}={fixed[key]}")
+    return "|".join(bits)
+
+
+def _annotate_repeat_failures(items: list[dict[str, Any]], rows: list[dict[str, Any]], player_id: str) -> None:
+    counts: dict[tuple[str, str, str], int] = {}
+    for row in rows:
+        if str(row.get("player_id") or "") != player_id or row.get("ok") is True:
+            continue
+        key = (str(row.get("kind") or ""), str(row.get("reason") or ""), _failure_identity(row))
+        counts[key] = counts.get(key, 0) + 1
+    for item in items:
+        if item.get("kind") != KIND_FAILED:
+            continue
+        key = (str(item.get("order_kind") or ""), str(item.get("reason") or ""), str(item.get("identity") or ""))
+        n = counts.get(key, 1)
+        if n > 1:
+            item["repeats"] = n
 
 
 def _target_key(row: dict[str, Any]) -> tuple[str, str, Any, Any] | None:
@@ -545,6 +576,7 @@ def inject_command_results(snapshot: dict[str, Any], session_dir: Path | None) -
         return 0
     items = build_command_results(snapshot, rows, turn)
     items.extend(_earlier_failed_items(snapshot, all_rows, player_id, turn, rows))
+    _annotate_repeat_failures(items, all_rows, player_id)
     history["command_results"] = items[:PRIOR_APPLY_WIRE_CAP]
     return len(items)
 
@@ -587,7 +619,16 @@ def thoughts_lines(context: dict[str, Any]) -> list[str]:
             bits.append(f"{noop} no effect")
         lines.append(pipeline._wire_line("prior.turn", f"{label}: {', '.join(bits)}"))
         for index, item in enumerate(result_items):
-            lines.append(pipeline._wire_line(f"apply.last.{index}", str(item["summary"]).strip()))
+            text = str(item["summary"]).strip()
+            repeats = item.get("repeats")
+            reason = str(item.get("reason") or "").strip()
+            plain = describe_reason(reason)
+            if plain and plain not in text and "the game rejected it" in text:
+                text = text.replace("the game rejected it", plain, 1)
+            if isinstance(repeats, int) and repeats > 1 and item.get("kind") == KIND_FAILED:
+                text += (f" — this same order failed {repeats} times for this reason; "
+                         "do not send it again until that changes")
+            lines.append(pipeline._wire_line(f"apply.last.{index}", text))
     for index, note in enumerate(dropped):
         lines.append(pipeline._wire_line(f"dropped.{index}", note))
     return lines

@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from sidecar import civ6_adapter
+from sidecar import civ6_prompt_coaching as coaching
 from sidecar import civ6_wire
 from sidecar import pipeline_v2 as pipeline
 
@@ -30,6 +31,7 @@ class Civ6WirePromptTests(unittest.TestCase):
             self.assertIn(f"=== {section} ===", wire)
         self.assertIn('"commands.required.count"', wire)
         self.assertIn('.spearman_1.command": "MoveTo(', wire)
+        self.assertEqual(1, wire.count(coaching.CIV6_SETTLER_MAP_ADVICE))
         # Only engine-supported unit command shapes are advertised.
         for unsupported in ("Alert", "Heal", "Sleep", "DISTRICT_*@", "legal.trade", "legal.alliance"):
             self.assertNotIn(unsupported, wire)

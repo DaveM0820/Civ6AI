@@ -517,7 +517,10 @@ def city_threat_lines(context: dict[str, Any]) -> list[str]:
     rendered = [line for _, line in ranked[:12]]
     if not rendered:
         return []
-    return ["# == Your cities (garrison, walls, enemies within their move range) =="] + rendered
+    threatened = any(rank == 0 for rank, _ in ranked[:12])
+    header = ("# == Your cities (garrison, walls, enemies within their move range) ==" if threatened
+              else "# == Your cities (garrison and walls; no enemy is within move range) ==")
+    return [header] + rendered
 
 
 def _threat_lines(context: dict[str, Any]) -> list[str]:
@@ -697,4 +700,8 @@ def attention_items(context: dict[str, Any]) -> list[str]:
 
 
 def tactics_advice_lines(context: dict[str, Any]) -> list[str]:
-    return list(WAR_TACTICS_ADVICE) if war_active(context) else []
+    if not war_active(context):
+        return []
+    if enemies_within_their_reach(context) or strike_lines(context):
+        return list(WAR_TACTICS_ADVICE)
+    return ["- War tactics: no enemy is within move range of your army or cities, so do not mass units or plan a strike this turn."]

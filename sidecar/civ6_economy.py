@@ -428,7 +428,7 @@ def city_lines(snapshot: dict[str, Any], city: dict[str, Any], name: str) -> lis
     if buildings:
         lines.append(pipeline._wire_line(f"{name}.buildings", ", ".join(buildings)))
     districts = [str(d) for d in row.get("built_districts") or [] if d]
-    if districts and not pipeline.map_image_attach_turn(snapshot):
+    if districts:
         lines.append(pipeline._wire_line(f"{name}.districts", ", ".join(districts)))
     return lines
 
