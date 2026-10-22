@@ -169,6 +169,7 @@ class LiveSnapshotSchemaTest(unittest.TestCase):
                 return math.max(math.abs(ax - bx), math.abs(ay - by))
               end,
             }
+            DefenseTypes = { DISTRICT_OUTER = 1, DISTRICT_GARRISON = 2 }
             local city = {
               GetID = function() return 9 end,
               GetX = function() return 10 end,
@@ -179,6 +180,14 @@ class LiveSnapshotSchemaTest(unittest.TestCase):
               GetMaxHitPoints = function() return 200 end,
               GetDamage = function() return 20 end,
             }
+            local district = {
+              GetX = function() return 10 end,
+              GetY = function() return 10 end,
+              GetType = function() return 0 end,
+              GetMaxDamage = function(_, kind) return -1 end,
+              GetDamage = function(_, kind) return -1 end,
+            }
+            city.GetDistricts = function() return { Members = members({ district }) } end
             local function unit(id, typ, x, y, charges)
               return {
                 GetOwner = function() return 1 end,
@@ -232,6 +241,51 @@ class LiveSnapshotSchemaTest(unittest.TestCase):
         self.assertEqual("DISTRICT_CAMPUS", plot["district_id"])
         self.assertIs(True, plot["improvement_pillaged"])
         self.assertIn("wall_hp", snap["your_cities"][0]["defense"])
+        self.assertEqual(0, snap["your_cities"][0]["defense"]["wall_max_hp"])
+        self.assertEqual(0, snap["your_cities"][0]["defense"]["wall_hp"])
+
+    def test_negative_sentinels_do_not_fail_the_schema(self):
+        # T187 stalled every seat: a city with no walls reports wall_max_hp -1,
+        # and the schema minimum is 0. The same -1 sentinel is applied to every
+        # number the schema requires to be >= 0.
+        raw = json.loads((ROOT / "fixtures" / "civ6" / "live-runtime-t4-city-snapshot.json").read_text(encoding="utf-8"))
+        defense = raw["your_cities"][0]["defense"]
+        defense["wall_hp"] = -1
+        defense["wall_max_hp"] = -1
+        defense["bombard_damage"] = -1
+        defense["health_percent"] = -1
+        defense["percent"] = -1
+        paths = civ6_adapter.nonnegative_number_paths(raw)
+        self.assertTrue(any(path[-1] == "wall_max_hp" for path in paths), paths)
+        stamped = set()
+        for path in paths:
+            cursor = raw
+            for part in path[:-1]:
+                cursor = cursor[part]
+            cursor[path[-1]] = -1
+            stamped.add(path)
+        snap = civ6_adapter.upgrade_runtime_snapshot(raw)
+        civ6_adapter.validate_civ6_snapshot(snap)
+        city = snap["your_cities"][0]["defense"]
+        self.assertEqual(0, city["wall_max_hp"])
+        self.assertEqual(0, city["wall_hp"])
+        self.assertEqual(0, city["bombard_damage"])
+        self.assertGreaterEqual(city["health_percent"], 0)
+        self.assertGreaterEqual(city["percent"], 0)
+        for path in stamped:
+            cursor = snap
+            missing = False
+            for part in path:
+                if isinstance(cursor, dict) and part in cursor:
+                    cursor = cursor[part]
+                elif isinstance(cursor, list) and isinstance(part, int) and part < len(cursor):
+                    cursor = cursor[part]
+                else:
+                    missing = True
+                    break
+            if missing or cursor is None:
+                continue
+            self.assertGreaterEqual(cursor, 0, path)
 
 
 if __name__ == "__main__":

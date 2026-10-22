@@ -9,9 +9,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "testbed"))
 
 from civ6_ui_automation import (  # noqa: E402
+    menu_blob_has,
     ocr_blob_is_loading_or_ingame,
     ocr_blob_is_main_menu,
+    ocr_dropped_initial,
     pick_newest_save_label,
+    _text_matches_target,
 )
 
 
@@ -29,6 +32,19 @@ class MainMenuBlobTests(unittest.TestCase):
         self.assertFalse(ocr_blob_is_main_menu(blob))
 
 
+class OcrMenuLabelTests(unittest.TestCase):
+    def test_load_game_matches_dropped_first_letter(self):
+        self.assertTrue(ocr_dropped_initial("Oad Game", "Load Game"))
+        self.assertTrue(_text_matches_target("oad game", "load game", exact=True))
+        self.assertTrue(menu_blob_has("back oad game autosaves", "load game"))
+        self.assertTrue(_text_matches_target("ocal network", "local network", exact=True))
+        self.assertTrue(_text_matches_target("utosaves", "autosaves", exact=False))
+
+    def test_short_labels_do_not_use_the_dropped_letter(self):
+        self.assertFalse(ocr_dropped_initial("ack", "back"))
+        self.assertFalse(_text_matches_target("ack", "back", exact=True))
+
+
 class NewestAutosaveTests(unittest.TestCase):
     def test_top_row_is_newest_and_chrome_is_skipped(self):
         rows = [
@@ -39,6 +55,8 @@ class NewestAutosaveTests(unittest.TestCase):
             ("Load", 700, 900),
         ]
         self.assertEqual(pick_newest_save_label(rows), ("AutoSave_0186", 300, 220))
+        garbled = [("Oad Game", 200, 80), ("AutoSave_0186", 300, 220)]
+        self.assertEqual(pick_newest_save_label(garbled), ("AutoSave_0186", 300, 220))
 
     def test_empty_list(self):
         self.assertIsNone(pick_newest_save_label([("Autosaves", 1, 1), ("Back", 2, 2)]))
