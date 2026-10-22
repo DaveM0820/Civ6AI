@@ -34,6 +34,13 @@ class DiplomacyWireTests(unittest.TestCase):
         self.assertEqual(keys["legal.diplomacy.Cleopatra"], "DECLARE_WAR")
         self.assertIn("Cleopatra", keys["deal.<Leader>"])
 
+    def test_envoys_stay_refused(self):
+        # Live sends failed from T80: the gameplay script has no token setter.
+        ids, notes = diplo.bind_reply(_snap(), "envoy.Geneva", "1")
+        self.assertEqual(ids, [])
+        self.assertIn("envoys are not offered; the game sends them", notes[0])
+        self.assertEqual(diplo.bind_reply(_snap(), "envoy.Geneva", "none"), ([], []))
+
     def test_bind_declare_war(self):
         snap = _snap()
         ids, notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "DECLARE_WAR")

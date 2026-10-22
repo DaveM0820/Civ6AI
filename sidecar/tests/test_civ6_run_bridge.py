@@ -18,6 +18,35 @@ MINIMAL_SNAPSHOT = ROOT / "fixtures" / "civ6" / "snapshot-turn-runtime-minimal.j
 
 
 class Civ6RunBridgeTests(unittest.TestCase):
+    def test_turn_metrics_use_real_visibility_and_per_player_board(self):
+        snap = {
+            "game": {"map_width": 10, "map_height": 10},
+            "known_map": {
+                "explored_percent": 50,
+                "revealed_count": 12,
+                "plots": [{}, {}, {}],
+                "visibility_grid": ["???"],
+            },
+            "civ6": {"rankings": {"players": [
+                {"player_id": "PLAYER_0", "score": 20, "era": "ERA_CLASSICAL", "era_score": 8,
+                 "wonders": 1, "religion": "Buddhism", "cities": 2},
+                {"player_id": "PLAYER_1", "score": 15, "religion_founded": {"name": "Catholicism"}},
+            ]}},
+        }
+        board = run_civ6.board_for_turn_metrics(snap)
+        # 12 of 100 tiles, not the cached 50 and not the three-plot crop.
+        self.assertEqual(12, board["explored_percent"])
+        self.assertEqual(12, board["revealed_tiles"])
+        self.assertEqual(100, board["map_tiles"])
+        rows = {row["player_id"]: row for row in board["players"]}
+        self.assertEqual(rows["PLAYER_0"]["era"], "ERA_CLASSICAL")
+        self.assertEqual(rows["PLAYER_0"]["era_score"], 8)
+        self.assertEqual(rows["PLAYER_0"]["wonders"], 1)
+        self.assertEqual(rows["PLAYER_0"]["religion"], "Buddhism")
+        self.assertEqual(rows["PLAYER_0"]["cities"], 2)
+        self.assertEqual(rows["PLAYER_0"]["score"], 20)
+        self.assertEqual(rows["PLAYER_1"]["religion"], "Catholicism")
+        self.assertEqual(rows["PLAYER_1"]["score"], 15)
     def test_upgrade_runtime_snapshot_validates(self):
         raw = json.loads(MINIMAL_SNAPSHOT.read_text(encoding="utf-8"))
         upgraded = civ6_adapter.upgrade_runtime_snapshot(raw)

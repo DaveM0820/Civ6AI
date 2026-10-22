@@ -31,6 +31,69 @@ DEFAULT_SNAPSHOT = ROOT / "fixtures" / "civ6" / "snapshot-turn-classical-golden.
 DEFAULT_JOURNAL = ROOT / "artifacts" / "civ6-ai-result-journal.jsonl"
 
 
+def _metric_value(value: Any) -> Any:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float, str)):
+        return value
+    return None
+
+
+def board_for_turn_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Score, era, wonders, religion, and cities per player, plus real map reveal.
+
+    The game export does not carry these. Rankings rows are the same engine
+    reads as the World Rankings screen. Explored percent uses revealed_count
+    over the whole map, not the cropped visibility grid.
+    """
+    from sidecar.civ6_prompt_coaching import civ6_true_explored
+
+    out: dict[str, Any] = {}
+    true_map = civ6_true_explored(snapshot if isinstance(snapshot, dict) else {})
+    if true_map is not None:
+        revealed, total, percent = true_map
+        out["revealed_tiles"] = revealed
+        out["map_tiles"] = total
+        out["explored_percent"] = percent
+    else:
+        known = snapshot.get("known_map") if isinstance(snapshot, dict) and isinstance(snapshot.get("known_map"), dict) else {}
+        cached = known.get("explored_percent") if isinstance(known, dict) else None
+        if isinstance(cached, int) and not isinstance(cached, bool):
+            out["explored_percent"] = max(0, min(100, cached))
+    civ6 = snapshot.get("civ6") if isinstance(snapshot, dict) and isinstance(snapshot.get("civ6"), dict) else {}
+    rankings = civ6.get("rankings") if isinstance(civ6, dict) and isinstance(civ6.get("rankings"), dict) else {}
+    players: list[dict[str, Any]] = []
+    for row in (rankings.get("players") if isinstance(rankings, dict) else None) or []:
+        if not isinstance(row, dict):
+            continue
+        item: dict[str, Any] = {}
+        pid = row.get("player_id")
+        if isinstance(pid, str) and pid:
+            item["player_id"] = pid
+        for key in ("score", "era", "era_score", "wonders", "cities"):
+            value = _metric_value(row.get(key))
+            if value is not None:
+                item[key] = value
+        religion = _metric_value(row.get("religion"))
+        if religion is None:
+            founded = row.get("religion_founded")
+            majority = row.get("majority_religion")
+            for source in (founded, majority):
+                if isinstance(source, dict):
+                    religion = _metric_value(source.get("name")) or _metric_value(source.get("id"))
+                elif isinstance(source, str):
+                    religion = source
+                if religion:
+                    break
+        if religion:
+            item["religion"] = religion
+        if item:
+            players.append(item)
+    if players:
+        out["players"] = players
+    return out
+
+
 def configure_stdio() -> None:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
@@ -909,6 +972,7 @@ def main() -> None:
     score = empire.get("score")
     if isinstance(score, int) and not isinstance(score, bool):
         metrics["score"] = score
+    metrics.update(board_for_turn_metrics(snapshot))
     pipeline.append_turn_metrics(metrics_dir, metrics)
     record["metrics"] = metrics
     report = civ6_turn_report.build_turn_report(

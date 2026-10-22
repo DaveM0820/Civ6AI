@@ -29,11 +29,18 @@ GameInfo = {
   Religions = gameinfo({{ReligionType = "RELIGION_PANTHEON"}, {ReligionType = "RELIGION_BUDDHISM", Name = "LOC_BUDDHISM"}}, "ReligionType"),
   Victories = gameinfo({{VictoryType = "VICTORY_TECHNOLOGY"}}, "VictoryType"),
   Governors = gameinfo({{GovernorType = "GOVERNOR_THE_EDUCATOR"}}, "GovernorType"),
+  Eras = gameinfo({{EraType = "ERA_CLASSICAL"}}, "EraType"),
 }
 Game = {
   IsVictoryEnabled = function(v) return v ~= "VICTORY_DIPLOMATIC" end,
   GetVictoryProgressForTeam = function(v, team) if v == "VICTORY_TECHNOLOGY" then return 0 end return nil end,
   GetReligion = function() return {GetName = function(self, t) return "Buddhism" end} end,
+  GetEras = function()
+    return {
+      GetCurrentEra = function() return 0 end,
+      GetPlayerCurrentScore = function(self, id) return 10 + id end,
+    }
+  end,
 }
 local function mk(id, d)
   local stats = {
@@ -42,6 +49,7 @@ local function mk(id, d)
     GetMilitaryStrengthWithoutTreasury = function() return d.mil end,
     GetNumCitiesFollowingReligion = function() return d.follow end,
     GetNumProjectsAdvanced = function(self, idx) if d.space and idx == 0 then return 1 end return 0 end,
+    GetNumWondersConstructed = function() return d.wonders or 0 end,
   }
   local culture = {
     GetCultureYield = function() return d.culture end,
@@ -56,6 +64,7 @@ local function mk(id, d)
   }
   local cities = {
     GetCapitalCity = function() return city end,
+    GetCount = function() return d.cities or 1 end,
     Members = function() local done = false; return function() if not done then done = true; return 1, city end end end,
   }
   return {
@@ -79,7 +88,7 @@ local function mk(id, d)
 end
 Players = {}
 Players[0] = mk(0, {techs = 3, tourism = 0, mil = 40, follow = 0, culture = 2.5, stay = 0, to = 0, score = 20, sci = 4.2, faith = 1, favor = 7, meets = {[1] = true}, majority = 1})
-Players[1] = mk(1, {techs = 5, tourism = 1, mil = 60, follow = 2, culture = 3, stay = 2, to = 0, score = 25, sci = 6, faith = 3, founded = 1, majority = 1, space = true})
+Players[1] = mk(1, {techs = 5, tourism = 1, mil = 60, follow = 2, culture = 3, stay = 2, to = 0, score = 25, sci = 6, faith = 3, founded = 1, majority = 1, space = true, wonders = 3, cities = 2})
 Players[2] = mk(2, {techs = 4, tourism = 0, mil = 30, follow = 0, culture = 1, stay = 1, to = 0, score = 18, sci = 5, faith = 0, capOwner = 0})
 PlayerManager = {GetAliveMajors = function() return {Players[0], Players[1], Players[2]} end}
 PlayerConfigurations = {}
@@ -141,6 +150,16 @@ class LuaRankingsTests(unittest.TestCase):
         self.assertEqual(me["favor"], 7)  # player:GetFavor() (Gathering Storm API)
         self.assertEqual(me["favor_per_turn"], 2)
         self.assertEqual(p1["favor"], 0)  # falls back to diplomacy:GetFavor()  # base/XP1 engine has no such method
+        self.assertEqual(me["era"], "ERA_CLASSICAL")
+        self.assertEqual(me["era_score"], 10)
+        self.assertEqual(p1["era_score"], 11)
+        self.assertEqual(me["wonders"], 0)
+        self.assertEqual(p1["wonders"], 3)
+        self.assertEqual(me["cities"], 1)
+        self.assertEqual(p1["cities"], 2)
+        self.assertEqual(p1["religion"], "Buddhism")
+        self.assertEqual(me["religion"], "Buddhism")
+        self.assertNotIn("religion", p2)
 
     def test_missing_methods_never_raise(self):
         self.lua.execute("GameInfo.Governors = nil; Game.GetVictoryProgressForTeam = nil; Players[1].GetStats = nil")

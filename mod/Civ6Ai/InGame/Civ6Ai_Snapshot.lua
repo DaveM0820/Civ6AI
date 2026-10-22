@@ -5627,6 +5627,62 @@ function Civ6Ai_Snapshot._RankPlayerRow(viewerID, otherID, majorIDs, dipNeeded)
   if majority ~= nil then
     row.majority_religion = majority
   end
+  local function relLabel(info)
+    if info == nil then
+      return nil
+    end
+    if type(info.name) == "string" and info.name ~= "" and info.name ~= "NULL" then
+      return info.name
+    end
+    if type(info.id) == "string" and info.id ~= "" then
+      return info.id
+    end
+    return nil
+  end
+  local religionName = relLabel(foundedInfo) or relLabel(majority)
+  if religionName ~= nil then
+    row.religion = religionName
+  end
+  -- The game era is global. Era score, wonders, and city count are per player.
+  -- Each read is optional; a ruleset without the method simply omits the field.
+  local era = Civ6Ai_Snapshot._CurrentEraId()
+  if type(era) == "string" and era ~= "" and era ~= "UNKNOWN" then
+    row.era = era
+  end
+  local eraScore = nil
+  local eras = Civ6Ai_Snapshot._Try(function() return Game.GetEras() end)
+  if eras ~= nil then
+    eraScore = Civ6Ai_Snapshot._Method(eras, "GetPlayerCurrentScore", otherID)
+  end
+  if type(eraScore) ~= "number" then
+    local playerEra = Civ6Ai_Snapshot._Method(p, "GetEra")
+    eraScore = Civ6Ai_Snapshot._Method(playerEra, "GetPlayerEraScore")
+      or Civ6Ai_Snapshot._Method(playerEra, "GetCurrentEraScore")
+  end
+  if type(eraScore) == "number" then
+    row.era_score = math.floor(eraScore)
+  end
+  local wonders = Civ6Ai_Snapshot._Method(stats, "GetNumWondersBuilt")
+    or Civ6Ai_Snapshot._Method(stats, "GetNumWondersConstructed")
+  if type(wonders) == "number" then
+    row.wonders = math.floor(wonders)
+  end
+  local cityCount = Civ6Ai_Snapshot._Method(Civ6Ai_Snapshot._Method(p, "GetCities"), "GetCount")
+  if type(cityCount) ~= "number" then
+    local counted, total = false, 0
+    Civ6Ai_Snapshot._Try(function()
+      for _ in p:GetCities():Members() do
+        total = total + 1
+        counted = true
+      end
+    end)
+    if counted then
+      cityCount = total
+    end
+  end
+  if type(cityCount) == "number" then
+    row.cities = math.floor(cityCount)
+  end
   -- Overview order key: Game.GetVictoryProgressForTeam per enabled victory.
   local progress = {}
   if type(row.team_id) == "number" then
