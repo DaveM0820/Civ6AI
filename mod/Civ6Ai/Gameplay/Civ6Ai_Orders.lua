@@ -102,11 +102,18 @@ local function log(s)
   print(Civ6Ai_Orders.TAG .. s)
 end
 
+-- Civ6 userdata __index throws "function expected instead of nil" for a method
+-- the object does not have. The lookup itself has to be inside pcall; a bare
+-- obj[name] aborts the turn before the nil check can run.
 local function call(obj, name, ...)
-  if obj == nil or obj[name] == nil then
+  if obj == nil then
     return nil
   end
-  local ok, v = pcall(obj[name], obj, ...)
+  local okGet, fn = pcall(function() return obj[name] end)
+  if not okGet or type(fn) ~= "function" then
+    return nil
+  end
+  local ok, v = pcall(fn, obj, ...)
   if ok then
     return v
   end
@@ -136,8 +143,8 @@ local function trimErr(err)
   return text
 end
 
--- City centre district. Gameplay cities have no GetDistrictID (calling it throws
--- "function expected instead of nil" before call() can nil-check the argument).
+-- City centre district. Gameplay cities have no GetDistrictID (indexing it throws
+-- "function expected instead of nil"). call() swallows that lookup.
 -- The centre is the district on the city plot, else a CITY_CENTER in the city's
 -- or the player's district list. Every lookup goes through call/pcall.
 function Civ6Ai_Orders._DistrictById(owner, city, id)
@@ -720,7 +727,7 @@ end
 
 function Civ6Ai_Orders._AtWar(owner, other)
   local them = Players[other]
-  if them ~= nil and them.IsBarbarian ~= nil and them:IsBarbarian() then
+  if call(them, "IsBarbarian") == true then
     return true
   end
   local diplo = call(Players[owner], "GetDiplomacy")
@@ -731,7 +738,19 @@ end
 -- Damage each side takes, from the engine's forecast. Returns
 -- attackerDamage, defenderDamage, or nil, reason.
 function Civ6Ai_Orders._ForecastOnce(unit, defender, combatType)
-  local ok, res = pcall(CombatManager.SimulateAttackVersus, unit:GetComponentID(), defender:GetComponentID(), combatType)
+  -- Arguments to pcall are evaluated first. A city district with no
+  -- GetComponentID throws "function expected instead of nil" on that lookup
+  -- and never enters pcall, which aborted the seat's turn on a city attack.
+  local attackerId = call(unit, "GetComponentID")
+  local defenderId = call(defender, "GetComponentID")
+  if attackerId == nil or defenderId == nil or CombatManager == nil then
+    return nil
+  end
+  local okFn, simulate = pcall(function() return CombatManager.SimulateAttackVersus end)
+  if not okFn or type(simulate) ~= "function" then
+    return nil
+  end
+  local ok, res = pcall(simulate, attackerId, defenderId, combatType)
   if not ok or type(res) ~= "table" then
     return nil
   end
@@ -749,7 +768,14 @@ end
 -- The unit panel's hover preview passes nil for melee. A MELEE type that
 -- forecasts 0 is retried with nil before the attack is refused.
 function Civ6Ai_Orders._Forecast(unit, defender, combatType)
-  if CombatManager == nil or CombatManager.SimulateAttackVersus == nil or CombatResultParameters == nil then
+  local simulate = nil
+  if CombatManager ~= nil then
+    local okFn, fn = pcall(function() return CombatManager.SimulateAttackVersus end)
+    if okFn and type(fn) == "function" then
+      simulate = fn
+    end
+  end
+  if simulate == nil or CombatResultParameters == nil then
     return nil, "no_combat_forecast"
   end
   local toA, toD = Civ6Ai_Orders._ForecastOnce(unit, defender, combatType)

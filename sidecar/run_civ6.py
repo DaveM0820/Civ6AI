@@ -58,7 +58,7 @@ def _read(path: Path | None) -> dict:
     encoding = "utf-8-sig" if path else "utf-8"
     stream = path.open(encoding=encoding) if path else sys.stdin
     try:
-        value = json.load(stream)
+        value = json.load(stream, strict=False)
     finally:
         if path:
             stream.close()

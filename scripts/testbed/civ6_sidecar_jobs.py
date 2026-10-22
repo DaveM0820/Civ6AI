@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
-        payload = json.loads(path.read_text(encoding="utf-8-sig"))
+        payload = json.loads(path.read_text(encoding="utf-8-sig"), strict=False)
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
@@ -39,7 +39,14 @@ def decision_suppresses_sidecar(player_dir: Path) -> bool:
         return True
     snapshot = _read_json(snapshot_path)
     if snapshot is None:
-        return True
+        # A Lua error string can embed a raw control character, and a truncated
+        # write can be unreadable. Either way this turn is not decided: treating
+        # it as approved dropped the seat onto the base AI with no model call.
+        log.warning(
+            "snapshot %s could not be parsed; not treating the turn as already decided",
+            snapshot_path,
+        )
+        return False
     snap_turn = snapshot.get("decision", {}).get("turn")
     metrics = payload.get("metrics")
     decision_turn = metrics.get("turn") if isinstance(metrics, dict) else None
