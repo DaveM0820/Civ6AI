@@ -60,6 +60,7 @@ Civ6Ai_Orders.K = {
   REPORT = 30,
   CITY_STRIKE = 31,
   FORT = 32,
+  SPREAD = 35,
   PING = 40,
   TEST_MODE = 49,
   TEST_INTROSPECT = 50,
@@ -84,6 +85,7 @@ Civ6Ai_Orders.DECISION_KINDS = {
   [10] = true, [11] = true, [12] = true, [13] = true, [14] = true, [15] = true, [16] = true,
   [17] = true, [18] = true, [19] = true, [20] = true, [21] = true, [22] = true,
   [24] = true, [25] = true, [26] = true, [27] = true, [28] = true, [29] = true, [31] = true, [32] = true, [33] = true, [34] = true,
+  [35] = true,
 }
 -- Intent on a MOVE (param A). N is the batch count on the wire, so intent is A.
 Civ6Ai_Orders.INTENT = { MOVE = 0, FOUND = 1, IMPROVE = 2, RELIGION = 3, TRADE = 4 }
@@ -632,7 +634,9 @@ function Civ6Ai_Orders._DoCommand(sender, o)
   elseif k == Civ6Ai_Orders.K.EXPLORE then
     return Civ6Ai_Orders.Gov.Explore(owner, o.U)
   elseif k == Civ6Ai_Orders.K.ACTIVATE_GP then
-    return Civ6Ai_Orders.Gov.ActivateGreatPerson(owner, o.U)
+    return Civ6Ai_Orders.Gov.ActivateGreatPerson(owner, o.U, o.V)
+  elseif k == Civ6Ai_Orders.K.SPREAD then
+    return Civ6Ai_Orders.Gov.SpreadReligion(owner, o.U, o.X, o.Y, o.A)
   elseif k == Civ6Ai_Orders.K.UPGRADE then
     return Civ6Ai_Orders.Gov.UpgradeUnit(owner, o.U, o.I, o.V)
   elseif k == Civ6Ai_Orders.K.PROMOTE then
@@ -1607,6 +1611,17 @@ function Gov.SlotCall(culture)
   return nil
 end
 
+-- The local seat's attacks use this too. Offers are distance-based; this is
+-- the resolver those offers describe (the UI operation check is a different
+-- path and rejects them).
+function Gov.AttackUnit(owner, unitId, x, y)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  if unit == nil then
+    return false, "unit_not_found"
+  end
+  return Civ6Ai_Orders._ResolveAttack(unit, x, y)
+end
+
 function Gov.SetPolicySlot(owner, slot, policyIndex)
   local culture = call(Players[owner], "GetCulture")
   if culture == nil then
@@ -1889,6 +1904,9 @@ local function startOperation(unit, typeName, extras)
       params[UnitOperationTypes.PARAM_Y] = extras.y
     end
   end
+  if extras ~= nil and extras.unitId ~= nil and UnitOperationTypes ~= nil and UnitOperationTypes.PARAM_UNIT_ID ~= nil then
+    params[UnitOperationTypes.PARAM_UNIT_ID] = extras.unitId
+  end
   local ok, err = pcall(UnitManager.RequestOperation, unit, row.Hash, params)
   if not ok then
     return false, "operation_error:" .. tostring(typeName) .. ":" .. tostring(err)
@@ -2026,10 +2044,26 @@ function Gov.Explore(owner, unitId)
   return true, reason
 end
 
-function Gov.ActivateGreatPerson(owner, unitId)
+function Gov.ActivateGreatPerson(owner, unitId, mode)
   local unit = Civ6Ai_Orders._Unit(owner, unitId)
   if unit == nil then
     return false, "stale_unit_id"
+  end
+  if mode == 1 then
+    local row = GameInfo.Units[unit:GetType()]
+    local gp = call(unit, "GetGreatPerson")
+    local isGP = gp ~= nil or (row ~= nil and row.UnitType ~= nil and string.find(row.UnitType, "GREAT_", 1, true) ~= nil)
+    if not isGP then
+      return false, "only a great person can retire"
+    end
+    if UnitManager == nil or UnitManager.Kill == nil then
+      return false, "this game has no gameplay route to retire a great person"
+    end
+    UnitManager.Kill(unit, false)
+    if Civ6Ai_Orders._Unit(owner, unitId) ~= nil then
+      return false, "the game refused to retire that great person"
+    end
+    return true, "retired"
   end
   local gp = call(unit, "GetGreatPerson")
   if gp ~= nil and gp.Activate ~= nil then
@@ -2424,64 +2458,193 @@ function Gov.PillageImprovement(owner, unitId, x, y)
     .. ":plot=" .. tostring(ux) .. "," .. tostring(uy)
 end
 
--- Upgrade: pay the cost the host read from Unit:GetUpgradeCost (V), then
--- replace the unit with the upgrade type on its tile, keeping damage and XP.
+-- Upgrade: pay the live GetUpgradeCost (the packet cost is only a hint; a UI
+-- read of -1 must not be charged), then replace the unit on its tile.
+-- InitUnit in a gameplay script takes the unit Index. A type string creates
+-- nothing, and the tile stays blocked until Kill is told not to delay death.
 function Gov.UpgradeUnit(owner, unitId, typeIndex, cost)
   local unit = Civ6Ai_Orders._Unit(owner, unitId)
   local row = GameInfo.Units[typeIndex]
   if unit == nil or row == nil then
     return false, "stale_unit_or_type"
   end
+  if type(cost) ~= "number" or cost < 0 then
+    cost = call(unit, "GetUpgradeCost")
+  end
+  if type(cost) ~= "number" or cost < 0 then
+    return false, "upgrade cost is unknown, so the unit was not replaced"
+  end
   local x, y, dmg = unit:GetX(), unit:GetY(), call(unit, "GetDamage") or 0
   local xp = call(call(unit, "GetExperience"), "GetExperiencePoints") or 0
-  local okPay, why = debit(owner, false, cost or 0)
+  local okPay, why = debit(owner, false, cost)
   if not okPay then
     return false, why
   end
-  UnitManager.Kill(unit)
-  local okU, new = pcall(UnitManager.InitUnit, owner, row.UnitType, x, y)
-  if not okU or new == nil then
-    credit(owner, false, cost or 0)
-    return false, "the game refused to create " .. row.UnitType
+  local function spawn(typeArg)
+    if UnitManager == nil or UnitManager.InitUnit == nil or typeArg == nil then
+      return nil
+    end
+    local okU, new = pcall(UnitManager.InitUnit, owner, typeArg, x, y)
+    if okU and new ~= nil then
+      return new
+    end
+    return nil
   end
-  call(new, "SetDamage", dmg)
-  call(call(new, "GetExperience"), "ChangeExperience", xp)
-  pcall(UnitManager.FinishMoves, new)
+  -- The old unit still occupies the tile, so the first create usually fails.
+  -- Kill with the delay flag false, then create by Index (the gameplay
+  -- argument). The type string is only a fallback.
+  local created = spawn(row.Index)
+  if created == nil then
+    pcall(UnitManager.Kill, unit, false)
+    created = spawn(row.Index) or spawn(row.UnitType)
+  else
+    pcall(UnitManager.Kill, unit, false)
+  end
+  if created == nil then
+    credit(owner, false, cost)
+    return false, "the game refused to create " .. tostring(row.UnitType)
+      .. " (InitUnit did not accept the type index or the type name)"
+  end
+  call(created, "SetDamage", dmg)
+  call(call(created, "GetExperience"), "ChangeExperience", xp)
+  pcall(UnitManager.FinishMoves, created)
   return true, "upgraded=" .. row.UnitType .. ":gold=" .. tostring(cost)
 end
 
 function Gov.PromoteUnit(owner, unitId, promoIndex)
-  local exp = call(Civ6Ai_Orders._Unit(owner, unitId), "GetExperience")
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  local exp = call(unit, "GetExperience")
   local row = GameInfo.UnitPromotions[promoIndex]
-  if exp == nil or row == nil or exp.SetPromotion == nil then
+  if exp == nil or row == nil then
     return false, "no_promotion_route"
   end
-  pcall(exp.SetPromotion, exp, row.Index)
+  if exp.SetPromotion ~= nil then
+    if not pcall(exp.SetPromotion, exp, row.Index, true) then
+      pcall(exp.SetPromotion, exp, row.Index)
+    end
+  end
+  if call(exp, "HasPromotion", row.Index) ~= true and exp.ChangePromotion ~= nil then
+    pcall(exp.ChangePromotion, exp, row.Index)
+  end
   if call(exp, "HasPromotion", row.Index) ~= true then
     return false, "the game refused " .. row.UnitPromotionType
+      .. " (SetPromotion did not grant it; the unit was not changed)"
   end
-  pcall(UnitManager.FinishMoves, Civ6Ai_Orders._Unit(owner, unitId))
+  pcall(UnitManager.FinishMoves, unit)
   return true, "promoted=" .. row.UnitPromotionType
 end
 
 -- Corps/army (fleet/armada): the unit absorbs an adjacent same-type unit (I).
+-- The formation is set while that partner is still alive. Killing it first
+-- makes SetMilitaryFormation a no-op and the order reports failure after the
+-- partner is already gone.
 function Gov.JoinFormation(owner, unitId, otherId)
   local unit, other = Civ6Ai_Orders._Unit(owner, unitId), Civ6Ai_Orders._Unit(owner, otherId)
   local F = MilitaryFormationTypes
-  if unit == nil or other == nil or F == nil or unit.SetMilitaryFormation == nil then
-    return false, "no_formation_route"
+  if unit == nil or other == nil or F == nil then
+    return false, "no_formation_route: a unit, its partner, or formation types are missing; nothing was removed"
   end
   local nextF = { [F.STANDARD_MILITARY_FORMATION] = F.CORPS_MILITARY_FORMATION,
     [F.CORPS_MILITARY_FORMATION] = F.ARMY_MILITARY_FORMATION }
   local target = nextF[call(unit, "GetMilitaryFormation")]
   if target == nil or unit:GetType() ~= other:GetType()
       or Map.GetPlotDistance(unit:GetX(), unit:GetY(), other:GetX(), other:GetY()) > 1 then
-    return false, "needs an adjacent unit of the same type"
+    return false, "needs an adjacent unit of the same type that is not already a corps or army"
   end
-  UnitManager.Kill(other)
-  pcall(unit.SetMilitaryFormation, unit, target)
+  if unit.SetMilitaryFormation ~= nil then
+    pcall(unit.SetMilitaryFormation, unit, target)
+  end
+  if call(unit, "GetMilitaryFormation") ~= target then
+    local opName = target == F.CORPS_MILITARY_FORMATION and "UNITOPERATION_FORM_CORPS" or "UNITOPERATION_FORM_ARMY"
+    local okOp, whyOp = startOperation(unit, opName, { unitId = other:GetID() })
+    if not okOp or call(unit, "GetMilitaryFormation") ~= target then
+      return false, "the game refused to form the corps or army; both units are unchanged ("
+        .. tostring(whyOp or "SetMilitaryFormation did not stick") .. ")"
+    end
+  end
+  if Civ6Ai_Orders._Unit(owner, otherId) ~= nil then
+    pcall(UnitManager.Kill, other, false)
+  end
   pcall(UnitManager.FinishMoves, unit)
-  return call(unit, "GetMilitaryFormation") == target, "formation=" .. tostring(target)
+  return true, "formation=" .. tostring(target)
+end
+
+-- Spread religion onto a city, or a guru heal onto a friendly religious unit.
+-- Pressure comes from the unit row's ReligiousStrength. A missing method or a
+-- zero strength fails without spending a charge.
+function Gov.SpreadReligion(owner, unitId, x, y, mode)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  if unit == nil then
+    return false, "stale_unit_id"
+  end
+  if x == nil or y == nil then
+    return false, "missing_target"
+  end
+  if Map.GetPlotDistance(unit:GetX(), unit:GetY(), x, y) > 1 then
+    return false, "that tile is not adjacent to the religious unit"
+  end
+  local row = GameInfo.Units[unit:GetType()]
+  local rel = call(unit, "GetReligion")
+  local charges = call(rel, "GetSpreadCharges")
+  if type(charges) ~= "number" or charges <= 0 then
+    return false, "that unit has no religious charges left"
+  end
+  if mode == 1 then
+    local amount = tonumber(row and row.ReligiousStrength) or 0
+    if amount <= 0 and GameInfo.GlobalParameters ~= nil then
+      for param in GameInfo.GlobalParameters() do
+        local name = tostring(param.Name or "")
+        if string.find(name, "HEAL", 1, true) and string.find(name, "RELIG", 1, true) then
+          amount = tonumber(param.Value) or 0
+          if amount > 0 then break end
+        end
+      end
+    end
+    if amount <= 0 then
+      return false, "this game does not publish a religious heal amount, so no charge was spent"
+    end
+    local plot = Map.GetPlot(x, y)
+    local target = nil
+    if plot ~= nil and Units ~= nil and Units.GetUnitsInPlot ~= nil then
+      for _, other in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+        if other:GetOwner() == owner and other:GetID() ~= unit:GetID() then
+          target = other
+          break
+        end
+      end
+    end
+    if target == nil then
+      return false, "no friendly unit on that tile to heal"
+    end
+    call(target, "ChangeDamage", -amount)
+    call(rel, "ChangeSpreadCharges", -1)
+    pcall(UnitManager.FinishMoves, unit)
+    return true, "healed=" .. tostring(amount)
+  end
+  local pressure = tonumber(row and row.ReligiousStrength) or 0
+  if pressure <= 0 then
+    return false, "that unit has no religious strength to spread, so no charge was spent"
+  end
+  local religionType = call(rel, "GetReligionType")
+  if type(religionType) ~= "number" or religionType < 0 then
+    return false, "that unit has no religion to spread"
+  end
+  local city = nil
+  if Cities ~= nil and Cities.GetCityInPlot ~= nil then
+    local okC, found = pcall(Cities.GetCityInPlot, x, y)
+    if okC then city = found end
+  end
+  local cityRel = call(city, "GetReligion")
+  if city == nil or cityRel == nil or cityRel.AddReligiousPressure == nil then
+    return false, "there is no city on that tile, or this game has no gameplay route to add religious pressure"
+  end
+  local okP, err = pcall(cityRel.AddReligiousPressure, cityRel, owner, religionType, pressure)
+  if not okP then
+    return false, "the game refused the spread: " .. tostring(err)
+  end
+  call(rel, "ChangeSpreadCharges", -1)
+  pcall(UnitManager.FinishMoves, unit)
+  return true, "spread=" .. tostring(pressure) .. ":city=" .. tostring(city:GetID())
 end
 
 -- City ranged strike from the city centre, once per city per turn (synced property).

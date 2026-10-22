@@ -8,7 +8,9 @@
   "max_retries": 3,
   "vision": true,
   "reasoning": "off",
+  "reasoning_effort": "off",
+  "seat_models": {},
   "context_budget": true,
   "queue_shared_model": true,
-  "comment": "Copy to config/civ6ai.local.json (gitignored) or override via env. reasoning is on|off only \u2014 never send reasoning_effort=on to LM Studio. Env overrides: CIV6AI_MODEL_PROVIDER, LMSTUDIO_BASE_URL, LMSTUDIO_MODEL, LMSTUDIO_API_KEY, CIV6AI_LMSTUDIO_TIMEOUT_SECONDS, CIV6AI_LMSTUDIO_VISION, CIV6AI_LMSTUDIO_REASONING, CIV6AI_CONTEXT_BUDGET, CIV6AI_QUEUE_SHARED_MODEL. Prefer reasoning=off for OpenRouter qwen \u2014 the Civ6AI prompt already includes reasoning."
+  "comment": "Copy to config/civ6ai.local.json (gitignored). reasoning is on|off for LM Studio only \u2014 never send reasoning_effort=on to LM Studio. reasoning_effort is off|low|medium|high|xhigh and is what OpenRouter receives (off disables reasoning). Per seat: seat_models {\"0\": {\"model\": \"provider/model\", \"reasoning_effort\": \"high\"}} and/or env CIV6AI_MODEL_PLAYER_<n>, CIV6AI_REASONING_EFFORT, CIV6AI_REASONING_EFFORT_PLAYER_<n>. Env model/effort overrides seat_models. Each seat-turn appends latency_ms, prompt_tokens, completion_tokens, reasoning_tokens, and cost to turn_metrics.jsonl. Other env: CIV6AI_MODEL_PROVIDER, LMSTUDIO_BASE_URL, LMSTUDIO_MODEL, LMSTUDIO_API_KEY, OPENROUTER_API_KEY, OPENROUTER_MODEL, CIV6AI_LMSTUDIO_TIMEOUT_SECONDS, CIV6AI_LMSTUDIO_VISION, CIV6AI_LMSTUDIO_REASONING, CIV6AI_CONTEXT_BUDGET, CIV6AI_QUEUE_SHARED_MODEL."
 }

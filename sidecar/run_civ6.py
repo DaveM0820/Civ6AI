@@ -823,6 +823,9 @@ def main() -> None:
     wall_ms = int((time.monotonic() - wall_started) * 1000)
     model_meta = record.get("model") if isinstance(record.get("model"), dict) else {}
     usage = model_meta.get("usage", {}) if isinstance(model_meta.get("usage"), dict) else {}
+    from sidecar.lmstudio_client import metrics_from_model
+
+    accounted = metrics_from_model(model_meta, llm_ms)
     dropped = record.get("dropped") if isinstance(record.get("dropped"), list) else []
     if isinstance(thought_memory, dict):
         thought_memory["dropped"] = dropped
@@ -837,7 +840,12 @@ def main() -> None:
         "status": record.get("status"),
         "provider": model_meta.get("provider"),
         "model": model_meta.get("model"),
-        "latency_ms": model_meta.get("latency_ms"),
+        "latency_ms": accounted.get("latency_ms"),
+        "prompt_tokens": accounted.get("prompt_tokens", 0),
+        "completion_tokens": accounted.get("completion_tokens", 0),
+        "reasoning_tokens": accounted.get("reasoning_tokens", 0),
+        "cost": accounted.get("cost"),
+        "reasoning_effort": accounted.get("reasoning_effort"),
         "usage": usage,
         "wall_ms": wall_ms,
         "map_ms": map_ms,

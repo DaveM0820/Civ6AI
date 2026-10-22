@@ -24,6 +24,7 @@ APPLY_KINDS = {
     "send_diplomatic_action", "execute_deal", "send_envoy", "purchase_item", "purchase_tile",
     "worker_improve", "pillage_improvement", "explore", "activate_great_person",
     "upgrade_unit", "promote_unit", "join_formation", "city_attack", "build_fort",
+    "trade_route", "spread_religion",
 }
 
 

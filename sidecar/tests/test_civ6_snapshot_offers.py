@@ -314,6 +314,367 @@ class SnapshotLuaOffersTests(unittest.TestCase):
         self.assertLess(sum(1 for item in a if item[2] == "IMPROVEMENT_QUARRY"), len(a))
 
 
+
+    def test_promotion_uses_experience_and_is_offered_when_legal(self):
+        self.lua.execute(
+            r"""
+            local function iter(rows)
+              local i = 0
+              return function()
+                i = i + 1
+                return rows[i]
+              end
+            end
+            local exp = {
+              ready = true,
+              CanPromote = function(self) return self.ready end,
+              HasPromotion = function() return false end,
+              GetExperiencePoints = function() return 20 end,
+              GetExperienceForNextLevel = function() return 15 end,
+            }
+            UNIT = {
+              GetType = function() return 0 end,
+              GetX = function() return 0 end,
+              GetY = function() return 0 end,
+              GetExperience = function() return exp end,
+            }
+            EXP = exp
+            Players = { [1] = {} }
+            Map = { GetPlot = function() return nil end }
+            GameInfo = {
+              Units = { [0] = { PromotionClass = "PROMOTION_CLASS_MELEE", UnitType = "UNIT_WARRIOR" } },
+              UnitPromotions = function()
+                return iter({
+                  { Index = 1, UnitPromotionType = "PROMOTION_BATTLECRY", PromotionClass = "PROMOTION_CLASS_MELEE" },
+                  { Index = 2, UnitPromotionType = "PROMOTION_RANGER", PromotionClass = "PROMOTION_CLASS_RECON" },
+                })
+              end,
+              UnitPromotionPrereqs = function() return iter({}) end,
+            }
+            CMDS = {}
+            """
+        )
+        snap = self.lua.globals().Civ6Ai_Snapshot
+        self.assertTrue(snap._UnitPromotionReady(self.lua.globals().UNIT))
+        self.lua.execute("EXP.ready = false; EXP.CanPromote = nil")
+        self.assertTrue(snap._UnitPromotionReady(self.lua.globals().UNIT))
+        self.lua.execute("EXP.GetExperiencePoints = function() return 1 end")
+        self.assertFalse(snap._UnitPromotionReady(self.lua.globals().UNIT))
+        self.lua.execute("EXP.CanPromote = function(self) return true end")
+        snap._AddProgressionCommands(self.lua.globals().CMDS, 1, self.lua.globals().UNIT, "UNIT_1")
+        cmds = self.lua.globals().CMDS
+        promos = [cmds[i] for i in range(1, len(cmds) + 1) if cmds[i].kind == "promote_unit"]
+        self.assertEqual(1, len(promos))
+        self.assertEqual("PROMOTION_BATTLECRY", promos[0].fixed_arguments.promotion_id)
+
+    def test_city_strike_is_offered_in_range_and_survives_the_command_cap(self):
+        self.lua.execute(
+            r"""
+            Civ6Ai_Production = { _WireCityId = function(city) return "CITY_" .. tostring(city:GetID()) end }
+            Map = { GetPlotDistance = function(ax, ay, bx, by) return math.abs(ax - bx) + math.abs(ay - by) end }
+            local city = {
+              GetID = function() return 7 end,
+              GetX = function() return 10 end,
+              GetY = function() return 10 end,
+            }
+            local function members(list)
+              return function()
+                local i = 0
+                return function()
+                  i = i + 1
+                  if list[i] then return i, list[i] end
+                end
+              end
+            end
+            Players = { [1] = { GetCities = function() return { Members = members({ city }) } end } }
+            Civ6Ai_Snapshot._HostileTargets = function()
+              return {
+                { x = 12, y = 10, who = "unit" },
+                { x = 20, y = 10, who = "unit" },
+                { x = 11, y = 10, who = "city" },
+              }
+            end
+            CMDS = {}
+            """
+        )
+        snap = self.lua.globals().Civ6Ai_Snapshot
+        snap._AddCityStrikeCommands(self.lua.globals().CMDS, 1)
+        cmds = self.lua.globals().CMDS
+        targets = [(cmds[i].fixed_arguments.target_x, cmds[i].fixed_arguments.target_y) for i in range(1, len(cmds) + 1)]
+        self.assertEqual([(12, 10)], targets)
+        self.assertTrue(all(cmds[i].kind == "city_attack" for i in range(1, len(cmds) + 1)))
+
+        self.lua.execute(
+            r"""
+            local unit = {}
+            Civ6Ai_Snapshot._AddProductionCommands = function() end
+            Civ6Ai_Snapshot._AddPurchaseCommands = function() end
+            Civ6Ai_Snapshot._IterateUnits = function() return { unit } end
+            Civ6Ai_Snapshot._UnitNeedsOrders = function() return true end
+            Civ6Ai_Snapshot._UnitWireId = function() return "UNIT_1" end
+            Civ6Ai_Snapshot._UnitInfo = function() return {} end
+            Civ6Ai_Snapshot._IsMilitaryInfo = function() return false end
+            Civ6Ai_Snapshot._AddAttackCommands = function() end
+            Civ6Ai_Snapshot._AddPillageCommand = function() end
+            Civ6Ai_Snapshot._AddAdjacentMoveCommands = function(commands)
+              for i = 1, 520 do
+                commands[#commands + 1] = { kind = "move_unit", command_id = "M" .. i, fixed_arguments = {} }
+              end
+            end
+            Players[1].GetUnits = function() return {} end
+            Players[1].GetTechs = function() return nil end
+            """
+        )
+        capped = snap._BuildLegalCommands(1, "PLAYER_1")
+        self.assertEqual(500, len(capped))
+        self.assertEqual("city_attack", capped[1].kind)
+
+    def test_religion_great_person_and_trader_commands_follow_legality(self):
+        self.lua.execute(
+            r"""
+            Map = {
+              GetPlotDistance = function(ax, ay, bx, by) return math.abs(ax - bx) + math.abs(ay - by) end,
+              GetPlot = function(x, y)
+                return { GetX = function() return x end, GetY = function() return y end }
+              end,
+              GetNeighborPlots = function(x, y, dist)
+                return { { GetX = function() return x + 1 end, GetY = function() return y end } }
+              end,
+            }
+            local function members(list)
+              return function()
+                local i = 0
+                return function()
+                  i = i + 1
+                  if list[i] then return i, list[i] end
+                end
+              end
+            end
+            local campus = {
+              GetType = function() return 3 end,
+              GetX = function() return 4 end,
+              GetY = function() return 4 end,
+            }
+            local holy = {
+              GetType = function() return 4 end,
+              GetX = function() return 8 end,
+              GetY = function() return 8 end,
+            }
+            local ownCity = {
+              GetDistricts = function() return { Members = members({ campus, holy }) } end,
+              GetX = function() return 4 end, GetY = function() return 4 end,
+              GetID = function() return 1 end, GetOwner = function() return 1 end,
+            }
+            local foreign = {
+              GetX = function() return 5 end, GetY = function() return 4 end,
+              GetID = function() return 131072 end, GetOwner = function() return 2 end,
+            }
+            Players = {
+              [1] = { GetCities = function() return { Members = members({ ownCity }) } end },
+              [2] = { GetCities = function() return { Members = members({ foreign }) } end },
+            }
+            GameInfo = {
+              Units = {
+                [1] = { UnitType = "UNIT_APOSTLE", ReligiousStrength = 110 },
+                [2] = { UnitType = "UNIT_GURU", ReligiousStrength = 0 },
+                [3] = { UnitType = "UNIT_GREAT_SCIENTIST", GreatPersonClassType = "GREAT_PERSON_CLASS_SCIENTIST" },
+                [4] = { UnitType = "UNIT_GREAT_GENERAL", GreatPersonClassType = "GREAT_PERSON_CLASS_GENERAL" },
+                [5] = { UnitType = "UNIT_TRADER" },
+              },
+              Districts = {
+                [3] = { DistrictType = "DISTRICT_CAMPUS" },
+                [4] = { DistrictType = "DISTRICT_HOLY_SITE" },
+              },
+              GlobalParameters = function()
+                return (function()
+                  local rows = { { Name = "RELIGION_HEAL_CHARGES", Value = 25 } }
+                  local i = 0
+                  return function()
+                    i = i + 1
+                    return rows[i]
+                  end
+                end)()
+              end,
+            }
+            local rel = {
+              GetSpreadCharges = function() return 2 end,
+              GetReligionType = function() return 3 end,
+            }
+            local apostle = {
+              GetType = function() return 1 end, GetX = function() return 5 end, GetY = function() return 3 end,
+              GetID = function() return 11 end, GetReligion = function() return rel end,
+            }
+            local guru = {
+              GetType = function() return 2 end, GetX = function() return 4 end, GetY = function() return 4 end,
+              GetID = function() return 12 end, GetOwner = function() return 1 end,
+              GetReligion = function() return rel end,
+            }
+            local friend = {
+              GetOwner = function() return 1 end, GetID = function() return 99 end,
+            }
+            Units = { GetUnitsInPlot = function(plot)
+              if plot:GetX() == 5 and plot:GetY() == 4 then return { friend } end
+              return {}
+            end }
+            local scientist = {
+              GetType = function() return 3 end, GetX = function() return 4 end, GetY = function() return 4 end,
+              GetGreatPerson = function() return {} end,
+            }
+            local general = {
+              GetType = function() return 4 end, GetX = function() return 4 end, GetY = function() return 4 end,
+              GetGreatPerson = function() return {} end,
+            }
+            local trader = {
+              GetType = function() return 5 end, GetX = function() return 4 end, GetY = function() return 4 end,
+            }
+            Cities = { GetCityInPlot = function() return ownCity end }
+            Game = { GetTradeManager = function()
+              return { CanStartRoute = function(_, oOwner, oId, dOwner, dId) return dId == 131072 end }
+            end }
+            APOSTLE, GURU, SCIENTIST, GENERAL, TRADER = apostle, guru, scientist, general, trader
+            """
+        )
+        snap = self.lua.globals().Civ6Ai_Snapshot
+
+        def kinds_for(unit, unit_id, adder):
+            self.lua.execute("CMDS = {}")
+            adder(self.lua.globals().CMDS, 1, unit, unit_id)
+            cmds = self.lua.globals().CMDS
+            return [(cmds[i].kind, dict(cmds[i].fixed_arguments.items())) for i in range(1, len(cmds) + 1)]
+
+        spread = kinds_for(self.lua.globals().APOSTLE, "UNIT_A", snap._AddReligionCommands)
+        self.assertEqual([("spread_religion", {"unit_id": "UNIT_A", "target_x": 5, "target_y": 4, "action": "spread"})], spread)
+        heal = kinds_for(self.lua.globals().GURU, "UNIT_G", snap._AddReligionCommands)
+        self.assertEqual([("spread_religion", {"unit_id": "UNIT_G", "target_x": 5, "target_y": 4, "action": "heal"})], heal)
+        self.lua.execute("GameInfo.GlobalParameters = function() return function() return nil end end")
+        self.assertEqual([], kinds_for(self.lua.globals().GURU, "UNIT_G", snap._AddReligionCommands))
+
+        scientist = kinds_for(self.lua.globals().SCIENTIST, "UNIT_S", snap._AddActivateCommand)
+        self.assertEqual(
+            ["activate_great_person", "activate_great_person"],
+            [kind for kind, _ in scientist],
+        )
+        self.assertNotIn("retire", scientist[0][1])
+        self.assertEqual(1, scientist[1][1]["retire"])
+        general = kinds_for(self.lua.globals().GENERAL, "UNIT_N", snap._AddActivateCommand)
+        self.assertEqual([("activate_great_person", {"unit_id": "UNIT_N", "retire": 1})], general)
+
+        trade = kinds_for(self.lua.globals().TRADER, "UNIT_T", snap._AddTradeRouteCommands)
+        self.assertEqual(1, len(trade))
+        self.assertEqual("trade_route", trade[0][0])
+        self.assertEqual("CITY_131072", trade[0][1]["city_id"])
+        self.assertEqual(5, trade[0][1]["target_x"])
+
+    def test_embark_site_is_recorded_when_nothing_is_walkable(self):
+        self.lua.execute(
+            r"""
+            Map = {
+              GetPlot = function(x, y)
+                if not ((x == 10 and y == 10) or (x == 22 and y == 10)) then return nil end
+                return {
+                  GetX = function() return x end, GetY = function() return y end,
+                  GetIndex = function() return x * 100 + y end,
+                  IsWater = function() return false end, IsImpassable = function() return false end,
+                  IsFreshWater = function() return false end, IsRiver = function() return false end,
+                  GetOwner = function() return -1 end,
+                  GetArea = function() return { GetID = function() return x == 22 and 2 or 1 end } end,
+                }
+              end,
+              GetPlotDistance = function(ax, ay, bx, by) return math.max(math.abs(ax - bx), math.abs(ay - by)) end,
+            }
+            local function members(list)
+              return function()
+                local i = 0
+                return function()
+                  i = i + 1
+                  if list[i] then return i, list[i] end
+                end
+              end
+            end
+            local city = { GetX = function() return 10 end, GetY = function() return 10 end }
+            Players = {}
+            for pid = 0, 3 do
+              Players[pid] = { GetCities = function() return { Members = members({}) } end }
+            end
+            Players[0].GetCities = function() return { Members = members({ city }) } end
+            Players[1].GetTechs = function()
+              return { HasTech = function(_, idx) return idx == 4 end }
+            end
+            GameInfo = {
+              Units = { [0] = { UnitType = "UNIT_SETTLER", FoundCity = true } },
+              Technologies = { TECH_SHIPBUILDING = { Index = 4 }, TECH_CARTOGRAPHY = { Index = 8 } },
+            }
+            UnitManager = { GetMoveToPath = function() return {} end }
+            PlayersVisibility = { [1] = { IsRevealed = function() return true end } }
+            ExposedMembers = { Civ6Ai = { CanFoundCityForPlayer = function() return false, "unit_cannot_found_city" end } }
+            UNIT = {
+              GetOwner = function() return 1 end, GetID = function() return 7 end,
+              GetType = function() return 0 end, GetX = function() return 10 end, GetY = function() return 10 end,
+            }
+            """
+        )
+        facts = self.lua.globals().Civ6Ai_Snapshot._AddSettleFacts(self.lua.globals().UNIT)
+        self.assertEqual(0, len(facts.sites))
+        self.assertTrue(bool(facts.no_reachable_site))
+        self.assertEqual(22, facts.embark_site.x)
+        self.assertEqual(10, facts.embark_site.y)
+        self.assertTrue(bool(facts.embark_site.can_embark))
+        self.assertFalse(bool(facts.embark_site.can_ocean))
+
+    def test_research_turns_left_uses_the_engine_not_the_floored_yield(self):
+        self.lua.execute(
+            r"""
+            Civ6Ai_Snapshot._BuildYourCities = function() return {} end
+            Civ6Ai_Snapshot._BuildUnitCounts = function() return {} end
+            local function empty()
+              return function() return nil end
+            end
+            GameInfo = {
+              Technologies = function()
+                local rows = { { Index = 3, TechnologyType = "TECH_STEEL" } }
+                local i = 0
+                return function()
+                  i = i + 1
+                  return rows[i]
+                end
+              end,
+              Civics = empty,
+            }
+            TECHS = {
+              GetResearchingTech = function() return 3 end,
+              GetScienceYield = function() return 10.2 end,
+              GetResearchProgress = function() return 39 end,
+              GetResearchCost = function() return 100 end,
+              GetTurnsLeft = function() return 6 end,
+              HasTech = function() return false end,
+            }
+            local player = {
+              GetTeam = function() return 0 end,
+              GetScore = function() return 0 end,
+              GetTreasury = function()
+                return {
+                  GetGoldBalance = function() return 0 end,
+                  GetGoldYield = function() return 0 end,
+                  GetTotalMaintenance = function() return 0 end,
+                }
+              end,
+              GetTechs = function() return TECHS end,
+              GetCulture = function()
+                return { GetCultureYield = function() return 0 end, HasCivic = function() return false end }
+              end,
+            }
+            Players = { [0] = player }
+            PLAYER = player
+            """
+        )
+        empire = self.lua.globals().Civ6Ai_Snapshot._BuildYourEmpire(0, self.lua.globals().PLAYER)
+        self.assertEqual("TECH_STEEL", empire.research.tech_id)
+        self.assertEqual(6, empire.research.estimated_turns_remaining)
+        self.lua.execute("TECHS.GetTurnsLeft = nil")
+        empire = self.lua.globals().Civ6Ai_Snapshot._BuildYourEmpire(0, self.lua.globals().PLAYER)
+        # Remaining 61 at 10.2 science is 6 turns. Flooring the yield to 10 makes it 7.
+        self.assertEqual(6, empire.research.estimated_turns_remaining)
+
 class CommandWireVocabTests(unittest.TestCase):
     def test_far_move_without_adjacent_offer(self):
         snap = {

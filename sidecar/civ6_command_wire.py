@@ -255,13 +255,21 @@ def unit_command_token(command: dict[str, Any]) -> str | None:
         verb = {"trade_route": "TradeRoute", "teleport_trader": "Teleport", "rebase": "RebaseTo",
                 "paradrop": "ParadropTo", "nuke": "NukeAt"}[kind]
         city = fixed.get("city_id")
+        if kind == "trade_route" and xy:
+            return f"TradeRoute({xy[0]},{xy[1]})"
         if kind == "trade_route" and isinstance(city, str) and city:
             return f"TradeRoute({city})"
         return f"{verb}({xy[0]},{xy[1]})" if xy else verb
+    if kind == "join_formation":
+        return "FormCorps"
     if kind == "activate_great_person":
+        if fixed.get("retire") in (1, True, "1"):
+            return "Retire"
         return "Activate"
     if kind == "spread_religion":
-        return "SpreadReligion"
+        if str(fixed.get("action") or "") == "heal":
+            return f"HealReligious({xy[0]},{xy[1]})" if xy else "HealReligious"
+        return f"SpreadReligion({xy[0]},{xy[1]})" if xy else "SpreadReligion"
     return _camel(kind)
 
 

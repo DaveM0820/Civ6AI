@@ -639,6 +639,13 @@ class OrdersGameplayTests(unittest.TestCase):
             return rt.eval("ExposedMembers.Civ6Ai.OrderHash"), rt.eval("Civ6Ai_Orders.Checksum()")
         self.assertEqual(run(), run())
 
+    def test_gov_attack_unit_uses_the_ai_resolver(self):
+        self.rt.execute("Players[0].war = {[1] = true}")
+        ok, reason = self.rt.eval("function() return Civ6Ai_Orders.Gov.AttackUnit(0, 1, 6, 6) end")()
+        self.assertTrue(ok, reason)
+        self.assertIn("melee", str(reason))
+        self.assertGreater(int(self.rt.eval("Players[1].units[1].dmg")), 0)
+
 
 CHANNEL_ENV = r"""
 logs = {}
@@ -1142,6 +1149,127 @@ class WpAApplyCoreTests(unittest.TestCase):
         self.order(0, K=24, P=2, U=7, I=3, S=102)
         self.assertFalse(self.last()["ok"])
         self.assertTrue("stale_city_id" in self.last()["reason"] or "trade" in self.last()["reason"])
+
+    def test_upgrade_uses_the_type_index_and_does_not_kill_when_the_cost_is_unknown(self):
+        self.rt.execute(r"""
+          INIT_ARGS = {}
+          KILLED = {}
+          GameInfo.Units[0].Index = 0
+          GameInfo.Units[0].UnitType = "UNIT_SWORDSMAN"
+          UnitManager.Kill = function(u)
+            table.insert(KILLED, u.id)
+            u.dead = true
+            local p = Players[u.owner]
+            for i, x in ipairs(p.units) do if x == u then table.remove(p.units, i) break end end
+          end
+          UnitManager.InitUnit = function(pid, typ, x, y)
+            table.insert(INIT_ARGS, typ)
+            if type(typ) ~= "number" then return nil end
+            for _, u in ipairs(Players[pid].units) do
+              if u.x == x and u.y == y and not u.dead then return nil end
+            end
+            local u = MkUnit(pid, 200, x, y, typ)
+            table.insert(Players[pid].units, u)
+            return u
+          end
+        """)
+        self.order(0, K=27, P=2, U=7, I=0, V=-1, S=210)
+        self.assertFalse(self.last()["ok"])
+        self.assertIn("upgrade cost is unknown", self.last()["reason"])
+        self.assertIsNotNone(self.rt.eval("Players[2]:GetUnits():FindID(7)"))
+        self.assertEqual(0, len(_vals(self.rt.eval("KILLED"))))
+
+        self.order(0, K=27, P=2, U=7, I=0, V=10, S=211)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertIn("upgraded=UNIT_SWORDSMAN", self.last()["reason"])
+        args = [int(value) for value in _vals(self.rt.eval("INIT_ARGS"))]
+        self.assertTrue(args)
+        self.assertTrue(all(value == 0 for value in args))
+        self.assertIsNone(self.rt.eval("Players[2]:GetUnits():FindID(7)"))
+        self.assertIsNotNone(self.rt.eval("Players[2]:GetUnits():FindID(200)"))
+
+    def test_corps_forms_while_the_partner_is_alive_and_leaves_both_when_it_cannot(self):
+        self.rt.execute(r"""
+          MilitaryFormationTypes = {
+            STANDARD_MILITARY_FORMATION = 0,
+            CORPS_MILITARY_FORMATION = 1,
+            ARMY_MILITARY_FORMATION = 2,
+          }
+          for _, u in ipairs(Players[2].units) do
+            u.formation = 0
+            function u:GetMilitaryFormation() return self.formation or 0 end
+            function u:SetMilitaryFormation(f)
+              local alive = false
+              for _, other in ipairs(Players[self.owner].units) do
+                if other.id ~= self.id and other.typ == self.typ and not other.dead then
+                  alive = true
+                end
+              end
+              if alive then self.formation = f end
+            end
+          end
+        """)
+        self.order(0, K=29, P=2, U=7, I=8, S=220)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertIn("formation=", self.last()["reason"])
+        self.assertEqual(1, int(self.rt.eval("Players[2]:GetUnits():FindID(7).formation")))
+        self.assertIsNone(self.rt.eval("Players[2]:GetUnits():FindID(8)"))
+
+        self.rt.execute(r"""
+          for _, u in ipairs(Players[2].units) do
+            function u:SetMilitaryFormation(f) end
+            u.formation = 0
+          end
+        """)
+        # Unit 8 is already gone. Use the other warrior-type neighbour? Unit 9 is type 1.
+        # Put a fresh same-type partner back and make formation a no-op.
+        self.rt.execute(r"""
+          local partner = MkUnit(2, 8, 11, 10, 0)
+          partner.formation = 0
+          function partner:GetMilitaryFormation() return self.formation or 0 end
+          function partner:SetMilitaryFormation(f) end
+          table.insert(Players[2].units, partner)
+          local lead = Players[2]:GetUnits():FindID(7)
+          function lead:SetMilitaryFormation(f) end
+          lead.formation = 0
+        """)
+        self.order(0, K=29, P=2, U=7, I=8, S=221)
+        self.assertFalse(self.last()["ok"], self.last())
+        self.assertIn("both units are unchanged", self.last()["reason"])
+        self.assertIsNotNone(self.rt.eval("Players[2]:GetUnits():FindID(7)"))
+        self.assertIsNotNone(self.rt.eval("Players[2]:GetUnits():FindID(8)"))
+
+    def test_spread_spends_a_charge_only_when_pressure_is_applied(self):
+        self.rt.execute(r"""
+          GameInfo.Units[0].ReligiousStrength = 80
+          GameInfo.Units[0].UnitType = "UNIT_MISSIONARY"
+          REL = { charges = 2, religion = 3 }
+          function REL:GetSpreadCharges() return self.charges end
+          function REL:GetReligionType() return self.religion end
+          function REL:ChangeSpreadCharges(n) self.charges = self.charges + n end
+          Players[2].units[1].GetReligion = function() return REL end
+          CITY = { got = nil }
+          function CITY:GetID() return 9 end
+          function CITY:GetReligion()
+            local me = self
+            return { AddReligiousPressure = function(_, owner, rtype, amount)
+              me.got = { owner = owner, rtype = rtype, amount = amount }
+            end }
+          end
+          Cities = { GetCityInPlot = function(x, y)
+            if x == 10 and y == 11 then return CITY end
+            return nil
+          end }
+        """)
+        self.order(0, K=35, P=2, U=7, X=10, Y=11, A=0, S=230)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertEqual(1, int(self.rt.eval("REL.charges")))
+        self.assertEqual(80, int(self.rt.eval("CITY.got.amount")))
+        self.rt.execute("GameInfo.Units[0].ReligiousStrength = 0")
+        self.order(0, K=35, P=2, U=7, X=10, Y=11, A=1, S=231)
+        self.assertFalse(self.last()["ok"])
+        self.assertIn("no charge was spent", self.last()["reason"])
+        self.assertEqual(1, int(self.rt.eval("REL.charges")))
 
 
 @unittest.skipIf(lupa is None, "lupa not installed")

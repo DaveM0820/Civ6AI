@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +41,11 @@ class Civ6AiLocalConfig:
     max_retries: int = 3
     vision: bool = True
     reasoning: str = "on"  # on|off only for LM Studio Qwen stacks
+    # OpenRouter effort. off|low|medium|high|xhigh. Empty derives from reasoning
+    # (on -> low, off -> off). Never sent to LM Studio as reasoning_effort=on.
+    reasoning_effort: str = ""
+    # Per-seat overrides: {"0": {"model": "...", "reasoning_effort": "high"}, ...}
+    seat_models: dict[str, Any] | None = None
     context_budget: bool = True
     queue_shared_model: bool = True
     # How many seat jobs may call the model at once. 0 = auto (1 for LM Studio,
@@ -110,6 +115,21 @@ def _read_json(path: Path) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
+REASONING_EFFORTS = ("off", "low", "medium", "high", "xhigh")
+
+
+def normalize_reasoning_effort(value: Any) -> str:
+    """OpenRouter effort. Legacy on/true maps to low, never the literal 'on'."""
+    text = str(value or "").strip().lower()
+    if text in {"", "none", "off", "minimal", "false", "0"}:
+        return "off"
+    if text in {"low", "medium", "high", "xhigh"}:
+        return text
+    if text in {"on", "true", "1"}:
+        return "low"
+    return "low"
+
+
 def normalize_reasoning(value: Any) -> str:
     """Map config/env to LM Studio-safe on|off (never reasoning_effort=on)."""
     text = str(value or "on").strip().lower()
@@ -118,6 +138,74 @@ def normalize_reasoning(value: Any) -> str:
     if text in {"on", "true", "1", "low", "medium", "high", "xhigh"}:
         return "on"
     return "on"
+
+
+def effective_reasoning_effort(cfg: Civ6AiLocalConfig) -> str:
+    raw = str(getattr(cfg, "reasoning_effort", "") or "").strip()
+    if raw:
+        return normalize_reasoning_effort(raw)
+    return normalize_reasoning_effort(getattr(cfg, "reasoning", "on"))
+
+
+def player_seat_index(player_id: Any) -> int | None:
+    text = str(player_id or "").strip()
+    upper = text.upper()
+    if upper.startswith("PLAYER_"):
+        text = text.split("_", 1)[1]
+    if text.isdigit():
+        return int(text)
+    return None
+
+
+def _seat_models(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key, row in raw.items():
+        if isinstance(row, dict):
+            out[str(key)] = row
+    return out
+
+
+def resolve_seat_runtime(cfg: Civ6AiLocalConfig, player_id: Any) -> tuple[str, str]:
+    """Model and effort for one seat.
+
+    Precedence: CIV6AI_MODEL_PLAYER_<n> / CIV6AI_REASONING_EFFORT_PLAYER_<n>,
+    then seat_models in the local json, then the shared model and effort.
+    """
+    model = cfg.model
+    effort = effective_reasoning_effort(cfg)
+    seat = player_seat_index(player_id)
+    seats = _seat_models(cfg.seat_models)
+    row = None
+    if seat is not None:
+        row = seats.get(str(seat)) or seats.get(f"PLAYER_{seat}")
+    if isinstance(row, dict):
+        named = str(row.get("model") or "").strip()
+        if named:
+            model = named
+        if str(row.get("reasoning_effort") or "").strip():
+            effort = normalize_reasoning_effort(row.get("reasoning_effort"))
+    if seat is not None:
+        env_model = os.environ.get(f"CIV6AI_MODEL_PLAYER_{seat}", "").strip()
+        if env_model:
+            model = env_model
+        env_effort = os.environ.get(f"CIV6AI_REASONING_EFFORT_PLAYER_{seat}", "").strip()
+        if env_effort:
+            effort = normalize_reasoning_effort(env_effort)
+    return model, effort
+
+
+def apply_seat_runtime(cfg: Civ6AiLocalConfig, snapshot: dict[str, Any] | None) -> Civ6AiLocalConfig:
+    """Copy cfg with this snapshot's seat model and effort applied."""
+    player_id = None
+    if isinstance(snapshot, dict):
+        decision = snapshot.get("decision")
+        if isinstance(decision, dict):
+            player_id = decision.get("player_id")
+    model, effort = resolve_seat_runtime(cfg, player_id)
+    reasoning = "off" if effort == "off" else "on"
+    return replace(cfg, model=model, reasoning=reasoning, reasoning_effort=effort)
 
 
 def load_local_config(
@@ -136,6 +224,8 @@ def load_local_config(
     kwargs = {k: v for k, v in data.items() if k in known}
     cfg = Civ6AiLocalConfig(**kwargs)
     cfg.reasoning = normalize_reasoning(cfg.reasoning)
+    cfg.seat_models = _seat_models(cfg.seat_models)
+    json_effort = data.get("reasoning_effort")
     cfg.timeout_seconds = max(30, int(cfg.timeout_seconds or LMSTUDIO_TIMEOUT_DEFAULT))
     cfg.max_retries = max(1, int(cfg.max_retries or 1))
     cfg.endpoint = str(cfg.endpoint or LMSTUDIO_BASE_DEFAULT).rstrip("/")
@@ -143,6 +233,11 @@ def load_local_config(
     cfg.provider = str(cfg.provider or "lmstudio").strip().lower()
 
     if not apply_env:
+        if json_effort is not None and str(json_effort).strip() != "":
+            cfg.reasoning_effort = normalize_reasoning_effort(json_effort)
+        else:
+            cfg.reasoning_effort = normalize_reasoning_effort(cfg.reasoning)
+        cfg.reasoning = "off" if cfg.reasoning_effort == "off" else "on"
         _apply_provider_defaults(cfg)
         return cfg
 
@@ -172,9 +267,20 @@ def load_local_config(
         "CIV4AI_LMSTUDIO_REASONING",
         "CIV6AI_LMSTUDIO_REASONING_EFFORT",
         "CIV4AI_LMSTUDIO_REASONING_EFFORT",
-        default=cfg.reasoning,
+        default="",
     )
-    cfg.reasoning = normalize_reasoning(reasoning_raw)
+    if reasoning_raw:
+        cfg.reasoning = normalize_reasoning(reasoning_raw)
+    effort_raw = _env_first("CIV6AI_REASONING_EFFORT", default="")
+    if effort_raw:
+        cfg.reasoning_effort = normalize_reasoning_effort(effort_raw)
+    elif reasoning_raw:
+        cfg.reasoning_effort = normalize_reasoning_effort(cfg.reasoning)
+    elif json_effort is not None and str(json_effort).strip() != "":
+        cfg.reasoning_effort = normalize_reasoning_effort(json_effort)
+    else:
+        cfg.reasoning_effort = normalize_reasoning_effort(cfg.reasoning)
+    cfg.reasoning = "off" if cfg.reasoning_effort == "off" else "on"
     cfg.context_budget = _env_bool("CIV6AI_CONTEXT_BUDGET", default=cfg.context_budget)
     cfg.queue_shared_model = _env_bool("CIV6AI_QUEUE_SHARED_MODEL", default=cfg.queue_shared_model)
     cfg.timeout_seconds = max(30, int(cfg.timeout_seconds))
@@ -217,9 +323,14 @@ def apply_config_to_environ(cfg: Civ6AiLocalConfig) -> None:
     os.environ["CIV4AI_LMSTUDIO_VISION"] = "1" if cfg.vision else "0"
     os.environ["CIV6AI_LMSTUDIO_REASONING"] = cfg.reasoning
     os.environ["CIV4AI_LMSTUDIO_REASONING"] = "1" if cfg.reasoning == "on" else "0"
-    # Never leave a legacy "on" effort string that LM Studio would reject.
+    # LM Studio only accepts on|off. Never write the literal "on" into the
+    # OpenAI effort variable (it rejects reasoning_effort=on).
     os.environ["CIV6AI_LMSTUDIO_REASONING_EFFORT"] = cfg.reasoning
     os.environ["CIV4AI_LMSTUDIO_REASONING_EFFORT"] = cfg.reasoning
+    effort = effective_reasoning_effort(cfg)
+    os.environ["CIV6AI_REASONING_EFFORT"] = effort
+    openai_effort = {"low": "low", "medium": "medium", "high": "high", "xhigh": "high"}.get(effort, "low")
+    os.environ["CIV4AI_OPENAI_REASONING_EFFORT"] = openai_effort
     os.environ["CIV6AI_CONTEXT_BUDGET"] = "1" if cfg.context_budget else "0"
     os.environ["CIV6AI_QUEUE_SHARED_MODEL"] = "1" if cfg.queue_shared_model else "0"
     os.environ["CIV6AI_PARALLEL_SEATS"] = str(cfg.effective_parallel_seats)

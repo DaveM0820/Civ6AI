@@ -1766,20 +1766,17 @@ def render_civ6_map_png(
         used_base_cache = True
 
     if show_axis and not used_base_cache:
+        # Odd rows are shifted half a hex east. Drawing the same column number
+        # on both parities printed every x label twice, half a hex apart.
+        # One label, on the unshifted (even) column center.
         y_even = y0 - (y0 & 1)
-        y_odd = y_even + 1
-        even_label_y = max(2, axis_font // 2 + 1)
-        odd_label_y = axis_gutter - max(2, axis_font // 2 + 1)
+        label_y = max(2, axis_font // 2 + 1)
         for vx in range(vw):
             wx = x0 + vx
-            cx_even, _, _, _ = _odd_r_cell_center(
+            cx, _, _, _ = _odd_r_cell_center(
                 wx, y_even, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
             )
-            cx_odd, _, _, _ = _odd_r_cell_center(
-                wx, y_odd, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
-            )
-            draw.text((cx_even, even_label_y), str(wx), fill="#9a9a9a", font=axis_label_font, anchor="mm")
-            draw.text((cx_odd, odd_label_y), str(wx), fill="#d0d0d0", font=axis_label_font, anchor="mm")
+            draw.text((cx, label_y), str(wx), fill="#9a9a9a", font=axis_label_font, anchor="mm")
         for vy in range(vh):
             wy = y0 + vy
             _, cy, _, _ = _odd_r_cell_center(x0, y0 + vy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)

@@ -165,8 +165,24 @@ function Civ6Ai_Snapshot._CurrentCivic(playerID)
     local cost = culture:GetCultureCost(idx) or 0
     result.progress = math.floor(progress)
     local rate = Players[playerID]:GetCulture():GetCultureYield() or 0
-    if rate > 0 and cost > progress then
-      result.turns_left = math.ceil((cost - progress) / rate)
+    local turnsLeft = nil
+    if culture.GetTurnsLeft ~= nil then
+      local okT, t = pcall(function() return culture:GetTurnsLeft() end)
+      if okT and type(t) == "number" and t >= 0 then
+        turnsLeft = math.floor(t)
+      end
+    end
+    if turnsLeft == nil and culture.GetTurnsToProgressCivic ~= nil then
+      local okT, t = pcall(function() return culture:GetTurnsToProgressCivic(idx) end)
+      if okT and type(t) == "number" and t >= 0 then
+        turnsLeft = math.floor(t)
+      end
+    end
+    if turnsLeft == nil and rate > 0 and cost > progress then
+      turnsLeft = math.ceil((cost - progress) / rate)
+    end
+    if turnsLeft ~= nil then
+      result.turns_left = turnsLeft
     end
   end)
   if not ok then
@@ -932,13 +948,33 @@ function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
   }
   if techs ~= nil then
     local idx = techs:GetResearchingTech()
-    research.research_per_turn = Civ6Ai_Snapshot._Int(techs:GetScienceYield())
+    local rawYield = techs:GetScienceYield() or 0
+    research.research_per_turn = Civ6Ai_Snapshot._Int(rawYield)
     if idx ~= nil and idx >= 0 then
       research.progress = Civ6Ai_Snapshot._Int(techs:GetResearchProgress(idx))
       research.cost = Civ6Ai_Snapshot._Int(techs:GetResearchCost(idx))
       local remaining = research.cost - research.progress
-      if research.research_per_turn > 0 and remaining > 0 then
-        research.estimated_turns_remaining = math.ceil(remaining / research.research_per_turn)
+      -- The same engine call the tech panel uses. Ceil of the floored
+      -- per-turn yield is one turn high whenever the fractional science
+      -- would finish sooner (STEEL 7 in one place and 6 in the other).
+      local turnsLeft = nil
+      if techs.GetTurnsLeft ~= nil then
+        local okT, t = pcall(function() return techs:GetTurnsLeft() end)
+        if okT and type(t) == "number" and t >= 0 then
+          turnsLeft = math.floor(t)
+        end
+      end
+      if turnsLeft == nil and techs.GetTurnsToResearch ~= nil then
+        local okT, t = pcall(function() return techs:GetTurnsToResearch(idx) end)
+        if okT and type(t) == "number" and t >= 0 then
+          turnsLeft = math.floor(t)
+        end
+      end
+      if turnsLeft == nil and rawYield > 0 and remaining > 0 then
+        turnsLeft = math.ceil(remaining / rawYield)
+      end
+      if turnsLeft ~= nil then
+        research.estimated_turns_remaining = turnsLeft
       end
     end
   end
@@ -2188,6 +2224,7 @@ Civ6Ai_Snapshot.KIND_NAMES = {
   [20] = "purchase_tile", [21] = "worker_improve", [22] = "pillage_improvement",
   [24] = "trade_route", [25] = "explore", [26] = "activate_great_person",
   [27] = "upgrade_unit", [28] = "promote_unit", [29] = "join_formation", [31] = "city_attack", [32] = "build_fort",
+  [35] = "spread_religion",
 }
 
 Civ6Ai_Snapshot.INTENT_NAMES = {
@@ -2343,6 +2380,42 @@ function Civ6Ai_Snapshot._AddSettleFacts(unit)
     end
     return a.y < b.y
   end)
+  local embark = nil
+  if #sites == 0 then
+    local unitArea = Civ6Ai_Snapshot._AreaId(herePlot)
+    local best = nil
+    local radius = 12
+    for dy = -radius, radius do
+      for dx = -radius, radius do
+        local tx, ty = x + dx, y + dy
+        local dist = Map.GetPlotDistance ~= nil and Map.GetPlotDistance(x, y, tx, ty) or (math.abs(dx) + math.abs(dy))
+        if dist >= 1 and dist <= radius and (best == nil or dist < best.dist) then
+          local plot = Map.GetPlot(tx, ty)
+          if plot ~= nil and Civ6Ai_Snapshot._PlotCitySiteProblem(playerID, tx, ty) == nil then
+            local revealed = true
+            if vis ~= nil and vis.IsRevealed ~= nil then
+              local okRev, isRev = pcall(function() return vis:IsRevealed(plot:GetIndex()) end)
+              revealed = (not okRev) or isRev == true
+            end
+            local plotArea = Civ6Ai_Snapshot._AreaId(plot)
+            if revealed and unitArea ~= nil and plotArea ~= nil and plotArea ~= unitArea then
+              best = { x = tx, y = ty, dist = dist }
+            end
+          end
+        end
+      end
+    end
+    if best ~= nil then
+      local techs = Players[playerID] ~= nil and Players[playerID].GetTechs ~= nil and Players[playerID]:GetTechs() or nil
+      local function known(name)
+        local row = GameInfo.Technologies ~= nil and GameInfo.Technologies[name] or nil
+        return row ~= nil and techs ~= nil and techs.HasTech ~= nil and techs:HasTech(row.Index) == true
+      end
+      best.can_embark = known("TECH_SHIPBUILDING")
+      best.can_ocean = known("TECH_CARTOGRAPHY")
+      embark = best
+    end
+  end
   return {
     here_ok = hereOk == true,
     here_reason = hereReason,
@@ -2350,6 +2423,7 @@ function Civ6Ai_Snapshot._AddSettleFacts(unit)
     fresh_water = Civ6Ai_Snapshot._PlotFreshWater(herePlot),
     sites = sites,
     no_reachable_site = #sites == 0,
+    embark_site = embark,
   }
 end
 
@@ -2508,6 +2582,22 @@ end
 function Civ6Ai_Snapshot._UnitPromotionReady(unit)
   if unit == nil then
     return false
+  end
+  -- CanPromote lives on the experience object. The unit itself has neither
+  -- IsPromotionReady nor CanPromote, so checking those never offered a promotion.
+  local exp = Civ6Ai_Snapshot._Method(unit, "GetExperience")
+  if exp ~= nil and exp.CanPromote ~= nil then
+    local ok, can = pcall(function() return exp:CanPromote() end)
+    if ok then
+      return can == true
+    end
+  end
+  if exp ~= nil and exp.GetExperiencePoints ~= nil and exp.GetExperienceForNextLevel ~= nil then
+    local okPts, pts = pcall(function() return exp:GetExperiencePoints() end)
+    local okNeed, need = pcall(function() return exp:GetExperienceForNextLevel() end)
+    if okPts and okNeed and type(pts) == "number" and type(need) == "number" and need > 0 and pts >= need then
+      return true
+    end
   end
   if unit.IsPromotionReady ~= nil then
     return unit:IsPromotionReady() == true
@@ -2916,6 +3006,21 @@ function Civ6Ai_Snapshot._HostileTargets(playerID)
   return targets
 end
 
+-- AI seats and the single-player local seat execute attacks with the gameplay
+-- resolver, which matches these distance offers. A network game's local seat
+-- uses the UI operation instead, so only list a strike that operation can start.
+function Civ6Ai_Snapshot._AttackCanExecute(playerID, unit, x, y)
+  local mp = GameConfiguration ~= nil and GameConfiguration.IsNetworkMultiplayer ~= nil
+    and GameConfiguration.IsNetworkMultiplayer()
+  if not mp or Game == nil or Game.GetLocalPlayer == nil or Game.GetLocalPlayer() ~= playerID then
+    return true
+  end
+  if Civ6Ai_Apply == nil or Civ6Ai_Apply._AttackPlan == nil then
+    return true
+  end
+  return Civ6Ai_Apply._AttackPlan(unit, x, y) ~= nil
+end
+
 function Civ6Ai_Snapshot._OfferAttack(commands, seen, unitId, tx, ty, kind, ranged)
   local key = tostring(tx) .. "," .. tostring(ty)
   if seen[key] then
@@ -2943,7 +3048,8 @@ function Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
   local seen = {}
   for _, target in ipairs(Civ6Ai_Snapshot._HostileTargets(playerID)) do
     local dist = Civ6Ai_Snapshot._Dist(x, y, target.x, target.y)
-    if dist >= 1 and dist <= reach then
+    if dist >= 1 and dist <= reach
+        and Civ6Ai_Snapshot._AttackCanExecute(playerID, unit, target.x, target.y) then
       Civ6Ai_Snapshot._OfferAttack(commands, seen, unitId, target.x, target.y, target.who, ranged)
     end
   end
@@ -2959,7 +3065,8 @@ function Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
   end
   for _, plot in ipairs(plots) do
     local tx, ty = plot:GetX(), plot:GetY()
-    if not (tx == x and ty == y) and Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot) ~= nil then
+    if not (tx == x and ty == y) and Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot) ~= nil
+        and Civ6Ai_Snapshot._AttackCanExecute(playerID, unit, tx, ty) then
       Civ6Ai_Snapshot._OfferAttack(commands, seen, unitId, tx, ty, Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot), ranged)
     end
   end
@@ -3027,7 +3134,8 @@ function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId
     local ok, mgr = pcall(function() return Game.GetTradeManager() end)
     if ok then tm = mgr end
   end
-  if tm == nil or tm.CanStartRoute == nil then
+  local canStart = tm ~= nil and (tm.CanStartRoute or tm.CanCreateTradeRoute) or nil
+  if tm == nil or canStart == nil then
     Civ6Ai_Util.Log("snapshot|trade_api_missing|CanStartRoute")
     return
   end
@@ -3043,21 +3151,18 @@ function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId
       for _, city in cities:Members() do
         if added >= 8 then break end
         local ok, can = pcall(function()
-          return tm:CanStartRoute(origin:GetOwner(), origin:GetID(), city:GetOwner(), city:GetID())
+          return canStart(tm, origin:GetOwner(), origin:GetID(), city:GetOwner(), city:GetID())
         end)
         if ok and can == true then
           table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
             command_id = "CMD_trade_" .. unitId .. "_" .. tostring(city:GetOwner()) .. "_" .. tostring(city:GetID()),
-            kind = "move_unit",
+            kind = "trade_route",
             fixed_arguments = {
               unit_id = unitId,
+              -- Full GetID(). CITY_owner_index would parse as the owner.
               city_id = "CITY_" .. tostring(city:GetID()),
               target_x = city:GetX(),
               target_y = city:GetY(),
-              G = 1,
-              A = 4,
-              goal = 1,
-              intent = "trade",
             },
           }))
           added = added + 1
@@ -3145,8 +3250,13 @@ function Civ6Ai_Snapshot._AddProgressionCommands(commands, playerID, unit, unitI
   local function civic(name) local c = GameInfo.Civics[name]; return c ~= nil and M(M(p, "GetCulture"), "HasCivic", c.Index) == true end
   local form = F ~= nil and M(unit, "GetMilitaryFormation") or nil
   local sea = row.Domain == "DOMAIN_SEA"
-  local can = (form == F.STANDARD_MILITARY_FORMATION and civic(sea and "CIVIC_MERCANTILISM" or "CIVIC_NATIONALISM"))
-    or (form == F.CORPS_MILITARY_FORMATION and civic(sea and "CIVIC_NATIONALISM" or "CIVIC_MOBILIZATION"))
+  -- Indexing F when the formation table is missing throws and drops the fort
+  -- offer that follows, even though the promotion was already inserted.
+  local can = false
+  if F ~= nil then
+    can = (form == F.STANDARD_MILITARY_FORMATION and civic(sea and "CIVIC_MERCANTILISM" or "CIVIC_NATIONALISM"))
+      or (form == F.CORPS_MILITARY_FORMATION and civic(sea and "CIVIC_NATIONALISM" or "CIVIC_MOBILIZATION"))
+  end
   if can and row.FormationClass ~= "FORMATION_CLASS_CIVILIAN" and row.FormationClass ~= "FORMATION_CLASS_SUPPORT" then
     for _, other in ipairs(Civ6Ai_Snapshot._IterateUnits(p:GetUnits())) do
       if other:GetID() ~= unit:GetID() and other:GetType() == unit:GetType()
@@ -3351,11 +3461,153 @@ function Civ6Ai_Snapshot._AddCityStrikeCommands(commands, playerID)
   end
 end
 
+-- Missionary and apostle: SpreadReligion on an adjacent city when the unit
+-- still has charges and a religious strength. Guru: HealReligious on an
+-- adjacent friendly unit when the database publishes a heal amount.
+-- CanStartOperation is a local-player check and is not used.
+function Civ6Ai_Snapshot._ReligiousHealAmount(row)
+  local amount = tonumber(row and row.ReligiousStrength) or 0
+  if amount > 0 then
+    return amount
+  end
+  if GameInfo == nil or GameInfo.GlobalParameters == nil then
+    return 0
+  end
+  local found = 0
+  pcall(function()
+    for param in GameInfo.GlobalParameters() do
+      local name = tostring(param.Name or "")
+      if string.find(name, "HEAL", 1, true) and string.find(name, "RELIG", 1, true) then
+        local n = tonumber(param.Value) or 0
+        if n > 0 then
+          found = n
+          return
+        end
+      end
+    end
+  end)
+  return found
+end
+
+function Civ6Ai_Snapshot._AddReligionCommands(commands, playerID, unit, unitId)
+  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+  if row == nil or row.UnitType == nil then
+    return
+  end
+  local rel = Civ6Ai_Snapshot._Method(unit, "GetReligion")
+  local charges = Civ6Ai_Snapshot._Method(rel, "GetSpreadCharges")
+  if type(charges) ~= "number" or charges <= 0 then
+    return
+  end
+  local ux, uy = unit:GetX(), unit:GetY()
+  local added = 0
+  if row.UnitType == "UNIT_MISSIONARY" or row.UnitType == "UNIT_APOSTLE" then
+    local religion = Civ6Ai_Snapshot._Method(rel, "GetReligionType")
+    local pressure = tonumber(row.ReligiousStrength) or 0
+    if type(religion) ~= "number" or religion < 0 or pressure <= 0 then
+      return
+    end
+    for pid = 0, 63 do
+      if added >= 6 then break end
+      local other = Players[pid]
+      local cities = other ~= nil and other.GetCities ~= nil and other:GetCities() or nil
+      if cities ~= nil and cities.Members ~= nil then
+        for _, city in cities:Members() do
+          if added >= 6 then break end
+          local dist = Map.GetPlotDistance ~= nil and Map.GetPlotDistance(ux, uy, city:GetX(), city:GetY()) or 99
+          if dist <= 1 then
+            table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+              command_id = "CMD_spread_" .. unitId .. "_" .. tostring(city:GetOwner()) .. "_" .. tostring(city:GetID()),
+              kind = "spread_religion",
+              fixed_arguments = {
+                unit_id = unitId, target_x = city:GetX(), target_y = city:GetY(), action = "spread",
+              },
+            }))
+            added = added + 1
+          end
+        end
+      end
+    end
+    return
+  end
+  if row.UnitType ~= "UNIT_GURU" or Civ6Ai_Snapshot._ReligiousHealAmount(row) <= 0 then
+    return
+  end
+  if Units == nil or Units.GetUnitsInPlot == nil or Map.GetNeighborPlots == nil then
+    return
+  end
+  local plots = { Map.GetPlot(ux, uy) }
+  for _, plot in ipairs(Map.GetNeighborPlots(ux, uy, 1) or {}) do
+    plots[#plots + 1] = plot
+  end
+  for _, plot in ipairs(plots) do
+    if added >= 4 then break end
+    local okL, list = pcall(function() return Units.GetUnitsInPlot(plot) end)
+    if okL and list ~= nil then
+      for _, other in ipairs(list) do
+        if other ~= nil and other.GetOwner ~= nil and other:GetOwner() == playerID and other:GetID() ~= unit:GetID() then
+          table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+            command_id = "CMD_healrel_" .. unitId .. "_" .. tostring(plot:GetX()) .. "_" .. tostring(plot:GetY()),
+            kind = "spread_religion",
+            fixed_arguments = {
+              unit_id = unitId, target_x = plot:GetX(), target_y = plot:GetY(), action = "heal",
+            },
+          }))
+          added = added + 1
+          break
+        end
+      end
+    end
+  end
+end
+
 function Civ6Ai_Snapshot._AddExploreCommand(commands, unit, unitId)
   local row = GameInfo.Units[unit:GetType()]
   if row ~= nil and row.FormationClass ~= "FORMATION_CLASS_CIVILIAN" and Civ6Ai_Snapshot._UnitMoves(unit) > 0 then
     table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({command_id = "CMD_explore_" .. unitId, kind = "explore", fixed_arguments = {unit_id = unitId}}))
   end
+end
+
+-- Great person activation is legal on the district that class uses, not via
+-- UnitManager.CanStartCommand (that check is false for every AI seat).
+Civ6Ai_Snapshot.GP_DISTRICT = {
+  GREAT_PERSON_CLASS_SCIENTIST = { "DISTRICT_CAMPUS" },
+  GREAT_PERSON_CLASS_WRITER = { "DISTRICT_THEATER" },
+  GREAT_PERSON_CLASS_ARTIST = { "DISTRICT_THEATER" },
+  GREAT_PERSON_CLASS_MUSICIAN = { "DISTRICT_THEATER" },
+  GREAT_PERSON_CLASS_MERCHANT = { "DISTRICT_COMMERCIAL_HUB", "DISTRICT_HARBOR" },
+  GREAT_PERSON_CLASS_ENGINEER = { "DISTRICT_INDUSTRIAL_ZONE" },
+  GREAT_PERSON_CLASS_PROPHET = { "DISTRICT_HOLY_SITE" },
+}
+
+function Civ6Ai_Snapshot._DistrictWithin(playerID, unit, names, maxDist)
+  local want = {}
+  for _, name in ipairs(names or {}) do want[name] = true end
+  local ux, uy = unit:GetX(), unit:GetY()
+  local player = Players[playerID]
+  local cities = player ~= nil and player.GetCities ~= nil and player:GetCities() or nil
+  if cities == nil or cities.Members == nil then
+    return false
+  end
+  local found = false
+  pcall(function()
+    for _, city in cities:Members() do
+      local districts = city.GetDistricts ~= nil and city:GetDistricts() or nil
+      if districts ~= nil and districts.Members ~= nil then
+        for _, district in districts:Members() do
+          local dRow = GameInfo.Districts[district:GetType()]
+          if dRow ~= nil and want[dRow.DistrictType] and district.GetX ~= nil then
+            local dist = Map.GetPlotDistance(ux, uy, district:GetX(), district:GetY())
+            if dist <= maxDist then
+              found = true
+              return
+            end
+          end
+        end
+      end
+    end
+  end)
+  return found
 end
 
 function Civ6Ai_Snapshot._AddActivateCommand(commands, playerID, unit, unitId)
@@ -3372,18 +3624,24 @@ function Civ6Ai_Snapshot._AddActivateCommand(commands, playerID, unit, unitId)
   if not isGP then
     return
   end
-  local cmdRow = GameInfo.UnitCommands ~= nil and GameInfo.UnitCommands["UNITCOMMAND_ACTIVATE_GREAT_PERSON"] or nil
-  local cmd = cmdRow ~= nil and cmdRow.Hash or nil
-  local canAct = false
-  if cmd ~= nil and UnitManager ~= nil and UnitManager.CanStartCommand ~= nil then
-    local ok, can = pcall(function() return UnitManager.CanStartCommand(unit, cmd) end)
-    canAct = ok and can == true
-  else
-    Civ6Ai_Util.Log("snapshot|activate_api_missing")
+  local class = row.GreatPersonClassType
+  local passive = class == "GREAT_PERSON_CLASS_GENERAL" or class == "GREAT_PERSON_CLASS_ADMIRAL"
+  local sites = Civ6Ai_Snapshot.GP_DISTRICT[class]
+  -- A prophet founds a religion by moving onto a holy site (offered below),
+  -- not by the generic activate command.
+  if not passive and class ~= "GREAT_PERSON_CLASS_PROPHET" and sites ~= nil
+      and Civ6Ai_Snapshot._DistrictWithin(playerID, unit, sites, 0) then
+    table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+      command_id = "CMD_activate_" .. unitId,
+      kind = "activate_great_person",
+      fixed_arguments = {unit_id = unitId},
+    }))
   end
-  if canAct then
-    table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({command_id = "CMD_activate_" .. unitId, kind = "activate_great_person", fixed_arguments = {unit_id = unitId}}))
-  end
+  table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+    command_id = "CMD_retire_" .. unitId,
+    kind = "activate_great_person",
+    fixed_arguments = {unit_id = unitId, retire = 1},
+  }))
   local isProphet = row.UnitType == "UNIT_GREAT_PROPHET"
     or (row.GreatPersonClassType == "GREAT_PERSON_CLASS_PROPHET")
   if isProphet then
@@ -3954,14 +4212,24 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
         local okB, whyB = pcall(Civ6Ai_Snapshot._AddBuilderImproveCommands, commands, playerID, unit, unitId)
         if not okB then Civ6Ai_Util.Log("snapshot|improve_error|" .. tostring(whyB)) end
         pcall(Civ6Ai_Snapshot._AddActivateCommand, commands, playerID, unit, unitId)
+        pcall(Civ6Ai_Snapshot._AddReligionCommands, commands, playerID, unit, unitId)
         local okP, whyP = pcall(Civ6Ai_Snapshot._AddProgressionCommands, commands, playerID, unit, unitId)
         if not okP then Civ6Ai_Util.Log("snapshot|progression_error|" .. tostring(whyP)) end
       end
     end
   end
   if player ~= nil then
-    local okS, whyS = pcall(Civ6Ai_Snapshot._AddCityStrikeCommands, commands, playerID)
-    if not okS then Civ6Ai_Util.Log("snapshot|city_strike_error|" .. tostring(whyS)) end
+    -- Unit move and improve offers fill the legal-command cap and used to
+    -- drop every city strike. Strikes are few and go in front.
+    local strikes = {}
+    local okS, whyS = pcall(Civ6Ai_Snapshot._AddCityStrikeCommands, strikes, playerID)
+    if not okS then
+      Civ6Ai_Util.Log("snapshot|city_strike_error|" .. tostring(whyS))
+    else
+      for i = #strikes, 1, -1 do
+        table.insert(commands, 1, strikes[i])
+      end
+    end
   end
   local techs = player and player:GetTechs()
   local rt = techs ~= nil and techs:GetResearchingTech() or -1

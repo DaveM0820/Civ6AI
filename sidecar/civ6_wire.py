@@ -32,7 +32,11 @@ CIV6_HUMAN_SEAT_POLICY = (
 
 
 def prune_settlers_without_sites(snapshot: dict[str, Any]) -> int:
-    """Settlers already cover every legal city site: drop settler production, note why."""
+    """Drop extra settler production when walkable sites are fewer than settlers.
+
+    Zero walkable sites is not "settlers already cover every site". That case
+    is a blocked settler (often an embark away from the next legal tile).
+    """
     settlers = [u for u in snapshot.get("your_units") or [] if isinstance(u, dict) and u.get("unit_type_id") == "UNIT_SETTLER"]
     sites: set[tuple[Any, Any]] = set()
     for u in settlers:
@@ -46,12 +50,22 @@ def prune_settlers_without_sites(snapshot: dict[str, Any]) -> int:
     keep = [c for c in legal if not (isinstance(c, dict) and c.get("kind") == "queue_production"
                                      and (c.get("fixed_arguments") or {}).get("build_id") == "UNIT_SETTLER")]
     snapshot["legal_commands"] = keep
-    snapshot["_no_city_sites"] = len(settlers)
+    if len(sites) == 0:
+        snapshot["_settlers_no_walkable_site"] = len(settlers)
+    else:
+        snapshot["_no_city_sites"] = len(settlers)
     return len(legal) - len(keep)
 
 
 def no_city_sites_lines(context: dict[str, Any]) -> list[str]:
-    n = context.get("_no_city_sites") if isinstance(context, dict) else None
+    if not isinstance(context, dict):
+        return []
+    blocked = context.get("_settlers_no_walkable_site")
+    if blocked:
+        return [f"No walkable city site is in range of your {blocked} settler(s). "
+                "See settle.nearby for the nearest legal tile, including one that needs embarking. "
+                "Build no more settlers until a site is reachable."]
+    n = context.get("_no_city_sites")
     if not n:
         return []
     return [f"No reachable city sites left: your {n} settler(s) already cover every legal site. "
@@ -477,7 +491,13 @@ def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None
         pipeline._append_int_wire(lines, "empire.research.tech.progress", research.get("progress"))
         pipeline._append_int_wire(lines, "empire.research.tech.cost", research.get("cost"))
         pipeline._append_int_wire(lines, "empire.research.tech.per_turn", research.get("research_per_turn"))
-        pipeline._append_int_wire(lines, "empire.research.tech.turns_left", research.get("estimated_turns_remaining"))
+        # Governance already asked the engine (GetTurnsLeft). The empire field
+        # is a separate ceil and used to disagree by a turn.
+        gov_techs = ((snapshot.get("civ6") or {}).get("governance") or {}).get("techs") if isinstance(snapshot.get("civ6"), dict) else None
+        turns_left = research.get("estimated_turns_remaining")
+        if isinstance(gov_techs, dict) and gov_techs.get("current") == research.get("tech_id") and isinstance(gov_techs.get("turns_left"), int):
+            turns_left = gov_techs["turns_left"]
+        pipeline._append_int_wire(lines, "empire.research.tech.turns_left", turns_left)
         lines.append(pipeline._wire_line("empire.techs.known", ", ".join(research.get("known_tech_ids") or []) or "none"))
     known_civics = [c.get("id") for c in empire.get("civics") or [] if isinstance(c, dict) and c.get("id")]
     lines.append(pipeline._wire_line("empire.civics.known", ", ".join(known_civics) or "none"))
@@ -485,7 +505,11 @@ def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None
     if civic.get("civic_id"):
         pipeline._append_id_wire(lines, "empire.research.civic", civic.get("civic_id"))
         pipeline._append_int_wire(lines, "empire.research.civic.progress", civic.get("progress"))
-        pipeline._append_int_wire(lines, "empire.research.civic.turns_left", civic.get("turns_left"))
+        gov_civics = ((snapshot.get("civ6") or {}).get("governance") or {}).get("civics") if isinstance(snapshot.get("civ6"), dict) else None
+        civic_turns = civic.get("turns_left")
+        if isinstance(gov_civics, dict) and gov_civics.get("current") == civic.get("civic_id") and isinstance(gov_civics.get("turns_left"), int):
+            civic_turns = gov_civics["turns_left"]
+        pipeline._append_int_wire(lines, "empire.research.civic.turns_left", civic_turns)
     government_id = _civ6_block(snapshot).get("government_id")
     if isinstance(government_id, str) and government_id.strip():
         pipeline._append_id_wire(lines, "empire.government", government_id)
@@ -1135,8 +1159,6 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
                 lines.append("")
             if lines[-1] == "":
                 lines.pop()
-        if coaching.settler_present(context):
-            lines.append(f"# Settle: {coaching.CIV6_SETTLER_MAP_ADVICE}")
     return lines
 
 
@@ -1622,11 +1644,16 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
 
 
 def _advice_section(context: dict[str, Any]) -> list[str]:
-    if combat_wire.war_active(context):
+    if combat_wire.war_active(context) and combat_wire.enemies_within_their_reach(context):
         opening = (
-            "- You are at war. Ignore peacetime explore-and-fortify advice. Use the WAR section: "
+            "- You are at war and an enemy is within move range. Use the WAR section: "
             "strike enemies in range, garrison threatened cities, and build walls or military units "
             "where the city threat table shows an enemy within its move range."
+        )
+    elif combat_wire.war_active(context):
+        opening = (
+            "- You are at war, but no enemy unit is within move range of your army or cities. "
+            "Do not strike or mass units for an assault this turn. Garrison and build as usual."
         )
     else:
         opening = (

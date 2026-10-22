@@ -65,6 +65,42 @@ class WarReviewTests(unittest.TestCase):
         ctx["civ6"]["combat"]["hostiles"][0]["max_moves"] = 2
         text = "\n".join(combat.war_section_lines(ctx))
         self.assertIn("No enemy is within reach of your military this turn.", text)
+        self.assertIn("no enemy is within move range", text)
+        self.assertNotIn("enemies within their move range", text)
+        tactics = "\n".join(combat.tactics_advice_lines(ctx))
+        self.assertNotIn("Mass 3+", tactics)
+        self.assertIn("do not mass units", tactics)
+        advice = "\n".join(civ6_wire._advice_section(ctx))
+        self.assertIn("no enemy unit is within move range", advice)
+        self.assertNotIn("Mass 3+", advice)
+
+    def test_civilian_and_city_strike_tokens(self):
+        self.assertEqual("SpreadReligion(4,5)", command_wire.unit_command_token({
+            "kind": "spread_religion", "fixed_arguments": {"target_x": 4, "target_y": 5, "action": "spread"},
+        }))
+        self.assertEqual("HealReligious(4,5)", command_wire.unit_command_token({
+            "kind": "spread_religion", "fixed_arguments": {"target_x": 4, "target_y": 5, "action": "heal"},
+        }))
+        self.assertEqual("Retire", command_wire.unit_command_token({
+            "kind": "activate_great_person", "fixed_arguments": {"retire": 1},
+        }))
+        self.assertEqual("Activate", command_wire.unit_command_token({
+            "kind": "activate_great_person", "fixed_arguments": {},
+        }))
+        self.assertEqual("TradeRoute(8,9)", command_wire.unit_command_token({
+            "kind": "trade_route", "fixed_arguments": {"target_x": 8, "target_y": 9, "city_id": "CITY_131072"},
+        }))
+        self.assertEqual("FormCorps", command_wire.unit_command_token({
+            "kind": "join_formation", "fixed_arguments": {},
+        }))
+        self.assertEqual("Promote(PROMOTION_BATTLECRY)", command_wire.unit_command_token({
+            "kind": "promote_unit", "fixed_arguments": {"promotion_id": "PROMOTION_BATTLECRY"},
+        }))
+        prop, value = command_wire.city_command_token({
+            "kind": "city_attack", "fixed_arguments": {"target_x": 12, "target_y": 10},
+        })
+        self.assertEqual("rangeStrike", prop)
+        self.assertEqual("(12,10)", value)
 
     def test_empty_queue_is_an_attention_item_and_not_filled(self):
         ctx = _war_context()
