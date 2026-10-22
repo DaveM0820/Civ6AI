@@ -347,7 +347,7 @@ def _strike_sort_key(row: dict[str, Any]) -> tuple[int, int, int]:
 
 
 def capture_lines(context: dict[str, Any]) -> list[str]:
-    """Melee captures of 0-strength civilians, listed apart from combat strikes."""
+    """Melee captures: 0-strength civilians, and enemy cities already at 0 HP."""
     wire_ids = _wire_ids(context)
     lines: list[str] = []
     for row in _rows(_combat(context), "previews"):
@@ -362,6 +362,18 @@ def capture_lines(context: dict[str, Any]) -> list[str]:
         lines.append(pipeline._wire_line(
             "war.capture",
             f"{name} can capture {who} at ({x},{y}){extra}",
+        ))
+    for city in _rows(_combat(context), "hostile_cities"):
+        hp, max_hp = _int(city.get("hp")), _int(city.get("max_hp"))
+        if hp != 0 or not max_hp:
+            continue
+        x, y = _int(city.get("x")), _int(city.get("y"))
+        if x is None or y is None:
+            continue
+        name = str(city.get("name") or "city")
+        lines.append(pipeline._wire_line(
+            "war.capture",
+            f"{name}: capture with a melee unit adjacent at ({x},{y})",
         ))
     return lines
 

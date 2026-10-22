@@ -822,12 +822,11 @@ function Civ6Ai_Orders._DoCommand(sender, o)
   return false, "unknown_kind"
 end
 
--- An AI seat's attack, melee or ranged. The fight is the engine's own unit
--- operation (RANGE_ATTACK, or MOVE_TO with the attack modifier), checked with
--- CanStartOperation and issued with RequestOperation from this gameplay script
--- so every PC runs the same call. Direct damage and Kill are not used: they
--- skip the capture a 0 HP city is waiting for, and they crash the way city
--- strikes used to. If the operation API is missing, the attack fails closed.
+-- An AI seat's attack, melee or ranged. Unit fights use the gameplay forecast
+-- and apply that damage here. The unit operation request is UI-only and is
+-- nil in this script, so it cannot be the attack. A melee hit that finds a
+-- city already at 0 HP, or leaves it there, captures through the gameplay
+-- transfer. City ranged strikes stay on CityManager.RequestCommand.
 function Civ6Ai_Orders._Attack(owner, o)
   local unit = Civ6Ai_Orders._Unit(owner, o.U)
   if unit == nil then
@@ -1018,83 +1017,67 @@ function Civ6Ai_Orders._IsDead(target)
   return call(target, "IsDead") == true or (call(target, "GetDamage") or 0) >= max
 end
 
--- The operation Civ6Common would issue for a strike on x,y. CanStartOperation
--- is the four-argument form (unit, op, nil, params). Nil when none can start.
-function Civ6Ai_Orders._AttackParams(x, y, modifiers)
-  local params = {}
-  if UnitOperationTypes == nil then
-    return params
+Civ6Ai_Orders.ATTACK_XP = { melee = 3, ranged = 2, kill_bonus = 2 }
+
+-- Hit points left on one district defense layer. Damage at or past the max is 0.
+function Civ6Ai_Orders._DistrictHp(district, defenseType)
+  local maxHp = call(district, "GetMaxDamage", defenseType) or 0
+  local dmg = call(district, "GetDamage", defenseType) or 0
+  if dmg >= maxHp then
+    return 0
   end
-  params[UnitOperationTypes.PARAM_X] = x
-  params[UnitOperationTypes.PARAM_Y] = y
-  if modifiers ~= nil and UnitOperationTypes.PARAM_MODIFIERS ~= nil then
-    params[UnitOperationTypes.PARAM_MODIFIERS] = modifiers
-  end
-  return params
+  return maxHp - dmg
 end
 
-function Civ6Ai_Orders._CanStartOp(unit, op, params)
-  if unit == nil or op == nil or UnitManager == nil or UnitManager.CanStartOperation == nil then
+function Civ6Ai_Orders._CityHitPoints(district)
+  if district == nil or DefenseTypes == nil then
+    return 0
+  end
+  return Civ6Ai_Orders._DistrictHp(district, DefenseTypes.DISTRICT_OUTER)
+    + Civ6Ai_Orders._DistrictHp(district, DefenseTypes.DISTRICT_GARRISON)
+end
+
+-- Kill defenders on the tile, hand the city to owner, then step the attacker on.
+-- TransferCity is the gameplay call. AcquireCity is the fallback when that
+-- function is absent. Owner is checked after the call: a missing method is not a capture.
+function Civ6Ai_Orders._TakeCity(unit, city, x, y)
+  local owner = unit:GetOwner()
+  if Map ~= nil and Map.GetPlot ~= nil and Units ~= nil and Units.GetUnitsInPlot ~= nil
+      and UnitManager ~= nil and UnitManager.Kill ~= nil then
+    local plot = Map.GetPlot(x, y)
+    for _, other in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+      if other:GetOwner() ~= owner then
+        pcall(UnitManager.Kill, other)
+      end
+    end
+  end
+  local function owned()
+    return call(city, "GetOwner") == owner
+  end
+  if CityManager ~= nil and CityManager.TransferCity ~= nil then
+    pcall(CityManager.TransferCity, city, owner)
+  end
+  if not owned() and Cities ~= nil then
+    local okGet, transfer = pcall(function() return Cities.TransferCity end)
+    if okGet and type(transfer) == "function" then
+      pcall(transfer, city, owner)
+    end
+  end
+  if not owned() and Players ~= nil and Players[owner] ~= nil then
+    local okGet, acquire = pcall(function() return Players[owner].AcquireCity end)
+    if okGet and type(acquire) == "function" then
+      pcall(acquire, Players[owner], city, true, false)
+    end
+  end
+  if not owned() then
     return false
   end
-  local ok, can = pcall(UnitManager.CanStartOperation, unit, op, nil, params)
-  return ok and can == true
-end
-
-function Civ6Ai_Orders._AttackPlan(unit, x, y)
-  if unit == nil or x == nil or y == nil or UnitOperationTypes == nil then
-    return nil, nil
+  if UnitManager ~= nil and UnitManager.MoveUnit ~= nil then
+    pcall(UnitManager.MoveUnit, unit, x, y)
+  elseif UnitManager ~= nil and UnitManager.PlaceUnit ~= nil then
+    pcall(UnitManager.PlaceUnit, unit, x, y)
   end
-  local moveMods = UnitOperationMoveModifiers
-  local function tryOp(op, modifiers)
-    if op == nil then
-      return nil, nil
-    end
-    local params = Civ6Ai_Orders._AttackParams(x, y, modifiers)
-    if Civ6Ai_Orders._CanStartOp(unit, op, params) then
-      return op, params
-    end
-    return nil, nil
-  end
-  local domain = nil
-  if GameInfo ~= nil and GameInfo.Units ~= nil and unit.GetType ~= nil then
-    local row = GameInfo.Units[unit:GetType()]
-    if row ~= nil then
-      domain = row.Domain
-    end
-  end
-  local attackMods = nil
-  if moveMods ~= nil then
-    attackMods = (moveMods.ATTACK or 0) + (moveMods.MOVE_IGNORE_UNEXPLORED_DESTINATION or 0)
-  end
-  if domain == "DOMAIN_AIR" then
-    return tryOp(UnitOperationTypes.AIR_ATTACK, moveMods ~= nil and moveMods.ATTACK or nil)
-  end
-  local op, params = tryOp(UnitOperationTypes.RANGE_ATTACK, moveMods ~= nil and moveMods.NONE or nil)
-  if op ~= nil then
-    return op, params
-  end
-  op, params = tryOp(UnitOperationTypes.COASTAL_RAID, attackMods)
-  if op ~= nil then
-    return op, params
-  end
-  return tryOp(UnitOperationTypes.MOVE_TO, attackMods)
-end
-
-function Civ6Ai_Orders._RequestEngineAttack(unit, x, y)
-  if UnitManager == nil or UnitManager.RequestOperation == nil or UnitOperationTypes == nil then
-    return false, "request_operation_unavailable"
-  end
-  local op, params = Civ6Ai_Orders._AttackPlan(unit, x, y)
-  if op == nil then
-    return false, "operation_illegal"
-  end
-  local requested, err = pcall(UnitManager.RequestOperation, unit, op, params)
-  if not requested or err == false then
-    return false, "operation_rejected:" .. tostring(err)
-  end
-  local kind = Civ6Ai_Orders._IsRanged(unit) and "ranged" or "melee"
-  return true, "engine:" .. kind
+  return true
 end
 
 function Civ6Ai_Orders._ResolveAttack(unit, x, y)
@@ -1109,12 +1092,10 @@ function Civ6Ai_Orders._ResolveAttack(unit, x, y)
   end
   local city = Cities ~= nil and Cities.GetCityInPlot ~= nil and Cities.GetCityInPlot(x, y) or nil
   local defender = Civ6Ai_Orders._Defender(x, y, owner)
-  local cityTarget = city ~= nil and city:GetOwner() ~= owner
-  if not cityTarget and defender == nil then
-    return false, "no_enemy_on_plot"
+  if defender == nil or (city ~= nil and city:GetOwner() ~= owner) then
+    return Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
   end
-  local enemyOwner = cityTarget and city:GetOwner() or defender:GetOwner()
-  if not Civ6Ai_Orders._AtWar(owner, enemyOwner) then
+  if not Civ6Ai_Orders._AtWar(owner, defender:GetOwner()) then
     return false, "not_at_war"
   end
   if (call(unit, "GetMovesRemaining") or 0) <= 0 then
@@ -1124,13 +1105,103 @@ function Civ6Ai_Orders._ResolveAttack(unit, x, y)
   if attacks ~= nil and attacks <= 0 then
     return false, "no_attacks_left"
   end
-  -- The engine applies damage, kills, and captures. A city already at 0 HP is
-  -- captured by MOVE_TO/ATTACK; we do not measure HP and refuse first.
-  local ok, why = Civ6Ai_Orders._RequestEngineAttack(unit, x, y)
-  if not ok then
-    return false, why
+  local combatType = Civ6Ai_Orders._CombatType(unit)
+  local toAttacker, toDefender = Civ6Ai_Orders._Forecast(unit, defender, combatType)
+  if toAttacker == nil then
+    return false, toDefender
   end
-  return true, why .. (cityTarget and ":city" or ":unit")
+  if ranged then
+    toAttacker = 0
+  end
+  if toDefender <= 0 and toAttacker <= 0 then
+    return false, "no_effect:zero_damage"
+  end
+  local defBefore = call(defender, "GetDamage") or 0
+  local attBefore = call(unit, "GetDamage") or 0
+  Civ6Ai_Orders._ChangeDamage(defender, toDefender)
+  Civ6Ai_Orders._ChangeDamage(unit, toAttacker)
+  local killed = Civ6Ai_Orders._IsDead(defender)
+  local lost = Civ6Ai_Orders._IsDead(unit)
+  local defAfter = call(defender, "GetDamage") or 0
+  if not killed and toDefender > 0 and defAfter == defBefore then
+    return false, "no_effect:damage_not_applied:forecast=" .. tostring(toDefender)
+  end
+  if killed and call(defender, "IsDead") ~= true then
+    pcall(UnitManager.Kill, defender)
+  end
+  if lost then
+    pcall(UnitManager.Kill, unit)
+  else
+    local exp = call(unit, "GetExperience")
+    local xp = (ranged and Civ6Ai_Orders.ATTACK_XP.ranged or Civ6Ai_Orders.ATTACK_XP.melee)
+      + (killed and Civ6Ai_Orders.ATTACK_XP.kill_bonus or 0)
+    if exp ~= nil and exp.ChangeExperience ~= nil then
+      pcall(exp.ChangeExperience, exp, xp)
+    end
+    local _, left = Civ6Ai_Orders._DefenderDamage(x, y, owner)
+    if killed and not ranged and left == 0 then
+      pcall(UnitManager.MoveUnit, unit, x, y)
+    end
+    pcall(UnitManager.FinishMoves, unit)
+  end
+  return true, (ranged and "ranged" or "melee") .. ":def_dmg=" .. defBefore .. ">" .. defAfter
+    .. ":att_dmg=" .. attBefore .. ">" .. (lost and "dead" or tostring(call(unit, "GetDamage") or 0))
+    .. ":killed=" .. tostring(killed)
+end
+
+-- Fight the enemy city on X,Y (centre district, walls first) from the forecast.
+-- Melee captures when the city is already at 0 HP, or when this hit leaves it there.
+-- A city that still has HP and does not take the forecast damage is still a refusal.
+function Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
+  local owner = unit:GetOwner()
+  local city = Cities ~= nil and Cities.GetCityInPlot ~= nil and Cities.GetCityInPlot(x, y) or nil
+  if city == nil or city:GetOwner() == owner then
+    return false, "no_enemy_on_plot"
+  end
+  if not Civ6Ai_Orders._AtWar(owner, city:GetOwner()) then
+    return false, "not_at_war"
+  end
+  if (call(unit, "GetMovesRemaining") or 0) <= 0 or (call(unit, "GetAttacksRemaining") or 1) <= 0 then
+    return false, "no_moves_left"
+  end
+  local district = Civ6Ai_Orders._CityCenterDistrict(city)
+  if district == nil or DefenseTypes == nil then
+    return false, "no_city_district"
+  end
+  local before = Civ6Ai_Orders._CityHitPoints(district)
+  if not ranged and before <= 0 and not Civ6Ai_Orders._IsDead(unit) then
+    local captured = Civ6Ai_Orders._TakeCity(unit, city, x, y)
+    pcall(UnitManager.FinishMoves, unit)
+    if not captured then
+      return false, "capture_unavailable"
+    end
+    return true, "melee:city_hp=" .. tostring(before) .. ">0:captured=true"
+  end
+  local toAttacker, toCity = Civ6Ai_Orders._Forecast(unit, district, Civ6Ai_Orders._CombatType(unit))
+  if toAttacker == nil then
+    return false, toCity
+  end
+  if toCity <= 0 then
+    return false, "no_effect:zero_damage"
+  end
+  local walls, garrison = DefenseTypes.DISTRICT_OUTER, DefenseTypes.DISTRICT_GARRISON
+  local w = math.min(toCity, Civ6Ai_Orders._DistrictHp(district, walls))
+  call(district, "ChangeDamage", walls, w)
+  call(district, "ChangeDamage", garrison, toCity - w)
+  if not ranged then
+    Civ6Ai_Orders._ChangeDamage(unit, toAttacker)
+  end
+  local after = Civ6Ai_Orders._CityHitPoints(district)
+  if after >= before then
+    return false, "no_effect:damage_not_applied:forecast=" .. tostring(toCity)
+  end
+  local captured = false
+  if not ranged and after <= 0 and not Civ6Ai_Orders._IsDead(unit) then
+    captured = Civ6Ai_Orders._TakeCity(unit, city, x, y)
+  end
+  pcall(UnitManager.FinishMoves, unit)
+  return true, (ranged and "ranged" or "melee") .. ":city_hp=" .. tostring(before) .. ">"
+    .. tostring(after) .. ":captured=" .. tostring(captured)
 end
 
 function Civ6Ai_Orders._MeleeStep(unit, x, y)
@@ -2596,32 +2667,6 @@ function Gov.Governor(owner)
     .. "(the game only offers that to the local player's screen); the game's own AI manages this seat's governors"
 end
 
-local function startOperation(unit, typeName, extras)
-  local ops = GameInfo ~= nil and GameInfo.UnitOperations or nil
-  local row = ops ~= nil and ops[typeName] or nil
-  if row == nil then
-    return false, "no_operation:" .. tostring(typeName)
-  end
-  if UnitManager == nil or UnitManager.RequestOperation == nil then
-    return false, "request_operation_unavailable:" .. tostring(typeName)
-  end
-  local params = extras or {}
-  if UnitOperationTypes ~= nil and UnitOperationTypes.PARAM_X ~= nil then
-    if extras ~= nil and extras.x ~= nil then
-      params[UnitOperationTypes.PARAM_X] = extras.x
-      params[UnitOperationTypes.PARAM_Y] = extras.y
-    end
-  end
-  if extras ~= nil and extras.unitId ~= nil and UnitOperationTypes ~= nil and UnitOperationTypes.PARAM_UNIT_ID ~= nil then
-    params[UnitOperationTypes.PARAM_UNIT_ID] = extras.unitId
-  end
-  local ok, err = pcall(UnitManager.RequestOperation, unit, row.Hash, params)
-  if not ok then
-    return false, "operation_error:" .. tostring(typeName) .. ":" .. tostring(err)
-  end
-  return true, "operation=" .. tostring(typeName)
-end
-
 local function findCityById(cityId)
   for id = 0, 63 do
     local p = Players[id]
@@ -3251,12 +3296,9 @@ function Gov.JoinFormation(owner, unitId, otherId)
     pcall(unit.SetMilitaryFormation, unit, target)
   end
   if call(unit, "GetMilitaryFormation") ~= target then
-    local opName = target == F.CORPS_MILITARY_FORMATION and "UNITOPERATION_FORM_CORPS" or "UNITOPERATION_FORM_ARMY"
-    local okOp, whyOp = startOperation(unit, opName, { unitId = other:GetID() })
-    if not okOp or call(unit, "GetMilitaryFormation") ~= target then
-      return false, "the game refused to form the corps or army; both units are unchanged ("
-        .. tostring(whyOp or "SetMilitaryFormation did not stick") .. ")"
-    end
+    -- The formation operation is UI-only. Leave both units when the gameplay
+    -- setter does not stick.
+    return false, "the game refused to form the corps or army; both units are unchanged (SetMilitaryFormation did not stick)"
   end
   if Civ6Ai_Orders._Unit(owner, otherId) ~= nil then
     pcall(UnitManager.Kill, other, false)
