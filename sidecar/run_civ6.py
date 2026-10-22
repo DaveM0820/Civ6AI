@@ -58,7 +58,6 @@ def _read(path: Path | None) -> dict:
     encoding = "utf-8-sig" if path else "utf-8"
     stream = path.open(encoding=encoding) if path else sys.stdin
     try:
-        # strict=False: Lua error tracebacks in history can carry raw tabs.
         value = json.load(stream, strict=False)
     finally:
         if path:

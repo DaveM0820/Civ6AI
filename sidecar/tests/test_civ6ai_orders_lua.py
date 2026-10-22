@@ -418,6 +418,73 @@ class OrdersGameplayTests(unittest.TestCase):
         logs = [str(s) for s in _vals(self.rt.eval("logs"))]
         self.assertFalse(any("turn_start_error" in s for s in logs))
 
+    def test_city_attack_survives_a_throwing_method_lookup(self):
+        # Gameplay userdata throws "function expected instead of nil" from
+        # __index. A missing GetDistrictID or GetComponentID must not abort
+        # the turn; the forecast arguments are evaluated before pcall.
+        self.rt.execute(r"""
+          DefenseTypes = {DISTRICT_OUTER=1, DISTRICT_GARRISON=2}
+          local district = {id=42, x=20, y=20, wdmg=0, gdmg=0}
+          function district:GetID() return self.id end
+          function district:GetX() return self.x end
+          function district:GetY() return self.y end
+          function district:GetType() return 0 end
+          function district:GetMaxDamage(t) if t == 1 then return 100 end return 200 end
+          function district:GetDamage(t) if t == 1 then return self.wdmg end return self.gdmg end
+          function district:ChangeDamage(t, n)
+            if t == 1 then self.wdmg = self.wdmg + n else self.gdmg = self.gdmg + n end
+          end
+          setmetatable(district, {__index = function(_, key)
+            if key == "GetComponentID" or key == "GetDistrictID" then
+              error("function expected instead of nil")
+            end
+          end})
+          local city = {id=7, owner=1, x=20, y=20}
+          function city:GetID() return self.id end
+          function city:GetOwner() return self.owner end
+          function city:GetX() return self.x end
+          function city:GetY() return self.y end
+          function city:GetDistricts()
+            return {Members=function()
+              local i=0
+              return function()
+                i=i+1
+                if i == 1 then return i, district end
+              end
+            end}
+          end
+          setmetatable(city, {__index = function(_, key)
+            if key == "GetDistrictID" then error("function expected instead of nil") end
+          end})
+          local plot = Map.GetPlot(20, 20)
+          setmetatable(plot, {__index = function(self, key)
+            if key == "GetDistrictID" then error("function expected instead of nil") end
+            return rawget(self, key)
+          end})
+          centerThrow = district
+          cityThrow = city
+          local p1 = Players[1]
+          function p1:GetCities()
+            return {Members=function()
+              local i=0
+              return function() i=i+1; if i == 1 then return i, city end end
+            end}
+          end
+          Cities = {GetCityInPlot=function(x, y) if x == 20 and y == 20 then return city end end}
+          Players[1].war = {[2]=true}
+          Players[2].war = {[1]=true}
+          table.insert(Players[2].units, MkUnit(2, 30, 20, 21, 0))
+        """)
+        self.assertEqual(self.rt.eval("Civ6Ai_Orders._CityCenterDistrict(cityThrow).id"), 42)
+        self.order(0, K=7, P=2, U=30, X=20, Y=20, S=80, B=4, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        row = {r["seq"]: r for r in self.results()}[80]
+        self.assertFalse(row["ok"])
+        self.assertIn("forecast_failed", str(row["reason"]))
+        self.assertNotIn("function expected instead of nil", str(row["reason"]))
+        logs = [str(s) for s in _vals(self.rt.eval("logs"))]
+        self.assertFalse(any("turn_start_error" in s for s in logs))
+
     def test_one_throwing_order_still_runs_the_rest(self):
         self.rt.execute(r"""
           local orig = Civ6Ai_Orders._Execute
