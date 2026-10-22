@@ -19,7 +19,14 @@ from typing import Any, Callable
 
 from sidecar import civ6_config
 from sidecar import pipeline_v2 as pipeline
-from sidecar.civ6_config import Civ6AiLocalConfig, load_local_config, normalize_reasoning
+from sidecar.civ6_config import (
+    Civ6AiLocalConfig,
+    apply_seat_runtime,
+    effective_reasoning_effort,
+    load_local_config,
+    normalize_reasoning,
+    normalize_reasoning_effort,
+)
 
 OpenFn = Callable[..., Any]
 
@@ -55,10 +62,53 @@ def lmstudio_chat_reasoning_fields(model: str | None, reasoning: str) -> dict[st
 
 
 def openrouter_reasoning_fields(reasoning: str) -> dict[str, Any]:
-    """OpenRouter unified reasoning control: low effort when on, disabled when off."""
-    if normalize_reasoning(reasoning) == "off":
+    """OpenRouter reasoning control. off disables; otherwise effort is low|medium|high|xhigh."""
+    level = normalize_reasoning_effort(reasoning)
+    if level == "off":
         return {"reasoning": {"enabled": False}}
-    return {"reasoning": {"effort": "low", "exclude": False}}
+    return {"reasoning": {"effort": level, "exclude": False}}
+
+
+def usage_accounting(usage: dict[str, Any] | None) -> dict[str, Any]:
+    """Prompt, completion, reasoning tokens and cost from a chat-completions usage object."""
+    usage = usage if isinstance(usage, dict) else {}
+    completion = usage.get("completion_tokens_details")
+    if not isinstance(completion, dict):
+        completion = {}
+    cost_details = usage.get("cost_details")
+    if not isinstance(cost_details, dict):
+        cost_details = {}
+    cost = usage.get("cost")
+    if cost is None:
+        cost = cost_details.get("upstream_inference_cost")
+    reasoning_tokens = usage.get("reasoning_tokens")
+    if reasoning_tokens is None:
+        reasoning_tokens = completion.get("reasoning_tokens", 0)
+    prompt = usage.get("prompt_tokens", usage.get("input_tokens", 0))
+    completion_tokens = usage.get("completion_tokens", usage.get("output_tokens", 0))
+    return {
+        "prompt_tokens": int(prompt or 0),
+        "completion_tokens": int(completion_tokens or 0),
+        "reasoning_tokens": int(reasoning_tokens or 0),
+        "total_tokens": int(usage.get("total_tokens") or 0),
+        "cost": cost,
+    }
+
+
+def metrics_from_model(model_meta: dict[str, Any] | None, llm_ms: int = 0) -> dict[str, Any]:
+    """Fields written to turn_metrics.jsonl for one seat-turn."""
+    meta = model_meta if isinstance(model_meta, dict) else {}
+    usage = meta.get("usage") if isinstance(meta.get("usage"), dict) else {}
+    accounted = usage_accounting(usage)
+    for key in ("prompt_tokens", "completion_tokens", "reasoning_tokens", "cost"):
+        if meta.get(key) is not None:
+            accounted[key] = meta[key]
+    latency = meta.get("latency_ms")
+    return {
+        "latency_ms": llm_ms if latency is None else latency,
+        "reasoning_effort": meta.get("reasoning_effort"),
+        **accounted,
+    }
 
 
 def provider_label(cfg: Civ6AiLocalConfig) -> str:
@@ -119,7 +169,7 @@ def build_chat_completions_body(
         "max_tokens": 4096,
     }
     if cfg.provider == "openrouter":
-        body.update(openrouter_reasoning_fields(cfg.reasoning))
+        body.update(openrouter_reasoning_fields(effective_reasoning_effort(cfg)))
         body["usage"] = {"include": True}
         # Reasoning tokens count against max_tokens on OpenRouter; leave room
         # for the thinking pass on top of the ~2-4k token JSON answer.
@@ -209,7 +259,7 @@ def call_lmstudio_chat(
     wire_text: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """POST chat.completions to LM Studio with retries and shared-model queueing."""
-    cfg = cfg or load_local_config()
+    cfg = apply_seat_runtime(cfg or load_local_config(), snapshot)
     label = provider_label(cfg)
     if label == "openrouter" and not cfg.api_key:
         raise pipeline.BoundaryError(
@@ -270,9 +320,11 @@ def call_lmstudio_chat(
                         "model": payload.get("model") or cfg.model,
                         "response_id": payload.get("id"),
                         "usage": usage,
+                        **usage_accounting(usage),
                         "latency_ms": int((time.monotonic() - started) * 1000),
                         "vision_enabled": bool(cfg.vision and image_data_url),
                         "reasoning": body.get("reasoning"),
+                        "reasoning_effort": effective_reasoning_effort(cfg),
                         "endpoint": cfg.endpoint,
                         "attempts": attempt + 1,
                         "parse_retry": retried,

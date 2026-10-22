@@ -1611,6 +1611,17 @@ function Gov.SlotCall(culture)
   return nil
 end
 
+-- The local seat's attacks use this too. Offers are distance-based; this is
+-- the resolver those offers describe (the UI operation check is a different
+-- path and rejects them).
+function Gov.AttackUnit(owner, unitId, x, y)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  if unit == nil then
+    return false, "unit_not_found"
+  end
+  return Civ6Ai_Orders._ResolveAttack(unit, x, y)
+end
+
 function Gov.SetPolicySlot(owner, slot, policyIndex)
   local culture = call(Players[owner], "GetCulture")
   if culture == nil then

@@ -73,7 +73,46 @@ class Civ6ConfigTests(unittest.TestCase):
             civ6_config.apply_config_to_environ(cfg)
             self.assertEqual("on", os.environ.get("CIV6AI_LMSTUDIO_REASONING_EFFORT"))
             self.assertNotEqual("on", os.environ.get("CIV4AI_OPENAI_REASONING_EFFORT", "low"))
+            self.assertEqual("low", os.environ.get("CIV4AI_OPENAI_REASONING_EFFORT"))
             self.assertEqual("1", os.environ.get("CIV6AI_LMSTUDIO_VISION"))
+
+    def test_seat_model_and_effort_precedence(self):
+        self.assertEqual("off", civ6_config.normalize_reasoning_effort("off"))
+        self.assertEqual("low", civ6_config.normalize_reasoning_effort("on"))
+        self.assertEqual("xhigh", civ6_config.normalize_reasoning_effort("xhigh"))
+        self.assertNotEqual("on", civ6_config.normalize_reasoning_effort("on"))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "civ6ai.local.json"
+            path.write_text(json.dumps({
+                "provider": "lmstudio",
+                "model": "base-model",
+                "reasoning": "off",
+                "reasoning_effort": "medium",
+                "seat_models": {
+                    "1": {"model": "seat-one", "reasoning_effort": "high"},
+                    "PLAYER_3": {"model": "seat-three", "reasoning_effort": "low"},
+                },
+            }), encoding="utf-8")
+            cfg = civ6_config.load_local_config(path, apply_env=False)
+        self.assertEqual("medium", cfg.reasoning_effort)
+        self.assertEqual("on", cfg.reasoning)
+        self.assertEqual(("base-model", "medium"), civ6_config.resolve_seat_runtime(cfg, "PLAYER_0"))
+        self.assertEqual(("seat-one", "high"), civ6_config.resolve_seat_runtime(cfg, "PLAYER_1"))
+        self.assertEqual(("seat-three", "low"), civ6_config.resolve_seat_runtime(cfg, 3))
+        with mock.patch.dict(os.environ, {
+            "CIV6AI_MODEL_PLAYER_1": "from-env",
+            "CIV6AI_REASONING_EFFORT_PLAYER_1": "xhigh",
+            "CIV6AI_REASONING_EFFORT": "low",
+        }, clear=False):
+            loaded = civ6_config.load_local_config(path, apply_env=True)
+            self.assertEqual("low", loaded.reasoning_effort)
+            self.assertEqual(("from-env", "xhigh"), civ6_config.resolve_seat_runtime(loaded, "PLAYER_1"))
+        cfg_hi = civ6_config.Civ6AiLocalConfig(reasoning="on", reasoning_effort="xhigh")
+        with mock.patch.dict(os.environ, {}, clear=False):
+            civ6_config.apply_config_to_environ(cfg_hi)
+            self.assertEqual("xhigh", os.environ.get("CIV6AI_REASONING_EFFORT"))
+            self.assertEqual("high", os.environ.get("CIV4AI_OPENAI_REASONING_EFFORT"))
+            self.assertNotEqual("on", os.environ.get("CIV4AI_OPENAI_REASONING_EFFORT"))
 
 
 if __name__ == "__main__":

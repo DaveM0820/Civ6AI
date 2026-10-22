@@ -3006,6 +3006,21 @@ function Civ6Ai_Snapshot._HostileTargets(playerID)
   return targets
 end
 
+-- AI seats and the single-player local seat execute attacks with the gameplay
+-- resolver, which matches these distance offers. A network game's local seat
+-- uses the UI operation instead, so only list a strike that operation can start.
+function Civ6Ai_Snapshot._AttackCanExecute(playerID, unit, x, y)
+  local mp = GameConfiguration ~= nil and GameConfiguration.IsNetworkMultiplayer ~= nil
+    and GameConfiguration.IsNetworkMultiplayer()
+  if not mp or Game == nil or Game.GetLocalPlayer == nil or Game.GetLocalPlayer() ~= playerID then
+    return true
+  end
+  if Civ6Ai_Apply == nil or Civ6Ai_Apply._AttackPlan == nil then
+    return true
+  end
+  return Civ6Ai_Apply._AttackPlan(unit, x, y) ~= nil
+end
+
 function Civ6Ai_Snapshot._OfferAttack(commands, seen, unitId, tx, ty, kind, ranged)
   local key = tostring(tx) .. "," .. tostring(ty)
   if seen[key] then
@@ -3033,7 +3048,8 @@ function Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
   local seen = {}
   for _, target in ipairs(Civ6Ai_Snapshot._HostileTargets(playerID)) do
     local dist = Civ6Ai_Snapshot._Dist(x, y, target.x, target.y)
-    if dist >= 1 and dist <= reach then
+    if dist >= 1 and dist <= reach
+        and Civ6Ai_Snapshot._AttackCanExecute(playerID, unit, target.x, target.y) then
       Civ6Ai_Snapshot._OfferAttack(commands, seen, unitId, target.x, target.y, target.who, ranged)
     end
   end
@@ -3049,7 +3065,8 @@ function Civ6Ai_Snapshot._AddAttackCommands(commands, playerID, unit, unitId)
   end
   for _, plot in ipairs(plots) do
     local tx, ty = plot:GetX(), plot:GetY()
-    if not (tx == x and ty == y) and Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot) ~= nil then
+    if not (tx == x and ty == y) and Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot) ~= nil
+        and Civ6Ai_Snapshot._AttackCanExecute(playerID, unit, tx, ty) then
       Civ6Ai_Snapshot._OfferAttack(commands, seen, unitId, tx, ty, Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot), ranged)
     end
   end

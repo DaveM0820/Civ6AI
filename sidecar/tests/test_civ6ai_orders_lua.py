@@ -639,6 +639,13 @@ class OrdersGameplayTests(unittest.TestCase):
             return rt.eval("ExposedMembers.Civ6Ai.OrderHash"), rt.eval("Civ6Ai_Orders.Checksum()")
         self.assertEqual(run(), run())
 
+    def test_gov_attack_unit_uses_the_ai_resolver(self):
+        self.rt.execute("Players[0].war = {[1] = true}")
+        ok, reason = self.rt.eval("function() return Civ6Ai_Orders.Gov.AttackUnit(0, 1, 6, 6) end")()
+        self.assertTrue(ok, reason)
+        self.assertIn("melee", str(reason))
+        self.assertGreater(int(self.rt.eval("Players[1].units[1].dmg")), 0)
+
 
 CHANNEL_ENV = r"""
 logs = {}

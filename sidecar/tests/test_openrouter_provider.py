@@ -79,6 +79,13 @@ class OpenRouterRequestTests(unittest.TestCase):
         cfg.reasoning = "off"
         body = lmstudio_client.build_chat_completions_body(snapshot={}, cfg=cfg, system_prompt="s", wire_text="w")
         self.assertEqual(body["reasoning"], {"enabled": False})
+        cfg.reasoning_effort = "xhigh"
+        body = lmstudio_client.build_chat_completions_body(snapshot={}, cfg=cfg, system_prompt="s", wire_text="w")
+        self.assertEqual(body["reasoning"], {"effort": "xhigh", "exclude": False})
+        self.assertNotIn("reasoning_effort", body)
+        cfg.reasoning_effort = "off"
+        body = lmstudio_client.build_chat_completions_body(snapshot={}, cfg=cfg, system_prompt="s", wire_text="w")
+        self.assertEqual(body["reasoning"], {"enabled": False})
         headers = lmstudio_client.request_headers(cfg)
         self.assertEqual(headers["Authorization"], "Bearer sk-test")
         self.assertIn("X-Title", headers)

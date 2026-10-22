@@ -145,6 +145,36 @@ class LmStudioClientTests(unittest.TestCase):
         self.assertEqual("model_unloaded", ctx.exception.category)
         self.assertIn("no model loaded", str(ctx.exception).lower())
 
+    def test_usage_accounting_reads_openrouter_cost_and_reasoning_tokens(self):
+        usage = {
+            "prompt_tokens": 1200,
+            "completion_tokens": 80,
+            "total_tokens": 1400,
+            "cost": 0.0042,
+            "completion_tokens_details": {"reasoning_tokens": 320},
+        }
+        accounted = lmstudio_client.usage_accounting(usage)
+        self.assertEqual(1200, accounted["prompt_tokens"])
+        self.assertEqual(80, accounted["completion_tokens"])
+        self.assertEqual(320, accounted["reasoning_tokens"])
+        self.assertEqual(0.0042, accounted["cost"])
+        fields = lmstudio_client.metrics_from_model(
+            {"usage": usage, "latency_ms": 1500, "reasoning_effort": "high",
+             "prompt_tokens": 1200, "completion_tokens": 80, "reasoning_tokens": 320, "cost": 0.0042},
+            llm_ms=9,
+        )
+        self.assertEqual(1500, fields["latency_ms"])
+        self.assertEqual("high", fields["reasoning_effort"])
+        self.assertEqual(320, fields["reasoning_tokens"])
+        nested = {
+            "usage": {"prompt_tokens": 3, "completion_tokens": 4, "cost_details": {"upstream_inference_cost": 0.1}},
+        }
+        from_usage = lmstudio_client.metrics_from_model(nested, llm_ms=40)
+        self.assertEqual(40, from_usage["latency_ms"])
+        self.assertEqual(3, from_usage["prompt_tokens"])
+        self.assertEqual(0.1, from_usage["cost"])
+        self.assertEqual(0, from_usage["reasoning_tokens"])
+
 
 if __name__ == "__main__":
     unittest.main()

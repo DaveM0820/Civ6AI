@@ -528,7 +528,10 @@ function Civ6Ai_Apply._CanStartUnitOperation(unit, op, plot, params)
     end
   end
   if params ~= nil then
-    if UnitManager.CanStartOperation(unit, op, nil, params, false) then
+    -- Firaxis UI (WorldInput, Civ6Common) uses four arguments. A fifth false is
+    -- not that check: UnitPanel's fifth argument asks for a results table, and
+    -- false here rejects a legal targeted operation.
+    if UnitManager.CanStartOperation(unit, op, nil, params) then
       return true
     end
   end
@@ -734,6 +737,75 @@ function Civ6Ai_Apply._FoundCity(playerID, args)
   return false, reason or "found_city_rejected", args
 end
 
+-- The operation Civ6Common.RequestMoveOperation would issue for a strike on
+-- x,y. CanStartOperation is the four-argument form (unit, op, nil, params).
+-- Returns op, params, or nil when none of those operations can start.
+function Civ6Ai_Apply._AttackParams(x, y, modifiers)
+  local params = {}
+  if UnitOperationTypes == nil then
+    return params
+  end
+  params[UnitOperationTypes.PARAM_X] = x
+  params[UnitOperationTypes.PARAM_Y] = y
+  if modifiers ~= nil and UnitOperationTypes.PARAM_MODIFIERS ~= nil then
+    params[UnitOperationTypes.PARAM_MODIFIERS] = modifiers
+  end
+  return params
+end
+
+function Civ6Ai_Apply._CanStartParams(unit, op, params)
+  if unit == nil or op == nil then
+    return false
+  end
+  if UnitManager == nil or UnitManager.CanStartOperation == nil then
+    return true
+  end
+  local ok, can = pcall(UnitManager.CanStartOperation, unit, op, nil, params)
+  return ok and can == true
+end
+
+function Civ6Ai_Apply._AttackPlan(unit, x, y)
+  if unit == nil or x == nil or y == nil or UnitOperationTypes == nil then
+    return nil, nil
+  end
+  local moveMods = UnitOperationMoveModifiers
+  local function tryOp(op, modifiers)
+    if op == nil then
+      return nil, nil
+    end
+    local params = Civ6Ai_Apply._AttackParams(x, y, modifiers)
+    if Civ6Ai_Apply._CanStartParams(unit, op, params) then
+      return op, params
+    end
+    return nil, nil
+  end
+  local domain = nil
+  if GameInfo ~= nil and GameInfo.Units ~= nil and unit.GetType ~= nil then
+    local okRow, row = pcall(function() return GameInfo.Units[unit:GetType()] end)
+    if okRow and row ~= nil then
+      domain = row.Domain
+    end
+  end
+  local attackMods = nil
+  if moveMods ~= nil then
+    attackMods = (moveMods.ATTACK or 0) + (moveMods.MOVE_IGNORE_UNEXPLORED_DESTINATION or 0)
+  end
+  if domain == "DOMAIN_AIR" then
+    return tryOp(UnitOperationTypes.AIR_ATTACK, moveMods ~= nil and moveMods.ATTACK or nil)
+  end
+  local op, params = tryOp(UnitOperationTypes.RANGE_ATTACK, moveMods ~= nil and moveMods.NONE or nil)
+  if op ~= nil then
+    return op, params
+  end
+  op, params = tryOp(UnitOperationTypes.COASTAL_RAID, attackMods)
+  if op ~= nil then
+    return op, params
+  end
+  -- Melee is MOVE_TO with the attack modifier. Offer it only when that same
+  -- check passes, so a listed attack is one RequestOperation can start.
+  return tryOp(UnitOperationTypes.MOVE_TO, attackMods)
+end
+
 function Civ6Ai_Apply._AttackTarget(playerID, args)
   local unitId = args.unit_id
   local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
@@ -745,60 +817,39 @@ function Civ6Ai_Apply._AttackTarget(playerID, args)
     return false, "unit_not_found", args
   end
   if Civ6Ai_Apply._UseGameCoreRoute(playerID) then
-    -- GameCore UnitManager.MoveUnit cannot attack; attacks need the UI operation.
+    -- AI seats attack through the synced order channel, not this function.
     return false, "attack_requires_local_player", args
   end
-  local params = {}
-  if UnitOperationTypes ~= nil then
-    params[UnitOperationTypes.PARAM_X] = x
-    params[UnitOperationTypes.PARAM_Y] = y
-  end
-  local attackOp = nil
-  local isRanged = args.ranged
-  if isRanged == nil and GameInfo ~= nil and GameInfo.Units ~= nil then
-    local okRow, row = pcall(function() return GameInfo.Units[unit:GetType()] end)
-    if okRow and row ~= nil then
-      isRanged = (tonumber(row.RangedCombat) or 0) > 0 and (tonumber(row.Range) or 0) > 0
-    end
-  end
-  if UnitOperationTypes ~= nil then
-    if isRanged == false then
-      -- Civ6 melee attacks are MOVE_TO onto the enemy with the ATTACK move modifier.
-      attackOp = UnitOperationTypes.MOVE_TO
-      if UnitOperationMoveModifiers ~= nil and UnitOperationMoveModifiers.ATTACK ~= nil then
-        params[UnitOperationTypes.PARAM_MODIFIERS] = UnitOperationMoveModifiers.ATTACK
-      end
-    else
-      attackOp = UnitOperationTypes.RANGE_ATTACK
-    end
-  end
-  if attackOp == nil and GameInfo ~= nil and GameInfo.UnitOperations ~= nil then
-    local row = GameInfo.UnitOperations["UNITOPERATION_RANGE_ATTACK"]
-    if row ~= nil then
-      attackOp = row.Hash
-    end
-  end
-  if attackOp == nil then
-    return false, "attack_op_missing", args
-  end
-  local ok, reason = Civ6Ai_Apply._RequestUnitOperation(unit, attackOp, params, "attack")
-  if ok then
-    return true, "", args
-  end
+  -- Single player: the local seat's offers are the same distance list the AI
+  -- seats execute with Civ6Ai_Orders._ResolveAttack. The UI CanStart check
+  -- rejected every one of those as operation_illegal. Use that resolver here
+  -- so an offered attack is the attack that runs.
   if not Civ6Ai_Apply._IsNetworkMultiplayer() then
-    local fallbackOk, fallbackReason = Civ6Ai_Apply._WithLocalPlayer(playerID, function()
-      local localUnit = Civ6Ai_Apply._FindUnit(playerID, unitId)
-      if localUnit == nil then
-        return false, "unit_not_found"
+    local ok, reason = Civ6Ai_Apply._GovRoute("AttackUnit", playerID, unit:GetID(), x, y)
+    local missing = reason ~= nil and string.find(tostring(reason), "is not loaded", 1, true) ~= nil
+    if not missing then
+      if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
+        Civ6Ai_Util.Log("apply|attack|gameplay|player=" .. tostring(playerID)
+          .. "|ok=" .. tostring(ok) .. "|" .. tostring(reason or ""))
       end
-      return Civ6Ai_Apply._RequestUnitOperation(localUnit, attackOp, params, nil)
-    end)
-    if fallbackOk then
-      return true, "", args
+      return ok, reason or "", args
     end
-    reason = fallbackReason or reason
   end
-  return false, reason or "attack_rejected", args
+  if UI ~= nil and UI.SelectUnit ~= nil then
+    pcall(UI.SelectUnit, unit)
+  end
+  local op, params = Civ6Ai_Apply._AttackPlan(unit, x, y)
+  if op == nil or UnitManager == nil or UnitManager.RequestOperation == nil then
+    return false, "operation_illegal", args
+  end
+  local requested, err = pcall(UnitManager.RequestOperation, unit, op, params)
+  if not requested or err == false then
+    return false, "operation_rejected", args
+  end
+  if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
+    Civ6Ai_Util.Log("apply|attack|ui|player=" .. tostring(playerID) .. "|op=" .. tostring(op))
+  end
+  return true, "ui_attack_requested", args
 end
 
 function Civ6Ai_Apply._UnitFortify(playerID, args)
@@ -1110,11 +1161,7 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
   if Game ~= nil and Game.IsAllowStrategicCommands ~= nil and Game.IsAllowStrategicCommands(playerID) == false then
     return false, "policy cards cannot be changed until this seat's turn is active", args
   end
-  -- Same shape as GovernmentScreen OnConfirmPolicies: slot indexes to clear,
-  -- then slot index -> type hash for the cards that should be there afterwards.
-  -- Only slots that actually change are sent, so an ignored request cannot
-  -- wipe a card that was already correct.
-  local clearList, addList = {}, {}
+  local changed = false
   for i = 0, n - 1 do
     local cur = gcall(culture, "GetSlotPolicy", i)
     local crow = cur ~= nil and cur >= 0 and GameInfo.Policies[cur] or nil
@@ -1122,17 +1169,10 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
     local same = (crow == nil and nextRow == nil)
       or (crow ~= nil and nextRow ~= nil and crow.PolicyType == nextRow.PolicyType)
     if not same then
-      table.insert(clearList, i)
-      if nextRow ~= nil then
-        local typeHash = Civ6Ai_Apply._PolicyTypeHash(nextRow)
-        if typeHash == nil then
-          return false, nextRow.PolicyType .. " has no type hash", args
-        end
-        addList[i] = typeHash
-      end
+      changed = true
     end
   end
-  if #clearList == 0 then
+  if not changed then
     local parts = {}
     for slot, idx in pairs(want) do
       parts[#parts + 1] = slot .. "=" .. (GameInfo.Policies[idx] and GameInfo.Policies[idx].PolicyType or "?")
@@ -1140,23 +1180,92 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
     table.sort(parts)
     return true, "policies=" .. table.concat(parts, ";") .. ":already", args
   end
-  local okReq, reqWhy = Civ6Ai_Apply._AsSeat(playerID, function()
-    return culture:RequestPolicyChanges(clearList, addList)
-  end)
-  if okReq == false then
-    return false, "the game refused the policy change"
-      .. ((reqWhy ~= nil and reqWhy ~= "") and (": " .. tostring(reqWhy)) or ""), args
+  -- GovernmentScreen leaves Confirm disabled while any slot is empty, and
+  -- RequestPolicyChanges then does nothing: the slot we named stays empty
+  -- ("slot N still holds nothing") on every later turn.
+  local empty = {}
+  for i = 0, n - 1 do
+    if desired[i] == nil then
+      empty[#empty + 1] = tostring(i)
+    end
+    local typeHash = desired[i] ~= nil and Civ6Ai_Apply._PolicyTypeHash(desired[i]) or nil
+    if desired[i] ~= nil and typeHash == nil then
+      return false, desired[i].PolicyType .. " has no type hash", args
+    end
+  end
+  if #empty > 0 then
+    return false, "the game will not apply a policy change while slot " .. table.concat(empty, ", ")
+      .. " still holds nothing (every slot has to hold a card)", args
+  end
+  -- Confirm is hidden until GetCostToUnlockPolicies() is 0. On a turn a civic
+  -- did not complete, that cost stays above 0 and RequestPolicyChanges is
+  -- ignored, so the empty slot never fills. Unlock (the government screen's
+  -- gold/faith button) first, then send every slot the way OnConfirmPolicies does.
+  local cost = Civ6Ai_Apply._PolicyUnlockCost(culture)
+  local justUnlocked = false
+  if cost > 0 then
+    local currency, balance = Civ6Ai_Apply._PolicyUnlockCurrency(playerID)
+    if balance < cost then
+      return false, "changing policy cards costs " .. tostring(cost) .. " " .. currency
+        .. " and this seat has " .. tostring(balance), args
+    end
+    local okU, whyU = Civ6Ai_Apply._AsSeat(playerID, function()
+      return Civ6Ai_Apply._PlayerOp(playerID, "UNLOCK_POLICIES", {})
+    end)
+    if okU == false then
+      return false, "the game refused to unlock policy changes"
+        .. ((whyU ~= nil and whyU ~= "") and (": " .. tostring(whyU)) or ""), args
+    end
+    -- The unlock is a separate operation. Confirm on a later frame, once the
+    -- cost has dropped, the way the government screen does.
+    justUnlocked = true
+  end
+  local submitted, fatal = false, nil
+  local function submitOnce()
+    if fatal ~= nil then
+      return false, fatal
+    end
+    if submitted then
+      return true, ""
+    end
+    if justUnlocked then
+      justUnlocked = false
+      return false, "waiting for the policy change to unlock"
+    end
+    if Civ6Ai_Apply._PolicyUnlockCost(culture) > 0 then
+      return false, "policy changes stay locked (the unlock did not apply)"
+    end
+    local okReq, why = Civ6Ai_Apply._SubmitPolicyChanges(playerID, culture, n, desired)
+    if okReq == false then
+      fatal = "the game refused the policy change"
+        .. ((why ~= nil and why ~= "") and (": " .. tostring(why)) or "")
+      return false, fatal
+    end
+    submitted = true
+    return true, ""
+  end
+  local okNow, whyNow = submitOnce()
+  if fatal ~= nil then
+    return false, whyNow, args
   end
   local label = tostring(args.slots)
   return Civ6Ai_Apply._Defer(playerID, command, args, "policies=" .. label, function()
+    if not submitted then
+      local okReq, why = submitOnce()
+      if not okReq then
+        return false, why or "policy changes stay locked (the unlock did not apply)"
+      end
+    end
     local parts, missing = {}, {}
     for slot, idx in pairs(want) do
       local now = gcall(culture, "GetSlotPolicy", slot)
-      if (idx < 0 and (now == nil or now < 0)) or now == idx then
-        parts[#parts + 1] = slot .. "=" .. (idx >= 0 and GameInfo.Policies[idx].PolicyType or "NONE")
+      local row = now ~= nil and now >= 0 and GameInfo.Policies[now] or nil
+      local wantRow = idx ~= nil and GameInfo.Policies[idx] or nil
+      if row ~= nil and wantRow ~= nil and row.PolicyType == wantRow.PolicyType then
+        parts[#parts + 1] = slot .. "=" .. row.PolicyType
       else
         missing[#missing + 1] = "slot " .. slot .. " still holds "
-          .. tostring(now ~= nil and now >= 0 and GameInfo.Policies[now] and GameInfo.Policies[now].PolicyType or "nothing")
+          .. tostring(row ~= nil and row.PolicyType or "nothing")
       end
     end
     if #missing == 0 then
@@ -1166,6 +1275,51 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
     local seatNote = isLocal(playerID) and "" or " (policy cards for a seat that is not the local player can only be "
       .. "set through the game's screen, which ignored the request; the game's own AI keeps choosing this seat's cards)"
     return false, table.concat(missing, ", ") .. seatNote
+  end, function()
+    if Civ6Ai_Apply._PolicyUnlockCost(culture) > 0 then
+      Civ6Ai_Apply._AsSeat(playerID, function()
+        return Civ6Ai_Apply._PlayerOp(playerID, "UNLOCK_POLICIES", {})
+      end)
+    end
+  end)
+end
+
+function Civ6Ai_Apply._PolicyUnlockCost(culture)
+  local cost = gcall(culture, "GetCostToUnlockPolicies")
+  if type(cost) ~= "number" or cost < 0 then
+    return 0
+  end
+  return cost
+end
+
+-- Gold, unless GOVERNMENT_UNLOCK_WITH_FAITH is set (GovernmentScreen).
+function Civ6Ai_Apply._PolicyUnlockCurrency(playerID)
+  local gp = GameInfo ~= nil and GameInfo.GlobalParameters ~= nil
+    and GameInfo.GlobalParameters["GOVERNMENT_UNLOCK_WITH_FAITH"] or nil
+  local value = gp ~= nil and gp.Value or 0
+  local faith = value == true or (tonumber(value) ~= nil and tonumber(value) ~= 0)
+  if faith then
+    local rel = gcall(Players[playerID], "GetReligion")
+    return "faith", tonumber(gcall(rel, "GetFaithBalance")) or 0
+  end
+  local treasury = gcall(Players[playerID], "GetTreasury")
+  return "gold", tonumber(gcall(treasury, "GetGoldBalance")) or 0
+end
+
+-- OnConfirmPolicies: clear every slot, then slot index -> Types[PolicyType].Hash
+-- for each card that should be there. Removals are applied first, so a card
+-- moving between slots is not still "active" when it is added.
+function Civ6Ai_Apply._SubmitPolicyChanges(playerID, culture, n, desired)
+  local clearList, addList = {}, {}
+  for i = 0, n - 1 do
+    table.insert(clearList, i)
+    local row = desired[i]
+    if row ~= nil then
+      addList[i] = Civ6Ai_Apply._PolicyTypeHash(row)
+    end
+  end
+  return Civ6Ai_Apply._AsSeat(playerID, function()
+    return culture:RequestPolicyChanges(clearList, addList)
   end)
 end
 
