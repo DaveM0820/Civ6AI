@@ -72,6 +72,51 @@ class TickPumpTests(unittest.TestCase):
         self.assertEqual(self.lua.globals().ok_runs, 3)
         self.assertEqual(self.lua.eval("#Civ6Ai_Util._ticks"), 0)
 
+    def test_apply_results_skip_append_failed_when_file_io_is_dead(self) -> None:
+        # The jsonl line is the row the bridge reads. append_failed repeated
+        # that row once per result after gameplay AppendFile failed.
+        self.lua.execute(
+            r"""
+            logs = {}
+            calls = 0
+            Civ6Ai_Util.Log = function(s) logs[#logs + 1] = s end
+            Civ6Ai_Util._AppendCandidates = function(path) return { path } end
+            io.open = function() return nil end
+            ExposedMembers.Civ6Ai = {
+              AppendFile = function() calls = calls + 1; return false end,
+              GameCoreIo = true,
+            }
+            local path = "/tmp/civ6ai-logs/sessions/sess/PLAYER_1/apply-results.jsonl"
+            Civ6Ai_Util.AppendTextLine(path, "{\"event\":\"apply_result\",\"turn\":1}")
+            Civ6Ai_Util.AppendJsonLine(path, {event = "apply_result", turn = 2, player_id = "PLAYER_1"})
+            Civ6Ai_Util.AppendTextLine(path, "{\"event\":\"apply_result\",\"turn\":3}")
+            """
+        )
+        count = int(self.lua.eval("#logs"))
+        logs = [self.lua.eval(f"logs[{i}]") for i in range(1, count + 1)]
+        failed = [line for line in logs if "append_failed" in line]
+        why = [line for line in logs if "append_why" in line]
+        jsonl = [line for line in logs if str(line).startswith("jsonl|")]
+        self.assertEqual(failed, [])
+        self.assertEqual(why, [])
+        self.assertEqual(len(jsonl), 1)
+        self.assertIn("apply_result", jsonl[0])
+        # The second and third results writes do not call into gameplay io again.
+        self.assertEqual(self.lua.globals().calls, 1)
+        # Chat still uses the append_failed line the bridge copies onto disk.
+        self.lua.execute(
+            r"""
+            logs = {}
+            Civ6Ai_Util.AppendTextLine("/tmp/civ6ai-logs/sessions/sess/chat_log.jsonl", "{\"kind\":\"chat\"}")
+            """
+        )
+        chat_count = int(self.lua.eval("#logs"))
+        chat_logs = [self.lua.eval(f"logs[{i}]") for i in range(1, chat_count + 1)]
+        chat_failed = [line for line in chat_logs if "append_failed" in line]
+        self.assertEqual(len(chat_failed), 1)
+        self.assertIn("chat_log.jsonl", chat_failed[0])
+        self.assertIn('{"kind":"chat"}', chat_failed[0])
+
 
 if __name__ == "__main__":
     unittest.main()

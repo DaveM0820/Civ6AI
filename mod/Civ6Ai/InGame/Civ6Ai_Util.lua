@@ -212,7 +212,22 @@ function Civ6Ai_Util.FileExists(path)
   return text ~= nil
 end
 
+function Civ6Ai_Util._IsApplyResults(path)
+  return string.find(tostring(path or ""), "apply-results.jsonl", 1, true) ~= nil
+end
+
 function Civ6Ai_Util.AppendTextLine(path, line)
+  -- Apply results are recovered from the CIV6AI|jsonl| line AppendJsonLine
+  -- prints when this returns false. The gameplay AppendFile cannot create the
+  -- file, so each result was also logged as io|append_failed (about a dozen
+  -- lines a turn, the same row the bridge already reads from jsonl). Once a
+  -- results write has failed, or the probe already found no file io, skip the
+  -- open and do not log that failure. Chat and other logs still emit
+  -- append_failed: that line is how the bridge copies them onto disk.
+  if Civ6Ai_Util._IsApplyResults(path)
+      and (Civ6Ai_Util._resultsIoDead == true or Civ6Ai_Util._fileIoOk == false) then
+    return false
+  end
   local why = nil
   for _, candidate in ipairs(Civ6Ai_Util._AppendCandidates(path)) do
     local file = Civ6Ai_Util._TryInGameOpen(candidate, "a")
@@ -251,6 +266,10 @@ function Civ6Ai_Util.AppendTextLine(path, line)
       end
       why = "gamecore"
     end
+  end
+  if Civ6Ai_Util._IsApplyResults(path) then
+    Civ6Ai_Util._resultsIoDead = true
+    return false
   end
   if why ~= nil then
     Civ6Ai_Util.Log("io|append_why|" .. tostring(why) .. "|" .. tostring(path))
