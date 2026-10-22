@@ -34,6 +34,16 @@ function Civ6Ai_Snapshot._NullableInt(value)
   return Civ6Ai_Snapshot._Int(value)
 end
 
+-- Civ6 uses -1 for "this layer does not exist" (a city with no walls).
+-- Counters the schema requires to be >= 0 must not leave the snapshot as -1.
+function Civ6Ai_Snapshot._NonNegative(value)
+  local n = tonumber(value)
+  if n == nil or n < 0 then
+    return 0
+  end
+  return math.floor(n + 0.5)
+end
+
 function Civ6Ai_Snapshot._NullableId(value)
   if value == nil or value == "" then
     return Civ6Ai_Util.JsonNull()
@@ -767,14 +777,16 @@ function Civ6Ai_Snapshot._CityDefense(city)
     defense.percent = math.floor(100 * current / maxHp)
     defense.health_percent = defense.percent
   end
-  defense.bombard_damage = damage
+  defense.bombard_damage = Civ6Ai_Snapshot._NonNegative(damage)
   local district = Civ6Ai_Snapshot._CityCenterDistrict(city)
   if district ~= nil and DefenseTypes ~= nil then
-    local wMax = tonumber(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_OUTER)) or 0
-    local wDmg = tonumber(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_OUTER)) or 0
-    defense.wall_max_hp = math.floor(wMax)
-    defense.wall_hp = math.floor(math.max(0, wMax - wDmg))
+    local wMax = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_OUTER))
+    local wDmg = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_OUTER))
+    defense.wall_max_hp = wMax
+    defense.wall_hp = math.max(0, wMax - wDmg)
   end
+  defense.percent = math.max(0, math.min(100, Civ6Ai_Snapshot._NonNegative(defense.percent)))
+  defense.health_percent = math.max(0, math.min(100, Civ6Ai_Snapshot._NonNegative(defense.health_percent)))
   return defense
 end
 
@@ -3956,14 +3968,14 @@ function Civ6Ai_Snapshot._VisibleHostiles(playerID)
               strength = Civ6Ai_Snapshot._CombatNum(Civ6Ai_Snapshot._Method(city, "GetStrength")),
             }
             if district ~= nil and DefenseTypes ~= nil then
-              local gMax = tonumber(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_GARRISON)) or 0
-              local gDmg = tonumber(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_GARRISON)) or 0
-              local wMax = tonumber(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_OUTER)) or 0
-              local wDmg = tonumber(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_OUTER)) or 0
+              local gMax = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_GARRISON))
+              local gDmg = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_GARRISON))
+              local wMax = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetMaxDamage", DefenseTypes.DISTRICT_OUTER))
+              local wDmg = Civ6Ai_Snapshot._NonNegative(Civ6Ai_Snapshot._Method(district, "GetDamage", DefenseTypes.DISTRICT_OUTER))
               if gMax > 0 then row.hp, row.max_hp = math.max(0, gMax - gDmg), gMax end
               row.strength = row.strength or Civ6Ai_Snapshot._CombatNum(Civ6Ai_Snapshot._Method(district, "GetDefenseStrength"))
               row.wall_max_hp = wMax
-              if wMax > 0 then row.wall_hp = math.max(0, wMax - wDmg) end
+              row.wall_hp = wMax > 0 and math.max(0, wMax - wDmg) or 0
             end
             table.insert(cities, row)
           end

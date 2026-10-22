@@ -42,6 +42,135 @@ def is_civ6_snapshot(snapshot: dict[str, Any]) -> bool:
     return isinstance(version, str) and version.startswith("civ6ai-input/")
 
 
+# Engine "missing" readings. Civ6 returns -1 for a defense layer that does not
+# exist (no walls) and for several other counters. The schema minimum is 0.
+_DEFENSE_SENTINEL_KEYS = frozenset({
+    "wall_hp",
+    "wall_max_hp",
+    "bombard_damage",
+    "health_percent",
+    "percent",
+    "defender_wall_hp",
+    "defender_wall_max_hp",
+    "damage_to_walls",
+})
+
+
+def _schema_store() -> dict[str, Any]:
+    return {
+        CIV6_SCHEMA_PATH.name: json.loads(CIV6_SCHEMA_PATH.read_text(encoding="utf-8")),
+        "decision-input-v2.json": json.loads((ROOT / "schemas" / "decision-input-v2.json").read_text(encoding="utf-8")),
+    }
+
+
+def _deref_schema(node: Any, doc_name: str, store: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    if not isinstance(node, dict):
+        return {}, doc_name
+    if "$ref" not in node:
+        return node, doc_name
+    ref = str(node["$ref"])
+    file, _, frag = ref.partition("#")
+    target = file or doc_name
+    cur: Any = store.get(target, {})
+    for part in frag.split("/"):
+        if not part:
+            continue
+        part = part.replace("~1", "/").replace("~0", "~")
+        if not isinstance(cur, dict) or part not in cur:
+            return {}, target
+        cur = cur[part]
+    return (cur if isinstance(cur, dict) else {}), target
+
+
+def _clamp_sentinel_value(value: Any, schema: dict[str, Any]) -> Any:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return value
+    if value >= 0:
+        return value
+    minimum = schema.get("minimum")
+    if isinstance(minimum, (int, float)) and minimum >= 0:
+        if float(minimum).is_integer():
+            return int(minimum)
+        return minimum
+    return value
+
+
+def _clamp_tree(node: Any, schema: Any, doc_name: str, store: dict[str, Any]) -> None:
+    schema, doc_name = _deref_schema(schema, doc_name, store)
+    if isinstance(node, dict):
+        props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+        additional = schema.get("additionalProperties")
+        for key, value in list(node.items()):
+            child = props.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                resolved, _doc = _deref_schema(child, doc_name, store) if isinstance(child, dict) else ({}, doc_name)
+                node[key] = _clamp_sentinel_value(value, resolved)
+            elif isinstance(value, (dict, list)):
+                if isinstance(child, dict):
+                    _clamp_tree(value, child, doc_name, store)
+                elif additional is True or isinstance(additional, dict):
+                    _clamp_tree(value, additional if isinstance(additional, dict) else {}, doc_name, store)
+        # defense.percent has no schema minimum. A negative reading is still "no walls / no data".
+        if "wall_max_hp" in node or "wall_hp" in node:
+            for key in _DEFENSE_SENTINEL_KEYS:
+                current = node.get(key)
+                if isinstance(current, (int, float)) and not isinstance(current, bool) and current < 0:
+                    node[key] = 0
+        return
+    if isinstance(node, list):
+        item_schema = schema.get("items") if isinstance(schema.get("items"), dict) else {}
+        for item in node:
+            if isinstance(item, (dict, list)):
+                _clamp_tree(item, item_schema, doc_name, store)
+
+
+def clamp_negative_sentinels(snapshot: dict[str, Any]) -> None:
+    """Rewrite engine -1 counters to the schema minimum (0, or 1 when that is the floor).
+
+    Runs before validation so a city with no walls cannot stall the seat.
+    """
+    if not isinstance(snapshot, dict):
+        return
+    store = _schema_store()
+    root = store.get(CIV6_SCHEMA_PATH.name, {})
+    _clamp_tree(snapshot, root, CIV6_SCHEMA_PATH.name, store)
+
+
+def nonnegative_number_paths(snapshot: dict[str, Any]) -> list[tuple[Any, ...]]:
+    """Paths of numbers whose schema minimum is >= 0. Audit target for the -1 sentinel."""
+    store = _schema_store()
+    found: list[tuple[Any, ...]] = []
+
+    def walk(node: Any, schema: Any, doc_name: str, path: tuple[Any, ...]) -> None:
+        schema, doc_name = _deref_schema(schema, doc_name, store)
+        if isinstance(node, dict):
+            props = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+            additional = schema.get("additionalProperties")
+            for key, value in node.items():
+                child = props.get(key)
+                child_path = path + (key,)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    resolved, _doc = _deref_schema(child, doc_name, store) if isinstance(child, dict) else ({}, doc_name)
+                    minimum = resolved.get("minimum")
+                    if isinstance(minimum, (int, float)) and minimum >= 0:
+                        found.append(child_path)
+                elif isinstance(value, (dict, list)):
+                    if isinstance(child, dict):
+                        walk(value, child, doc_name, child_path)
+                    elif additional is True or isinstance(additional, dict):
+                        walk(value, additional if isinstance(additional, dict) else {}, doc_name, child_path)
+            return
+        if isinstance(node, list):
+            item_schema = schema.get("items") if isinstance(schema.get("items"), dict) else {}
+            for index, item in enumerate(node):
+                if isinstance(item, (dict, list)):
+                    walk(item, item_schema, doc_name, path + (index,))
+
+    root = store.get(CIV6_SCHEMA_PATH.name, {})
+    walk(snapshot, root, CIV6_SCHEMA_PATH.name, ())
+    return found
+
+
 def validate_civ6_snapshot(snapshot: dict[str, Any]) -> None:
     errors = _schema_errors(snapshot)
     if errors:
@@ -403,6 +532,7 @@ def normalize_civ6_snapshot(snapshot: dict[str, Any]) -> None:
     normalize_civ6_diplomacy(snapshot)
     normalize_civ6_late_game(snapshot)
     derive_known_other_cities(snapshot)
+    clamp_negative_sentinels(snapshot)
     validate_civ6_snapshot(snapshot)
 
 

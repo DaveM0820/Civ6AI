@@ -642,7 +642,7 @@ _DEFAULT_MENU_POSITIONS: dict[str, dict[str, float]] = {
 _MENU_OCR_HINTS: dict[str, tuple[tuple[str, ...], str]] = {
     "main_single_player": (("sin", "sing", "sngl", "plav"), "single player"),
     "sp_create_game": (("cre", "creat"), "create game"),
-    "sp_load_game": (("load", "loa"), "load game"),
+    "sp_load_game": (("load", "loa", "oad game"), "load game"),
     "sp_scenarios": (("scen", "scena"), "scenarios"),
     "start_game": (("start", "sta"), "start game"),
     "begin_game": (("beg",), "begin game"),
@@ -1017,6 +1017,25 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
 
 
+def ocr_dropped_initial(got: str, want: str) -> bool:
+    """True when OCR dropped the first letter: 'Load Game' is read as 'Oad Game'."""
+    got_n = _normalize(got)
+    want_n = _normalize(want)
+    if len(want_n) < 5:
+        return False
+    short = want_n[1:]
+    return got_n == short or short in got_n
+
+
+def menu_blob_has(blob: str, label: str) -> bool:
+    """Substring match, also accepting a dropped first letter ('oad game')."""
+    text = _normalize(blob)
+    want = _normalize(label)
+    if want and want in text:
+        return True
+    return ocr_dropped_initial(text, label)
+
+
 def _text_matches_target(
     got: str,
     want: str,
@@ -1034,6 +1053,9 @@ def _text_matches_target(
         p = prefix.lower()
         if got.startswith(p) or p in got:
             return True
+    # Exact menu labels still match when the first glyph is missing.
+    if ocr_dropped_initial(got, want):
+        return True
     return False
 
 
@@ -2305,7 +2327,7 @@ def _open_multiplayer_flyout(win: WindowInfo) -> bool:
         time.sleep(1.4)
         names = [t.lower() for t, _, _ in ocr_window(win)]
         log.info("after Multiplayer OCR names=%s", names[:20])
-        if any("local network" in n for n in names):
+        if any(menu_blob_has(n, "local network") for n in names):
             return True
     return False
 
@@ -2335,7 +2357,10 @@ def pick_newest_save_label(rows: list[tuple[str, int, int]]) -> tuple[str, int, 
     ranked: list[tuple[int, int, str]] = []
     for text, x, y in rows:
         low = " ".join(text.lower().split())
-        if len(low) < 4 or low in _SAVE_LIST_CHROME:
+        if len(low) < 4 or low in _SAVE_LIST_CHROME or any(
+            ocr_dropped_initial(low, label)
+            for label in ("load game", "autosaves", "sort by last modified", "no saved games")
+        ):
             continue
         if any(part in low for part in ("sort by", "no saved", "no file", "cloud")):
             continue
@@ -2382,9 +2407,9 @@ def load_lan_autosave(win: WindowInfo) -> list[str]:
 def _load_lan_autosave_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
     entry = ocr_window(win)
     blob = " ".join(t.lower() for t, _, _ in entry)
-    on_lan_browser = "local network games" in blob or ("join game" in blob and "refresh" in blob)
-    on_staging = "staging room" in blob
-    on_load = "autosaves" in blob or ("load game" in blob and "back" in blob)
+    on_lan_browser = menu_blob_has(blob, "local network games") or ("join game" in blob and "refresh" in blob)
+    on_staging = menu_blob_has(blob, "staging room")
+    on_load = menu_blob_has(blob, "autosaves") or (menu_blob_has(blob, "load game") and "back" in blob)
     if detect_menu(win) == "single_player" and not on_lan_browser and not on_staging and not on_load:
         press_escape(win)
         time.sleep(0.5)
@@ -2398,17 +2423,17 @@ def _load_lan_autosave_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
         steps.append(f"clicked_{hit}")
         time.sleep(1.6)
     blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
-    if "staging room" in blob:
+    if menu_blob_has(blob, "staging room"):
         steps.append("already_staging")
         return _ready_lan_staging(win, steps)
-    if "autosaves" not in blob:
-        if not click_text(win, "Load Game", timeout=8.0, exact=True, post_delay=0.6):
+    if not menu_blob_has(blob, "autosaves"):
+        if not click_text(win, "Load Game", timeout=8.0, exact=True, prefixes=("oad game",), post_delay=0.6):
             raise RuntimeError("Could not click Load Game")
         steps.append("clicked_load_game")
         time.sleep(1.0)
     blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
-    if "autosaves" not in blob:
-        if not click_text(win, "Autosaves", timeout=6.0, exact=False, post_delay=0.5):
+    if not menu_blob_has(blob, "autosaves"):
+        if not click_text(win, "Autosaves", timeout=6.0, exact=False, prefixes=("utosave",), post_delay=0.5):
             raise RuntimeError("Could not open Autosaves")
         steps.append("clicked_autosaves")
         time.sleep(0.8)
@@ -2427,11 +2452,15 @@ def _load_lan_autosave_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
         "Load",
         timeout=6.0,
         exact=True,
+        prefixes=("oad",),
         prefer_bottom=True,
         min_y_fraction=0.65,
         post_delay=0.6,
     ):
-        if not click_text(win, "Load Game", timeout=4.0, prefer_bottom=True, min_y_fraction=0.65, post_delay=0.6):
+        if not click_text(
+            win, "Load Game", timeout=4.0, prefixes=("oad game",),
+            prefer_bottom=True, min_y_fraction=0.65, post_delay=0.6,
+        ):
             raise RuntimeError("Could not click Load")
     steps.append("clicked_load")
     deadline = time.monotonic() + 90.0
@@ -2440,7 +2469,7 @@ def _load_lan_autosave_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
         if win is None:
             break
         blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
-        if "staging room" in blob or ocr_blob_is_loading_or_ingame(blob):
+        if menu_blob_has(blob, "staging room") or ocr_blob_is_loading_or_ingame(blob):
             steps.append("reached_staging")
             return _ready_lan_staging(win, steps)
         time.sleep(1.5)
@@ -2498,7 +2527,7 @@ def _start_lan_test_game_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
     entry = ocr_window(win)
     blob = " ".join(t.lower() for t, _, _ in entry)
     log.info("lan entry OCR: %s", [(t, x - win.x, y - win.y) for t, x, y in entry[:40]])
-    if "autosaves" in blob or ("load game" in blob and "back" in blob and "no file" in blob):
+    if menu_blob_has(blob, "autosaves") or (menu_blob_has(blob, "load game") and "back" in blob and "no file" in blob):
         _hit_client(win, 1240, 148, taps=1)
         steps.append("clicked_back_load_game")
         time.sleep(1.2)
