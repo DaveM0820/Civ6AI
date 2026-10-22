@@ -1373,6 +1373,19 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
         return Civ6Ai_Apply._PlayerOp(playerID, "UNLOCK_POLICIES", {})
       end)
     end
+    -- The type hash is what the government screen sends. When that does not
+    -- stick, send the row hash once. A nil result from the request is normal.
+    local clearList, alt = {}, {}
+    for i = 0, n - 1 do
+      table.insert(clearList, i)
+      local row = desired[i]
+      if row ~= nil then
+        alt[i] = row.Hash or row.Index
+      end
+    end
+    Civ6Ai_Apply._AsSeat(playerID, function()
+      return culture:RequestPolicyChanges(clearList, alt)
+    end)
   end)
 end
 

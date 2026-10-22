@@ -846,15 +846,8 @@ function Civ6Ai_GameCore.BuildChargesForPlayer(playerID, unitNumericId)
 end
 
 function Civ6Ai_GameCore.CanActivateGreatPersonForPlayer(playerID, unitNumericId)
-  local _, unit = Civ6Ai_GameCore._FindUnit(playerID, unitNumericId)
-  if unit == nil or unit.GetGreatPerson == nil then
-    return false
-  end
-  local ok, gp = pcall(function() return unit:GetGreatPerson() end)
-  if not ok or gp == nil then
-    return false
-  end
-  return gp.Activate ~= nil
+  -- The great-person action is UI-only. This script does not read or call it.
+  return false
 end
 
 function Civ6Ai_GameCore.UnitMovesForPlayer(playerID, unitNumericId, planning)

@@ -251,6 +251,17 @@ function Civ6Ai_Chat._LeaderName(playerID)
     return nil
   end
   local config = PlayerConfigurations[playerID]
+  -- The slot name (GetLeaderName / GetPlayerName) can be another leader's
+  -- label. The civilization's leader type is who this seat is.
+  if config.GetLeaderTypeName ~= nil and GameInfo ~= nil and GameInfo.Leaders ~= nil then
+    local okType, typeName = pcall(function() return config:GetLeaderTypeName() end)
+    if okType and typeName ~= nil and typeName ~= "" then
+      local row = GameInfo.Leaders[typeName]
+      if row ~= nil and row.Name ~= nil and row.Name ~= "" then
+        return row.Name
+      end
+    end
+  end
   if config.GetLeaderName ~= nil then
     local name = config:GetLeaderName()
     if name ~= nil and name ~= "" then
@@ -388,6 +399,24 @@ function Civ6Ai_Chat.SendMessage(senderPlayerID, message)
     return false
   end
   local text = tostring(message.text)
+  -- A line that already starts with another seat's name is still this seat
+  -- speaking. Keep the body and prefix the real leader.
+  local parsedId, parsedBody = Civ6Ai_Chat._ParseWire(text)
+  if parsedId ~= nil and parsedId ~= senderPlayerID and parsedBody ~= nil and parsedBody ~= "" then
+    text = parsedBody
+  end
+  -- The slot label can be a different leader. Drop that prefix before the real name.
+  local config = PlayerConfigurations ~= nil and PlayerConfigurations[senderPlayerID] or nil
+  if config ~= nil and config.GetLeaderName ~= nil then
+    local okSlot, slot = pcall(function() return config:GetLeaderName() end)
+    local real = Civ6Ai_Chat._SpeakerName(senderPlayerID)
+    if okSlot and type(slot) == "string" and slot ~= "" and slot ~= real then
+      local slotPrefix = slot .. ": "
+      if string.sub(text, 1, string.len(slotPrefix)) == slotPrefix then
+        text = string.sub(text, string.len(slotPrefix) + 1)
+      end
+    end
+  end
   local wire = Civ6Ai_Chat._WireText(senderPlayerID, text)
   local target = tostring(message.target or "all")
   if target == "all" or target == "public" then

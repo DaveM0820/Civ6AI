@@ -83,6 +83,23 @@ class ChatWireTextTests(unittest.TestCase):
         self.assertTrue(self.lua.eval("Civ6Ai_Chat._HasMet(1)"))
         self.assertFalse(self.lua.eval("Civ6Ai_Chat._HasMet(61)"))
 
+    def test_leader_type_beats_the_slot_label(self):
+        # The slot label can be another leader. The leader type is who is speaking.
+        self.lua.execute(
+            r"""
+            PlayerConfigurations[1] = {
+              GetLeaderTypeName = function() return "LEADER_MONTEZUMA" end,
+              GetLeaderName = function() return "Wilhelmina" end,
+              GetPlayerName = function() return "AI_1" end,
+            }
+            GameInfo = { Leaders = { LEADER_MONTEZUMA = { Name = "Montezuma" } } }
+            """
+        )
+        self.lua.eval('Civ6Ai_Chat.SendMessage(1, { text = "hello", target = "all" })')
+        self.assertEqual("Montezuma: hello", self.lua.eval("SENT[1].text"))
+        self.lua.eval('Civ6Ai_Chat.SendMessage(1, { text = "Wilhelmina: hello", target = "all" })')
+        self.assertEqual("Montezuma: hello", self.lua.eval("SENT[2].text"))
+
     def test_plain_human_line_stays_the_network_sender(self):
         self.lua.eval('Civ6Ai_Chat._OnHumanChat(0, -1, "hello", 1)')
         sender = self.lua.eval("Civ6Ai_Chat.GetPublicEvents()[1].affected_ids[1]")

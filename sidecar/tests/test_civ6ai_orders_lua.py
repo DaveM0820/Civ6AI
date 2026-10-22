@@ -2035,6 +2035,14 @@ class GameplayApiTests(unittest.TestCase):
             "CityManager.RequestOperation",
             "CityManager.CanStartOperation",
             "UI.RequestPlayerOperation",
+            "CreateTradeRoute",
+            "CanCreateTradeRoute",
+            "RequestPolicyChanges",
+            "ChangeTokensToGive",
+            "ChangeTokensReceived",
+            "GiveTokenToPlayer",
+            ".Activate(",
+            ":Activate(",
         ):
             self.assertNotIn(banned, body)
 

@@ -823,6 +823,76 @@ function Civ6Ai_Snapshot._GarrisonIds(playerID, x, y)
   return ids
 end
 
+function Civ6Ai_Snapshot._CityBuildingIds(city)
+  local out = Civ6Ai_Util.JsonArrayList()
+  local buildings = Civ6Ai_Snapshot._EconCall(city, "GetBuildings")
+  if buildings == nil or GameInfo == nil or GameInfo.Buildings == nil then
+    return out
+  end
+  pcall(function()
+    for bRow in GameInfo.Buildings() do
+      if bRow.IsWonder ~= true and Civ6Ai_Snapshot._EconCall(buildings, "HasBuilding", bRow.Index) == true then
+        table.insert(out, bRow.BuildingType)
+      end
+    end
+  end)
+  return out
+end
+
+function Civ6Ai_Snapshot._WorkedPlotIds(city)
+  local out = Civ6Ai_Util.JsonArrayList()
+  local citizens = Civ6Ai_Snapshot._EconCall(city, "GetCitizens")
+  if citizens == nil or Map == nil or Map.GetPlot == nil then
+    return out
+  end
+  local cx, cy = city:GetX(), city:GetY()
+  pcall(function()
+    for dy = -3, 3 do
+      for dx = -3, 3 do
+        local plot = Map.GetPlot(cx + dx, cy + dy)
+        local index = plot ~= nil and plot.GetIndex ~= nil and plot:GetIndex() or nil
+        if type(index) == "number" and Civ6Ai_Snapshot._EconCall(citizens, "IsPlotWorked", index) == true then
+          table.insert(out, Civ6Ai_Util.PlotId(plot:GetX(), plot:GetY()))
+        end
+      end
+    end
+  end)
+  return out
+end
+
+function Civ6Ai_Snapshot._WorldCongress()
+  if Game == nil or Game.GetWorldCongress == nil then
+    return nil
+  end
+  local ok, wc = pcall(function() return Game.GetWorldCongress() end)
+  if not ok or wc == nil then
+    return nil
+  end
+  local out = {}
+  local function take(field, name, ...)
+    local okCall, fn = pcall(function() return wc[name] end)
+    if not okCall or type(fn) ~= "function" then
+      return
+    end
+    local okV, value = pcall(fn, wc, ...)
+    if okV and (type(value) == "number" or type(value) == "string" or type(value) == "boolean") then
+      out[field] = value
+    end
+  end
+  take("meeting_status", "GetMeetingStatus")
+  take("meeting_turn", "GetMeetingTurn")
+  take("in_session", "IsInSession")
+  local any = false
+  for _, _ in pairs(out) do
+    any = true
+    break
+  end
+  if not any then
+    return nil
+  end
+  return out
+end
+
 function Civ6Ai_Snapshot._BuildYourCities(playerID)
   local player = Players[playerID]
   if player == nil then
@@ -863,9 +933,9 @@ function Civ6Ai_Snapshot._BuildYourCities(playerID)
         culture = Civ6Ai_Snapshot._EmptyCommerceItem(),
         espionage = Civ6Ai_Snapshot._EmptyCommerceItem(),
       },
-      buildings = {},
+      buildings = Civ6Ai_Snapshot._CityBuildingIds(city),
       garrison_unit_ids = Civ6Ai_Snapshot._GarrisonIds(playerID, x, y),
-      worked_plot_ids = {},
+      worked_plot_ids = Civ6Ai_Snapshot._WorkedPlotIds(city),
       automation = {citizens = false, production = true},
       culture = Civ6Ai_Snapshot._EmptyAmounts(),
       great_people = Civ6Ai_Snapshot._EmptyAmounts(),
@@ -2357,24 +2427,24 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   if Civ6Ai_Snapshot._UnitMoves(unit) <= 0 then
     return false
   end
-  -- Builders of AI seats are left to the game's own AI. A human seat (P0) has no
-  -- builder AI, so its builders need orders (improve/move offers) or they sit idle.
+  -- Builders of AI seats stay with the game's own AI. Taking them after two
+  -- idle turns handed the model Improve orders that did not stick, and then
+  -- finished the builder's moves so the base AI could not build either.
+  -- A human seat has no builder AI, so its builders still need orders.
   local charges = select(1, Civ6Ai_Snapshot._BuildCharges(unit))
   if charges > 0 then
     local owner = Players[unit:GetOwner()]
     if owner ~= nil and owner.IsHuman ~= nil and owner:IsHuman() == true then return true end
-    -- AI seat: hand the builder to the model only once the game's AI left it idle
-    -- (same tile, same charges) for 2+ snapshots on different turns.
-    Civ6Ai_Snapshot._builderSeen = Civ6Ai_Snapshot._builderSeen or {}
-    local key = tostring(unit:GetOwner()) .. "_" .. tostring(unit:GetID())
-    local turn = Game.GetCurrentGameTurn()
-    local sig = unit:GetX() .. "," .. unit:GetY() .. "," .. tostring(charges)
-    local seen = Civ6Ai_Snapshot._builderSeen[key]
-    if seen == nil or seen.sig ~= sig then
-      Civ6Ai_Snapshot._builderSeen[key] = {sig = sig, turn = turn}
-      return false
-    end
-    return turn - seen.turn >= 2
+    return false
+  end
+  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+  local great = row ~= nil and ((row.GreatPersonClassType ~= nil and row.GreatPersonClassType ~= "")
+      or (row.UnitType ~= nil and string.find(row.UnitType, "GREAT_", 1, true) ~= nil))
+  if great then
+    local owner = Players[unit:GetOwner()]
+    -- A human seat has no great-person AI. An AI seat's own AI activates them.
+    if owner ~= nil and owner.IsHuman ~= nil and owner:IsHuman() == true then return true end
+    return false
   end
   return true
 end
@@ -3032,7 +3102,7 @@ function Civ6Ai_Snapshot._AddPurchaseCommands(commands, playerID)
           or Civ6Ai_Snapshot._PurchaseCost(city, yieldType, hash)
         if cost ~= nil and cost <= bal then
           do
-            local fixed = { city_id = cityId, item_id = itemId }
+            local fixed = { city_id = cityId, item_id = itemId, cost = cost }
             if yieldName == "faith" then
               fixed["yield"] = "faith"
             end
@@ -3290,50 +3360,8 @@ function Civ6Ai_Snapshot._TradeRouteCanStart(tm, owner, fromPlot, destPlot)
 end
 
 function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId)
-  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
-  if row == nil then
-    return
-  end
-  local isTrader = row.UnitType == "UNIT_TRADER" or row.MakeTradeRoute == true or row.MakeTradeRoute == 1
-  if not isTrader then
-    return
-  end
-  local tm = nil
-  if Game ~= nil and Game.GetTradeManager ~= nil then
-    local ok, mgr = pcall(function() return Game.GetTradeManager() end)
-    if ok then tm = mgr end
-  end
-  if tm == nil or tm.CanCreateTradeRoute == nil or tm.CreateTradeRoute == nil then
-    Civ6Ai_Util.Log("snapshot|trade_api_missing|CanCreateTradeRoute")
-    return
-  end
-  local origin = Map ~= nil and Map.GetPlot ~= nil and Map.GetPlot(unit:GetX(), unit:GetY()) or nil
-  local added = 0
-  for pid = 0, 63 do
-    if added >= 8 then break end
-    local other = Players[pid]
-    local cities = other ~= nil and other.GetCities ~= nil and other:GetCities() or nil
-    if cities ~= nil and cities.Members ~= nil then
-      for _, city in cities:Members() do
-        if added >= 8 then break end
-        local dest = Map.GetPlot(city:GetX(), city:GetY())
-        if Civ6Ai_Snapshot._TradeRouteCanStart(tm, playerID, origin, dest) then
-          table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-            command_id = "CMD_trade_" .. unitId .. "_" .. tostring(city:GetOwner()) .. "_" .. tostring(city:GetID()),
-            kind = "trade_route",
-            fixed_arguments = {
-              unit_id = unitId,
-              -- Full GetID(). CITY_owner_index would parse as the owner.
-              city_id = "CITY_" .. tostring(city:GetID()),
-              target_x = city:GetX(),
-              target_y = city:GetY(),
-            },
-          }))
-          added = added + 1
-        end
-      end
-    end
-  end
+  -- Creating a route is a UI operation. Offering it failed on every send.
+  -- Traders stay with the game's own AI.
 end
 
 -- Schema upgrade list: {} or {{unit_type_id, gold_cost}}.
@@ -3371,11 +3399,12 @@ function Civ6Ai_Snapshot._UpgradeTarget(playerID, unit)
   local plot = Map.GetPlot(unit:GetX(), unit:GetY())
   if (tech ~= nil and M(M(p, "GetTechs"), "HasTech", tech.Index) ~= true)
       or (civic ~= nil and M(M(p, "GetCulture"), "HasCivic", civic.Index) ~= true)
-      or cost <= 0 or (M(M(p, "GetTreasury"), "GetGoldBalance") or 0) < cost
-      or M(plot, "GetOwner") ~= playerID then
+      or cost <= 0 then
     return nil
   end
-  return row.UnitType, cost
+  local gold = M(M(p, "GetTreasury"), "GetGoldBalance") or 0
+  local affordable = gold >= cost and M(plot, "GetOwner") == playerID
+  return row.UnitType, cost, affordable
 end
 
 -- Promotions the unit may take now: its class, not held, any prereq held.
@@ -3404,8 +3433,8 @@ function Civ6Ai_Snapshot._AddProgressionCommands(commands, playerID, unit, unitI
     args.unit_id = unitId
     table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({command_id = "CMD_" .. kind .. "_" .. unitId .. "_" .. tag, kind = kind, fixed_arguments = args}))
   end
-  local up, cost = Civ6Ai_Snapshot._UpgradeTarget(playerID, unit)
-  if up ~= nil then add("upgrade_unit", up, {unit_type_id = up, cost = cost}) end
+  local up, cost, canAfford = Civ6Ai_Snapshot._UpgradeTarget(playerID, unit)
+  if up ~= nil and canAfford == true then add("upgrade_unit", up, {unit_type_id = up, cost = cost}) end
   for _, promo in ipairs(Civ6Ai_Snapshot._LegalPromotions(unit)) do
     add("promote_unit", promo, {promotion_id = promo})
   end
@@ -3421,6 +3450,9 @@ function Civ6Ai_Snapshot._AddProgressionCommands(commands, playerID, unit, unitI
     can = (form == F.STANDARD_MILITARY_FORMATION and civic(sea and "CIVIC_MERCANTILISM" or "CIVIC_NATIONALISM"))
       or (form == F.CORPS_MILITARY_FORMATION and civic(sea and "CIVIC_NATIONALISM" or "CIVIC_MOBILIZATION"))
   end
+  -- SetMilitaryFormation does not stick from a gameplay script. Offering the
+  -- order failed every time and removed nothing. Leave both units as they are.
+  can = false
   if can and row.FormationClass ~= "FORMATION_CLASS_CIVILIAN" and row.FormationClass ~= "FORMATION_CLASS_SUPPORT" then
     for _, other in ipairs(Civ6Ai_Snapshot._IterateUnits(p:GetUnits())) do
       if other:GetID() ~= unit:GetID() and other:GetType() == unit:GetType()
@@ -3789,65 +3821,34 @@ function Civ6Ai_Snapshot._DistrictWithin(playerID, unit, names, maxDist)
 end
 
 function Civ6Ai_Snapshot._AddActivateCommand(commands, playerID, unit, unitId)
+  -- Activation and retire are not offered. The action is UI-only and every
+  -- live order failed. A Great Prophet still gets a move onto the Holy Site,
+  -- which founds the religion through the gameplay route on arrival.
   local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
   if row == nil then
     return
   end
-  local gp = nil
-  if unit.GetGreatPerson ~= nil then
-    local ok, value = pcall(function() return unit:GetGreatPerson() end)
-    if ok then gp = value end
-  end
-  local isGP = gp ~= nil or (row.UnitType ~= nil and string.find(row.UnitType, "GREAT_", 1, true) ~= nil)
-  if not isGP then
-    return
-  end
-  local canActivate = gp ~= nil and gp.Activate ~= nil
-  if not canActivate then
-    local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
-    if routes ~= nil and routes.CanActivateGreatPersonForPlayer ~= nil and unit.GetOwner ~= nil then
-      local okCan, allowed = pcall(routes.CanActivateGreatPersonForPlayer, unit:GetOwner(), unit:GetID())
-      canActivate = okCan and allowed == true
-    end
-  end
-  local class = row.GreatPersonClassType
-  local passive = class == "GREAT_PERSON_CLASS_GENERAL" or class == "GREAT_PERSON_CLASS_ADMIRAL"
-  local sites = Civ6Ai_Snapshot.GP_DISTRICT[class]
-  -- A prophet founds a religion by moving onto a holy site (offered below),
-  -- not by the generic activate command. Activate is offered only when
-  -- gameplay has GreatPerson:Activate; the heal operation is not that action.
-  if canActivate and not passive and class ~= "GREAT_PERSON_CLASS_PROPHET" and sites ~= nil
-      and Civ6Ai_Snapshot._DistrictWithin(playerID, unit, sites, 0) then
-    table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-      command_id = "CMD_activate_" .. unitId,
-      kind = "activate_great_person",
-      fixed_arguments = {unit_id = unitId},
-    }))
-  end
-  table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-    command_id = "CMD_retire_" .. unitId,
-    kind = "activate_great_person",
-    fixed_arguments = {unit_id = unitId, retire = 1},
-  }))
   local isProphet = row.UnitType == "UNIT_GREAT_PROPHET"
     or (row.GreatPersonClassType == "GREAT_PERSON_CLASS_PROPHET")
-  if isProphet then
-    local site = Civ6Ai_Snapshot._NearestOwnHolySite(playerID, unit:GetX(), unit:GetY())
-    if site ~= nil then
-      table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
-        command_id = "CMD_foundrel_move_" .. unitId .. "_" .. tostring(site.x) .. "_" .. tostring(site.y),
-        kind = "move_unit",
-        fixed_arguments = {
-          unit_id = unitId,
-          target_x = site.x,
-          target_y = site.y,
-          G = 1,
-          A = 3,
-          intent = "found_religion",
-        },
-      }))
-    end
+  if not isProphet then
+    return
   end
+  local site = Civ6Ai_Snapshot._NearestOwnHolySite(playerID, unit:GetX(), unit:GetY())
+  if site == nil then
+    return
+  end
+  table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+    command_id = "CMD_foundrel_move_" .. unitId .. "_" .. tostring(site.x) .. "_" .. tostring(site.y),
+    kind = "move_unit",
+    fixed_arguments = {
+      unit_id = unitId,
+      target_x = site.x,
+      target_y = site.y,
+      G = 1,
+      A = 3,
+      intent = "found_religion",
+    },
+  }))
 end
 
 -- ---------------------------------------------------------------------------
@@ -4395,22 +4396,8 @@ Civ6Ai_Snapshot.LEGAL_COMMAND_CAP = 500
 -- One envoy per met city-state when this seat still has tokens to give.
 -- Gameplay applies it (Gov.SendEnvoy); the UI influence-token request is not used.
 function Civ6Ai_Snapshot._AddEnvoyCommands(commands, playerID)
-  local inf = Civ6Ai_Snapshot._Method(Players[playerID], "GetInfluence")
-  local tokens = Civ6Ai_Snapshot._Method(inf, "GetTokensToGive")
-  if type(tokens) ~= "number" or tokens < 1 then
-    return
-  end
-  local diplo = Civ6Ai_Snapshot._BuildDiplomacy(playerID)
-  for _, cs in ipairs(diplo.city_states or {}) do
-    local pid = tostring(cs.player_id or "")
-    if pid ~= "" then
-      table.insert(commands, 1, Civ6Ai_Snapshot._EnrichLegalCommand({
-        command_id = "CMD_envoy_" .. pid,
-        kind = "send_envoy",
-        fixed_arguments = {target_player_id = pid},
-      }))
-    end
-  end
+  -- The influence-token setters are not available in a gameplay script.
+  -- Every live envoy order failed. The game's own AI sends them.
 end
 
 function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
@@ -5161,6 +5148,7 @@ function Civ6Ai_Snapshot._BuildGovernance(playerID)
     { "religion", function() return Civ6Ai_Snapshot._GovReligion(playerID, player) end },
     { "governors", function() return Civ6Ai_Snapshot._GovGovernors(playerID, player) end },
     { "great_people", function() return Civ6Ai_Snapshot._GovGreatPeople(playerID, player) end },
+    { "world_congress", function() return Civ6Ai_Snapshot._WorldCongress() end },
   }
   for _, part in ipairs(parts) do
     local ok, value = pcall(part[2])

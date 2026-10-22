@@ -1810,7 +1810,11 @@ function Civ6Ai_Orders._ModelCommandsUnit(unit, ordered)
   local builder = (num(info.BuildCharges) or 0) > 0
   local trader = info.MakeTradeRoute == true
   local religious = (num(info.ReligiousStrength) or 0) > 0
-  if builder or trader or religious then
+  -- Great people stay with the game's own AI. Activate is a UI action and
+  -- does not exist in this script, so finishing their moves would idle them.
+  local great = (info.GreatPersonClassType ~= nil and info.GreatPersonClassType ~= "")
+    or (info.UnitType ~= nil and string.find(info.UnitType, "GREAT_", 1, true) ~= nil)
+  if builder or trader or religious or great then
     if ordered ~= nil and ordered[unit:GetID()] then
       return true
     end
@@ -2751,56 +2755,11 @@ function Gov.Governor(owner)
     .. "(the game only offers that to the local player's screen); the game's own AI manages this seat's governors"
 end
 
-local function findCityById(cityId)
-  for id = 0, 63 do
-    local p = Players[id]
-    if p ~= nil then
-      for _, c in ipairs(sortedMembers(call(p, "GetCities"))) do
-        if c:GetID() == cityId then
-          return c, id
-        end
-      end
-    end
-  end
-  return nil
-end
-
--- Trade route: gameplay TradeManager when present, else a guarded unit
--- operation. Destination is a city id (I).
+-- Trade routes. Creating one is a UI operation. This script does not call it.
+-- Traders stay with the game's own AI (they are not model-commanded).
 function Gov.MakeTradeRoute(owner, unitId, destCityId)
-  local unit = Civ6Ai_Orders._Unit(owner, unitId)
-  if unit == nil then
-    return false, "stale_unit_id"
-  end
-  local dest = destCityId ~= nil and destCityId >= 0 and findCityById(destCityId) or nil
-  if dest == nil then
-    return false, "stale_city_id:" .. tostring(destCityId)
-  end
-  local tm = Game.GetTradeManager ~= nil and Game.GetTradeManager() or nil
-  if tm == nil or tm.CanCreateTradeRoute == nil or tm.CreateTradeRoute == nil then
-    return false, "trade_route_unavailable:no_trade_manager"
-  end
-  local origin = Map.GetPlot(unit:GetX(), unit:GetY())
-  local destPlot = Map.GetPlot(dest:GetX(), dest:GetY())
-  local fromIdx = origin ~= nil and call(origin, "GetIndex") or nil
-  local toIdx = destPlot ~= nil and call(destPlot, "GetIndex") or nil
-  if fromIdx == nil or toIdx == nil then
-    return false, "trade_route_unavailable:no_plot"
-  end
-  -- Same call the snapshot uses before it offers TradeRoute. CanStartRoute
-  -- (city ids) is a different API and was true for routes this call rejects.
-  -- Gameplay has no UNITOPERATION_MAKE_TRADE_ROUTE, so do not fall through to it.
-  local okCan, can = pcall(tm.CanCreateTradeRoute, tm, owner, fromIdx, toIdx)
-  if not okCan or can ~= true then
-    return false, "cannot_start_trade_route"
-  end
-  local okMake, made = pcall(tm.CreateTradeRoute, tm, owner, fromIdx, toIdx)
-  if okMake and made ~= false then
-    pcall(UnitManager.FinishMoves, unit)
-    return true, "trade_route:city=" .. tostring(destCityId)
-  end
-  log("trade_unavailable|CreateTradeRoute|" .. tostring(made))
-  return false, "trade_route_unavailable:" .. tostring(made)
+  return false, "trade_route_unavailable:no_gameplay_route:player=" .. tostring(owner)
+    .. ":unit=" .. tostring(unitId) .. ":city=" .. tostring(destCityId)
 end
 
 -- Explore: RequestOperation does not exist in gameplay script, so walk the unit
@@ -2900,19 +2859,11 @@ function Gov.ActivateGreatPerson(owner, unitId, mode)
     end
     return true, "retired"
   end
-  -- Activate is the gameplay great-person action. UNITOPERATION_GREAT_PERSON_HEAL
-  -- is not available from a gameplay script; falling through to it reported
-  -- every activate as "great person heal unavailable".
-  local gp = call(unit, "GetGreatPerson")
-  if gp == nil or gp.Activate == nil then
-    return false, "activate_unavailable:no_activate"
-  end
-  local ok, err = pcall(gp.Activate, gp)
-  if ok then
-    return true, "activate_gp"
-  end
-  log("activate_unavailable|GreatPerson.Activate|" .. tostring(err))
-  return false, "activate_unavailable:" .. tostring(err)
+  -- The great-person action is a UI command. Calling it from this script
+  -- throws and every activation comes back failed. Retire (mode 1) still
+  -- uses UnitManager.Kill above. The snapshot does not offer either action;
+  -- the game's own AI uses the unit.
+  return false, "activate_unavailable:no_gameplay_activate"
 end
 
 local function cityById(owner, cityId)
@@ -2996,6 +2947,21 @@ function Gov.MakePeace(owner, other)
       pcall(fn, theirDiplo, owner)
     end
   end
+  -- War can also sit on the team. Clear that flag when the engine exposes it,
+  -- or the player call succeeds and the other seat keeps attacking.
+  local myTeam = call(Players[owner], "GetTeam")
+  local theirTeam = call(Players[other], "GetTeam")
+  if Teams ~= nil and myTeam ~= nil and theirTeam ~= nil and Teams[myTeam] ~= nil then
+    local team = Teams[myTeam]
+    local okPeace, teamPeace = pcall(function() return team.MakePeace end)
+    if okPeace and type(teamPeace) == "function" then
+      pcall(teamPeace, team, theirTeam)
+    end
+    local okSet, setAtWar = pcall(function() return team.SetAtWar end)
+    if okSet and type(setAtWar) == "function" then
+      pcall(setAtWar, team, theirTeam, false)
+    end
+  end
   local ours = call(diplo, "IsAtWarWith", other)
   local theirs = call(theirDiplo, "IsAtWarWith", owner)
   if ours ~= false or theirs ~= false then
@@ -3036,39 +3002,11 @@ local function knows(p, id)
   return tech ~= nil and call(call(p, "GetTechs"), "HasTech", tech.Index) == true
 end
 
--- One envoy from this seat to a city-state. Gameplay only (ChangeTokensToGive /
--- ChangeTokensReceived). The UI GIVE_INFLUENCE_TOKEN request is not used.
+-- Envoys. The influence-token setters are not available in this script: every
+-- live send came back without moving a token. Do not call them. The snapshot
+-- does not offer the order; the game's own AI sends envoys.
 function Gov.SendEnvoy(owner, minor)
-  local me, them = Players[owner], Players[minor]
-  if them == nil or call(them, "IsAlive") ~= true then
-    return false, "that city-state is not in the game"
-  end
-  local infMe, infThem = call(me, "GetInfluence"), call(them, "GetInfluence")
-  if infMe == nil or infThem == nil then
-    return false, "this game has no influence object"
-  end
-  local have = call(infMe, "GetTokensToGive") or 0
-  if have < 1 then
-    return false, "you have no envoys to send"
-  end
-  local before = call(infThem, "GetTokensReceived", owner) or 0
-  if infMe.ChangeTokensToGive ~= nil and infThem.ChangeTokensReceived ~= nil then
-    pcall(infMe.ChangeTokensToGive, infMe, -1)
-    pcall(infThem.ChangeTokensReceived, infThem, owner, 1)
-  elseif infThem.GiveTokenToPlayer ~= nil then
-    local ok, err = pcall(infThem.GiveTokenToPlayer, infThem, owner)
-    if not ok then
-      return false, "the game refused the envoy: " .. tostring(err)
-    end
-  else
-    return false, "this game has no gameplay route to send an envoy"
-  end
-  local after = call(infThem, "GetTokensReceived", owner) or before
-  local left = call(infMe, "GetTokensToGive")
-  if after <= before and (left == nil or left >= have) then
-    return false, "the game did not move an envoy"
-  end
-  return true, "envoy_to=" .. tostring(minor)
+  return false, "envoy_unavailable:no_gameplay_route"
 end
 
 function Gov.Deal(owner, other, gold, r1, a1, r2, a2, mode)
@@ -3628,6 +3566,9 @@ function Gov.BuildImprovement(owner, unitId, impIndex)
     return false, "tile_cannot_have:" .. row.ImprovementType
   end
   pcall(ImprovementBuilder.SetImprovementType, plot, row.Index, owner)
+  if call(plot, "GetImprovementType") ~= row.Index and ImprovementBuilder.SetImprovement ~= nil then
+    pcall(ImprovementBuilder.SetImprovement, plot, row.Index, owner)
+  end
   if call(plot, "GetImprovementType") ~= row.Index then
     return false, "the game refused " .. row.ImprovementType
   end
