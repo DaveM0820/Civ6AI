@@ -745,6 +745,32 @@ class CommandWireVocabTests(unittest.TestCase):
         }
         self.assertIsNone(command_wire.resolve_unit_token(snap, "UNIT_W", "MoveTo(10,10)"))
         self.assertEqual([], snap["legal_commands"])
+        self.assertTrue(any("does nothing" in n for n in command_wire.LAST_UNRESOLVED))
+
+    def test_own_tile_move_is_not_turned_into_fortify(self):
+        snap = {
+            "game": {"map_width": 40, "map_height": 40},
+            "your_units": [{"unit_id": "UNIT_W", "unit_type_id": "UNIT_WARRIOR", "plot_id": "PLOT_10_10"}],
+            "legal_commands": [{
+                "command_id": "CMD_fortify_UNIT_W",
+                "kind": "unit_posture_fortify",
+                "fixed_arguments": {"unit_id": "UNIT_W"},
+            }],
+        }
+        self.assertIsNone(command_wire.resolve_unit_token(snap, "UNIT_W", "MoveTo(10,10)"))
+        self.assertEqual(["CMD_fortify_UNIT_W"], [c["command_id"] for c in snap["legal_commands"]])
+        self.assertTrue(any("Fortify to hold" in n for n in command_wire.LAST_UNRESOLVED))
+
+    def test_unknown_unit_token_names_the_real_ids(self):
+        snap = {
+            "your_units": [{"unit_id": "UNIT_BUILDER_1", "unit_type_id": "UNIT_BUILDER", "plot_id": "PLOT_1_1"}],
+            "legal_commands": [],
+        }
+        command_wire.expand_civ6_command_wire(snap, {"builder_10.command": "MoveTo"})
+        notes = " ".join(command_wire.LAST_UNRESOLVED)
+        self.assertIn("builder_10", notes)
+        self.assertIn("not one of your units", notes)
+        self.assertIn("builder_1", notes)
 
     def test_settle_token_and_reply(self):
         snap = {

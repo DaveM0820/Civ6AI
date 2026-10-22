@@ -480,6 +480,8 @@ def unresolved_unit_note(snapshot: dict[str, Any], unit_id: str, key: str, value
             f"{key}={value}: no attack is legal at that tile this turn "
             "(the enemy is outside this unit's attack range, or you are not at war)"
         )
+    if verb in ("moveto", "move") and _COORD_RE.search(str(value or "")) is None:
+        return f"{key}={value}: MoveTo needs a destination as (x,y)"
     return f"{key}={value}"
 
 
@@ -571,7 +573,7 @@ def _append_legal(snapshot: dict[str, Any], command: dict[str, Any]) -> str | No
 
 
 def _self_tile_command(snapshot: dict[str, Any], unit_id: str) -> str | None:
-    """Own-tile MoveTo becomes a legal Fortify or FoundCity, else is dropped."""
+    """Own-tile MoveTo becomes FoundCity when this settler can found here. Otherwise dropped."""
     unit = _unit_row(snapshot, unit_id)
     settle = unit.get("settle") if isinstance(unit, dict) else None
     here_ok = isinstance(settle, dict) and settle.get("here_ok") is True
@@ -595,14 +597,10 @@ def _self_tile_command(snapshot: dict[str, Any], unit_id: str) -> str | None:
                 "affected_ids": [unit_id],
                 "runtime_status": "tested",
             })
-    for command in legal:
-        if not isinstance(command, dict):
-            continue
-        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
-        if command.get("kind") == "unit_posture_fortify" and fixed.get("unit_id") == unit_id:
-            LAST_UNRESOLVED.append(f"dropped: self-tile move for {unit_id} became Fortify")
-            return str(command.get("command_id"))
-    LAST_UNRESOLVED.append(f"dropped: self-tile move for {unit_id} (no legal action here)")
+    LAST_UNRESOLVED.append(
+        f"dropped: MoveTo your own tile for {unit_id} does nothing. "
+        "Order Fortify to hold, or choose a different tile."
+    )
     return None
 
 
@@ -645,7 +643,7 @@ def _synthesize_far_move(
 ) -> str | None:
     """Civ5-style destination order: ``MoveTo(x,y)`` to any on-map plot.
 
-    Adjacent-move rows are not required (F4). Own-tile targets become hold/FoundCity.
+    Adjacent-move rows are not required (F4). A settler's own tile becomes FoundCity.
     Encodes WP-A MOVE G=1 and A=arrival intent (found=1, improve=2, religion=3, trade=4).
     """
     if not _on_map(snapshot, x, y):
@@ -975,6 +973,17 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
                 out[f"{head}.changeProduction"] = value
                 continue
             unresolved.append(f"{key}={value}")
+            continue
+        if prop and head not in units and head.lower() not in cities and prop.lower() in {
+            "command", "moveto", "move", "settle", "found", "traderoute", "trade_route",
+            "attack", "attackto", "fortify", "skip", "improve", "automate",
+        }:
+            known = ", ".join(list(units)[:12])
+            shown = f" Known units: {known}." if known else ""
+            unresolved.append(
+                f"{key}={value}: {head} is not one of your units.{shown} "
+                "Copy a unit id from legal.validUnits."
+            )
             continue
         if key in out and raw_key != key:
             continue

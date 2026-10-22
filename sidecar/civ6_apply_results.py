@@ -133,6 +133,8 @@ _SIMPLE_REASONS = {
     "forecast_failed": "the game could not forecast that attack, so it was not made",
     "forecast_empty": "the game could not forecast that attack, so it was not made",
     "out_of_range": "the target is outside this unit's attack range",
+    "outside_borders": "builders can only move onto your own tiles; that destination is outside your borders",
+    "send_failed": "the order never left the host, so it was not played",
 }
 
 
@@ -198,6 +200,15 @@ def describe_reason(reason: Any) -> str:
         return "the game raised a script error on that order" + extra + "; do not reissue this same order"
     if text.startswith("gamecore_unavailable:"):
         return "the game-side order script was unavailable"
+    if text.startswith("stale_turn"):
+        return ("this order arrived after that turn had moved on, so it was not played; "
+                "order it again next turn if it is still legal")
+    if text.startswith("seat_turn_over"):
+        return "this seat's turn had already ended, so the order was not played"
+    if text.startswith("queue_replaced"):
+        return "a newer batch replaced this order before the turn started, so it was not played"
+    if text.startswith("outside_borders"):
+        return _SIMPLE_REASONS["outside_borders"]
     if text.startswith("tile_cannot_have:"):
         return "that tile cannot have " + _readable(text.split(":", 1)[1], "IMPROVEMENT_")
     if text in _SIMPLE_REASONS:

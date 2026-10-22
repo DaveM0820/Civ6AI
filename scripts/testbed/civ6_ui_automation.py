@@ -2310,6 +2310,43 @@ def _open_multiplayer_flyout(win: WindowInfo) -> bool:
     return False
 
 
+_SAVE_LIST_CHROME = frozenset({
+    "autosaves",
+    "saves",
+    "load",
+    "back",
+    "delete",
+    "cancel",
+    "load game",
+    "sort by last modified",
+    "sort by name",
+    "no saved games",
+    "no file",
+    "cloud saves",
+    "name",
+    "date",
+    "turn",
+    "filter",
+})
+
+
+def pick_newest_save_label(rows: list[tuple[str, int, int]]) -> tuple[str, int, int] | None:
+    """Top save row. Civ lists the newest save first under Sort by Last Modified."""
+    ranked: list[tuple[int, int, str]] = []
+    for text, x, y in rows:
+        low = " ".join(text.lower().split())
+        if len(low) < 4 or low in _SAVE_LIST_CHROME:
+            continue
+        if any(part in low for part in ("sort by", "no saved", "no file", "cloud")):
+            continue
+        ranked.append((y, x, text))
+    if not ranked:
+        return None
+    ranked.sort()
+    y, x, text = ranked[0]
+    return text, x, y
+
+
 def start_lan_test_game(win: WindowInfo) -> list[str]:
     """Main menu -> Multiplayer -> LAN -> Create Game -> test config -> 2 AI -> Start."""
     steps: list[str] = []
@@ -2324,6 +2361,137 @@ def start_lan_test_game(win: WindowInfo) -> list[str]:
         return _start_lan_test_game_clicks(win, steps)
     finally:
         pin_civ_topmost(win.hwnd, False)
+
+
+def load_lan_autosave(win: WindowInfo) -> list[str]:
+    """Main menu -> Multiplayer -> Local Network -> Load Game -> newest autosave -> Ready."""
+    steps: list[str] = []
+    raise_civ_via_taskbar()
+    _alt_tab_to_civ(win)
+    pin_civ_topmost(win.hwnd, True)
+    try:
+        click_civ_title_bar(win)
+        focus_game(win.hwnd)
+        pin_civ_topmost(win.hwnd, True)
+        time.sleep(0.4)
+        return _load_lan_autosave_clicks(win, steps)
+    finally:
+        pin_civ_topmost(win.hwnd, False)
+
+
+def _load_lan_autosave_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
+    entry = ocr_window(win)
+    blob = " ".join(t.lower() for t, _, _ in entry)
+    on_lan_browser = "local network games" in blob or ("join game" in blob and "refresh" in blob)
+    on_staging = "staging room" in blob
+    on_load = "autosaves" in blob or ("load game" in blob and "back" in blob)
+    if detect_menu(win) == "single_player" and not on_lan_browser and not on_staging and not on_load:
+        press_escape(win)
+        time.sleep(0.5)
+    if not on_lan_browser and not on_staging and not on_load:
+        opened = _open_multiplayer_flyout(win)
+        if not opened:
+            raise RuntimeError("Could not open Multiplayer panel")
+        hit = _click_labels(win, ("Local Network",), timeout=8.0, min_x_fraction=0.48)
+        if hit is None:
+            raise RuntimeError("Could not click Local Network")
+        steps.append(f"clicked_{hit}")
+        time.sleep(1.6)
+    blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
+    if "staging room" in blob:
+        steps.append("already_staging")
+        return _ready_lan_staging(win, steps)
+    if "autosaves" not in blob:
+        if not click_text(win, "Load Game", timeout=8.0, exact=True, post_delay=0.6):
+            raise RuntimeError("Could not click Load Game")
+        steps.append("clicked_load_game")
+        time.sleep(1.0)
+    blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
+    if "autosaves" not in blob:
+        if not click_text(win, "Autosaves", timeout=6.0, exact=False, post_delay=0.5):
+            raise RuntimeError("Could not open Autosaves")
+        steps.append("clicked_autosaves")
+        time.sleep(0.8)
+    else:
+        steps.append("already_autosaves")
+    rows = ocr_window(win)
+    newest = pick_newest_save_label(rows)
+    if newest is None:
+        raise RuntimeError("No autosave row found")
+    label, _x, _y = newest
+    if not click_text(win, label, timeout=6.0, exact=True, prefer_top=True, post_delay=0.4):
+        raise RuntimeError(f"Could not select autosave {label}")
+    steps.append(f"selected_{label}")
+    if not click_text(
+        win,
+        "Load",
+        timeout=6.0,
+        exact=True,
+        prefer_bottom=True,
+        min_y_fraction=0.65,
+        post_delay=0.6,
+    ):
+        if not click_text(win, "Load Game", timeout=4.0, prefer_bottom=True, min_y_fraction=0.65, post_delay=0.6):
+            raise RuntimeError("Could not click Load")
+    steps.append("clicked_load")
+    deadline = time.monotonic() + 90.0
+    while time.monotonic() < deadline:
+        win = refresh_window(win) or find_civ_window()
+        if win is None:
+            break
+        blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
+        if "staging room" in blob or ocr_blob_is_loading_or_ingame(blob):
+            steps.append("reached_staging")
+            return _ready_lan_staging(win, steps)
+        time.sleep(1.5)
+    raise RuntimeError("Autosave load did not reach the staging room")
+
+
+def _ready_lan_staging(win: WindowInfo, steps: list[str]) -> list[str]:
+    """Host Ready circle, then ARE YOU READY?, the same path create-game uses."""
+    if _click_labels(win, ("ADD PLAYER", "Add Player"), timeout=3.0):
+        time.sleep(0.5)
+        _click_labels(win, ("AI", "Computer"), timeout=3.0)
+        steps.append("staging_add_player")
+    host_ready = False
+    for _ in range(8):
+        names = [t.lower() for t, _, _ in ocr_window(win)]
+        blob_now = " ".join(names)
+        if ocr_blob_is_loading_or_ingame(blob_now):
+            steps.append("staging_loading")
+            return steps
+        if "not ready" in blob_now:
+            # Host Ready is a small circle to the left of the "Not Ready" label.
+            _hit_client(win, 1088, 332, taps=1)
+            time.sleep(0.8)
+            continue
+        host_ready = True
+        break
+    if host_ready:
+        clicked_go = click_text(win, "ARE YOU READY?", timeout=3.0, exact=True, prefer_bottom=True)
+        if not clicked_go:
+            _hit_client(win, 799, 1005, taps=1)
+        steps.append("clicked_are_you_ready")
+    steps.append("staging_ready")
+    deadline = time.monotonic() + 90.0
+    while time.monotonic() < deadline:
+        win = refresh_window(win) or find_civ_window()
+        if win is None:
+            break
+        blob2 = " ".join(t.lower() for t, _, _ in ocr_window(win))
+        if ocr_blob_is_loading_or_ingame(blob2):
+            steps.append("ingame_or_loading")
+            return steps
+        if "staging room" not in blob2:
+            bootstrap_click_begin_game_timed(win)
+            steps.append("clicked_begin_game")
+            return steps
+        if "not ready" in blob2:
+            _hit_client(win, 1088, 332, taps=1)
+        elif "are you ready?" in blob2:
+            click_text(win, "ARE YOU READY?", timeout=2.0, exact=True, prefer_bottom=True)
+        time.sleep(2.0)
+    return steps
 
 
 def _start_lan_test_game_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
@@ -2366,49 +2534,7 @@ def _start_lan_test_game_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
 
     if on_staging:
         steps.append("already_staging")
-        if _click_labels(win, ("ADD PLAYER", "Add Player"), timeout=3.0):
-            time.sleep(0.5)
-            _click_labels(win, ("AI", "Computer"), timeout=3.0)
-            steps.append("staging_add_player")
-        host_ready = False
-        for _ in range(8):
-            names = [t.lower() for t, _, _ in ocr_window(win)]
-            blob_now = " ".join(names)
-            if ocr_blob_is_loading_or_ingame(blob_now):
-                steps.append("staging_loading")
-                return steps
-            if "not ready" in blob_now:
-                # Host Ready is a small circle to the left of the "Not Ready" label.
-                _hit_client(win, 1088, 332, taps=1)
-                time.sleep(0.8)
-                continue
-            host_ready = True
-            break
-        if host_ready:
-            clicked_go = click_text(win, "ARE YOU READY?", timeout=3.0, exact=True, prefer_bottom=True)
-            if not clicked_go:
-                _hit_client(win, 799, 1005, taps=1)
-            steps.append("clicked_are_you_ready")
-        steps.append("staging_ready")
-        deadline = time.monotonic() + 90.0
-        while time.monotonic() < deadline:
-            win = refresh_window(win) or find_civ_window()
-            if win is None:
-                break
-            blob2 = " ".join(t.lower() for t, _, _ in ocr_window(win))
-            if ocr_blob_is_loading_or_ingame(blob2):
-                steps.append("ingame_or_loading")
-                return steps
-            if "staging room" not in blob2:
-                bootstrap_click_begin_game_timed(win)
-                steps.append("clicked_begin_game")
-                return steps
-            if "not ready" in blob2:
-                _hit_client(win, 1088, 332, taps=1)
-            elif "are you ready?" in blob2:
-                click_text(win, "ARE YOU READY?", timeout=2.0, exact=True, prefer_bottom=True)
-            time.sleep(2.0)
-        return steps
+        return _ready_lan_staging(win, steps)
 
     if not on_mp_setup:
         if on_lan_browser:

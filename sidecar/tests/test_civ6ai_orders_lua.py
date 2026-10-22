@@ -357,6 +357,39 @@ class OrdersGameplayTests(unittest.TestCase):
             for line in logs
         ), logs)
 
+    def test_refused_attack_batch_logs_why_it_did_not_run(self):
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=1, B=9, J=1, N=1, T=4)
+        self.assertEqual(self.last()["reason"], "stale_turn:4")
+        logs = list(self.rt.eval("logs").values())
+        self.assertTrue(any(
+            "CIV6AI|attacks|player=2|turn=4|executed=0|failed=1" in line
+            and "reason=stale_turn:4" in line
+            for line in logs
+        ), logs)
+
+    def test_replaced_queue_records_the_attack_it_dropped(self):
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=1, B=1, J=1, N=1, T=6)
+        self.order(0, K=2, P=2, I=4, S=2, B=2, J=1, N=1, T=6)
+        reasons = [r["reason"] for r in self.results()]
+        self.assertIn("queue_replaced:6", reasons)
+        logs = list(self.rt.eval("logs").values())
+        self.assertTrue(any(
+            "executed=0|failed=1" in line and "reason=queue_replaced" in line
+            for line in logs
+        ), logs)
+
+    def test_builder_move_outside_borders_is_refused(self):
+        self.rt.execute(
+            "GameInfo.Units[2] = {BuildCharges=3}; "
+            "table.insert(Players[2].units, MkUnit(2,40,3,4,2)); "
+            "Map.GetPlot(5,6):SetOwner(-1)"
+        )
+        self.order(0, K=1, P=2, U=40, X=5, Y=6, S=30)
+        self.assertEqual(self.last()["reason"], "outside_borders")
+        self.rt.execute("Map.GetPlot(5,6):SetOwner(2)")
+        self.order(0, K=1, P=2, U=40, X=5, Y=6, S=31)
+        self.assertNotEqual(self.last()["reason"], "outside_borders")
+
     def test_city_attack_and_strike_without_get_district_id(self):
         # Gameplay cities have no GetDistrictID. The centre comes from the city
         # plot, or from the city's district list. Neither call may throw.

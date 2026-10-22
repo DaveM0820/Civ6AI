@@ -278,21 +278,13 @@ def _previews(context: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def unit_row_lines(prefix: str, unit: dict[str, Any], context: dict[str, Any]) -> list[str]:
-    """Extra EMPIRE unit-row lines: strength/HP, and attack odds for targets in reach now."""
+    """Extra EMPIRE unit-row lines: strength and HP. Attack forecasts stay on AttackTo tokens."""
     lines: list[str] = []
     text = unit_strength_text(unit, context)
     if text:
         lines.append(pipeline._wire_line(f"{prefix}.combat", text))
-    odds: list[str] = []
-    for row in _previews(context):
-        if row.get("unit_id") != unit.get("unit_id") or row.get("needs_move"):
-            continue
-        x, y = _int(row.get("target_x")), _int(row.get("target_y"))
-        if x is None or y is None:
-            continue
-        odds.append(f"AttackTo({x},{y}) {outcome_text(row)}")
-    if odds:
-        lines.append(pipeline._wire_line(f"{prefix}.attackOdds", " | ".join(odds[:4])))
+    # AttackTo tokens on the unit row already carry the forecast. A second
+    # attackOdds line repeated that text on every unit and inflated the prompt.
     return lines
 
 

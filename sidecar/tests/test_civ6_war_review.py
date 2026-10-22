@@ -217,6 +217,14 @@ class WarReviewTests(unittest.TestCase):
         strike = civ6_wire._civ6_city_tokens(snap)["CITY_8"]["rangeStrike"][0]
         self.assertTrue(strike.startswith("(18,22) ("))
         self.assertIn("~20dmg", strike)
+        block = "\n".join(civ6_wire.city_strike_prompt_lines(snap))
+        self.assertIn("CITY STRIKES", block)
+        self.assertIn("Teotihuacan.rangeStrike = (18,22)", block)
+        self.assertNotIn("~20dmg", block)
+        self.assertIn("moved on", results.describe_reason("stale_turn:185"))
+        self.assertIn("already ended", results.describe_reason("seat_turn_over:185"))
+        self.assertIn("newer batch", results.describe_reason("queue_replaced:184"))
+        self.assertIn("outside your borders", results.describe_reason("outside_borders"))
         self.assertEqual(
             command_wire.resolve_city_token(snap, "CITY_8", "rangeStrike", strike),
             "CMD_citystrike_8_18_22",

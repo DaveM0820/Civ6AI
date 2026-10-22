@@ -348,6 +348,24 @@ function Civ6Ai_Orders._PlotEnterOk(owner, unit, x, y)
   return true, ""
 end
 
+-- Builders improve owned land. A destination outside this seat's borders
+-- (including unowned tiles) is refused before pathing, with a plain reason.
+function Civ6Ai_Orders._BuilderOutsideBorders(unit, x, y)
+  local info = GameInfo.Units[unit:GetType()]
+  if info == nil or (num(info.BuildCharges) or 0) <= 0 then
+    return false
+  end
+  local plot = Map.GetPlot(x, y)
+  if plot == nil then
+    return false
+  end
+  local tileOwner = call(plot, "GetOwner")
+  if tileOwner == nil then
+    return false
+  end
+  return tileOwner ~= unit:GetOwner()
+end
+
 function Civ6Ai_Orders._SameDomain(unit, plot)
   local row = GameInfo.Units[unit:GetType()]
   local domain = row ~= nil and row.Domain or "DOMAIN_LAND"
@@ -495,6 +513,9 @@ function Civ6Ai_Orders._DoMove(sender, o)
     -- route itself (sea included), so start it here instead of walking to the target.
     Civ6Ai_Orders._ClearGoal(owner, o.U)
     return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, o.U, o.I)
+  end
+  if Civ6Ai_Orders._BuilderOutsideBorders(unit, x, y) then
+    return false, "outside_borders"
   end
   if unit:GetX() == x and unit:GetY() == y then
     Civ6Ai_Orders._ClearGoal(owner, o.U)
@@ -1096,9 +1117,8 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
   end
   local executed = counts.ok.unit + counts.ok.city
   local failed = counts.fail.unit + counts.fail.city
-  print("CIV6AI|attacks|player=" .. tostring(owner) .. "|turn=" .. tostring(Game.GetCurrentGameTurn())
-    .. "|executed=" .. tostring(executed) .. "|failed=" .. tostring(failed)
-    .. "|unit=" .. tostring(counts.ok.unit) .. "|city=" .. tostring(counts.ok.city))
+  Civ6Ai_Orders._LogAttackBatch(
+    owner, Game.GetCurrentGameTurn(), executed, failed, nil, counts.ok.unit, counts.ok.city)
   Civ6Ai_Orders._ContinueGoals(owner, ordered, okUnits)
   Civ6Ai_Orders._FinishIdleUnits(owner, ordered, okUnits)
 end
@@ -1239,7 +1259,47 @@ function Civ6Ai_Orders._StartedTurn(owner)
   return num(Game:GetProperty("CIV6AI_STARTED_" .. tostring(owner))) or -1
 end
 
+function Civ6Ai_Orders._LogAttackBatch(owner, turn, executed, failed, reason, unitOk, cityOk)
+  if (executed or 0) + (failed or 0) <= 0 then
+    return
+  end
+  local line = "CIV6AI|attacks|player=" .. tostring(owner) .. "|turn=" .. tostring(turn)
+    .. "|executed=" .. tostring(executed or 0) .. "|failed=" .. tostring(failed or 0)
+  if unitOk ~= nil then
+    line = line .. "|unit=" .. tostring(unitOk) .. "|city=" .. tostring(cityOk or 0)
+  end
+  if reason ~= nil and reason ~= "" then
+    line = line .. "|reason=" .. tostring(reason)
+  end
+  print(line)
+end
+
+-- A second batch for this seat replaces a queue that has not run yet. Record
+-- the replaced orders, or an attack in the old batch vanishes with no result.
+function Civ6Ai_Orders._DropUnplayedQueue(owner)
+  local oldT = num(Game:GetProperty(qkey(owner, "T")))
+  if oldT == nil or oldT < 0 then
+    return
+  end
+  local sender = num(Game:GetProperty(qkey(owner, "FROM"))) or -1
+  local n = num(Game:GetProperty(qkey(owner, "N"))) or 0
+  local attacks = 0
+  for j = 1, n do
+    local o = { P = owner }
+    for _, f in ipairs(Civ6Ai_Orders.QUEUE_FIELDS) do
+      o[f] = num(Game:GetProperty(qkey(owner, j .. "_" .. f)))
+    end
+    if o.K == Civ6Ai_Orders.K.ATTACK or o.K == Civ6Ai_Orders.K.CITY_STRIKE then
+      attacks = attacks + 1
+    end
+    Civ6Ai_Orders._Record(sender, o, false, "queue_replaced:" .. tostring(oldT))
+  end
+  Civ6Ai_Orders._LogAttackBatch(owner, oldT, 0, attacks, "queue_replaced")
+  log("queue_replaced|player=" .. tostring(owner) .. "|old_turn=" .. tostring(oldT) .. "|orders=" .. tostring(n))
+end
+
 function Civ6Ai_Orders._Store(sender, owner, turn, orders)
+  Civ6Ai_Orders._DropUnplayedQueue(owner)
   for j, o in ipairs(orders) do
     for _, f in ipairs(Civ6Ai_Orders.QUEUE_FIELDS) do
       Game:SetProperty(qkey(owner, j .. "_" .. f), o[f] or -1)
@@ -1292,9 +1352,15 @@ function Civ6Ai_Orders._Deliver(sender, batch)
     why = "seat_turn_over:" .. tostring(t)
   end
   if why ~= nil then
+    local attacks = 0
     for _, o in ipairs(orders) do
       Civ6Ai_Orders._Record(sender, o, false, why)
+      if o.K == Civ6Ai_Orders.K.ATTACK or o.K == Civ6Ai_Orders.K.CITY_STRIKE then
+        attacks = attacks + 1
+      end
     end
+    -- Refused before _ApplyOrders, so the executed summary would otherwise be missing.
+    Civ6Ai_Orders._LogAttackBatch(owner, t or turn, 0, attacks, why)
     return
   end
   if started then
@@ -1318,9 +1384,15 @@ function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
     Civ6Ai_Orders._LogQueueUnits(owner, turn)
     Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
   elseif t ~= nil then
+    local attacks = 0
+    local why = "stale_turn:" .. tostring(t)
     for _, o in ipairs(orders) do
-      Civ6Ai_Orders._Record(sender, o, false, "stale_turn:" .. tostring(t))
+      Civ6Ai_Orders._Record(sender, o, false, why)
+      if o.K == Civ6Ai_Orders.K.ATTACK or o.K == Civ6Ai_Orders.K.CITY_STRIKE then
+        attacks = attacks + 1
+      end
     end
+    Civ6Ai_Orders._LogAttackBatch(owner, t, 0, attacks, why)
     Civ6Ai_Orders._ContinueGoals(owner, {})
   elseif turn == 1 and not call(Players[owner], "IsHuman") then
     Civ6Ai_Orders._FinishIdleUnits(owner, {})
@@ -1550,7 +1622,11 @@ function Civ6Ai_Orders.OnOrder(sender, params)
   if params.B ~= nil and Civ6Ai_Orders.DECISION_KINDS[k] then
     Civ6Ai_Orders._Batch(sender, o, params)
   elseif num(params.T) ~= turn then
-    Civ6Ai_Orders._Record(sender, o, false, "stale_turn:" .. tostring(params.T))
+    local why = "stale_turn:" .. tostring(params.T)
+    Civ6Ai_Orders._Record(sender, o, false, why)
+    if k == Civ6Ai_Orders.K.ATTACK or k == Civ6Ai_Orders.K.CITY_STRIKE then
+      Civ6Ai_Orders._LogAttackBatch(o.P, params.T or turn, 0, 1, why)
+    end
   elseif Civ6Ai_Orders.DECISION_KINDS[k] then
     local ok, reason = Civ6Ai_Orders._Execute(sender, o)
     Civ6Ai_Orders._Record(sender, o, ok, reason)

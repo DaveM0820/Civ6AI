@@ -40,6 +40,16 @@ class DiplomacyWireTests(unittest.TestCase):
         self.assertEqual(notes, [])
         self.assertEqual(snap["legal_commands"][0]["kind"], "send_diplomatic_action")
 
+    def test_reject_and_embassy_are_not_diplomacy_orders(self):
+        snap = _snap()
+        for token in ("REJECT", "ACCEPT_EMBASSY"):
+            ids, notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", token)
+            self.assertEqual(ids, [])
+            self.assertTrue(notes)
+            self.assertIn("not a diplomacy order", notes[0])
+            self.assertIn("deal.Cleopatra", notes[0])
+        self.assertEqual(snap["legal_commands"], [])
+
     def test_offer_then_required_accept_executes(self):
         with tempfile.TemporaryDirectory() as tmp:
             a = _snap(session=tmp)
