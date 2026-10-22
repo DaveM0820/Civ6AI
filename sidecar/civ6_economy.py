@@ -465,39 +465,13 @@ def attention_items(snapshot: dict[str, Any]) -> list[str]:
 # production catalogs (reference lines, not orderable rows)
 # ---------------------------------------------------------------------------
 def _catalog_stats(item: dict[str, Any], turns: Any) -> str:
+    """Short catalog text. Full combat and yield stats were most of a 20k-token prompt."""
     bits: list[str] = []
     if isinstance(turns, int):
-        bits.append(f"{turns} turn{'s' if turns != 1 else ''}")
-    kind = item.get("category")
+        bits.append(f"{turns}t")
     cost = _num(item.get("cost"))
     if cost:
-        bits.append(f"{_fmt(cost)} prod")
-    if kind == "unit":
-        combat, ranged = _num(item.get("combat")) or 0, _num(item.get("ranged")) or 0
-        if combat:
-            bits.append(f"{_fmt(combat)} str")
-        if ranged:
-            bits.append(f"{_fmt(ranged)} rng str")
-            rng = _num(item.get("range")) or 0
-            if rng:
-                bits.append(f"{_fmt(rng)} range")
-        moves = _num(item.get("moves")) or 0
-        if moves:
-            bits.append(f"{_fmt(moves)} mov")
-        upkeep = _num(item.get("upkeep")) or 0
-        if upkeep:
-            bits.append(f"-{_fmt(upkeep)}gpt")
-    elif kind == "building":
-        yields = item.get("yields")
-        if isinstance(yields, str) and yields.strip():
-            bits.append(yields.strip())
-        for key, label in (("housing", "housing"), ("amenities", "amenity")):
-            value = _num(item.get(key)) or 0
-            if value:
-                bits.append(f"+{_fmt(value)} {label}")
-        maint = _num(item.get("maintenance")) or 0
-        if maint:
-            bits.append(f"-{_fmt(maint)}gpt")
+        bits.append(f"{_fmt(cost)}p")
     return ", ".join(bits)
 
 
@@ -551,7 +525,10 @@ def production_catalog_lines(snapshot: dict[str, Any], city_tokens: dict[str, di
                     rank = 3
             ranked.append((rank, index, text))
         ranked.sort()
-        parts = [text for _, _, text in ranked]
+        parts = [text for _, _, text in ranked[:16]]
+        hidden = len(ranked) - len(parts)
+        if hidden > 0:
+            parts.append(f"+{hidden} more")
         prefix = "THREATENED — walls, ranged, then melee first: " if threatened and parts else ""
         lines.append(pipeline._wire_line(
             f"{pipeline._city_prompt_name(city)}.production.catalog", prefix + " | ".join(parts),

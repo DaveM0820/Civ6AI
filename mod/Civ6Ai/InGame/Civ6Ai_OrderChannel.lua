@@ -438,6 +438,13 @@ function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn, snapshotT
   if Civ6Ai_Config ~= nil and Civ6Ai_Config.AutoRangedMode ~= nil then
     autoMode = Civ6Ai_Config.AutoRangedMode(playerID)
   end
+  -- The local autotest seat is a human, so mode 1 would skip its city strikes
+  -- and ranged shots. A real human game stays on mode 1.
+  if Civ6Ai_Config ~= nil and Civ6Ai_Config.IsAutotest ~= nil and Civ6Ai_Config.IsAutotest()
+      and Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID
+      and autoMode ~= 0 then
+    autoMode = 2
+  end
   Civ6Ai_OrderChannel._batch = Civ6Ai_OrderChannel._batch + 1
   local batch = Game.GetLocalPlayer() * 100000 + Civ6Ai_OrderChannel._batch
   local sent = 0
@@ -489,8 +496,12 @@ function Civ6Ai_OrderChannel.DrainResults()
       entry = nil
     end
     if entry ~= nil then
+      r._taken = true
       Civ6Ai_OrderChannel._pending[r.seq] = nil
       Civ6Ai_Apply._RecordResult(entry.playerID, entry.command, r.ok == true, r.reason, entry.command.arguments or {})
+    elseif r.sender == me and Civ6Ai_OrderChannel._pending[r.seq] == nil then
+      -- Already consumed, or never ours. Do not let it crowd out unread rows.
+      r._taken = true
     end
   end
   local turn = Game.GetCurrentGameTurn()

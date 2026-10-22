@@ -95,6 +95,10 @@ function Civ6Ai_Util._LogMirrorPath(path)
   return logDir .. "/civ6ai/" .. rel
 end
 
+function Civ6Ai_Util._IsOneDrive(path)
+  return path ~= nil and string.find(string.lower(tostring(path)), "onedrive", 1, true) ~= nil
+end
+
 function Civ6Ai_Util._CandidatePaths(path)
   local paths = {}
   if path ~= nil and path ~= "" then
@@ -105,6 +109,41 @@ function Civ6Ai_Util._CandidatePaths(path)
     table.insert(paths, mirror)
   end
   return paths
+end
+
+-- Appends never start on a OneDrive/Documents path when a local log mirror exists.
+-- OneDrive locks "a" handles; the mirror is under LOCALAPPDATA.
+function Civ6Ai_Util._AppendCandidates(path)
+  local mirror = Civ6Ai_Util._LogMirrorPath(path)
+  if Civ6Ai_Util._IsOneDrive(path) and mirror ~= nil then
+    return { mirror }
+  end
+  return Civ6Ai_Util._CandidatePaths(path)
+end
+
+function Civ6Ai_Util._RewriteAppend(path, line)
+  local existing = ""
+  local reader = Civ6Ai_Util._TryInGameOpen(path, "r")
+  if reader ~= nil then
+    local okRead, text = pcall(function() return reader:read("*a") end)
+    pcall(function() reader:close() end)
+    if okRead and type(text) == "string" then
+      existing = text
+    end
+  end
+  if existing ~= "" and string.sub(existing, -1) ~= "\n" then
+    existing = existing .. "\n"
+  end
+  local ok, wrote = pcall(function()
+    local out = Civ6Ai_Util._TryInGameOpen(path, "w")
+    if out == nil then
+      return false
+    end
+    out:write(existing .. line .. "\n")
+    out:close()
+    return true
+  end)
+  return ok and wrote == true
 end
 
 function Civ6Ai_Util._TryInGameOpen(path, mode)
@@ -174,18 +213,47 @@ function Civ6Ai_Util.FileExists(path)
 end
 
 function Civ6Ai_Util.AppendTextLine(path, line)
-  for _, candidate in ipairs(Civ6Ai_Util._CandidatePaths(path)) do
+  local why = nil
+  for _, candidate in ipairs(Civ6Ai_Util._AppendCandidates(path)) do
     local file = Civ6Ai_Util._TryInGameOpen(candidate, "a")
     if file ~= nil then
-      file:write(line .. "\n")
-      file:close()
-      return true
-    end
-    if Civ6Ai_Util._GameCoreIo() and ExposedMembers.Civ6Ai.AppendFile ~= nil then
-      if ExposedMembers.Civ6Ai.AppendFile(candidate, line) then
+      local okw, err = pcall(function()
+        file:write(line .. "\n")
+        file:close()
+      end)
+      if okw then
+        if candidate ~= path then
+          Civ6Ai_Util.Log("io|append_mirror|" .. tostring(candidate))
+        end
         return true
       end
+      why = "write"
+      pcall(function() file:close() end)
+      if err ~= nil then
+        why = "write"
+      end
+    else
+      why = "open_a"
     end
+    -- OneDrive often allows a replace and refuses an append. Read, then rewrite.
+    if Civ6Ai_Util._RewriteAppend(candidate, line) then
+      Civ6Ai_Util.Log("io|append_rewrite|" .. tostring(candidate))
+      return true
+    end
+    why = why or "rewrite"
+    if Civ6Ai_Util._GameCoreIo() and ExposedMembers.Civ6Ai.AppendFile ~= nil then
+      local ok, result = pcall(ExposedMembers.Civ6Ai.AppendFile, candidate, line)
+      if ok and result then
+        if candidate ~= path then
+          Civ6Ai_Util.Log("io|append_mirror|" .. tostring(candidate))
+        end
+        return true
+      end
+      why = "gamecore"
+    end
+  end
+  if why ~= nil then
+    Civ6Ai_Util.Log("io|append_why|" .. tostring(why) .. "|" .. tostring(path))
   end
   Civ6Ai_Util.Log("io|append_failed|" .. tostring(path) .. "|" .. tostring(line))
   return false

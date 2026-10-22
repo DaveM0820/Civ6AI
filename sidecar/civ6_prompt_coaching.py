@@ -222,6 +222,79 @@ def _civ6_explored_percent(snapshot: dict[str, Any]) -> int | None:
     return max(0, min(100, (revealed * 100) // total))
 
 
+def civ6_true_explored(snapshot: dict[str, Any]) -> tuple[int, int, int] | None:
+    """Revealed tiles over the whole map. The cropped visibility grid is not this."""
+    known = snapshot.get("known_map")
+    game = snapshot.get("game")
+    if not isinstance(known, dict) or not isinstance(game, dict):
+        return None
+    try:
+        width = int(game.get("map_width") or 0)
+        height = int(game.get("map_height") or 0)
+        revealed = int(known.get("revealed_count"))
+    except (TypeError, ValueError):
+        return None
+    if isinstance(revealed, bool) or revealed < 0:
+        return None
+    total = width * height
+    if total <= 0:
+        return None
+    return revealed, total, max(0, min(100, (revealed * 100) // total))
+
+
+def _unit_moves_left(unit: dict[str, Any]) -> int | None:
+    movement = unit.get("movement")
+    if isinstance(movement, dict):
+        current = movement.get("current")
+        if isinstance(current, int) and not isinstance(current, bool):
+            return current
+    for key in ("moves_remaining", "moves"):
+        value = unit.get(key)
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
+
+
+def civ6_naval_explore_attention(snapshot: dict[str, Any]) -> str | None:
+    """Push a ship into coastal fog once one exists and the world is still dark."""
+    explored = _civ6_explored_percent(snapshot)
+    if not isinstance(explored, int) or explored >= CIV6_EXPLORE_STALL_BELOW_PCT:
+        return None
+    ships = 0
+    for unit in snapshot.get("your_units") or []:
+        if not isinstance(unit, dict) or unit.get("domain_id") != "DOMAIN_SEA":
+            continue
+        kind = str(unit.get("unit_class_id") or "")
+        type_id = str(unit.get("unit_type_id") or "")
+        if kind == "FORMATION_CLASS_CIVILIAN":
+            continue
+        if any(tag in type_id for tag in ("TRADER", "GREAT_", "SETTLER", "BUILDER", "MISSIONARY", "APOSTLE")):
+            continue
+        moves = _unit_moves_left(unit)
+        if moves is None:
+            if unit.get("needs_orders") is False:
+                continue
+        elif moves <= 0:
+            continue
+        ships += 1
+    if ships <= 0:
+        return None
+    true = civ6_true_explored(snapshot)
+    pct = true[2] if true is not None else explored
+    noun = "ship" if ships == 1 else "ships"
+    return (
+        f"NAVAL EXPLORE: {ships} {noun} can still move and the world is only {pct}% revealed "
+        "(your real visibility, not the trimmed picture). Send a ship along the coast into unexplored water this turn."
+    )
+
+
+def civ6_lethargy_attention(snapshot: dict[str, Any]) -> str | None:
+    """War with no fighting, an empty city queue, or a military unit that has sat still."""
+    from sidecar import civ6_seat_memory
+
+    return civ6_seat_memory.lethargy_line(snapshot)
+
+
 def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
     explored = _civ6_explored_percent(snapshot)
     if not isinstance(explored, int) or explored >= CIV6_EXPLORE_STALL_BELOW_PCT:
@@ -391,16 +464,43 @@ def civ6_diplomacy_guidance(snapshot: dict[str, Any]) -> list[str]:
     return lines
 
 
+def civ6_loyalty_attention(snapshot: dict[str, Any]) -> list[str]:
+    """Cities near a loyalty flip, with the levers that stop it."""
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    extras = civ6.get("city_extra") if isinstance(civ6.get("city_extra"), dict) else {}
+    notes: list[str] = []
+    for city in snapshot.get("your_cities") or []:
+        if not isinstance(city, dict):
+            continue
+        extra = extras.get(str(city.get("city_id")))
+        if not isinstance(extra, dict):
+            continue
+        loyalty = extra.get("loyalty")
+        if not isinstance(loyalty, int) or isinstance(loyalty, bool) or loyalty >= 40:
+            continue
+        name = pipeline._city_prompt_name(city)
+        per = extra.get("loyalty_per_turn")
+        drift = f", {per:+g}/turn" if isinstance(per, (int, float)) and not isinstance(per, bool) else ""
+        notes.append(
+            f"LOYALTY: {name} is at {loyalty}{drift}. A city near 0 rebels. "
+            "Raise amenities, keep a governor, or ease the nearby pressure before it flips."
+        )
+    return notes
+
+
 def collect_civ6_attention_items(snapshot: dict[str, Any]) -> list[str]:
     items: list[str] = []
     for fn in (
         civ6_exploration_attention,
+        civ6_naval_explore_attention,
+        civ6_lethargy_attention,
         civ6_low_hp_retreat_attention,
         civ6_focus_fire_attention,
     ):
         note = fn(snapshot)
         if note:
             items.append(note)
+    items.extend(civ6_loyalty_attention(snapshot))
     items.extend(civ6_economy_attention(snapshot))
     return items
 

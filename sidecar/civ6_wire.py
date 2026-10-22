@@ -195,6 +195,9 @@ def _civ6_unit_property_parts(command: dict[str, Any]) -> tuple[str, str]:
     if kind == "found_city":
         return "foundCity", "apply"
     if kind == "upgrade_unit":
+        target = fixed.get("unit_type_id")
+        if isinstance(target, str) and target.strip():
+            return "upgrade", target.strip()
         return "upgrade", "apply"
     if kind == "promote_unit":
         promo = fixed.get("promotion_id")
@@ -473,8 +476,21 @@ def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any])
         if is_capital:
             lines.append(pipeline._wire_line(f"{name}.capital", True))
         loyalty = extra.get("loyalty")
-        if isinstance(loyalty, int):
+        if isinstance(loyalty, int) and not isinstance(loyalty, bool):
             lines.append(pipeline._wire_line(f"{name}.loyalty", loyalty))
+        # Districts are printed from the economy city row. Repeat them here only
+        # when that row has none, so a missing economy block still shows them.
+        economy_row = economy_wire._cities_by_id(snapshot).get(str(city_id), {})
+        if not economy_row.get("built_districts"):
+            districts = [str(d) for d in extra.get("districts") or [] if d]
+            if districts:
+                lines.append(pipeline._wire_line(f"{name}.districts", ", ".join(districts)))
+        wonders = [str(w) for w in extra.get("wonders") or [] if w]
+        if wonders:
+            lines.append(pipeline._wire_line(f"{name}.wonders", ", ".join(wonders)))
+        city_religion = extra.get("religion")
+        if isinstance(city_religion, str) and city_religion.strip() and "UNKNOWN" not in city_religion.upper():
+            lines.append(pipeline._wire_line(f"{name}.religion", city_religion))
         amenities = city.get("amenities")
         if isinstance(amenities, dict):
             net = amenities.get("net")
@@ -501,6 +517,19 @@ def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None
         return
     yields = _civ6_yields(snapshot)
     pipeline._append_int_wire(lines, "empire.score", empire.get("score"))
+    religion = empire.get("religion") if isinstance(empire.get("religion"), dict) else {}
+    state_religion = religion.get("state_religion_id")
+    if isinstance(state_religion, str) and state_religion.strip() and "UNKNOWN" not in state_religion.upper():
+        lines.append(pipeline._wire_line("empire.religion", state_religion))
+    governance = ((snapshot.get("civ6") or {}).get("governance") or {}) if isinstance(snapshot.get("civ6"), dict) else {}
+    congress = governance.get("world_congress") if isinstance(governance, dict) else None
+    if isinstance(congress, dict) and congress:
+        bits = []
+        for key in ("in_session", "meeting_status", "meeting_turn"):
+            if congress.get(key) is not None:
+                bits.append(f"{key}={congress[key]}")
+        if bits:
+            lines.append(pipeline._wire_line("empire.world_congress", " ".join(bits)))
     cities = [city for city in snapshot.get("your_cities", []) if isinstance(city, dict)]
     if cities:
         lines.append(pipeline._wire_line("empire.cities", len(cities)))
@@ -702,6 +731,9 @@ def _civ6_city_tokens(snapshot: dict[str, Any]) -> dict[str, dict[str, list[str]
         if prop == "production" and (_production_turns(snapshot, city_id, token) or 0) >= 30:
             continue
         bucket = out.setdefault(city_id, {}).setdefault(prop, [])
+        cap = 6 if prop == "purchase" else 4 if prop == "buyTile" else None
+        if cap is not None and len(bucket) >= cap:
+            continue
         if token not in bucket:
             bucket.append(token)
     for props in out.values():
@@ -1096,6 +1128,14 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
             "when you first met. A delegation does not reveal the map, and the black hexes around that "
             "city were not explored."
         )
+        true_map = coaching.civ6_true_explored(context)
+        if true_map is not None:
+            revealed_tiles, map_tiles, true_pct = true_map
+            map_lines.append(pipeline._wire_line(
+                "map.revealed_tiles",
+                f"{revealed_tiles} of {map_tiles} tiles revealed on the whole map ({true_pct}%). "
+                "This is your real visibility, not the trimmed picture.",
+            ))
     naval = any(isinstance(u, dict) and u.get("domain_id") == "DOMAIN_SEA" for u in context.get("your_units") or [])
     grid = [list(r) for r in (context.get("known_map") or {}).get("visibility_grid") or []]
     todo = [tuple(map(int, str(o.get("plot_id")).split("_")[1:3])) for o in (context.get("your_units") or []) + (context.get("your_cities") or [])
@@ -1168,7 +1208,9 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
                     continue
                 seen_alerts.add(text)
                 name = wire_name
-                if name == "military" and not _MILITARY_ALERT_RE.search(text):
+                if name == "military" and re.search(r"wonder|loyalty", text, re.I):
+                    name = "city"
+                elif name == "military" and not _MILITARY_ALERT_RE.search(text):
                     name = "notice"  # generic game notification, not a military alert
                 index = counts.get(name, 0)
                 counts[name] = index + 1
@@ -1251,6 +1293,19 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
                     lines.append(f"***{prefix}.needsOrders = true***")
                 if unit.get("promotion_ready"):
                     lines.append(pipeline._wire_line(f"{prefix}.promotionReady", True))
+                upgrades = unit.get("upgrade_options")
+                if isinstance(upgrades, list) and upgrades:
+                    bits = []
+                    for option in upgrades:
+                        if not isinstance(option, dict) or not option.get("unit_type_id"):
+                            continue
+                        label = str(option["unit_type_id"])
+                        cost = option.get("gold_cost")
+                        if isinstance(cost, int) and not isinstance(cost, bool):
+                            label += f" ({cost} gold)"
+                        bits.append(label)
+                    if bits:
+                        lines.append(pipeline._wire_line(f"{prefix}.upgrade", ", ".join(bits)))
                 movement = unit.get("movement", {})
                 if isinstance(movement, dict):
                     if isinstance(movement.get("current"), int):
@@ -1714,13 +1769,22 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
         identity = personality.get("identity_summary") or personality.get("archetype")
         if isinstance(identity, str) and identity.strip():
             lines.append(pipeline._wire_line("identity", identity.strip()))
+    seat = context.get("_seat_memory")
+    if isinstance(seat, dict):
+        from sidecar import civ6_seat_memory
+
+        for key, value in civ6_seat_memory.prompt_lines(seat):
+            if value.strip():
+                lines.append(pipeline._wire_line(key, value.strip()))
     history = context.get("history", {})
-    budget = pipeline.JOURNAL_WIRE_CHAR_BUDGET
+    # Live prompts were 20–29k tokens. Keep the shared journal budget for other
+    # games; this section uses a shorter cap and fewer remembered notes.
+    budget = min(pipeline.JOURNAL_WIRE_CHAR_BUDGET, 1400)
     used = 0
     if isinstance(history, dict):
         memory = history.get("memory_summary")
         if isinstance(memory, str) and memory.strip():
-            lines.append(pipeline._wire_line("history.memory", _clip_sentence(memory.strip(), 400)))
+            lines.append(pipeline._wire_line("history.memory", _clip_sentence(memory.strip(), 180)))
         thought_rows = [entry for entry in history.get("thought_memory", []) if isinstance(entry, dict)]
         thought_rows = list(reversed(thought_rows))
         kept_thoughts: list[str] = []
@@ -1740,8 +1804,9 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
             kept_thoughts.extend(chunk)
             used += extra
         lines.extend(reversed(kept_thoughts))
-        for note in history.get("remembered", []):
-            if not isinstance(note, dict) or not str(note.get("text", "")).strip():
+        remembered = [note for note in history.get("remembered", []) if isinstance(note, dict)]
+        for note in remembered[-4:]:
+            if not str(note.get("text", "")).strip():
                 continue
             expires = note.get("expires_turn")
             until = "forever" if expires is None else f"until T{expires}"
@@ -1753,6 +1818,26 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
             ))
     lines.extend(civ6_apply_results.thoughts_lines(context))
     return lines
+
+
+def _war_going_badly(context: dict[str, Any]) -> bool:
+    if not combat_wire.war_active(context):
+        return False
+    for city in context.get("your_cities") or []:
+        if not isinstance(city, dict):
+            continue
+        defense = city.get("defense") if isinstance(city.get("defense"), dict) else {}
+        hp, max_hp = defense.get("hp"), defense.get("max_hp")
+        if isinstance(hp, int) and isinstance(max_hp, int) and max_hp > 0 and hp * 2 < max_hp:
+            return True
+    civ6 = context.get("civ6") if isinstance(context.get("civ6"), dict) else {}
+    extras = civ6.get("city_extra") if isinstance(civ6.get("city_extra"), dict) else {}
+    for extra in extras.values():
+        if isinstance(extra, dict):
+            loyalty = extra.get("loyalty")
+            if isinstance(loyalty, int) and not isinstance(loyalty, bool) and loyalty < 30:
+                return True
+    return False
 
 
 def _advice_section(context: dict[str, Any]) -> list[str]:
@@ -1778,6 +1863,11 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
         f"- {coaching.CIV6_EXPANSION_COACHING}",
         "- Before you finish: issue one command for each entry under REQUIRED COMMANDS.",
     ]
+    if _war_going_badly(context):
+        lines.append(
+            "- This war is going badly: a city is under half health or loyalty is collapsing. "
+            "Offer peace to the civ you are actually fighting if they will take it."
+        )
     capital = coaching.capital_founding_coaching(context)
     if capital:
         lines.append(f"- {capital}")
@@ -1870,6 +1960,12 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "optional command you will issue), state what you will command and why — prose only, no wire keys here.",
         "Event.<Name>.log = required attention notes (see REQUIRED COMMANDS).",
         "remember = text plus duration; store deals, rival impressions, war aims, and multi-turn plans. opinion.* / history.* as needed.",
+        *(
+            ["plan.goal = victory type (science, culture, domination, diplomacy, religion, or score). "
+             "plan.objective = attack|peace|improve|settle|research|defend, the aim, and by T<turn>. "
+             "plan.objective.done = that kind when the objective is finished. Update the plan every turn."]
+            if isinstance(snapshot.get("_seat_memory"), dict) else []
+        ),
         f"Required Event.* logs this turn: {event_count} (numbered under REQUIRED COMMANDS).",
         "",
         "Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):",
@@ -1987,7 +2083,11 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         if not isinstance(city, dict):
             continue
         name = pipeline._city_prompt_name(city)
-        for prop, tokens in city_tokens.get(str(city.get("city_id")), {}).items():
+        props = city_tokens.get(str(city.get("city_id")), {})
+        # Strikes and attacks before purchases so a long buy list does not bury them.
+        ordered_props = sorted(props, key=lambda prop: {"rangeStrike": 0, "attack": 1, "production": 2}.get(prop, 3))
+        for prop in ordered_props:
+            tokens = props[prop]
             key = f"{name}.{prop}"
             if key in required_keys:
                 continue
@@ -1997,7 +2097,10 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
             if prop == "rangeStrike":
                 optional_keys.append((key, "one (x,y) from the CITY STRIKES list"))
                 continue
-            optional_keys.append((key, " | ".join(tokens)))
+            shown = list(tokens)
+            if prop == "purchase" and len(shown) > 6:
+                shown = shown[:6]
+            optional_keys.append((key, " | ".join(shown)))
 
     opt = [
         "=== OPTIONAL COMMANDS ===",

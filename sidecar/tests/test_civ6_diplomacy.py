@@ -34,6 +34,13 @@ class DiplomacyWireTests(unittest.TestCase):
         self.assertEqual(keys["legal.diplomacy.Cleopatra"], "DECLARE_WAR")
         self.assertIn("Cleopatra", keys["deal.<Leader>"])
 
+    def test_envoys_stay_refused(self):
+        # Live sends failed from T80: the gameplay script has no token setter.
+        ids, notes = diplo.bind_reply(_snap(), "envoy.Geneva", "1")
+        self.assertEqual(ids, [])
+        self.assertIn("envoys are not offered; the game sends them", notes[0])
+        self.assertEqual(diplo.bind_reply(_snap(), "envoy.Geneva", "none"), ([], []))
+
     def test_bind_declare_war(self):
         snap = _snap()
         ids, notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "DECLARE_WAR")
@@ -127,7 +134,7 @@ class DiplomacyWireTests(unittest.TestCase):
             snap["civ6"]["diplomacy"]["majors"][0]["war_since_turn"] = 81
             keys = dict(diplo.optional_key_hints(snap))
             self.assertEqual(keys["legal.diplomacy.Cleopatra"], "PEACE_TREATY")
-            ids, notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "PEACE_TREATY")
+            ids, notes = diplo.bind_reply(snap, "deal.Cleopatra", "give 50 gold for peace")
             self.assertEqual((ids, notes), ([], []))
             status = diplo.rival_status_line(snap, "PLAYER_1")
             self.assertIn("at war since T81", status)
@@ -187,6 +194,63 @@ class DiplomacyWireTests(unittest.TestCase):
                 [("RESOURCE_COTTON", -1), ("RESOURCE_DYES", -1), ("RESOURCE_SILK", -1)],
             )
             self.assertGreater(len(ids), 1)
+
+    def test_bare_peace_while_at_war_needs_something(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = _snap(session=tmp, turn=96)
+            snap["civ6"]["diplomacy"]["majors"][0]["at_war"] = True
+            snap["civ6"]["diplomacy"]["majors"][0]["can_declare_war"] = False
+            snap["civ6"]["diplomacy"]["majors"][0]["can_make_peace"] = True
+            notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "PEACE_TREATY")[1]
+            self.assertTrue(notes)
+            self.assertIn("must include", notes[0])
+            self.assertEqual(diplo.load_deals(snap), [])
+
+    def test_counter_replaces_the_open_offer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            diplo.bind_reply(_snap(session=tmp), "deal.Cleopatra", "give 50 gold for 1 RESOURCE_SILK")
+            b = _snap(me="PLAYER_1", other="PLAYER_0", other_name="Amanitore", session=tmp, turn=13)
+            b["civ6"]["diplomacy"]["your_trade"]["luxuries"] = [{"resource_id": "RESOURCE_SILK", "amount": 1}]
+            ids, notes = diplo.bind_reply(b, "deal.Amanitore.respond", "COUNTER give 1 RESOURCE_SILK for 80 gold")
+            self.assertEqual(notes, [])
+            self.assertEqual(ids, [])
+            deals = diplo.load_deals(b)
+            self.assertEqual(deals[0]["status"], "countered")
+            self.assertEqual(deals[1]["status"], "pending")
+            self.assertEqual(deals[1]["from"], "PLAYER_1")
+            self.assertEqual(deals[1]["to"], "PLAYER_0")
+            self.assertEqual(diplo.required_rows(b), [])
+            a = _snap(session=tmp, turn=14)
+            self.assertTrue(diplo.required_rows(a))
+
+    def test_identical_deal_is_on_cooldown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = _snap(session=tmp, turn=20)
+            self.assertEqual(diplo.bind_reply(snap, "deal.Cleopatra", "give 50 gold for 1 RESOURCE_SILK"), ([], []))
+            snap["decision"]["turn"] = 22
+            notes = diplo.bind_reply(snap, "deal.Cleopatra", "give 50 gold for 1 RESOURCE_SILK")[1]
+            self.assertTrue(notes)
+            self.assertIn("already sent", notes[0])
+            snap["decision"]["turn"] = 20 + diplo.DEAL_COOLDOWN
+            self.assertEqual(diplo.bind_reply(snap, "deal.Cleopatra", "give 50 gold for 1 RESOURCE_SILK"), ([], []))
+
+    def test_accepted_peace_that_leaves_the_war_is_not_called_peace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = _snap(session=tmp, turn=96)
+            snap["civ6"]["diplomacy"]["majors"][0]["at_war"] = True
+            snap["civ6"]["diplomacy"]["majors"][0]["can_make_peace"] = True
+            snap["civ6"]["diplomacy"]["majors"][0]["can_declare_war"] = False
+            diplo.bind_reply(snap, "deal.Cleopatra", "give 50 gold for peace")
+            other = _snap(me="PLAYER_1", other="PLAYER_0", other_name="Montezuma", session=tmp, turn=97)
+            other["civ6"]["diplomacy"]["majors"][0]["at_war"] = True
+            other["civ6"]["diplomacy"]["majors"][0]["can_make_peace"] = True
+            other["civ6"]["diplomacy"]["your_trade"]["gold"] = 0
+            diplo.bind_reply(other, "deal.Montezuma.respond", "ACCEPT")
+            snap["decision"]["turn"] = 98
+            status = diplo.rival_status_line(snap, "PLAYER_1")
+            self.assertIn("at war", status)
+            self.assertIn("did not end the war", status)
+            self.assertNotIn("at peace", status.lower())
 
 
 if __name__ == "__main__":

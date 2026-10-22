@@ -29,6 +29,15 @@ class ExploreFallbackTests(unittest.TestCase):
         self.assertEqual(kept[0]["arguments"], {"unit_id": "UNIT_262146"})
         self.assertTrue(any("mountain" in d for d in dropped))
 
+    def test_prose_mountain_failure_is_not_repeated(self):
+        failed = [{"turn": 21, "kind": ar.KIND_FAILED, "order_kind": "move_unit", "unit": "",
+                   "reason": "that tile is a mountain or natural wonder",
+                   "summary": "Last turn you tried to move scout_1 to (44,12) but it failed: that tile is a mountain",
+                   "affected_ids": []}]
+        kept, dropped = ar.filter_repeat_failures(_snapshot(failed), [_move(44, 12)])
+        self.assertEqual([c["command_id"] for c in kept], ["CMD_explore_UNIT_262146"])
+        self.assertTrue(any("repeat of T21" in d for d in dropped))
+
     def test_repeat_failure_found_from_command_id(self):
         failed = [{"turn": 21, "kind": ar.KIND_FAILED, "order_kind": "move_unit", "unit": "scout_1",
                    "reason": "illegal_move:impassable",

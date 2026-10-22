@@ -460,11 +460,27 @@ function Civ6Ai_Orders._MoveOnce(owner, unitId, x, y)
   if unit == nil then
     return false, "stale_unit_id"
   end
-  local dist = Map.GetPlotDistance(unit:GetX(), unit:GetY(), x, y)
+  local fromX, fromY = unit:GetX(), unit:GetY()
+  local dist = Map.GetPlotDistance(fromX, fromY, x, y)
+  local ok, reason
   if dist > 1 then
-    return Civ6Ai_Orders._Route("MoveUnitAlongPathForPlayer", owner, unitId, x, y)
+    ok, reason = Civ6Ai_Orders._Route("MoveUnitAlongPathForPlayer", owner, unitId, x, y)
+  else
+    ok, reason = Civ6Ai_Orders._Route("MoveUnitForPlayer", owner, unitId, x, y)
   end
-  return Civ6Ai_Orders._Route("MoveUnitForPlayer", owner, unitId, x, y)
+  local now = Civ6Ai_Orders._Unit(owner, unitId)
+  if ok and now ~= nil then
+    local ax, ay = now:GetX(), now:GetY()
+    -- A reported success that leaves the unit put is not a move. already_there
+    -- (start equals the target) stays a success.
+    if ax == fromX and ay == fromY and (fromX ~= x or fromY ~= y) then
+      return false, "move_not_applied:" .. tostring(fromX) .. "," .. tostring(fromY) .. ">" .. tostring(ax) .. "," .. tostring(ay)
+    end
+    if reason == nil or reason == "" then
+      reason = "moved:" .. tostring(ax) .. "," .. tostring(ay)
+    end
+  end
+  return ok, reason
 end
 
 function Civ6Ai_Orders._MoveWithRetarget(owner, unit, x, y)
@@ -1468,11 +1484,18 @@ end
 -- After the model's orders: unused ranged, siege, and naval ranged units, plus
 -- city and encampment strikes. Melee is left alone. Runs inside _ApplyOrders,
 -- so every PC plays the same shots. The host chooses the mode on the batch.
+Civ6Ai_Orders._autoDone = Civ6Ai_Orders._autoDone or {}
+
 function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFailed, mode, moveOk, moveFailed)
   if not Civ6Ai_Orders._AutoRangedEnabled(owner, mode) then
     return
   end
   local turn = Game.GetCurrentGameTurn()
+  local doneKey = tostring(owner) .. ":" .. tostring(turn)
+  if Civ6Ai_Orders._autoDone[doneKey] then
+    return
+  end
+  Civ6Ai_Orders._autoDone[doneKey] = true
   local unitOk, cityOk, skipped = 0, 0, 0
   local function note(kind, reason, commandId, order, fixed)
     Civ6Ai_Orders._Record(sender, order, true, reason)
@@ -1518,18 +1541,41 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
   end
   -- Same command as an ordered strike. No forecast, and no damage applied here.
   -- The first refusal stops the rest, matching the ordered batch.
-  local function bestStrike(x, y)
+  -- nil means the gameplay command API is missing (the strike itself reports that).
+  -- false means CanStartCommand refused this plot, so another target can be tried.
+  local function strikeReady(city, x, y)
+    if CityManager == nil or CityManager.CanStartCommand == nil
+        or CityCommandTypes == nil or CityCommandTypes.RANGE_ATTACK == nil
+        or CityCommandTypes.PARAM_X == nil or CityCommandTypes.PARAM_Y == nil then
+      return nil
+    end
+    local params = {}
+    params[CityCommandTypes.PARAM_X] = x
+    params[CityCommandTypes.PARAM_Y] = y
+    local okCan, can = pcall(CityManager.CanStartCommand, city, CityCommandTypes.RANGE_ATTACK, params)
+    if okCan and can == true then
+      return true
+    end
+    return false
+  end
+  local function bestStrike(city, x, y)
     local best = nil
+    local blocked = false
     for _, cand in ipairs(Civ6Ai_Orders._AutoCandidates(owner, x, y, 2)) do
-      local hp = Civ6Ai_Orders._HpLeft(cand.obj)
-      local rank = cand.kind == "unit" and 1 or 2
-      if best == nil or rank < best.rank or (rank == best.rank and hp < best.hp)
-          or (rank == best.rank and hp == best.hp and cand.x < best.cand.x)
-          or (rank == best.rank and hp == best.hp and cand.x == best.cand.x and cand.y < best.cand.y) then
-        best = { cand = cand, hp = hp, rank = rank }
+      local ready = strikeReady(city, cand.x, cand.y)
+      if ready == false then
+        blocked = true
+      else
+        local hp = Civ6Ai_Orders._HpLeft(cand.obj)
+        local rank = cand.kind == "unit" and 1 or 2
+        if best == nil or rank < best.rank or (rank == best.rank and hp < best.hp)
+            or (rank == best.rank and hp == best.hp and cand.x < best.cand.x)
+            or (rank == best.rank and hp == best.hp and cand.x == best.cand.x and cand.y < best.cand.y) then
+          best = { cand = cand, hp = hp, rank = rank }
+        end
       end
     end
-    return best
+    return best, blocked
   end
   local function cityOf(district)
     local found = call(district, "GetCity")
@@ -1548,6 +1594,7 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
     return nil
   end
   local stopped = false
+  local skipWhy = nil
   local function fire(city, fromX, fromY, commandId)
     if stopped or city == nil then
       return
@@ -1557,8 +1604,12 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
     if num(Game:GetProperty(key)) == turn then
       return
     end
-    local best = bestStrike(fromX, fromY)
+    local best, blocked = bestStrike(city, fromX, fromY)
     if best == nil then
+      if blocked then
+        skipped = skipped + 1
+        skipWhy = skipWhy or "city_strike_refused"
+      end
       return
     end
     local tx, ty = best.cand.x, best.cand.y
@@ -1587,6 +1638,7 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
     else
       stopped = true
       skipped = skipped + 1
+      skipWhy = skipWhy or why or "city_strike_refused"
     end
   end
   for _, city in ipairs(sortedMembers(call(p, "GetCities"))) do
@@ -1600,8 +1652,12 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
     end
   end
   if unitOk + cityOk + skipped > 0 then
-    print("CIV6AI|attacks|auto|player=" .. tostring(owner) .. "|turn=" .. tostring(turn)
-      .. "|unit=" .. tostring(unitOk) .. "|city=" .. tostring(cityOk) .. "|skipped=" .. tostring(skipped))
+    local line = "CIV6AI|attacks|auto|player=" .. tostring(owner) .. "|turn=" .. tostring(turn)
+      .. "|unit=" .. tostring(unitOk) .. "|city=" .. tostring(cityOk) .. "|skipped=" .. tostring(skipped)
+    if skipWhy ~= nil and tostring(skipWhy) ~= "" then
+      line = line .. "|why=" .. tostring(skipWhy)
+    end
+    print(line)
   end
 end
 
@@ -1754,7 +1810,11 @@ function Civ6Ai_Orders._ModelCommandsUnit(unit, ordered)
   local builder = (num(info.BuildCharges) or 0) > 0
   local trader = info.MakeTradeRoute == true
   local religious = (num(info.ReligiousStrength) or 0) > 0
-  if builder or trader or religious then
+  -- Great people stay with the game's own AI. Activate is a UI action and
+  -- does not exist in this script, so finishing their moves would idle them.
+  local great = (info.GreatPersonClassType ~= nil and info.GreatPersonClassType ~= "")
+    or (info.UnitType ~= nil and string.find(info.UnitType, "GREAT_", 1, true) ~= nil)
+  if builder or trader or religious or great then
     if ordered ~= nil and ordered[unit:GetID()] then
       return true
     end
@@ -2095,6 +2155,34 @@ local function mixString(h, s)
   return h
 end
 
+-- Unread results stay until the UI drain marks them. Only a very long unread
+-- backlog drops the oldest, and that drop is logged.
+Civ6Ai_Orders.RESULT_CAP = 2048
+
+function Civ6Ai_Orders._TrimResults(shared)
+  local results = shared.OrderResults or {}
+  local unread = {}
+  for _, r in ipairs(results) do
+    if not r._taken then
+      unread[#unread + 1] = r
+    end
+  end
+  local drop = #unread - Civ6Ai_Orders.RESULT_CAP
+  if drop < 0 then
+    drop = 0
+  end
+  local kept = {}
+  for i, r in ipairs(unread) do
+    if i <= drop then
+      log("result_evicted|seq=" .. tostring(r.seq) .. "|kind=" .. tostring(r.kind)
+        .. "|player=" .. tostring(r.player) .. "|turn=" .. tostring(r.turn))
+    else
+      kept[#kept + 1] = r
+    end
+  end
+  shared.OrderResults = kept
+end
+
 function Civ6Ai_Orders._Record(sender, o, ok, reason)
   local shared = Civ6Ai_Orders._Shared()
   local turn = Game.GetCurrentGameTurn()
@@ -2107,9 +2195,9 @@ function Civ6Ai_Orders._Record(sender, o, ok, reason)
     apply_turn = turn, decision_turn = o.D ~= nil and o.D >= 0 and o.D or turn,
     ok = ok, reason = tostring(reason or ""),
   })
-  while #shared.OrderResults > 512 do
-    table.remove(shared.OrderResults, 1)
-  end
+  -- Moves are recorded before later attacks. Dropping the oldest unread row
+  -- made those moves time out as no_result_from_gameplay. Taken rows go first.
+  Civ6Ai_Orders._TrimResults(shared)
   log("result|turn=" .. turn .. "|from=" .. tostring(sender) .. "|seq=" .. tostring(o.S) .. "|kind=" .. tostring(o.K)
     .. "|player=" .. tostring(o.P) .. "|unit=" .. tostring(o.U) .. "|ok=" .. tostring(ok)
     .. "|reason=" .. tostring(reason or "") .. "|hash=" .. tostring(shared.OrderHash))
@@ -2667,62 +2755,20 @@ function Gov.Governor(owner)
     .. "(the game only offers that to the local player's screen); the game's own AI manages this seat's governors"
 end
 
-local function findCityById(cityId)
-  for id = 0, 63 do
-    local p = Players[id]
-    if p ~= nil then
-      for _, c in ipairs(sortedMembers(call(p, "GetCities"))) do
-        if c:GetID() == cityId then
-          return c, id
-        end
-      end
-    end
-  end
-  return nil
-end
-
--- Trade route: gameplay TradeManager when present, else a guarded unit
--- operation. Destination is a city id (I).
+-- Trade routes. Creating one is a UI operation. This script does not call it.
+-- Traders stay with the game's own AI (they are not model-commanded).
 function Gov.MakeTradeRoute(owner, unitId, destCityId)
-  local unit = Civ6Ai_Orders._Unit(owner, unitId)
-  if unit == nil then
-    return false, "stale_unit_id"
-  end
-  local dest = destCityId ~= nil and destCityId >= 0 and findCityById(destCityId) or nil
-  if dest == nil then
-    return false, "stale_city_id:" .. tostring(destCityId)
-  end
-  local tm = Game.GetTradeManager ~= nil and Game.GetTradeManager() or nil
-  if tm == nil or tm.CanCreateTradeRoute == nil or tm.CreateTradeRoute == nil then
-    return false, "trade_route_unavailable:no_trade_manager"
-  end
-  local origin = Map.GetPlot(unit:GetX(), unit:GetY())
-  local destPlot = Map.GetPlot(dest:GetX(), dest:GetY())
-  local fromIdx = origin ~= nil and call(origin, "GetIndex") or nil
-  local toIdx = destPlot ~= nil and call(destPlot, "GetIndex") or nil
-  if fromIdx == nil or toIdx == nil then
-    return false, "trade_route_unavailable:no_plot"
-  end
-  -- Same call the snapshot uses before it offers TradeRoute. CanStartRoute
-  -- (city ids) is a different API and was true for routes this call rejects.
-  -- Gameplay has no UNITOPERATION_MAKE_TRADE_ROUTE, so do not fall through to it.
-  local okCan, can = pcall(tm.CanCreateTradeRoute, tm, owner, fromIdx, toIdx)
-  if not okCan or can ~= true then
-    return false, "cannot_start_trade_route"
-  end
-  local okMake, made = pcall(tm.CreateTradeRoute, tm, owner, fromIdx, toIdx)
-  if okMake and made ~= false then
-    pcall(UnitManager.FinishMoves, unit)
-    return true, "trade_route:city=" .. tostring(destCityId)
-  end
-  log("trade_unavailable|CreateTradeRoute|" .. tostring(made))
-  return false, "trade_route_unavailable:" .. tostring(made)
+  return false, "trade_route_unavailable:no_gameplay_route:player=" .. tostring(owner)
+    .. ":unit=" .. tostring(unitId) .. ":city=" .. tostring(destCityId)
 end
 
--- Explore: RequestOperation does not exist in gameplay script, so walk the unit
--- to the nearest revealed, passable plot of its domain that borders the unknown.
--- IsRevealed takes a plot index. Passing (x, y) tested index == x, so the order
--- returned map_known or walked to a nonsense tile while most of the map was fog.
+-- Explore walks toward fog. A move that reveals nothing is not a success: a
+-- scout can be ordered onto a tile it already sees, the move call returns, and
+-- the revealed count stays flat. Success is a higher revealed count.
+-- IsRevealed takes a plot index. Passing (x, y) tested index == x.
+-- After two turns with no new tiles, the next order steps onto the nearest
+-- unrevealed frontier (or the frontier nearest a revealed unmet city or
+-- city-state). Ships step onto unrevealed water from the first order.
 function Gov.Explore(owner, unitId)
   local unit = Civ6Ai_Orders._Unit(owner, unitId)
   if unit == nil then
@@ -2731,6 +2777,13 @@ function Gov.Explore(owner, unitId)
   local vis = PlayersVisibility ~= nil and PlayersVisibility[owner] or nil
   if vis == nil or vis.IsRevealed == nil then
     return false, "explore_unavailable:no_visibility"
+  end
+  if Map == nil or Map.GetPlotCount == nil or Map.GetPlotByIndex == nil then
+    return false, "explore_unavailable:no_plot_index"
+  end
+  local plotCount = Map.GetPlotCount()
+  if type(plotCount) ~= "number" or plotCount <= 0 then
+    return false, "explore_unavailable:no_plot_index"
   end
   local function revealed(plot)
     if plot == nil or plot.GetIndex == nil then
@@ -2746,24 +2799,88 @@ function Gov.Explore(owner, unitId)
     end
     return nil
   end
+  local function adjacent(x, y, dir)
+    if Map.GetAdjacentPlot == nil then
+      return nil
+    end
+    local ok, plot = pcall(Map.GetAdjacentPlot, x, y, dir)
+    if ok then
+      return plot
+    end
+    return nil
+  end
+  local function countRevealed()
+    local count = 0
+    for i = 0, plotCount - 1 do
+      local p = Map.GetPlotByIndex(i)
+      if revealed(p) then
+        count = count + 1
+      end
+    end
+    return count
+  end
+  local function propKey(field)
+    return "CIV6AI_EXPLORE_" .. tostring(owner) .. "_" .. tostring(unitId) .. "_" .. field
+  end
+  local function propGet(field)
+    if Game == nil or Game.GetProperty == nil then
+      return nil
+    end
+    local ok, value = pcall(function() return Game:GetProperty(propKey(field)) end)
+    if ok then
+      return num(value)
+    end
+    return nil
+  end
+  local function propSet(field, value)
+    if Game == nil or Game.SetProperty == nil then
+      return
+    end
+    pcall(function() Game:SetProperty(propKey(field), value) end)
+  end
+  local before = countRevealed()
+  local turn = (Game ~= nil and Game.GetCurrentGameTurn ~= nil) and (num(Game.GetCurrentGameTurn()) or 0) or 0
+  local lastN = propGet("N")
+  local lastT = propGet("T")
+  local streak = propGet("S") or 0
+  local lastX, lastY = propGet("X"), propGet("Y")
+  if lastN ~= nil and lastT ~= nil and turn > lastT then
+    if before > lastN then
+      streak = 0
+    else
+      streak = streak + (turn - lastT)
+    end
+  elseif lastN ~= nil and before > lastN then
+    streak = 0
+  end
+  local stuck = streak >= 2
   local row = GameInfo.Units[unit:GetType()]
   local sea = row ~= nil and row.Domain == "DOMAIN_SEA"
   local ux, uy = unit:GetX(), unit:GetY()
   local here = Map.GetPlot(ux, uy)
   local unitArea = areaOf(here)
+  local function waterOf(plot)
+    return call(plot, "IsWater") == true
+  end
+  local function blocked(plot)
+    return call(plot, "IsImpassable") == true
+  end
+  local function sameBody(plot, requireArea)
+    return (not requireArea) or unitArea == nil or areaOf(plot) == unitArea
+  end
   -- Same landmass or water body first. The nearest fog edge on another
   -- continent sends a land unit into the coast, where it stops.
-  local function nearest(requireArea)
+  local function nearestBorder(requireArea)
     local best, bestD = nil, 1e9
-    for i = 0, Map.GetPlotCount() - 1 do
+    for i = 0, plotCount - 1 do
       local p = Map.GetPlotByIndex(i)
-      local x, y = p:GetX(), p:GetY()
-      if revealed(p) and p:IsWater() == sea and not p:IsImpassable() and not (x == ux and y == uy) then
-        if not requireArea or unitArea == nil or areaOf(p) == unitArea then
+      if p ~= nil and p.GetX ~= nil then
+        local x, y = p:GetX(), p:GetY()
+        if revealed(p) and waterOf(p) == sea and not blocked(p) and not (x == ux and y == uy) and sameBody(p, requireArea) then
           local d = Map.GetPlotDistance(ux, uy, x, y)
           if d < bestD then
             for dir = 0, 5 do
-              local a = Map.GetAdjacentPlot(x, y, dir)
+              local a = adjacent(x, y, dir)
               if a ~= nil and not revealed(a) then
                 best, bestD = p, d
                 break
@@ -2775,24 +2892,123 @@ function Gov.Explore(owner, unitId)
     end
     return best, bestD
   end
-  local best, bestD = nearest(true)
+  -- Revealed city of an unmet major, or any city-state. Hidden city plots are
+  -- not beacons: the coordinate is used only after IsRevealed is true.
+  local function beacons()
+    local marks = {}
+    if Players == nil then
+      return marks
+    end
+    local diplo = call(Players[owner], "GetDiplomacy")
+    for id = 0, 63 do
+      if id ~= owner and Players[id] ~= nil and call(Players[id], "IsAlive") == true
+        and call(Players[id], "IsBarbarian") ~= true then
+        local major = call(Players[id], "IsMajor")
+        local met = diplo ~= nil and call(diplo, "HasMet", id) == true
+        if major == false or (major == true and not met) then
+          local cities = call(Players[id], "GetCities")
+          if cities ~= nil and cities.Members ~= nil then
+            pcall(function()
+              for _, city in cities:Members() do
+                local x, y = call(city, "GetX"), call(city, "GetY")
+                local plot = (x ~= nil and y ~= nil and Map.GetPlot ~= nil) and Map.GetPlot(x, y) or nil
+                if revealed(plot) then
+                  marks[#marks + 1] = { x = x, y = y }
+                end
+              end
+            end)
+          end
+        end
+      end
+    end
+    return marks
+  end
+  local function nearestFog(requireArea, marks)
+    local best, bestD, bestBeacon = nil, 1e9, 1e9
+    for i = 0, plotCount - 1 do
+      local p = Map.GetPlotByIndex(i)
+      if p ~= nil and p.GetX ~= nil then
+        local x, y = p:GetX(), p:GetY()
+        local skip = stuck and lastX ~= nil and lastY ~= nil and x == lastX and y == lastY
+        if not skip and not revealed(p) and waterOf(p) == sea and not blocked(p) and sameBody(p, requireArea) then
+          local frontier = Map.GetPlotDistance(ux, uy, x, y) <= 1
+          if not frontier then
+            for dir = 0, 5 do
+              local a = adjacent(x, y, dir)
+              if a ~= nil and revealed(a) then
+                frontier = true
+                break
+              end
+            end
+          end
+          if frontier then
+            local dUnit = Map.GetPlotDistance(ux, uy, x, y)
+            local dBeacon = 1e9
+            for _, mark in ipairs(marks) do
+              local db = Map.GetPlotDistance(x, y, mark.x, mark.y)
+              if db < dBeacon then
+                dBeacon = db
+              end
+            end
+            local better = false
+            if #marks > 0 then
+              better = dBeacon < bestBeacon or (dBeacon == bestBeacon and dUnit < bestD)
+            else
+              better = dUnit < bestD
+            end
+            if better then
+              best, bestD, bestBeacon = p, dUnit, dBeacon
+            end
+          end
+        end
+      end
+    end
+    return best, bestD
+  end
+  local best, bestD = nil, nil
   local otherArea = false
+  if sea or stuck then
+    local marks = beacons()
+    best, bestD = nearestFog(true, marks)
+    if best == nil then
+      best, bestD = nearestFog(false, marks)
+      otherArea = best ~= nil
+    end
+  end
   if best == nil then
-    best, bestD = nearest(false)
-    otherArea = best ~= nil
+    otherArea = false
+    best, bestD = nearestBorder(true)
+    if best == nil then
+      best, bestD = nearestBorder(false)
+      otherArea = best ~= nil
+    end
   end
   if best == nil then
     return false, "explore_unavailable:map_known"
   end
-  local ok = pcall(UnitManager.MoveUnit, unit, best:GetX(), best:GetY())
-  if not ok then
-    return false, "explore_unavailable:move_error"
-  end
-  local reason = "explore_to=" .. best:GetX() .. "," .. best:GetY() .. ":d=" .. bestD
+  local tx, ty = best:GetX(), best:GetY()
+  local okMove, why = Civ6Ai_Orders._MoveOnce(owner, unitId, tx, ty)
+  local after = countRevealed()
+  propSet("N", after)
+  propSet("T", turn)
+  propSet("S", streak)
+  propSet("X", tx)
+  propSet("Y", ty)
+  local reason = "explore_to=" .. tostring(tx) .. "," .. tostring(ty) .. ":d=" .. tostring(bestD)
   if otherArea then
     reason = reason .. ":other_area"
   end
-  return true, reason
+  if sea then
+    reason = reason .. ":sea"
+  end
+  if stuck then
+    reason = reason .. ":stuck"
+  end
+  if after > before then
+    return true, reason .. ":new=" .. tostring(after - before)
+  end
+  local detail = (okMove and "no_new_tiles") or tostring(why or "no_new_tiles")
+  return false, "explore_no_reveal:" .. reason .. ":" .. detail
 end
 
 function Gov.ActivateGreatPerson(owner, unitId, mode)
@@ -2816,19 +3032,11 @@ function Gov.ActivateGreatPerson(owner, unitId, mode)
     end
     return true, "retired"
   end
-  -- Activate is the gameplay great-person action. UNITOPERATION_GREAT_PERSON_HEAL
-  -- is not available from a gameplay script; falling through to it reported
-  -- every activate as "great person heal unavailable".
-  local gp = call(unit, "GetGreatPerson")
-  if gp == nil or gp.Activate == nil then
-    return false, "activate_unavailable:no_activate"
-  end
-  local ok, err = pcall(gp.Activate, gp)
-  if ok then
-    return true, "activate_gp"
-  end
-  log("activate_unavailable|GreatPerson.Activate|" .. tostring(err))
-  return false, "activate_unavailable:" .. tostring(err)
+  -- The great-person action is a UI command. Calling it from this script
+  -- throws and every activation comes back failed. Retire (mode 1) still
+  -- uses UnitManager.Kill above. The snapshot does not offer either action;
+  -- the game's own AI uses the unit.
+  return false, "activate_unavailable:no_gameplay_activate"
 end
 
 local function cityById(owner, cityId)
@@ -2903,7 +3111,41 @@ function Gov.MakePeace(owner, other)
   if not ok then
     return false, "the game refused peace" .. (err ~= nil and (": " .. tostring(err)) or "")
   end
-  if call(diplo, "IsAtWarWith", other) == true then
+  -- A one-sided call can leave the other seat at war, and a failed read (nil)
+  -- is not peace. Gold is paid only after this returns true.
+  local theirDiplo = call(Players[other], "GetDiplomacy")
+  if theirDiplo ~= nil then
+    local okGet, fn = pcall(function() return theirDiplo.MakePeaceWith end)
+    if okGet and type(fn) == "function" then
+      pcall(fn, theirDiplo, owner)
+    end
+  end
+  -- War can also sit on the team. Clear that flag when the engine exposes it,
+  -- or the player call succeeds and the other seat keeps attacking.
+  local myTeam = call(Players[owner], "GetTeam")
+  local theirTeam = call(Players[other], "GetTeam")
+  if Teams ~= nil and myTeam ~= nil and theirTeam ~= nil and Teams[myTeam] ~= nil then
+    local team = Teams[myTeam]
+    local okPeace, teamPeace = pcall(function() return team.MakePeace end)
+    if okPeace and type(teamPeace) == "function" then
+      pcall(teamPeace, team, theirTeam)
+    end
+    local okSet, setAtWar = pcall(function() return team.SetAtWar end)
+    if okSet and type(setAtWar) == "function" then
+      pcall(setAtWar, team, theirTeam, false)
+    end
+  end
+  local ours = call(diplo, "IsAtWarWith", other)
+  local theirs = call(theirDiplo, "IsAtWarWith", owner)
+  if ours ~= false or theirs ~= false then
+    -- Their seat is still at war. Put our flag back so the snapshot does not
+    -- say peace while they keep attacking, and do not pay the gold.
+    if theirs == true and ours ~= true then
+      local okDecl, fn = pcall(function() return diplo.DeclareWarOn end)
+      if okDecl and type(fn) == "function" then
+        pcall(fn, diplo, other)
+      end
+    end
     return false, "peace did not take effect"
   end
   return true, "peace_with=" .. tostring(other)
@@ -2933,39 +3175,11 @@ local function knows(p, id)
   return tech ~= nil and call(call(p, "GetTechs"), "HasTech", tech.Index) == true
 end
 
--- One envoy from this seat to a city-state. Gameplay only (ChangeTokensToGive /
--- ChangeTokensReceived). The UI GIVE_INFLUENCE_TOKEN request is not used.
+-- Envoys. The influence-token setters are not available in this script: every
+-- live send came back without moving a token. Do not call them. The snapshot
+-- does not offer the order; the game's own AI sends envoys.
 function Gov.SendEnvoy(owner, minor)
-  local me, them = Players[owner], Players[minor]
-  if them == nil or call(them, "IsAlive") ~= true then
-    return false, "that city-state is not in the game"
-  end
-  local infMe, infThem = call(me, "GetInfluence"), call(them, "GetInfluence")
-  if infMe == nil or infThem == nil then
-    return false, "this game has no influence object"
-  end
-  local have = call(infMe, "GetTokensToGive") or 0
-  if have < 1 then
-    return false, "you have no envoys to send"
-  end
-  local before = call(infThem, "GetTokensReceived", owner) or 0
-  if infMe.ChangeTokensToGive ~= nil and infThem.ChangeTokensReceived ~= nil then
-    pcall(infMe.ChangeTokensToGive, infMe, -1)
-    pcall(infThem.ChangeTokensReceived, infThem, owner, 1)
-  elseif infThem.GiveTokenToPlayer ~= nil then
-    local ok, err = pcall(infThem.GiveTokenToPlayer, infThem, owner)
-    if not ok then
-      return false, "the game refused the envoy: " .. tostring(err)
-    end
-  else
-    return false, "this game has no gameplay route to send an envoy"
-  end
-  local after = call(infThem, "GetTokensReceived", owner) or before
-  local left = call(infMe, "GetTokensToGive")
-  if after <= before and (left == nil or left >= have) then
-    return false, "the game did not move an envoy"
-  end
-  return true, "envoy_to=" .. tostring(minor)
+  return false, "envoy_unavailable:no_gameplay_route"
 end
 
 function Gov.Deal(owner, other, gold, r1, a1, r2, a2, mode)
@@ -3279,15 +3493,42 @@ end
 -- The formation is set while that partner is still alive. Killing it first
 -- makes SetMilitaryFormation a no-op and the order reports failure after the
 -- partner is already gone.
+-- Field lookup on the formation enum. A missing name is nil; using it as a
+-- table key throws "table index is nil". Live builds use STANDARD_FORMATION;
+-- the long *_MILITARY_FORMATION names are the other family.
+local function formationConst(F, ...)
+  for i = 1, select("#", ...) do
+    local name = select(i, ...)
+    local ok, value = pcall(function() return F[name] end)
+    if ok and type(value) == "number" then
+      return value
+    end
+  end
+  return nil
+end
+
 function Gov.JoinFormation(owner, unitId, otherId)
   local unit, other = Civ6Ai_Orders._Unit(owner, unitId), Civ6Ai_Orders._Unit(owner, otherId)
   local F = MilitaryFormationTypes
   if unit == nil or other == nil or F == nil then
     return false, "no_formation_route: a unit, its partner, or formation types are missing; nothing was removed"
   end
-  local nextF = { [F.STANDARD_MILITARY_FORMATION] = F.CORPS_MILITARY_FORMATION,
-    [F.CORPS_MILITARY_FORMATION] = F.ARMY_MILITARY_FORMATION }
-  local target = nextF[call(unit, "GetMilitaryFormation")]
+  local standard = formationConst(F, "STANDARD_MILITARY_FORMATION", "STANDARD_FORMATION")
+  local corps = formationConst(F, "CORPS_MILITARY_FORMATION", "CORPS_FORMATION")
+  local army = formationConst(F, "ARMY_MILITARY_FORMATION", "ARMY_FORMATION")
+  if corps == nil or army == nil then
+    return false, "no_formation_route: corps or army formation types are missing; nothing was removed"
+  end
+  local current = call(unit, "GetMilitaryFormation")
+  local target = nil
+  if current == corps then
+    target = army
+  elseif current == army then
+    target = nil
+  elseif current == standard or (standard == nil and current ~= corps and current ~= army) then
+    -- No standard constant: a formation that is neither corps nor army is a single unit.
+    target = corps
+  end
   if target == nil or unit:GetType() ~= other:GetType()
       or Map.GetPlotDistance(unit:GetX(), unit:GetY(), other:GetX(), other:GetY()) > 1 then
     return false, "needs an adjacent unit of the same type that is not already a corps or army"
@@ -3498,6 +3739,9 @@ function Gov.BuildImprovement(owner, unitId, impIndex)
     return false, "tile_cannot_have:" .. row.ImprovementType
   end
   pcall(ImprovementBuilder.SetImprovementType, plot, row.Index, owner)
+  if call(plot, "GetImprovementType") ~= row.Index and ImprovementBuilder.SetImprovement ~= nil then
+    pcall(ImprovementBuilder.SetImprovement, plot, row.Index, owner)
+  end
   if call(plot, "GetImprovementType") ~= row.Index then
     return false, "the game refused " .. row.ImprovementType
   end
@@ -4628,6 +4872,7 @@ function Civ6Ai_Orders.Init()
   shared.OrderChecksum = Civ6Ai_Orders.Checksum
   shared.PriorityLevels = Civ6Ai_Orders.PriorityLevels
   shared.Gov = Civ6Ai_Orders.Gov
+  shared.AutoRanged = Civ6Ai_Orders._AutoRanged
   shared.ReadUnitGoal = Civ6Ai_Orders._ReadGoal
   pcall(Civ6Ai_Orders.Gov.Probe)
   log("load|version=" .. Civ6Ai_Orders.VERSION .. "|prio_conditions=" .. tostring(nPrio) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))

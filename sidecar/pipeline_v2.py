@@ -2427,6 +2427,18 @@ def load_thought_memory(
             remembered = payload.get("remembered")
             if isinstance(remembered, list) and remembered:
                 loaded["remembered"] = remembered
+            from sidecar import civ6_seat_memory
+
+            for key in civ6_seat_memory.KEPT_KEYS:
+                value = payload.get(key)
+                if value is None:
+                    continue
+                if key == "dropped" and isinstance(value, list):
+                    loaded[key] = value[:24]
+                elif key == "plan" and isinstance(value, dict):
+                    loaded[key] = value
+                elif isinstance(value, (dict, list)):
+                    loaded[key] = value
             return loaded
     if extracted is not None:
         bootstrapped = bootstrap_thought_memory_from_extracted(extracted, session_key)
@@ -5254,10 +5266,12 @@ def normalize_model_response(snapshot: dict[str, Any], response: dict[str, Any])
     if str(snapshot.get("schema_version", "")).startswith("civ6ai-input/"):
         from sidecar import civ6_command_wire
         remembered = civ6_command_wire.extract_remember(response)
+        plan_update = civ6_command_wire.extract_plan(response)
         map_viewport_reply = civ6_command_wire.extract_map_viewport(response)
         response = civ6_command_wire.expand_civ6_command_wire(snapshot, response)
     else:
         remembered = []
+        plan_update = None
         map_viewport_reply = None
     response = resolve_property_wire(snapshot, response)
     response = expand_flat_response(response, snapshot)
@@ -5416,6 +5430,10 @@ def normalize_model_response(snapshot: dict[str, Any], response: dict[str, Any])
         normalized["remember"] = remembered
     else:
         normalized.pop("remember", None)
+    if plan_update:
+        normalized["seat_plan"] = plan_update
+    else:
+        normalized.pop("seat_plan", None)
     if map_viewport_reply is not None:
         normalized["_map_viewport"] = map_viewport_reply
 

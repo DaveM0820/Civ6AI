@@ -58,7 +58,6 @@ function Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs)
     ok = ok,
     reason = reason or "",
     fixed_arguments = fixedArgs or {},
-    empire = Civ6Ai_Snapshot.EmpireTelemetry(playerID),
   }
   Civ6Ai_Util.AppendJsonLine(Civ6Ai_Apply._ApplyResultsPath(playerID), payload)
 end
@@ -154,6 +153,7 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   end
   local executedUnit, executedCity, failedAttacks = 0, 0, 0
   local cityStrikeFailed = false
+  local autoAttackOk = {}
   local function noteLocal(command, ok)
     local kind = command.kind
     local attack = kind == "attack_target" or kind == "city_attack" or kind == "range_attack" or kind == "melee_attack"
@@ -201,6 +201,9 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
           local numeric = Civ6Ai_Apply._ParseUnitNumericId(unitId)
           if numeric ~= nil then
             Civ6Ai_Apply._orderedUnits[playerID][numeric] = true
+            if command.kind == "attack_target" then
+              autoAttackOk[numeric] = true
+            end
           end
         end
         Civ6Ai_Util.Log("apply|ok|" .. tostring(command.kind) .. "|" .. tostring(command.command_id))
@@ -240,6 +243,16 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   Civ6Ai_Apply._LogAttacks(
     playerID, forTurn or snapshotTurn or Game.GetCurrentGameTurn(),
     "executed", executedUnit, executedCity, failedAttacks)
+  -- The local seat's orders run here, not in the gameplay queue, so the queue's
+  -- auto pass never sees them. Autotest only: fire leftover ranged shots and
+  -- city strikes. A real human game stays on mode 1 (AI seats only).
+  if Civ6Ai_Config ~= nil and Civ6Ai_Config.IsAutotest ~= nil and Civ6Ai_Config.IsAutotest()
+      and Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID then
+    local fn = ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil and ExposedMembers.Civ6Ai.AutoRanged or nil
+    if fn ~= nil then
+      pcall(fn, playerID, playerID, Civ6Ai_Apply._orderedUnits[playerID] or {}, autoAttackOk, {}, 2, {}, {})
+    end
+  end
 end
 
 -- Retry a move/attack in a later pass only when another unit was in the way (it
@@ -1360,6 +1373,19 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
         return Civ6Ai_Apply._PlayerOp(playerID, "UNLOCK_POLICIES", {})
       end)
     end
+    -- The type hash is what the government screen sends. When that does not
+    -- stick, send the row hash once. A nil result from the request is normal.
+    local clearList, alt = {}, {}
+    for i = 0, n - 1 do
+      table.insert(clearList, i)
+      local row = desired[i]
+      if row ~= nil then
+        alt[i] = row.Hash or row.Index
+      end
+    end
+    Civ6Ai_Apply._AsSeat(playerID, function()
+      return culture:RequestPolicyChanges(clearList, alt)
+    end)
   end)
 end
 

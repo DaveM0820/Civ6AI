@@ -80,6 +80,12 @@ function Civ6Ai_InGame._WatchTurnStarts()
         Civ6Ai_InGame.PulseAfterTurnStart(playerID, turn)
       end
     end
+    -- Autotest empty queues still fill when the pulse is waiting on the turn-start
+    -- mark. Autoqueue itself refuses every seat except the local autotest player.
+    if Civ6Ai_Production ~= nil and Civ6Ai_Production.AutoqueueEmptyCities ~= nil
+        and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID then
+      pcall(Civ6Ai_Production.AutoqueueEmptyCities, playerID)
+    end
   end
 end
 

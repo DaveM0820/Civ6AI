@@ -386,6 +386,8 @@ class SnapshotLuaOffersTests(unittest.TestCase):
                 end
               end
             end
+            CityCommandTypes = { RANGE_ATTACK = 7, PARAM_X = "x", PARAM_Y = "y" }
+            CityManager = { CanStartCommand = function() return true end }
             Players = { [1] = { GetCities = function() return { Members = members({ city }) } end } }
             Civ6Ai_Snapshot._HostileTargets = function()
               return {
@@ -555,28 +557,12 @@ class SnapshotLuaOffersTests(unittest.TestCase):
         self.lua.execute("GameInfo.GlobalParameters = function() return function() return nil end end")
         self.assertEqual([], kinds_for(self.lua.globals().GURU, "UNIT_G", snap._AddReligionCommands))
 
-        scientist = kinds_for(self.lua.globals().SCIENTIST, "UNIT_S", snap._AddActivateCommand)
-        self.assertEqual(
-            ["activate_great_person", "activate_great_person"],
-            [kind for kind, _ in scientist],
-        )
-        self.assertNotIn("retire", scientist[0][1])
-        self.assertEqual(1, scientist[1][1]["retire"])
-        general = kinds_for(self.lua.globals().GENERAL, "UNIT_N", snap._AddActivateCommand)
-        self.assertEqual([("activate_great_person", {"unit_id": "UNIT_N", "retire": 1})], general)
-
-        trade = kinds_for(self.lua.globals().TRADER, "UNIT_T", snap._AddTradeRouteCommands)
-        self.assertEqual(1, len(trade))
-        self.assertEqual("trade_route", trade[0][0])
-        self.assertEqual("CITY_131072", trade[0][1]["city_id"])
-        self.assertEqual(5, trade[0][1]["target_x"])
-        self.lua.execute(
-            "Game = { GetTradeManager = function() return { CanStartRoute = function() return true end } end }"
-        )
+        # Activate, retire, and trade routes are UI operations. They are not offered.
+        self.assertEqual([], kinds_for(self.lua.globals().SCIENTIST, "UNIT_S", snap._AddActivateCommand))
+        self.assertEqual([], kinds_for(self.lua.globals().GENERAL, "UNIT_N", snap._AddActivateCommand))
         self.assertEqual([], kinds_for(self.lua.globals().TRADER, "UNIT_T", snap._AddTradeRouteCommands))
         self.lua.execute("SCIENTIST.GetGreatPerson = function() return {} end")
-        retired = kinds_for(self.lua.globals().SCIENTIST, "UNIT_S", snap._AddActivateCommand)
-        self.assertEqual([("activate_great_person", {"unit_id": "UNIT_S", "retire": 1})], retired)
+        self.assertEqual([], kinds_for(self.lua.globals().SCIENTIST, "UNIT_S", snap._AddActivateCommand))
 
     def test_embark_site_is_recorded_when_nothing_is_walkable(self):
         self.lua.execute(
