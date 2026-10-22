@@ -495,9 +495,10 @@ def production_catalog_lines(snapshot: dict[str, Any], city_tokens: dict[str, di
         if not options:
             continue
         turns = turns_by_city.get(city_id) if isinstance(turns_by_city.get(city_id), dict) else {}
-        from sidecar import civ6_combat_wire as combat_wire
+        from sidecar.civ6_priorities import item_score, situation_for_city, tags_for_item
 
-        threatened = city_id in combat_wire.threatened_city_ids(snapshot)
+        situation = situation_for_city(snapshot, city)
+        threatened = bool(situation.get("threatened"))
         ranked: list[tuple[int, int, str]] = []
         for index, token in enumerate(options):
             base = token.split("@", 1)[0].split(":", 1)[0]
@@ -509,27 +510,15 @@ def production_catalog_lines(snapshot: dict[str, Any], city_tokens: dict[str, di
                 item = {}
             stats = _catalog_stats(item, turn_n if isinstance(turn_n, int) else None)
             text = f"{token} ({stats})" if stats else token
-            rank = index
-            if threatened:
-                upper = base.upper()
-                ranged = _num(item.get("ranged")) or 0
-                combat = _num(item.get("combat")) or 0
-                ranged_name = any(k in upper for k in ("ARCHER", "CROSSBOW", "SLINGER", "CANNON", "CATAPULT", "TREBUCHET", "BOMBARD"))
-                if "WALL" in upper:
-                    rank = 0
-                elif ranged > 0 or ranged_name:
-                    rank = 1
-                elif combat > 0 or upper.startswith("UNIT_"):
-                    rank = 2
-                else:
-                    rank = 3
-            ranked.append((rank, index, text))
+            tags, kind = tags_for_item(base, item)
+            score = item_score(base, tags, situation, kind)
+            ranked.append((-score, index, text))
         ranked.sort()
         parts = [text for _, _, text in ranked[:16]]
         hidden = len(ranked) - len(parts)
         if hidden > 0:
             parts.append(f"+{hidden} more")
-        prefix = "THREATENED — walls, ranged, then melee first: " if threatened and parts else ""
+        prefix = "THREATENED — defense build list first: " if threatened and parts else ""
         lines.append(pipeline._wire_line(
             f"{pipeline._city_prompt_name(city)}.production.catalog", prefix + " | ".join(parts),
         ))

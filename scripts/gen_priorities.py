@@ -18,8 +18,11 @@ from sidecar import civ6_priorities as P  # noqa: E402
 
 OUT = os.path.join(ROOT, "mod", "Civ6Ai", "Data", "Civ6Ai_Priorities.sql")
 ORDERS_LUA = os.path.join(ROOT, "mod", "Civ6Ai", "Gameplay", "Civ6Ai_Orders.lua")
+PRODUCTION_LUA = os.path.join(ROOT, "mod", "Civ6Ai", "InGame", "Civ6Ai_Production.lua")
 LUA_BEGIN = "-- BEGIN GENERATED PRIORITY_IDS (scripts/gen_priorities.py)"
 LUA_END = "-- END GENERATED PRIORITY_IDS"
+WEIGHT_BEGIN = "-- BEGIN GENERATED PRIORITY_WEIGHTS (scripts/gen_priorities.py)"
+WEIGHT_END = "-- END GENERATED PRIORITY_WEIGHTS"
 
 SYSTEMS = [
     # spec field, list suffix, AiLists system, defining table, key column
@@ -83,6 +86,49 @@ def lua_block() -> str:
     return "\n".join(lines)
 
 
+def production_weight_block() -> str:
+    """Level-1 weights, ids and groups for the local autotest queue scorer."""
+    lines = [
+        WEIGHT_BEGIN,
+        "-- Level-1 item weights from sidecar/civ6_priorities.py CATEGORIES.",
+        "-- ScoreBuild multiplies level 2 by 2 and level 3 by 4, then clamps each",
+        "-- component at -100. Do not edit by hand.",
+        "Civ6Ai_Production.PRIORITY_WEIGHTS = {",
+    ]
+    for cat in P.CATEGORIES:
+        items = {}
+        for field in ("yields", "pseudo", "classes", "districts"):
+            items.update(cat.get(field) or {})
+        body = ", ".join(f"{key} = {value}" for key, value in items.items())
+        lines.append(f"  [{cat['id']}] = {{ {body} }}, -- {cat['key']}")
+    lines.append("}")
+    lines.append("Civ6Ai_Production.PRIORITY_GROUP = {")
+    for cat in P.CATEGORIES:
+        lines.append(f'  [{cat["id"]}] = "{cat["group"]}",')
+    lines.append("}")
+    lines.append("Civ6Ai_Production.PRIORITY_KEY_ID = {")
+    for cat in P.CATEGORIES:
+        lines.append(f'  {cat["key"]} = {cat["id"]},')
+    lines.append("}")
+    lines.append(WEIGHT_END)
+    return "\n".join(lines)
+
+
+def update_production(path: str = PRODUCTION_LUA) -> bool:
+    """Rewrite the PRIORITY_WEIGHTS block in Civ6Ai_Production.lua."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    if WEIGHT_BEGIN not in text or WEIGHT_END not in text:
+        raise SystemExit(f"{path} is missing PRIORITY_WEIGHTS markers")
+    a = text.index(WEIGHT_BEGIN)
+    b = text.index(WEIGHT_END, a) + len(WEIGHT_END)
+    new = text[:a] + production_weight_block() + text[b:]
+    if new != text:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(new)
+    return new != text
+
+
 def update_lua(path: str = ORDERS_LUA) -> bool:
     """Rewrite the PRIORITY_IDS block in Civ6Ai_Orders.lua. Returns True if it changed."""
     with open(path, encoding="utf-8") as f:
@@ -98,6 +144,7 @@ def update_lua(path: str = ORDERS_LUA) -> bool:
 
 def main() -> int:
     update_lua()
+    update_production()
     text = build()
     with open(OUT, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)

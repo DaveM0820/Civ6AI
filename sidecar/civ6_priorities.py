@@ -283,6 +283,436 @@ def _fmt(levels: dict[int, int]) -> str:
     return ", ".join(f"{BY_ID[c]['key']}:{lvl}" for c, lvl in sorted(levels.items()))
 
 
+# ---------------------------------------------------------------------------
+# Local autotest queue. The SQL lists reweight the engine AI; they are not an
+# ordered UNIT_/BUILDING_ list. ScoreBuild turns those same level-1 weights
+# into a concrete CanProduce pick. The numbers live only in CATEGORIES.
+# ---------------------------------------------------------------------------
+_WEIGHT_FIELDS = ("yields", "pseudo", "classes", "districts")
+MILITARY_KEYS = ("war", "total_war", "naval_war", "naval_total_war", "domination_victory")
+EXPANSION_TURN_CAP = 100
+THREAT_DISTANCE = 4
+_ERAS = {
+    "ERA_ANCIENT": 0, "ERA_CLASSICAL": 1, "ERA_MEDIEVAL": 2, "ERA_RENAISSANCE": 3,
+    "ERA_INDUSTRIAL": 4, "ERA_MODERN": 5, "ERA_ATOMIC": 6, "ERA_INFORMATION": 7,
+}
+_NAVAL = {
+    "PROMOTION_CLASS_NAVAL_MELEE", "PROMOTION_CLASS_NAVAL_RANGED",
+    "PROMOTION_CLASS_NAVAL_RAIDER", "PROMOTION_CLASS_NAVAL_CARRIER",
+}
+_AIR = {"PROMOTION_CLASS_AIR_FIGHTER", "PROMOTION_CLASS_AIR_BOMBER"}
+_RELIGIOUS = {
+    "PROMOTION_CLASS_APOSTLE", "PROMOTION_CLASS_MISSIONARY", "PROMOTION_CLASS_INQUISITOR",
+    "PROMOTION_CLASS_WARRIOR_MONK", "PROMOTION_CLASS_GURU",
+}
+
+
+def _cat_items(cat: dict) -> dict[str, int]:
+    items: dict[str, int] = {}
+    for field in _WEIGHT_FIELDS:
+        for key, value in (cat.get(field) or {}).items():
+            items[key] = int(value)
+    return items
+
+
+def weight_vector(levels: dict[int, int], half_war: bool = False) -> dict[str, int]:
+    """Sum scaled category weights. Addition is commutative, so key order does not matter."""
+    acc: dict[str, int] = {}
+    for cid, level in levels.items():
+        cat = BY_ID.get(int(cid))
+        if cat is None or int(level) not in LEVEL_MULT:
+            continue
+        for item, value in _cat_items(cat).items():
+            acc[item] = acc.get(item, 0) + scaled(value, int(level))
+    if half_war:
+        # Half of war:1. Clamp at -100 before the floor divide so Lua math.floor matches.
+        for item, value in _cat_items(BY_KEY["war"]).items():
+            capped = value if value > -100 else -100
+            acc[item] = acc.get(item, 0) + (capped // 2)
+    return acc
+
+
+def compose_situation(
+    *,
+    saved: dict[int, int] | None = None,
+    major_wars: int = 0,
+    threatened: bool = False,
+    warlike: bool = False,
+    cities: int = 1,
+    pop: int = 1,
+    land: bool = True,
+    turn: int = 0,
+    era: int = 0,
+    builders: int = 0,
+    military: int = 0,
+    missing_monument: bool | None = None,
+    missing_granary: bool | None = None,
+    missing_district: bool | None = None,
+    last: str | None = None,
+    unit_counts: dict[str, int] | None = None,
+) -> dict:
+    """Saved priorities, or peace:1 when the seat has no posture, plus the situation overlays."""
+    levels: dict[int, int] = {}
+    for cid, level in (saved or {}).items():
+        if cid in BY_ID and 1 <= int(level) <= 3:
+            levels[int(cid)] = int(level)
+    if not any(BY_ID[c]["group"] == "posture" for c in levels):
+        levels[BY_KEY["peace"]["id"]] = 1
+    military_ids = {BY_KEY[key]["id"] for key in MILITARY_KEYS}
+    if major_wars > 0 and not any(levels.get(cid, 0) > 0 for cid in military_ids):
+        war_id = BY_KEY["war"]["id"]
+        if levels.get(war_id, 0) < 1:
+            levels[war_id] = 1
+    target = min(8, 3 + max(0, int(era)))
+    need_expansion = int(cities) < target and int(turn) <= EXPANSION_TURN_CAP and int(pop) >= 2 and bool(land)
+    need_builders = int(builders) < int(cities)
+    needed = int(cities)
+    if major_wars > 0:
+        needed += int(cities)
+    if threatened:
+        needed += 1
+    if warlike:
+        needed += 1
+    military_short = int(military) < needed
+    if threatened or military_short:
+        defense_id = BY_KEY["defense"]["id"]
+        if levels.get(defense_id, 0) < 1:
+            levels[defense_id] = 1
+    if need_expansion:
+        expansion_id = BY_KEY["expansion"]["id"]
+        if levels.get(expansion_id, 0) < 1:
+            levels[expansion_id] = 1
+    if need_builders:
+        improve_id = BY_KEY["improvements"]["id"]
+        if levels.get(improve_id, 0) < 1:
+            levels[improve_id] = 1
+    half_war = bool(warlike) and levels.get(BY_KEY["war"]["id"], 0) == 0
+    return {
+        "levels": levels,
+        "half_war": half_war,
+        "military_over": int(military) >= needed + 2,
+        "missing_monument": missing_monument is True,
+        "missing_granary": missing_granary is True,
+        "missing_district": missing_district is True,
+        "pop": int(pop),
+        "land": bool(land),
+        "need_expansion": need_expansion,
+        "threatened": bool(threatened),
+        "last": last,
+        "unit_counts": dict(unit_counts or {}),
+    }
+
+
+def _positive(value) -> bool:
+    if isinstance(value, bool) or value is None:
+        return False
+    try:
+        return float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def tags_for_item(type_id: str, row: dict | None = None) -> tuple[list[str], str]:
+    """GameInfo-shaped tags for one producible type. Catalog rows may be sparse."""
+    row = row or {}
+    ident = str(type_id or "")
+    upper = ident.upper()
+    kind = str(row.get("kind") or row.get("category") or "").lower()
+    if kind not in ("unit", "building", "district", "project"):
+        if upper.startswith("UNIT_"):
+            kind = "unit"
+        elif upper.startswith("BUILDING_"):
+            kind = "building"
+        elif upper.startswith("DISTRICT_"):
+            kind = "district"
+        elif upper.startswith("PROJECT_"):
+            kind = "project"
+        else:
+            kind = "project"
+    tags: list[str] = []
+
+    def add(tag: str | None) -> None:
+        if tag and tag not in tags:
+            tags.append(tag)
+
+    if kind == "unit":
+        promo = str(row.get("promotion_class") or row.get("PromotionClass") or "")
+        formation = str(row.get("formation_class") or row.get("FormationClass") or "")
+        combat = _positive(row.get("combat") if "combat" in row else row.get("Combat"))
+        ranged = _positive(row.get("ranged") if "ranged" in row else row.get("RangedCombat", row.get("ranged_combat")))
+        religious = _positive(row.get("religious_strength") if "religious_strength" in row else row.get("ReligiousStrength"))
+        charges = _positive(row.get("build_charges") if "build_charges" in row else row.get("BuildCharges"))
+        found = row.get("found_city") if "found_city" in row else row.get("FoundCity")
+        if found or upper == "UNIT_SETTLER":
+            add("PSEUDOYIELD_UNIT_SETTLER")
+        elif charges or upper == "UNIT_BUILDER":
+            add("PSEUDOYIELD_IMPROVEMENT")
+        elif promo == "PROMOTION_CLASS_RECON" or "SCOUT" in upper:
+            add("PSEUDOYIELD_UNIT_EXPLORER")
+            add(promo or "PROMOTION_CLASS_RECON")
+        elif promo in _NAVAL or formation == "FORMATION_CLASS_NAVAL":
+            add("PSEUDOYIELD_UNIT_NAVAL_COMBAT")
+            add(promo or None)
+        elif promo in _AIR or formation == "FORMATION_CLASS_AIR":
+            add("PSEUDOYIELD_UNIT_AIR_COMBAT")
+            add(promo or None)
+        elif religious or promo in _RELIGIOUS:
+            add("PSEUDOYIELD_UNIT_RELIGIOUS")
+            add(promo or None)
+        elif upper == "UNIT_TRADER" or promo == "PROMOTION_CLASS_TRADER":
+            add("PSEUDOYIELD_UNIT_TRADE")
+        elif combat or ranged or promo.startswith("PROMOTION_CLASS_"):
+            add("PSEUDOYIELD_UNIT_COMBAT")
+            if promo:
+                add(promo)
+            elif ranged:
+                add("PROMOTION_CLASS_RANGED")
+            else:
+                add("PROMOTION_CLASS_MELEE")
+    elif kind == "district":
+        add(upper)
+        add("PSEUDOYIELD_DISTRICT")
+        replaces = row.get("replaces_district") or row.get("ReplacesDistrictType")
+        if replaces:
+            add(str(replaces))
+        if row.get("is_wonder") or row.get("IsWonder") or "WONDER" in upper:
+            add("PSEUDOYIELD_WONDER")
+    else:
+        if any(token in upper for token in ("WALL", "CASTLE", "STAR_FORT")):
+            add("PSEUDOYIELD_CITY_DEFENSES")
+        if row.get("is_wonder") or row.get("IsWonder"):
+            add("PSEUDOYIELD_WONDER")
+        prereq = row.get("prereq_district") or row.get("PrereqDistrict")
+        if prereq:
+            add(str(prereq))
+        yield_rows = row.get("yield_changes") if "yield_changes" in row else row.get("YieldChanges")
+        added = False
+        if isinstance(yield_rows, dict):
+            for yield_type, change in yield_rows.items():
+                if _positive(change):
+                    add(str(yield_type))
+                    added = True
+        elif isinstance(yield_rows, list):
+            for entry in yield_rows:
+                if not isinstance(entry, dict):
+                    continue
+                change = entry.get("YieldChange", entry.get("change"))
+                if _positive(change):
+                    add(str(entry.get("YieldType") or entry.get("yield") or ""))
+                    added = True
+        housing = None
+        if "Housing" in row:
+            housing = row.get("Housing")
+        elif "housing" in row:
+            housing = row.get("housing")
+        if not added and housing is not None and _positive(housing):
+            add("YIELD_FOOD")
+            added = True
+        if not added and yield_rows is None and housing is None:
+            if "MONUMENT" in upper:
+                add("YIELD_CULTURE")
+            elif "GRANARY" in upper:
+                add("YIELD_FOOD")
+    return tags, kind
+
+
+def item_score(type_id: str, tags: list[str], situation: dict, kind: str = "", weights: dict[str, int] | None = None) -> int:
+    if weights is None:
+        weights = weight_vector(situation.get("levels") or {}, bool(situation.get("half_war")))
+    seen: set[str] = set()
+    score = 0
+    for tag in tags:
+        if tag in seen:
+            continue
+        seen.add(tag)
+        score += int(weights.get(tag, 0))
+    if situation.get("military_over") and "PSEUDOYIELD_UNIT_COMBAT" in seen:
+        score -= 40
+    if situation.get("missing_monument") and type_id == "BUILDING_MONUMENT":
+        score += 15
+    if situation.get("missing_granary") and type_id == "BUILDING_GRANARY":
+        score += 15
+    if (situation.get("missing_district") and kind == "district"
+            and type_id != "DISTRICT_CITY_CENTER" and "WONDER" not in type_id):
+        score += 10
+    if "PSEUDOYIELD_UNIT_SETTLER" in seen or type_id == "UNIT_SETTLER":
+        if int(situation.get("pop") or 1) < 2 or situation.get("land") is False:
+            score -= 200
+        if not situation.get("need_expansion"):
+            score -= 40
+    if situation.get("last") == type_id:
+        score -= 50
+    if kind == "unit" or str(type_id).startswith("UNIT_"):
+        count = int((situation.get("unit_counts") or {}).get(type_id) or 0)
+        if count > 2:
+            score -= 25 * (count - 2)
+    return score
+
+
+def pick_build(candidates: list[dict], situation: dict) -> tuple[str | None, int | None]:
+    """Highest score, then the lexicographically smaller type id. No randomness."""
+    weights = weight_vector(situation.get("levels") or {}, bool(situation.get("half_war")))
+    best_id: str | None = None
+    best_score: int | None = None
+    for cand in candidates:
+        type_id = str(cand.get("id") or "")
+        if not type_id:
+            continue
+        tags = list(cand.get("tags") or [])
+        kind = str(cand.get("kind") or "")
+        if not tags and not kind:
+            tags, kind = tags_for_item(type_id, cand.get("row") if isinstance(cand.get("row"), dict) else None)
+        score = item_score(type_id, tags, situation, kind, weights)
+        if best_score is None or score > best_score or (score == best_score and type_id < str(best_id)):
+            best_id, best_score = type_id, score
+    return best_id, best_score
+
+
+def _era_index(snapshot: dict) -> int:
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    rankings = civ6.get("rankings") if isinstance(civ6.get("rankings"), dict) else {}
+    for value in (rankings.get("era"), rankings.get("era_id"), game.get("era_id"), game.get("era")):
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value in _ERAS:
+            return _ERAS[value]
+    return 0
+
+
+def _game_turn(snapshot: dict) -> int:
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
+    for value in (game.get("turn"), decision.get("turn")):
+        if isinstance(value, int) and value >= 0:
+            return value
+    return 0
+
+
+def _city_population(snapshot: dict, city: dict) -> int:
+    if isinstance(city.get("population"), int):
+        return city["population"]
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    economy = civ6.get("economy") if isinstance(civ6.get("economy"), dict) else {}
+    for row in economy.get("cities") or []:
+        if isinstance(row, dict) and row.get("city_id") == city.get("city_id") and isinstance(row.get("population"), int):
+            return row["population"]
+    return 1
+
+
+def _reported(snapshot: dict, city: dict, city_key: str, economy_key: str) -> list[str] | None:
+    if city_key in city and isinstance(city.get(city_key), list):
+        return [str(item) for item in city[city_key]]
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    economy = civ6.get("economy") if isinstance(civ6.get("economy"), dict) else {}
+    for row in economy.get("cities") or []:
+        if isinstance(row, dict) and row.get("city_id") == city.get("city_id") and economy_key in row:
+            listed = row.get(economy_key)
+            if isinstance(listed, list):
+                return [str(item) for item in listed]
+    return None
+
+
+def _major_war_count(snapshot: dict) -> int:
+    from sidecar.civ6_wire import civ6_player_kind
+
+    count = 0
+    for rival in snapshot.get("known_players") or []:
+        if not isinstance(rival, dict) or rival.get("is_alive") is False:
+            continue
+        relation = rival.get("relation")
+        if not (isinstance(relation, dict) and relation.get("at_war") is True):
+            continue
+        if civ6_player_kind(rival) == "major":
+            count += 1
+    return count
+
+
+def _city_threatened(snapshot: dict, city: dict) -> bool:
+    from sidecar import civ6_wire
+    from sidecar import pipeline_v2 as pipeline
+
+    xy = pipeline._parse_plot_coords(city.get("plot_id")) if isinstance(city, dict) else None
+    if xy is None:
+        return False
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    width = game.get("map_width") if isinstance(game.get("map_width"), int) else None
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    if width is None and isinstance(civ6.get("map"), dict) and isinstance(civ6["map"].get("width"), int):
+        width = civ6["map"]["width"]
+    combat = civ6.get("combat") if isinstance(civ6.get("combat"), dict) else {}
+    at_war = set()
+    for rival in snapshot.get("known_players") or []:
+        relation = rival.get("relation") if isinstance(rival, dict) else None
+        if isinstance(relation, dict) and relation.get("at_war") is True:
+            at_war.add(str(rival.get("player_id")))
+    for hostile in combat.get("hostiles") or []:
+        if not isinstance(hostile, dict):
+            continue
+        owner = str(hostile.get("owner_player_id") or "")
+        barbarian = hostile.get("barbarian") is True or "BARBAR" in owner.upper()
+        if not barbarian and owner not in at_war:
+            continue
+        if not _positive(hostile.get("strength")) and not _positive(hostile.get("ranged_strength")):
+            continue
+        hx, hy = hostile.get("x"), hostile.get("y")
+        if not isinstance(hx, int) or not isinstance(hy, int):
+            continue
+        dist = civ6_wire._odd_r_distance(xy, (hx, hy), width, game.get("wrap_x") is not False)
+        if 0 < dist <= THREAT_DISTANCE:
+            return True
+    return False
+
+
+def _unit_counts(snapshot: dict) -> tuple[int, int]:
+    from sidecar.civ6_wire import _is_civilian
+
+    builders = 0
+    military = 0
+    for unit in snapshot.get("your_units") or []:
+        if not isinstance(unit, dict):
+            continue
+        type_id = str(unit.get("unit_type_id") or "")
+        if "BUILDER" in type_id or type_id.endswith("WORKER"):
+            builders += 1
+        if not _is_civilian(unit):
+            military += 1
+    return builders, military
+
+
+def situation_for_city(snapshot: dict, city: dict) -> dict:
+    """Prompt-side situation. Land is false only when the snapshot says no city site is open."""
+    builders, military = _unit_counts(snapshot if isinstance(snapshot, dict) else {})
+    buildings = _reported(snapshot, city, "buildings", "built_buildings")
+    districts = _reported(snapshot, city, "districts", "built_districts")
+    missing_monument = None if buildings is None else not any("MONUMENT" in item.upper() for item in buildings)
+    missing_granary = None if buildings is None else not any("GRANARY" in item.upper() for item in buildings)
+    if districts is None:
+        missing_district = None
+    else:
+        specialty = [item for item in districts if "CITY_CENTER" not in item.upper() and "WONDER" not in item.upper()]
+        missing_district = len(specialty) == 0
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    warlike = civ6.get("warlike") is True
+    cities = sum(1 for row in snapshot.get("your_cities") or [] if isinstance(row, dict))
+    return compose_situation(
+        saved=current_levels(snapshot),
+        major_wars=_major_war_count(snapshot),
+        threatened=_city_threatened(snapshot, city),
+        warlike=warlike,
+        cities=cities or 1,
+        pop=_city_population(snapshot, city),
+        land=not (snapshot.get("_settlers_no_walkable_site") or snapshot.get("_no_city_sites")),
+        turn=_game_turn(snapshot),
+        era=_era_index(snapshot),
+        builders=builders,
+        military=military,
+        missing_monument=missing_monument,
+        missing_granary=missing_granary,
+        missing_district=missing_district,
+    )
+
+
 def prompt_lines(snapshot: dict) -> list[str]:
     """=== BUILD PRIORITIES === block for the prompt (empty when unsupported)."""
     if not priorities_supported(snapshot):
@@ -294,6 +724,8 @@ def prompt_lines(snapshot: dict) -> list[str]:
         "Your cities' production is chosen by the game's own AI. Build priorities steer what it builds across "
         "your whole empire (which units, buildings, districts and wonders it favours). They stay on every turn "
         "until you change them.",
+        "The local test seat fills an empty queue from these same lists, with extra weight for war, nearby "
+        "enemies, a warlike leader, too few cities, too few builders, and a penalty for repeating the same item.",
         f"Current: {_fmt(current_levels(snapshot))}",
         "Levels: 1 = light, 2 = strong, 3 = all-in (almost nothing else gets built).",
         f"Pick at most ONE posture: {posture}",
