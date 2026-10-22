@@ -168,6 +168,12 @@ class Civ6LuaLogBridgeTests(unittest.TestCase):
                     time.sleep(0.01)
                 self.assertEqual(2, len(started))
                 release.set()
+                # The workers write into this temp dir after release. Wait until
+                # those writes finish or deleting the directory races them.
+                deadline = time.time() + 2
+                while seat_jobs._ACTIVE > 0 and time.time() < deadline:
+                    time.sleep(0.01)
+                self.assertEqual(0, seat_jobs._ACTIVE)
 
 
 class BlobSplitAcrossReadsTests(unittest.TestCase):

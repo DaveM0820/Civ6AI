@@ -69,11 +69,55 @@ end
 -- forTurn, and results are recorded when they come back. forTurn defaults to
 -- Civ6Ai_Bridge.SeatForTurn: snapshotTurn in single player when the seat's
 -- turn snapshotTurn has not started yet (same-turn timing), else snapshotTurn + 1.
+
+-- Unit attacks and city strikes before moves, same rule as the synced
+-- gameplay queue. Stable: attacks keep their order, then everything else.
+function Civ6Ai_Apply._AttacksBeforeMoves(commands)
+  local attacks, rest = {}, {}
+  for _, command in ipairs(commands or {}) do
+    local kind = command.kind
+    if kind == "attack_target" or kind == "city_attack" or kind == "range_attack" or kind == "melee_attack" then
+      attacks[#attacks + 1] = command
+    else
+      rest[#rest + 1] = command
+    end
+  end
+  for _, command in ipairs(rest) do
+    attacks[#attacks + 1] = command
+  end
+  return attacks
+end
+
+function Civ6Ai_Apply._CountAttacks(commands)
+  local unit, city = 0, 0
+  for _, command in ipairs(commands or {}) do
+    local kind = command.kind
+    if kind == "attack_target" or kind == "range_attack" or kind == "melee_attack" then
+      unit = unit + 1
+    elseif kind == "city_attack" then
+      city = city + 1
+    end
+  end
+  return unit, city
+end
+
+function Civ6Ai_Apply._LogAttacks(playerID, turn, field, unit, city, failed)
+  local message = "attacks|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
+    .. "|" .. field .. "=" .. tostring(unit + city)
+    .. "|unit=" .. tostring(unit) .. "|city=" .. tostring(city)
+  if failed ~= nil then
+    message = message .. "|failed=" .. tostring(failed)
+  end
+  Civ6Ai_Util.Log(message)
+end
+
 function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   if decision == nil or decision.commands == nil then
     Civ6Ai_Util.Log("apply|no_commands|player=" .. tostring(playerID))
     return
   end
+  decision.commands = Civ6Ai_Apply._AttacksBeforeMoves(decision.commands)
+  local orderedUnit, orderedCity = Civ6Ai_Apply._CountAttacks(decision.commands)
   local rest = decision.commands
   if playerID ~= Game.GetLocalPlayer() then
     if forTurn == nil then
@@ -86,6 +130,7 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
     local sent = Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn, snapshotTurn)
     Civ6Ai_Util.Log("apply|order_channel|player=" .. tostring(playerID) .. "|for_turn=" .. tostring(forTurn)
       .. "|sent=" .. tostring(sent))
+    Civ6Ai_Apply._LogAttacks(playerID, forTurn, "ordered", orderedUnit, orderedCity)
     return
   end
   if Civ6Ai_Apply._IsNetworkMultiplayer() then
@@ -101,10 +146,28 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   Civ6Ai_Apply._orderedUnits = Civ6Ai_Apply._orderedUnits or {}
   Civ6Ai_Apply._orderedUnits[playerID] = {}
   local commands = decision.commands
+  Civ6Ai_Apply._LogAttacks(playerID, forTurn or snapshotTurn or Game.GetCurrentGameTurn(), "ordered", orderedUnit, orderedCity)
   local maxPasses = 4
   local pending = {}
   for _, command in ipairs(commands) do
     table.insert(pending, command)
+  end
+  local executedUnit, executedCity, failedAttacks = 0, 0, 0
+  local function noteLocal(command, ok)
+    local kind = command.kind
+    local attack = kind == "attack_target" or kind == "city_attack" or kind == "range_attack" or kind == "melee_attack"
+    if not attack then
+      return
+    end
+    if ok then
+      if kind == "city_attack" then
+        executedCity = executedCity + 1
+      else
+        executedUnit = executedUnit + 1
+      end
+    else
+      failedAttacks = failedAttacks + 1
+    end
   end
   for passIndex = 1, maxPasses do
     if #pending == 0 then
@@ -123,6 +186,7 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
         Civ6Ai_Util.Log("apply|deferred|" .. tostring(command.kind) .. "|" .. tostring(command.command_id))
       elseif ok then
         progress = true
+        noteLocal(command, true)
         local unitId = (command.arguments and command.arguments.unit_id) or (fixedArgs and fixedArgs.unit_id)
         if unitId ~= nil then
           local numeric = Civ6Ai_Apply._ParseUnitNumericId(unitId)
@@ -144,12 +208,14 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
               .. tostring(command.command_id)
           )
         else
+          noteLocal(command, false)
           Civ6Ai_Util.Log("apply|fail|" .. tostring(command.kind) .. "|" .. tostring(reason))
         end
       end
     end
     if not progress then
       for _, command in ipairs(nextPending) do
+        noteLocal(command, false)
         Civ6Ai_Util.Log(
           "apply|fail|"
             .. tostring(command.kind)
@@ -161,6 +227,9 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
     end
     pending = nextPending
   end
+  Civ6Ai_Apply._LogAttacks(
+    playerID, forTurn or snapshotTurn or Game.GetCurrentGameTurn(),
+    "executed", executedUnit, executedCity, failedAttacks)
 end
 
 -- Retry a move/attack in a later pass only when another unit was in the way (it

@@ -338,6 +338,25 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertEqual(self.rt.eval("Players[2].units[1].dmg"), 20)
         self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
 
+    def test_attack_and_city_strike_run_before_a_move(self):
+        # The move is listed first and would spend the unit (moves left = 0).
+        # The attack must still land, and the city strike must run before it.
+        self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,3,10,11,0))")
+        self.order(0, K=1, P=2, U=7, X=9, Y=10, S=21, B=3, J=1, N=3, T=6)
+        self.order(0, K=31, P=2, I=99, X=10, Y=11, S=22, B=3, J=2, N=3, T=6)
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=23, B=3, J=3, N=3, T=6)
+        self.turn_start(2, turn=6)
+        res = self.results()
+        self.assertEqual([r["kind"] for r in res[:3]], [31, 7, 1])
+        attack = next(r for r in res if r["kind"] == 7)
+        self.assertTrue(attack["ok"], attack["reason"])
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
+        logs = list(self.rt.eval("logs").values())
+        self.assertTrue(any(
+            "CIV6AI|attacks|player=2|turn=6|executed=1|failed=1|unit=1|city=0" in line
+            for line in logs
+        ), logs)
+
     def test_city_attack_and_strike_without_get_district_id(self):
         # Gameplay cities have no GetDistrictID. The centre comes from the city
         # plot, or from the city's district list. Neither call may throw.

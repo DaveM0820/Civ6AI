@@ -42,6 +42,9 @@ CIV6_CAPITAL_T1_COACHING = (
 )
 
 CIV6_MOVE_THEN_ATTACK_GUIDANCE = (
+    "When an attack is offered, prefer it over a move: AttackTo on a unit row "
+    "(melee, ranged, or bombard) and rangeStrike on a city row (a city attack or city strike). "
+    "Move instead only when you judge that attack the wrong fight. "
     "A unit with leftover movement can often still attack this turn after moving — "
     "do not treat \"already moved\" as \"cannot attack\" unless the unit has 0 moves left "
     "or the attack is otherwise illegal."

@@ -4311,6 +4311,26 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
     end
     table.insert(capped, command)
   end
+  if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
+    local offeredUnit, offeredCity = 0, 0
+    for _, command in ipairs(capped) do
+      if command.kind == "attack_target" or command.kind == "range_attack" or command.kind == "melee_attack" then
+        offeredUnit = offeredUnit + 1
+      elseif command.kind == "city_attack" then
+        offeredCity = offeredCity + 1
+      end
+    end
+    local turn = -1
+    if Game ~= nil and Game.GetCurrentGameTurn ~= nil then
+      local okTurn, got = pcall(Game.GetCurrentGameTurn)
+      if okTurn and got ~= nil then
+        turn = got
+      end
+    end
+    Civ6Ai_Util.Log("attacks|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
+      .. "|offered=" .. tostring(offeredUnit + offeredCity)
+      .. "|unit=" .. tostring(offeredUnit) .. "|city=" .. tostring(offeredCity))
+  end
   return capped
 end
 

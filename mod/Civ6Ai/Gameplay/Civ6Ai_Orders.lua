@@ -991,6 +991,38 @@ function Civ6Ai_Orders._Execute(sender, o)
   return Civ6Ai_Orders._DoCommand(sender, o)
 end
 
+-- Unit attacks and city strikes before every other order. A move that fails
+-- or spends the unit must not run first and make a listed attack illegal.
+-- Stable: attacks keep their relative order, and so does everything else.
+function Civ6Ai_Orders._AttacksBeforeMoves(orders)
+  local attacks, rest = {}, {}
+  for _, o in ipairs(orders or {}) do
+    if o.K == Civ6Ai_Orders.K.ATTACK or o.K == Civ6Ai_Orders.K.CITY_STRIKE then
+      attacks[#attacks + 1] = o
+    else
+      rest[#rest + 1] = o
+    end
+  end
+  for _, o in ipairs(rest) do
+    attacks[#attacks + 1] = o
+  end
+  return attacks
+end
+
+local function noteAttack(counts, o, ok)
+  local which = nil
+  if o.K == Civ6Ai_Orders.K.ATTACK then
+    which = "unit"
+  elseif o.K == Civ6Ai_Orders.K.CITY_STRIKE then
+    which = "city"
+  end
+  if which == nil then
+    return
+  end
+  local bucket = ok and counts.ok or counts.fail
+  bucket[which] = bucket[which] + 1
+end
+
 -- Play one seat's orders with retry passes and record each result, then end
 -- the turn of the seat's units the model left in place.
 function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
@@ -1002,6 +1034,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
       end
     end
   end
+  orders = Civ6Ai_Orders._AttacksBeforeMoves(orders)
   local ordered = {}
   for _, o in ipairs(orders) do
     if o.U ~= nil and o.U >= 0 then
@@ -1010,6 +1043,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
     end
   end
   local pending, okUnits = orders, {}
+  local counts = { ok = { unit = 0, city = 0 }, fail = { unit = 0, city = 0 } }
   for pass = 1, Civ6Ai_Orders.MAX_PASSES do
     if #pending == 0 then
       break
@@ -1026,10 +1060,12 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
         progress = true
         okUnits[o.U or -1] = o.K ~= Civ6Ai_Orders.K.SKIP or nil
         Civ6Ai_Orders._Record(sender, o, true, reason)
+        noteAttack(counts, o, true)
       elseif retryable(o.K, reason) and pass < Civ6Ai_Orders.MAX_PASSES then
         nextPending[#nextPending + 1] = o
       else
         Civ6Ai_Orders._Record(sender, o, false, reason)
+        noteAttack(counts, o, false)
       end
     end
     if not progress then
@@ -1052,11 +1088,17 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
         else
           Civ6Ai_Orders._Record(sender, o, false, "plot_occupied_exhausted")
         end
+        noteAttack(counts, o, false)
       end
       break
     end
     pending = nextPending
   end
+  local executed = counts.ok.unit + counts.ok.city
+  local failed = counts.fail.unit + counts.fail.city
+  print("CIV6AI|attacks|player=" .. tostring(owner) .. "|turn=" .. tostring(Game.GetCurrentGameTurn())
+    .. "|executed=" .. tostring(executed) .. "|failed=" .. tostring(failed)
+    .. "|unit=" .. tostring(counts.ok.unit) .. "|city=" .. tostring(counts.ok.city))
   Civ6Ai_Orders._ContinueGoals(owner, ordered, okUnits)
   Civ6Ai_Orders._FinishIdleUnits(owner, ordered, okUnits)
 end

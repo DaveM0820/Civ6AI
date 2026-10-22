@@ -138,7 +138,7 @@ Command rules:
 - Never MoveTo a mountain or a tile one of your own units already holds. A rejected move says impassable when the tile is a mountain or natural wonder, and no_path when no route exists. Do not repeat that destination.
 - Coordinates: game-plot y increases north (up on the map image; north at top) and x increases east; see the GAME section for X-wrap.
 - Civ6 stacking: typically one military formation-class unit per tile, plus one civilian or support unit; two military units of the same formation class cannot share a tile. Use corps/armies and support units (e.g. battering ram, siege tower) intentionally.
-- A unit with leftover movement can often still attack this turn after moving — do not treat "already moved" as "cannot attack" unless the unit has 0 moves left or the attack is otherwise illegal.
+- When an attack is offered, prefer it over a move: AttackTo on a unit row (melee, ranged, or bombard) and rangeStrike on a city row (a city attack or city strike). Move instead only when you judge that attack the wrong fight. A unit with leftover movement can often still attack this turn after moving — do not treat "already moved" as "cannot attack" unless the unit has 0 moves left or the attack is otherwise illegal.
 - Attacks: AttackTo(x,y) options appear on the unit's own row only when a visible enemy (a civ you are at war with, or barbarians) is in reach — adjacent for melee, within range for ranged units.
 - A city with currentProduction set: leave cityName.production out unless you really mean to switch.
 - Hybrid control: Units left without orders stay where they are; cities keep auto production unless you override.
