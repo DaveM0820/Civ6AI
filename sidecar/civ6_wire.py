@@ -649,6 +649,45 @@ def _civ6_city_tokens(snapshot: dict[str, Any]) -> dict[str, dict[str, list[str]
     return out
 
 
+def _plain_strike_coord(token: str) -> str | None:
+    match = re.match(r"\((\d+)\s*,\s*(\d+)\)", str(token).strip())
+    if match is None:
+        return None
+    return f"({match.group(1)},{match.group(2)})"
+
+
+def city_strike_prompt_lines(snapshot: dict[str, Any]) -> list[str]:
+    """Plain city-strike coordinates, only when a city can strike this turn.
+
+    The rangeStrike token keeps its combat forecast for binding. This block
+    repeats the coordinates alone, next to the command rules, so a long forecast
+    is not the only place the target appears.
+    """
+    tokens = _civ6_city_tokens(snapshot)
+    rows: list[str] = []
+    for city in snapshot.get("your_cities") or []:
+        if not isinstance(city, dict):
+            continue
+        raw = (tokens.get(str(city.get("city_id") or "")) or {}).get("rangeStrike") or []
+        coords: list[str] = []
+        for token in raw:
+            pair = _plain_strike_coord(str(token))
+            if pair and pair not in coords:
+                coords.append(pair)
+        if not coords:
+            continue
+        name = pipeline._city_prompt_name(city)
+        rows.append(f"  {name}.rangeStrike = {' | '.join(coords)}")
+    if not rows:
+        return []
+    return [
+        "CITY STRIKES — these are city attacks. Prefer one over a move.",
+        "Order CityName.rangeStrike = (x,y) with one coordinate from that city's line.",
+        *rows,
+        "",
+    ]
+
+
 def _civ6_empire_tokens(snapshot: dict[str, Any]) -> dict[str, list[str]]:
     """wire key (legal.research.tech, ...) -> legal values."""
     out: dict[str, list[str]] = {}
@@ -1782,6 +1821,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "GOOD JSON (entire reply — row numbers on keys; host strips the prefix):",
         "  {" + ", ".join(example_rows) + "}",
         "",
+        *city_strike_prompt_lines(snapshot),
         "Command rules:",
         "- Movement: unitId.command = MoveTo(x,y) with any destination. One MoveTo spends the unit's remaining "
         "moves (unitId.moves of unitId.maxMovement) along the game's route; pick a destination at least that far "
@@ -1795,6 +1835,11 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "section for X-wrap.",
         f"- {coaching.CIV6_UNIT_STACKING_GUIDANCE}",
         f"- {coaching.CIV6_MOVE_THEN_ATTACK_GUIDANCE}",
+        *(
+            ["- CITY STRIKES above are city attacks. Order CityName.rangeStrike = (x,y) "
+             "with one coordinate from that city's line. Prefer a listed strike over a move."]
+            if city_strike_prompt_lines(snapshot) else []
+        ),
         "- Attacks: AttackTo(x,y) options appear on the unit's own row only when a visible enemy (a civ you are at "
         "war with, or barbarians) is in reach — adjacent for melee, within range for ranged units.",
         *(
@@ -1871,6 +1916,9 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
                 continue
             if prop == "production":
                 optional_keys.append((key, f"bare ID from {name}.production.catalog"))
+                continue
+            if prop == "rangeStrike":
+                optional_keys.append((key, "one (x,y) from the CITY STRIKES list"))
                 continue
             optional_keys.append((key, " | ".join(tokens)))
 

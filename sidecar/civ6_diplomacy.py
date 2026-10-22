@@ -290,7 +290,7 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
                     "<n> RESOURCE_X, or a pact that binds both sides: peace, friendship, alliance, "
                     "open_borders, embassy, delegation; "
                     f"answered next turn; Leader = {' | '.join(names)})"))
-        out.append(("cmd", "CMD_propose_PROPOSAL_* | CMD_accept_* | CMD_reject_* from the DIPLOMACY deal-status lines"))
+        out.append(("cmd", "CMD_propose_* or CMD_accept_* copied from a DIPLOMACY deal-status line"))
     diplo = diplomacy(snapshot)
     if int(diplo.get("envoys_to_give") or 0) > 0:
         for row in _lst(diplo.get("city_states")):
@@ -756,6 +756,14 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
     }:
         # Same offer as deal.<Leader> = peace. The other seat accepts it next turn.
         return bind_reply(snapshot, f"deal.{name}", "peace")
+    raw = str(text).strip().upper().replace(" ", "_")
+    if raw in {"REJECT", "ACCEPT_EMBASSY", "EMBASSY", "ACCEPT_DELEGATION", "DELEGATION"} or raw.startswith("ACCEPT_"):
+        return [], [
+            f"{key}={value}: {raw} is not a diplomacy order on legal.diplomacy.{name}. "
+            f"At peace use DECLARE_WAR. At war use PEACE_TREATY (or deal.{name} = peace). "
+            f"An open trade offer is answered with deal.{name}.respond = ACCEPT or REJECT. "
+            f"An embassy is deal.{name} = embassy."
+        ]
     action = _action_id(value)
     if action is None:
         return [], [

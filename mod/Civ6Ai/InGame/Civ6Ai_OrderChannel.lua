@@ -385,10 +385,41 @@ end
 -- Send a whole model decision for one seat as one batch of orders for turn
 -- forTurn. Returns the number of orders sent.
 function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn, snapshotTurn)
+  local function isAttack(command)
+    local kind = command and command.kind or ""
+    return kind == "attack_target" or kind == "city_attack"
+      or kind == "range_attack" or kind == "melee_attack"
+  end
+  local attackOrdered, attackSent, attackDropped, attackWhy = 0, 0, 0, nil
+  local function logAttackChannel()
+    if attackOrdered <= 0 then
+      return
+    end
+    local line = "attacks|player=" .. tostring(playerID) .. "|turn=" .. tostring(forTurn)
+      .. "|ordered=" .. tostring(attackOrdered) .. "|sent=" .. tostring(attackSent)
+      .. "|dropped=" .. tostring(attackDropped)
+    if attackWhy ~= nil and attackWhy ~= "" then
+      line = line .. "|reason=" .. tostring(attackWhy)
+    end
+    if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
+      Civ6Ai_Util.Log(line)
+    else
+      print("CIV6AI|" .. line)
+    end
+  end
   local orders = {}
   for _, command in ipairs(decision.commands or {}) do
     local f, why, many = Civ6Ai_OrderChannel._Fields(playerID, command)
+    if isAttack(command) then
+      attackOrdered = attackOrdered + 1
+    end
     if f == nil then
+      if isAttack(command) then
+        attackDropped = attackDropped + 1
+        if attackWhy == nil then
+          attackWhy = why
+        end
+      end
       Civ6Ai_Apply._RecordResult(playerID, command, false, why, command.arguments or {})
       log("no_route|player=" .. tostring(playerID) .. "|kind=" .. tostring(command.kind) .. "|reason=" .. tostring(why))
     elseif many then
@@ -396,10 +427,11 @@ function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn, snapshotT
         orders[#orders + 1] = { fields = one, command = command }
       end
     else
-      orders[#orders + 1] = { fields = f, command = command }
+      orders[#orders + 1] = { fields = f, command = command, attack = isAttack(command) }
     end
   end
   if #orders == 0 then
+    logAttackChannel()
     return 0
   end
   Civ6Ai_OrderChannel._batch = Civ6Ai_OrderChannel._batch + 1
@@ -416,10 +448,20 @@ function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn, snapshotT
     if seq ~= nil then
       Civ6Ai_OrderChannel._pending[seq] = { playerID = playerID, command = entry.command, turn = forTurn, kind = kind }
       sent = sent + 1
+      if entry.attack then
+        attackSent = attackSent + 1
+      end
     else
+      if entry.attack then
+        attackDropped = attackDropped + 1
+        if attackWhy == nil then
+          attackWhy = "send_failed"
+        end
+      end
       Civ6Ai_Apply._RecordResult(playerID, entry.command, false, "send_failed", entry.command.arguments or {})
     end
   end
+  logAttackChannel()
   Civ6Ai_OrderChannel._EnsureResultPump()
   return sent
 end

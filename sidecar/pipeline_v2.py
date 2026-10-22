@@ -148,11 +148,11 @@ RISK_BY_KIND = {item["kind"]: item.get("risk") for item in _CAPABILITIES if item
 MODEL_DEADLINE_SECONDS = 90
 CHAT_MAX_MESSAGES_DEFAULT = 3
 CHAT_MIN_MESSAGES_DEFAULT = 1
-CHAT_HISTORY_MAX_DEFAULT = 12
+CHAT_HISTORY_MAX_DEFAULT = 6
 # Unconditional intro-chat coaching on turns 1..N (Civ V lobby parity).
 EARLY_TURN_INTRO_CHAT_THROUGH = 3
 PLAYER_OPINION_MAX_CHARS_DEFAULT = 480
-PLAYER_HISTORY_MAX_CHARS_DEFAULT = 2000
+PLAYER_HISTORY_MAX_CHARS_DEFAULT = 1000
 
 
 def _empty_thought_memory(session_key: str) -> dict[str, Any]:
