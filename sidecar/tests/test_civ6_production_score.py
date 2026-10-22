@@ -378,6 +378,100 @@ class ProductionLuaScoreTests(unittest.TestCase):
         self.assertEqual("UNIT_SETTLER", build)
         self.assertEqual(0, self.lua.eval("Civ6Ai_Production.AutoqueueEmptyCities(1)"))
 
+    def test_nil_request_waits_for_the_next_pass_before_not_stuck(self):
+        first, second, missed, later, counts, log = self.lua.execute(
+            """
+            local logs = {}
+            local requests = 0
+            Civ6Ai_Util = { Log = function(line) logs[#logs + 1] = line end }
+            Civ6Ai_Config = { IsAutotest = function() return true end }
+            local hash = 0
+            local city = {
+              GetID = function() return 7 end,
+              GetX = function() return 2 end,
+              GetY = function() return 2 end,
+              GetPopulation = function() return 2 end,
+              GetBuildQueue = function()
+                return {
+                  GetSize = function() return hash == 0 and 0 or 1 end,
+                  CanProduce = function() return true end,
+                  GetCurrentProductionTypeHash = function() return hash end,
+                }
+              end,
+            }
+            Players = {
+              [0] = {
+                IsAlive = function() return true end,
+                IsMajor = function() return true end,
+                GetDiplomacy = function() return { IsAtWarWith = function() return false end } end,
+                GetCities = function()
+                  return { Members = function()
+                    local i = 0
+                    return function()
+                      i = i + 1
+                      if i == 1 then return i, city end
+                    end
+                  end }
+                end,
+                GetUnits = function() return { Members = function() return function() end end } end,
+              },
+            }
+            PlayerConfigurations = {}
+            Game = {
+              GetLocalPlayer = function() return 0 end,
+              GetCurrentGameTurn = function() return 10 end,
+              GetProperty = function() return nil end,
+            }
+            GameInfo = {
+              Units = function()
+                local rows = { { UnitType = "UNIT_SETTLER", Hash = 11, FoundCity = true } }
+                local i = 0
+                return function() i = i + 1; return rows[i] end
+              end,
+              Buildings = function() return function() end end,
+              Districts = function() return function() end end,
+              Projects = function() return function() end end,
+            }
+            CityManager = {
+              CanStartOperation = function() return true end,
+              RequestOperation = function()
+                requests = requests + 1
+                return nil
+              end,
+            }
+            CityOperationTypes = { BUILD = 1, PARAM_UNIT_TYPE = "unit", PARAM_INSERT_MODE = "mode", VALUE_EXCLUSIVE = 1 }
+            local function joined()
+              return table.concat(logs, "\\n")
+            end
+            Civ6Ai_Production.BeginQueuePass()
+            local same1 = Civ6Ai_Production.AutoqueueEmptyCities(0)
+            local same2 = Civ6Ai_Production.AutoqueueEmptyCities(0)
+            Civ6Ai_Production.EndQueuePass()
+            local afterSame = requests
+            local afterSameLog = joined()
+            local missed = Civ6Ai_Production.AutoqueueEmptyCities(0)
+            local afterMiss = requests
+            local afterMissLog = joined()
+            hash = 11
+            local later = Civ6Ai_Production.AutoqueueEmptyCities(0)
+            return same1, same2, missed, later,
+              afterSame .. ":" .. afterMiss .. ":" .. tostring(requests),
+              afterSameLog .. "||" .. afterMissLog .. "||" .. joined()
+            """
+        )
+        self.assertEqual(0, first)
+        self.assertEqual(0, second)
+        self.assertEqual(0, missed)
+        self.assertEqual(1, later)
+        same_requests, miss_requests, total_requests = counts.split(":")
+        self.assertEqual(("1", "2", "2"), (same_requests, miss_requests, total_requests))
+        same_log, miss_log, full_log = log.split("||")
+        self.assertNotIn("not_stuck", same_log)
+        self.assertNotIn("production|autoqueue|player=", same_log)
+        self.assertIn("production|autoqueue|not_stuck|city=7|wanted=UNIT_SETTLER|current=nil|result=nil", miss_log)
+        self.assertNotIn("production|autoqueue|player=", miss_log)
+        self.assertIn("production|autoqueue|player=0|city=7|build=UNIT_SETTLER|turn=10", full_log)
+
     @staticmethod
     def _lua(value) -> str:
         if isinstance(value, bool):

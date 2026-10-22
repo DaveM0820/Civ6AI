@@ -926,26 +926,63 @@ function Civ6Ai_Production._QueueLocalBuild(city, buildId)
     end
   end
   local ok, result = pcall(CityManager.RequestOperation, city, CityOperationTypes.BUILD, params)
-  -- A nil result is not success. The queue must actually show this build.
   if not ok or result == false then
     return false
   end
   local now = Civ6Ai_Production._GetCityProduction(city)
-  if now ~= buildId then
-    if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
-      Civ6Ai_Util.Log("production|autoqueue|not_stuck|city=" .. tostring(city:GetID())
-        .. "|wanted=" .. tostring(buildId) .. "|current=" .. tostring(now)
-        .. "|result=" .. tostring(result))
-    end
-    return false
+  if now == buildId then
+    return true
   end
-  return true
+  -- Nil (or any non-false) means the request was accepted. The queue updates
+  -- on a later tick, so this frame must not log not_stuck or request again.
+  return false, "pending", result
 end
 
 Civ6Ai_Production._autoTries = Civ6Ai_Production._autoTries or {}
 Civ6Ai_Production._lastQueued = Civ6Ai_Production._lastQueued or {}
+Civ6Ai_Production._pendingQueue = Civ6Ai_Production._pendingQueue or {}
+Civ6Ai_Production._queuePass = Civ6Ai_Production._queuePass or 0
+Civ6Ai_Production._queuePassDepth = Civ6Ai_Production._queuePassDepth or 0
+
+function Civ6Ai_Production.BeginQueuePass()
+  -- One pass per watch tick. A pulse inside that watch shares it, so the
+  -- same-frame second call does not re-request before the queue can update.
+  if (Civ6Ai_Production._queuePassDepth or 0) == 0 then
+    Civ6Ai_Production._queuePass = (Civ6Ai_Production._queuePass or 0) + 1
+  end
+  Civ6Ai_Production._queuePassDepth = (Civ6Ai_Production._queuePassDepth or 0) + 1
+end
+
+function Civ6Ai_Production.EndQueuePass()
+  local depth = (Civ6Ai_Production._queuePassDepth or 1) - 1
+  if depth < 0 then
+    depth = 0
+  end
+  Civ6Ai_Production._queuePassDepth = depth
+end
+
+local function _logProduction(line)
+  if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
+    Civ6Ai_Util.Log(line)
+  end
+end
 
 function Civ6Ai_Production.AutoqueueEmptyCities(playerID)
+  local ownPass = (Civ6Ai_Production._queuePassDepth or 0) == 0
+  if ownPass then
+    Civ6Ai_Production.BeginQueuePass()
+  end
+  local ok, queued = pcall(Civ6Ai_Production._AutoqueuePass, playerID)
+  if ownPass then
+    Civ6Ai_Production.EndQueuePass()
+  end
+  if not ok then
+    error(queued)
+  end
+  return queued or 0
+end
+
+function Civ6Ai_Production._AutoqueuePass(playerID)
   if Civ6Ai_Config == nil or Civ6Ai_Config.IsAutotest == nil or not Civ6Ai_Config.IsAutotest() then
     return 0
   end
@@ -972,11 +1009,35 @@ function Civ6Ai_Production.AutoqueueEmptyCities(playerID)
   local era = currentEra()
   local unitCounts = {}
   local queued = 0
+  local pass = Civ6Ai_Production._queuePass or 0
+  local function confirm(cityId, buildId, key)
+    Civ6Ai_Production._autoTries[key] = 3
+    Civ6Ai_Production._lastQueued[cityId] = buildId
+    Civ6Ai_Production._pendingQueue[key] = nil
+    if type(buildId) == "string" and string.sub(buildId, 1, 5) == "UNIT_" then
+      unitCounts[buildId] = (unitCounts[buildId] or 0) + 1
+    end
+    _logProduction("production|autoqueue|player=" .. tostring(playerID)
+      .. "|city=" .. tostring(cityId) .. "|build=" .. buildId
+      .. "|turn=" .. tostring(turn))
+  end
   for _, city in ipairs(list) do
+    local cityId = call(city, "GetID")
+    local key = tostring(playerID) .. ":" .. tostring(cityId) .. ":" .. tostring(turn)
     local current = Civ6Ai_Production._GetCityProduction(city)
-    if current == nil then
-      local cityId = call(city, "GetID")
-      local key = tostring(playerID) .. ":" .. tostring(cityId) .. ":" .. tostring(turn)
+    local pending = Civ6Ai_Production._pendingQueue[key]
+    if pending ~= nil and pending.pass ~= pass then
+      if current == pending.build then
+        confirm(cityId, pending.build, key)
+        queued = queued + 1
+      else
+        _logProduction("production|autoqueue|not_stuck|city=" .. tostring(city:GetID())
+          .. "|wanted=" .. tostring(pending.build) .. "|current=" .. tostring(current)
+          .. "|result=" .. tostring(pending.result))
+        Civ6Ai_Production._pendingQueue[key] = nil
+      end
+    end
+    if Civ6Ai_Production._GetCityProduction(city) == nil and Civ6Ai_Production._pendingQueue[key] == nil then
       local tries = Civ6Ai_Production._autoTries[key] or 0
       -- A few attempts later in the same turn. A stuck request must not look done.
       if tries < 3 then
@@ -1002,17 +1063,17 @@ function Civ6Ai_Production.AutoqueueEmptyCities(playerID)
           unit_counts = unitCounts,
         })
         local buildId = Civ6Ai_Production.PickBuild(Civ6Ai_Production._Candidates(city), situation)
-        if buildId ~= nil and Civ6Ai_Production._QueueLocalBuild(city, buildId) then
-          queued = queued + 1
-          Civ6Ai_Production._autoTries[key] = 3
-          Civ6Ai_Production._lastQueued[cityId] = buildId
-          if string.sub(buildId, 1, 5) == "UNIT_" then
-            unitCounts[buildId] = (unitCounts[buildId] or 0) + 1
-          end
-          if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
-            Civ6Ai_Util.Log("production|autoqueue|player=" .. tostring(playerID)
-              .. "|city=" .. tostring(cityId) .. "|build=" .. buildId
-              .. "|turn=" .. tostring(turn))
+        if buildId ~= nil then
+          local stuck, status, result = Civ6Ai_Production._QueueLocalBuild(city, buildId)
+          if stuck then
+            confirm(cityId, buildId, key)
+            queued = queued + 1
+          elseif status == "pending" then
+            local record = { build = buildId, pass = pass }
+            if result ~= nil then
+              record.result = result
+            end
+            Civ6Ai_Production._pendingQueue[key] = record
           end
         end
       end

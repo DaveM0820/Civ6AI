@@ -74,24 +74,46 @@ function Civ6Ai_InGame._WatchTurnStarts()
   if marks == nil then
     return
   end
-  for _, playerID in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
-    if marks[playerID] == turn then
-      if Civ6Ai_Config.ShouldRunBridge == nil or Civ6Ai_Config.ShouldRunBridge(playerID) then
-        Civ6Ai_InGame.PulseAfterTurnStart(playerID, turn)
+  -- Pulse and the direct autoqueue below share one pass. The queue is checked
+  -- on the next watch, after RequestOperation has had a tick to stick.
+  if Civ6Ai_Production ~= nil and Civ6Ai_Production.BeginQueuePass ~= nil then
+    Civ6Ai_Production.BeginQueuePass()
+  end
+  local okWatch, watchErr = pcall(function()
+    for _, playerID in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
+      if marks[playerID] == turn then
+        if Civ6Ai_Config.ShouldRunBridge == nil or Civ6Ai_Config.ShouldRunBridge(playerID) then
+          Civ6Ai_InGame.PulseAfterTurnStart(playerID, turn)
+        end
+      end
+      -- Autotest empty queues still fill when the pulse is waiting on the turn-start
+      -- mark. Autoqueue itself refuses every seat except the local autotest player.
+      if Civ6Ai_Production ~= nil and Civ6Ai_Production.AutoqueueEmptyCities ~= nil
+          and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID then
+        pcall(Civ6Ai_Production.AutoqueueEmptyCities, playerID)
       end
     end
-    -- Autotest empty queues still fill when the pulse is waiting on the turn-start
-    -- mark. Autoqueue itself refuses every seat except the local autotest player.
-    if Civ6Ai_Production ~= nil and Civ6Ai_Production.AutoqueueEmptyCities ~= nil
-        and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID then
-      pcall(Civ6Ai_Production.AutoqueueEmptyCities, playerID)
-    end
+  end)
+  if Civ6Ai_Production ~= nil and Civ6Ai_Production.EndQueuePass ~= nil then
+    Civ6Ai_Production.EndQueuePass()
+  end
+  if not okWatch then
+    error(watchErr)
   end
 end
 
 function Civ6Ai_InGame._PulseTurn(playerID)
+  local ownPass = Civ6Ai_Production ~= nil
+      and Civ6Ai_Production.BeginQueuePass ~= nil
+      and (Civ6Ai_Production._queuePassDepth or 0) == 0
+  if ownPass then
+    Civ6Ai_Production.BeginQueuePass()
+  end
   if Civ6Ai_Production ~= nil and Civ6Ai_Production.AutoqueueEmptyCities ~= nil then
     pcall(Civ6Ai_Production.AutoqueueEmptyCities, playerID)
+  end
+  if ownPass and Civ6Ai_Production.EndQueuePass ~= nil then
+    Civ6Ai_Production.EndQueuePass()
   end
   Civ6Ai_Bridge.RunTurnPulse(playerID)
 end
