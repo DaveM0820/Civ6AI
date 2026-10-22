@@ -822,10 +822,31 @@ def dropped_lines(context: dict[str, Any]) -> list[str]:
     return out[:12]
 
 
-def strategy_orders_note(strategy: str, commands: list[dict[str, Any]]) -> str | None:
-    """One context line when the stated strategy and the issued orders diverge. Does not change orders."""
+def strategy_orders_note(
+    strategy: str,
+    commands: list[dict[str, Any]],
+    plan: dict[str, Any] | None = None,
+) -> str | None:
+    """One context line when the stated strategy and the issued orders diverge. Does not change orders.
+
+    A stored plan with active objectives is checked against those objectives.
+    With no plan, the strategy text is checked for peace / attack / defend words.
+    """
+    if not isinstance(commands, list):
+        return None
+    from sidecar.civ6_seat_memory import OBJECTIVE_ORDERS, active_objectives
+
+    active = active_objectives({"plan": plan} if isinstance(plan, dict) else None)
+    if active:
+        kinds = {str(c.get("kind") or "") for c in commands if isinstance(c, dict)}
+        notes: list[str] = []
+        for obj in active:
+            if not (OBJECTIVE_ORDERS[str(obj.get("kind"))] & kinds):
+                label = str(obj.get("text") or obj.get("kind") or "objective")
+                notes.append(f"objective {obj.get('kind')} ({label}) has no matching order")
+        return "; ".join(notes) or None
     text = (strategy or "").lower()
-    if not text.strip() or not isinstance(commands, list):
+    if not text.strip():
         return None
 
     def mentioned(*words: str) -> bool:
@@ -855,7 +876,8 @@ def attach_strategy_orders_note(thought_memory: dict[str, Any], turn: int, comma
     entry = next((item for item in thoughts if isinstance(item, dict) and int(item.get("turn", -1)) == turn), None)
     if not isinstance(entry, dict):
         return
-    note = strategy_orders_note(str(entry.get("strategy") or ""), commands)
+    plan = thought_memory.get("plan") if isinstance(thought_memory.get("plan"), dict) else None
+    note = strategy_orders_note(str(entry.get("strategy") or ""), commands, plan)
     if note:
         entry["orders_note"] = note
     else:
@@ -1033,10 +1055,15 @@ def filter_repeat_public_chat(
     recent_map = recent_self_chats_by_target(snapshot)
     kept: list[dict[str, Any]] = []
     dropped: list[str] = []
+    batch: list[str] = []
     for message in chat_messages:
         if not isinstance(message, dict):
             continue
         text = str(message.get("text") or "")
+        needle = text.strip()
+        if needle and any(needle.lower() == prior.lower() or is_near_duplicate_chat(needle, [prior]) for prior in batch):
+            dropped.append("dropped: public chat repeated a line in this reply and was not sent")
+            continue
         key = chat_target_key(message)
         prior_rows = recent_map.get(key, []) + recent_map.get("all", [])
         prior_texts = list(dict.fromkeys(row[1] for row in prior_rows))
@@ -1060,6 +1087,8 @@ def filter_repeat_public_chat(
             dropped.append("dropped: chat repeated another player's recent line and was not sent")
             continue
         kept.append(message)
+        if needle:
+            batch.append(needle)
         if text.strip():
             try:
                 turn = int((snapshot.get("decision") or {}).get("turn") or 0)
@@ -1067,6 +1096,56 @@ def filter_repeat_public_chat(
                 turn = 0
             recent_map.setdefault(key, []).append((turn, text))
     return kept, dropped
+
+
+def _on_hand(snapshot: dict[str, Any]) -> tuple[int | None, int | None]:
+    gold = None
+    faith = None
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    economy = civ6.get("economy") if isinstance(civ6, dict) else {}
+    gold_row = economy.get("gold") if isinstance(economy, dict) else None
+    if isinstance(gold_row, dict) and isinstance(gold_row.get("treasury"), int) and not isinstance(gold_row.get("treasury"), bool):
+        gold = gold_row["treasury"]
+    empire = snapshot.get("your_empire") if isinstance(snapshot.get("your_empire"), dict) else {}
+    if gold is None and isinstance(empire.get("gold"), int) and not isinstance(empire.get("gold"), bool):
+        gold = empire["gold"]
+    religion = empire.get("religion") if isinstance(empire.get("religion"), dict) else {}
+    if isinstance(religion.get("faith"), int) and not isinstance(religion.get("faith"), bool):
+        faith = religion["faith"]
+    governance = civ6.get("governance") if isinstance(civ6, dict) else {}
+    gov_rel = governance.get("religion") if isinstance(governance, dict) else {}
+    if faith is None and isinstance(gov_rel, dict) and isinstance(gov_rel.get("faith"), int) and not isinstance(gov_rel.get("faith"), bool):
+        faith = gov_rel["faith"]
+    trade = (civ6.get("diplomacy") or {}).get("your_trade") if isinstance(civ6, dict) else None
+    if gold is None and isinstance(trade, dict) and isinstance(trade.get("gold"), int) and not isinstance(trade.get("gold"), bool):
+        gold = trade["gold"]
+    return gold, faith
+
+
+def drop_unaffordable_purchases(
+    snapshot: dict[str, Any], commands: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Drop a purchase whose listed cost is above the gold or faith on hand."""
+    gold, faith = _on_hand(snapshot)
+    kept: list[dict[str, Any]] = []
+    notes: list[str] = []
+    for command in commands:
+        if not isinstance(command, dict) or command.get("kind") != "purchase_item":
+            kept.append(command)
+            continue
+        args = command.get("arguments") if isinstance(command.get("arguments"), dict) else {}
+        cost = args.get("cost")
+        if isinstance(cost, bool) or not isinstance(cost, int):
+            kept.append(command)
+            continue
+        yield_name = str(args.get("yield") or "gold")
+        balance = faith if yield_name == "faith" else gold
+        if isinstance(balance, int) and cost > balance:
+            item = args.get("item_id") or "item"
+            notes.append(f"dropped: purchase {item} costs {cost} {yield_name}, have {balance}")
+            continue
+        kept.append(command)
+    return kept, notes
 
 
 def _reason_is_non_transient(reason: str) -> bool:

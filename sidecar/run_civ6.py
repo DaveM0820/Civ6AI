@@ -197,15 +197,25 @@ def _build_approved_record(
     private_copy["legal_commands"] = {item["command_id"]: item for item in snapshot["legal_commands"]}
     commands = pipeline.bind_approved_commands(private_copy, validated)
     commands, repeat_notes = civ6_apply_results.filter_repeat_failures(snapshot, commands)
+    commands, buy_notes = civ6_apply_results.drop_unaffordable_purchases(snapshot, commands)
     chats = validated.get("chat_messages") if isinstance(validated.get("chat_messages"), list) else []
     chats, chat_notes = civ6_apply_results.filter_repeat_public_chat(snapshot, chats)
+    from sidecar import civ6_seat_memory
+
+    new_promises = civ6_seat_memory.extract_promises(chats)
+    prior_promises: list[str] = []
+    seat = snapshot.get("_seat_memory")
+    if isinstance(seat, dict):
+        prior_promises = [str(row.get("text") or "") for row in seat.get("promises") or [] if isinstance(row, dict)]
+    contra_notes = civ6_seat_memory.contradiction_notes(prior_promises + new_promises, commands)
+    snapshot["_new_promises"] = new_promises
     validated = copy.deepcopy(validated)
     validated["chat_messages"] = chats
     from sidecar import civ6_command_wire
 
     commands = [civ6_command_wire.pack_apply_command(snapshot, item) for item in commands]
     unresolved = civ6_command_wire.take_unresolved()
-    dropped = list(repeat_notes) + list(chat_notes)
+    dropped = list(repeat_notes) + list(chat_notes) + list(buy_notes) + list(contra_notes)
     for token in unresolved:
         if str(token).endswith("=Automate(explore)"):
             continue  # already automated: nothing to do
@@ -286,6 +296,18 @@ def _persist_thought_memory(
             max_notes=pipeline.CIV6_REMEMBER_MAX_NOTES,
             max_new=1,
             near_dupe=0.7,
+        )
+    from sidecar import civ6_seat_memory
+
+    seat_plan = normalized_response.get("seat_plan")
+    if isinstance(seat_plan, dict):
+        thought_memory = civ6_seat_memory.apply_plan(
+            thought_memory, int(snapshot["decision"]["turn"]), seat_plan,
+        )
+    new_promises = snapshot.get("_new_promises")
+    if isinstance(new_promises, list) and new_promises:
+        thought_memory = civ6_seat_memory.record_promises(
+            thought_memory, int(snapshot["decision"]["turn"]), [str(item) for item in new_promises],
         )
     if snapshot.get("_policy_review_requested"):
         thought_memory["policy_review_turn"] = int(snapshot["decision"]["turn"])
@@ -616,6 +638,13 @@ def main() -> None:
     metrics_dir = args.session_dir.parent if args.session_dir is not None else args.journal.parent
     thought_path = _thought_memory_path(civ6ai_root, game_uuid, player_id)
     thought_memory = pipeline.load_thought_memory(thought_path, session_key, snapshot)
+    try:
+        from sidecar import civ6_seat_memory
+
+        thought_memory = civ6_seat_memory.observe(snapshot, thought_memory)
+        snapshot["_seat_memory"] = civ6_seat_memory.compact(thought_memory)
+    except Exception as error:
+        print(f"seat memory skipped: {error}", file=sys.stderr)
     pipeline.inject_thought_history(snapshot, thought_memory)
     snapshot["_policy_review"] = isinstance(thought_memory, dict) and thought_memory.get("policy_review_turn") == int(snapshot["decision"]["turn"]) - 1
     _pol = ((snapshot.get("civ6") or {}).get("governance") or {}).get("policies") or {}
@@ -831,6 +860,9 @@ def main() -> None:
         thought_memory["dropped"] = dropped
         try:
             pipeline.save_thought_memory(thought_path, thought_memory)
+            from sidecar import civ6_seat_memory
+
+            civ6_seat_memory.write_folder(thought_path, thought_memory, game_uuid, player_id)
         except OSError:
             pass
     metrics = {

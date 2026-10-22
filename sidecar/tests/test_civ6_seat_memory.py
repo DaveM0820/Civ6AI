@@ -1,0 +1,118 @@
+"""Seat memory, objective tracking, purchase checks, and same-reply chat dedupe."""
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from sidecar import civ6_apply_results as results
+from sidecar import civ6_command_wire as command_wire
+from sidecar import civ6_seat_memory as memory
+from sidecar import pipeline_v2 as pipeline
+
+
+def _snap(turn=40):
+    return {
+        "decision": {"player_id": "PLAYER_0", "turn": turn},
+        "known_players": [{"player_id": "PLAYER_1", "leader_name": "Cleopatra"}],
+        "your_cities": [{
+            "city_id": "CITY_1", "name": "Capital", "plot_id": "PLOT_10_10",
+            "worked_plot_ids": ["PLOT_10_10", "PLOT_11_10"],
+        }],
+        "known_map": {"plots": [
+            {"plot_id": "PLOT_11_10", "improvement_id": None, "water": False, "peak": False},
+        ]},
+        "your_empire": {"gold": 10, "religion": {"faith": 5, "state_religion_id": "RELIGION_BUDDHISM"}},
+        "civ6": {"diplomacy": {"majors": [{
+            "player_id": "PLAYER_1", "at_war": True, "war_since_turn": 12,
+        }], "city_states": []}, "economy": {"cities": [{
+            "city_id": "CITY_1", "name": "Capital", "turns_to_starve": 3,
+        }]}},
+    }
+
+
+class SeatMemoryTests(unittest.TestCase):
+    def test_observe_fills_history_and_keeps_alerts(self):
+        snap = _snap()
+        stored = memory.observe(snap, {"session_key": "g:player:0", "thoughts": []})
+        self.assertIn("War with Cleopatra", stored["situation_log"][0]["text"])
+        self.assertIn("PLAYER_1", stored["player_opinions"])
+        self.assertIn("PLAYER_1", stored["player_histories"])
+        self.assertTrue(stored["player_histories"]["PLAYER_1"]["text"])
+        alerts = {row["key"]: row["text"] for row in stored["alerts"]}
+        self.assertIn("starve:CITY_1", alerts)
+        self.assertIn("unimproved:PLOT_11_10", alerts)
+        again = memory.observe(snap, stored)
+        self.assertEqual(1, sum(1 for row in again["situation_log"] if "War with" in row["text"]))
+        fixed = _snap()
+        fixed["civ6"]["economy"]["cities"] = []
+        fixed["your_cities"][0]["worked_plot_ids"] = ["PLOT_10_10"]
+        cleared = memory.observe(fixed, again)
+        self.assertEqual([], cleared["alerts"])
+
+    def test_plan_round_trip_and_objective_note(self):
+        response = {"4.plan.goal": "domination", "5.plan.objective": "attack their capital by T80"}
+        update = command_wire.extract_plan(response)
+        self.assertNotIn("4.plan.goal", response)
+        stored = memory.apply_plan({"thoughts": []}, 40, update)
+        self.assertEqual("domination", stored["plan"]["goal"])
+        self.assertEqual(80, stored["plan"]["objectives"][0]["target_turn"])
+        note = results.strategy_orders_note("hold", [{"kind": "move_unit"}], stored["plan"])
+        self.assertIn("objective attack", note)
+        self.assertIsNone(results.strategy_orders_note("hold", [{"kind": "attack_target"}], stored["plan"]))
+        self.assertIn("attacking", results.strategy_orders_note("Attack Utrecht and take it.", [{"kind": "move_unit"}]))
+
+    def test_promises_and_contradictions(self):
+        chats = [{"text": "I will not attack you."}, {"text": "I will not attack you."}]
+        kept, dropped = results.filter_repeat_public_chat({"decision": {"player_id": "PLAYER_0", "turn": 3}, "history": {}}, chats)
+        self.assertEqual(1, len(kept))
+        self.assertTrue(dropped)
+        promises = memory.extract_promises(kept)
+        notes = memory.contradiction_notes(promises, [{"kind": "attack_target", "arguments": {}}])
+        self.assertIn("promised peace", notes[0])
+        notes = memory.contradiction_notes(
+            ["I will attack at dawn."],
+            [{"kind": "execute_deal", "arguments": {"mode": 1}}],
+        )
+        self.assertIn("promised an attack", notes[0])
+
+    def test_purchase_over_gold_is_dropped(self):
+        snap = _snap()
+        commands = [
+            {"kind": "purchase_item", "arguments": {"item_id": "UNIT_WARRIOR", "cost": 40}},
+            {"kind": "purchase_item", "arguments": {"item_id": "UNIT_MISSIONARY", "cost": 4, "yield": "faith"}},
+            {"kind": "move_unit", "arguments": {}},
+        ]
+        kept, notes = results.drop_unaffordable_purchases(snap, commands)
+        self.assertEqual(["purchase_item", "move_unit"], [c["kind"] for c in kept])
+        self.assertIn("40 gold", notes[0])
+
+    def test_loader_keeps_plan_and_folder_writes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "game_PLAYER_0.json"
+            payload = {
+                "session_key": "game:player:0",
+                "thoughts": [{"turn": 10, "situation": "a", "strategy": "b"}],
+                "player_opinions": {},
+                "player_histories": {},
+                "plan": {"goal": "science", "objectives": [], "updated_turn": 10},
+                "situation_log": [{"turn": 10, "text": "War with Cleopatra since T4."}],
+                "alerts": [{"key": "starve:CITY_1", "text": "Capital is starving", "since_turn": 8}],
+            }
+            pipeline.save_thought_memory(path, payload)
+            loaded = pipeline.load_thought_memory(path, "game:player:0")
+            self.assertEqual("science", loaded["plan"]["goal"])
+            self.assertEqual("War with Cleopatra since T4.", loaded["situation_log"][0]["text"])
+            memory.write_folder(path, loaded, "game", "PLAYER_0")
+            folder = Path(tmp) / "game" / "PLAYER_0"
+            self.assertIn("science", (folder / "plan.json").read_text(encoding="utf-8"))
+            self.assertIn("War with", (folder / "situation.jsonl").read_text(encoding="utf-8"))
+
+    def test_ten_turn_milestone(self):
+        stored = memory.observe(_snap(turn=20), {"thoughts": [], "plan": {"goal": "science", "objectives": []}})
+        self.assertEqual(20, stored["milestones"][-1]["turn"])
+        self.assertIn("science", stored["milestones"][-1]["text"])
+
+
+if __name__ == "__main__":
+    unittest.main()

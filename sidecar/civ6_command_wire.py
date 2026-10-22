@@ -165,6 +165,40 @@ def extract_map_viewport(response: dict[str, Any]) -> Any:
     return None
 
 
+def extract_plan(response: dict[str, Any]) -> dict[str, Any] | None:
+    """Pull plan.goal / plan.objective out of a wire reply and remove those keys."""
+    if not isinstance(response, dict):
+        return None
+    goal = None
+    objectives: list[str] = []
+    done: list[str] = []
+    drop: list[str] = []
+    for key, value in list(response.items()):
+        if not isinstance(key, str):
+            continue
+        base = pipeline.normalize_wire_property_key(strip_row_prefix(key))
+        if base == "plan.goal":
+            text = str(value or "").strip()
+            if text:
+                goal = text[:120]
+            drop.append(key)
+        elif base == "plan.objective.done" or (base.startswith("plan.objective.") and base.endswith(".done")):
+            text = str(value or "").strip()
+            if text:
+                done.append(text[:160])
+            drop.append(key)
+        elif base == "plan.objective" or base.startswith("plan.objective."):
+            text = str(value or "").strip()
+            if text:
+                objectives.append(text[:200])
+            drop.append(key)
+    for key in drop:
+        response.pop(key, None)
+    if goal is None and not objectives and not done:
+        return None
+    return {"goal": goal, "objectives": objectives, "done": done}
+
+
 def extract_remember(response: dict[str, Any]) -> list[str]:
     """Collect `remember` / `N.remember` / `remember.N` notes from a wire reply."""
     notes: list[str] = []
@@ -235,6 +269,9 @@ def unit_command_token(command: dict[str, Any]) -> str | None:
     if kind == "found_city":
         return "FoundCity"
     if kind == "upgrade_unit":
+        target = fixed.get("unit_type_id")
+        if isinstance(target, str) and target.strip():
+            return f"Upgrade({target.strip()})"
         return "Upgrade"
     if kind == "promote_unit":
         promo = fixed.get("promotion_id")

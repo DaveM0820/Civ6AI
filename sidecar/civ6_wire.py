@@ -195,6 +195,9 @@ def _civ6_unit_property_parts(command: dict[str, Any]) -> tuple[str, str]:
     if kind == "found_city":
         return "foundCity", "apply"
     if kind == "upgrade_unit":
+        target = fixed.get("unit_type_id")
+        if isinstance(target, str) and target.strip():
+            return "upgrade", target.strip()
         return "upgrade", "apply"
     if kind == "promote_unit":
         promo = fixed.get("promotion_id")
@@ -518,6 +521,15 @@ def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None
     state_religion = religion.get("state_religion_id")
     if isinstance(state_religion, str) and state_religion.strip() and "UNKNOWN" not in state_religion.upper():
         lines.append(pipeline._wire_line("empire.religion", state_religion))
+    governance = ((snapshot.get("civ6") or {}).get("governance") or {}) if isinstance(snapshot.get("civ6"), dict) else {}
+    congress = governance.get("world_congress") if isinstance(governance, dict) else None
+    if isinstance(congress, dict) and congress:
+        bits = []
+        for key in ("in_session", "meeting_status", "meeting_turn"):
+            if congress.get(key) is not None:
+                bits.append(f"{key}={congress[key]}")
+        if bits:
+            lines.append(pipeline._wire_line("empire.world_congress", " ".join(bits)))
     cities = [city for city in snapshot.get("your_cities", []) if isinstance(city, dict)]
     if cities:
         lines.append(pipeline._wire_line("empire.cities", len(cities)))
@@ -1273,6 +1285,19 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
                     lines.append(f"***{prefix}.needsOrders = true***")
                 if unit.get("promotion_ready"):
                     lines.append(pipeline._wire_line(f"{prefix}.promotionReady", True))
+                upgrades = unit.get("upgrade_options")
+                if isinstance(upgrades, list) and upgrades:
+                    bits = []
+                    for option in upgrades:
+                        if not isinstance(option, dict) or not option.get("unit_type_id"):
+                            continue
+                        label = str(option["unit_type_id"])
+                        cost = option.get("gold_cost")
+                        if isinstance(cost, int) and not isinstance(cost, bool):
+                            label += f" ({cost} gold)"
+                        bits.append(label)
+                    if bits:
+                        lines.append(pipeline._wire_line(f"{prefix}.upgrade", ", ".join(bits)))
                 movement = unit.get("movement", {})
                 if isinstance(movement, dict):
                     if isinstance(movement.get("current"), int):
@@ -1736,6 +1761,13 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
         identity = personality.get("identity_summary") or personality.get("archetype")
         if isinstance(identity, str) and identity.strip():
             lines.append(pipeline._wire_line("identity", identity.strip()))
+    seat = context.get("_seat_memory")
+    if isinstance(seat, dict):
+        from sidecar import civ6_seat_memory
+
+        for key, value in civ6_seat_memory.prompt_lines(seat):
+            if value.strip():
+                lines.append(pipeline._wire_line(key, value.strip()))
     history = context.get("history", {})
     # Live prompts were 20–29k tokens. Keep the shared journal budget for other
     # games; this section uses a shorter cap and fewer remembered notes.
@@ -1920,6 +1952,12 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "optional command you will issue), state what you will command and why — prose only, no wire keys here.",
         "Event.<Name>.log = required attention notes (see REQUIRED COMMANDS).",
         "remember = text plus duration; store deals, rival impressions, war aims, and multi-turn plans. opinion.* / history.* as needed.",
+        *(
+            ["plan.goal = victory type (science, culture, domination, diplomacy, religion, or score). "
+             "plan.objective = attack|peace|improve|settle|research|defend, the aim, and by T<turn>. "
+             "plan.objective.done = that kind when the objective is finished. Update the plan every turn."]
+            if isinstance(snapshot.get("_seat_memory"), dict) else []
+        ),
         f"Required Event.* logs this turn: {event_count} (numbered under REQUIRED COMMANDS).",
         "",
         "Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):",
