@@ -460,11 +460,27 @@ function Civ6Ai_Orders._MoveOnce(owner, unitId, x, y)
   if unit == nil then
     return false, "stale_unit_id"
   end
-  local dist = Map.GetPlotDistance(unit:GetX(), unit:GetY(), x, y)
+  local fromX, fromY = unit:GetX(), unit:GetY()
+  local dist = Map.GetPlotDistance(fromX, fromY, x, y)
+  local ok, reason
   if dist > 1 then
-    return Civ6Ai_Orders._Route("MoveUnitAlongPathForPlayer", owner, unitId, x, y)
+    ok, reason = Civ6Ai_Orders._Route("MoveUnitAlongPathForPlayer", owner, unitId, x, y)
+  else
+    ok, reason = Civ6Ai_Orders._Route("MoveUnitForPlayer", owner, unitId, x, y)
   end
-  return Civ6Ai_Orders._Route("MoveUnitForPlayer", owner, unitId, x, y)
+  local now = Civ6Ai_Orders._Unit(owner, unitId)
+  if ok and now ~= nil then
+    local ax, ay = now:GetX(), now:GetY()
+    -- A reported success that leaves the unit put is not a move. already_there
+    -- (start equals the target) stays a success.
+    if ax == fromX and ay == fromY and (fromX ~= x or fromY ~= y) then
+      return false, "move_not_applied:" .. tostring(fromX) .. "," .. tostring(fromY) .. ">" .. tostring(ax) .. "," .. tostring(ay)
+    end
+    if reason == nil or reason == "" then
+      reason = "moved:" .. tostring(ax) .. "," .. tostring(ay)
+    end
+  end
+  return ok, reason
 end
 
 function Civ6Ai_Orders._MoveWithRetarget(owner, unit, x, y)
@@ -1468,11 +1484,18 @@ end
 -- After the model's orders: unused ranged, siege, and naval ranged units, plus
 -- city and encampment strikes. Melee is left alone. Runs inside _ApplyOrders,
 -- so every PC plays the same shots. The host chooses the mode on the batch.
+Civ6Ai_Orders._autoDone = Civ6Ai_Orders._autoDone or {}
+
 function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFailed, mode, moveOk, moveFailed)
   if not Civ6Ai_Orders._AutoRangedEnabled(owner, mode) then
     return
   end
   local turn = Game.GetCurrentGameTurn()
+  local doneKey = tostring(owner) .. ":" .. tostring(turn)
+  if Civ6Ai_Orders._autoDone[doneKey] then
+    return
+  end
+  Civ6Ai_Orders._autoDone[doneKey] = true
   local unitOk, cityOk, skipped = 0, 0, 0
   local function note(kind, reason, commandId, order, fixed)
     Civ6Ai_Orders._Record(sender, order, true, reason)
@@ -1518,18 +1541,41 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
   end
   -- Same command as an ordered strike. No forecast, and no damage applied here.
   -- The first refusal stops the rest, matching the ordered batch.
-  local function bestStrike(x, y)
+  -- nil means the gameplay command API is missing (the strike itself reports that).
+  -- false means CanStartCommand refused this plot, so another target can be tried.
+  local function strikeReady(city, x, y)
+    if CityManager == nil or CityManager.CanStartCommand == nil
+        or CityCommandTypes == nil or CityCommandTypes.RANGE_ATTACK == nil
+        or CityCommandTypes.PARAM_X == nil or CityCommandTypes.PARAM_Y == nil then
+      return nil
+    end
+    local params = {}
+    params[CityCommandTypes.PARAM_X] = x
+    params[CityCommandTypes.PARAM_Y] = y
+    local okCan, can = pcall(CityManager.CanStartCommand, city, CityCommandTypes.RANGE_ATTACK, params)
+    if okCan and can == true then
+      return true
+    end
+    return false
+  end
+  local function bestStrike(city, x, y)
     local best = nil
+    local blocked = false
     for _, cand in ipairs(Civ6Ai_Orders._AutoCandidates(owner, x, y, 2)) do
-      local hp = Civ6Ai_Orders._HpLeft(cand.obj)
-      local rank = cand.kind == "unit" and 1 or 2
-      if best == nil or rank < best.rank or (rank == best.rank and hp < best.hp)
-          or (rank == best.rank and hp == best.hp and cand.x < best.cand.x)
-          or (rank == best.rank and hp == best.hp and cand.x == best.cand.x and cand.y < best.cand.y) then
-        best = { cand = cand, hp = hp, rank = rank }
+      local ready = strikeReady(city, cand.x, cand.y)
+      if ready == false then
+        blocked = true
+      else
+        local hp = Civ6Ai_Orders._HpLeft(cand.obj)
+        local rank = cand.kind == "unit" and 1 or 2
+        if best == nil or rank < best.rank or (rank == best.rank and hp < best.hp)
+            or (rank == best.rank and hp == best.hp and cand.x < best.cand.x)
+            or (rank == best.rank and hp == best.hp and cand.x == best.cand.x and cand.y < best.cand.y) then
+          best = { cand = cand, hp = hp, rank = rank }
+        end
       end
     end
-    return best
+    return best, blocked
   end
   local function cityOf(district)
     local found = call(district, "GetCity")
@@ -1548,6 +1594,7 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
     return nil
   end
   local stopped = false
+  local skipWhy = nil
   local function fire(city, fromX, fromY, commandId)
     if stopped or city == nil then
       return
@@ -1557,8 +1604,12 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
     if num(Game:GetProperty(key)) == turn then
       return
     end
-    local best = bestStrike(fromX, fromY)
+    local best, blocked = bestStrike(city, fromX, fromY)
     if best == nil then
+      if blocked then
+        skipped = skipped + 1
+        skipWhy = skipWhy or "city_strike_refused"
+      end
       return
     end
     local tx, ty = best.cand.x, best.cand.y
@@ -1587,6 +1638,7 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
     else
       stopped = true
       skipped = skipped + 1
+      skipWhy = skipWhy or why or "city_strike_refused"
     end
   end
   for _, city in ipairs(sortedMembers(call(p, "GetCities"))) do
@@ -1600,8 +1652,12 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
     end
   end
   if unitOk + cityOk + skipped > 0 then
-    print("CIV6AI|attacks|auto|player=" .. tostring(owner) .. "|turn=" .. tostring(turn)
-      .. "|unit=" .. tostring(unitOk) .. "|city=" .. tostring(cityOk) .. "|skipped=" .. tostring(skipped))
+    local line = "CIV6AI|attacks|auto|player=" .. tostring(owner) .. "|turn=" .. tostring(turn)
+      .. "|unit=" .. tostring(unitOk) .. "|city=" .. tostring(cityOk) .. "|skipped=" .. tostring(skipped)
+    if skipWhy ~= nil and tostring(skipWhy) ~= "" then
+      line = line .. "|why=" .. tostring(skipWhy)
+    end
+    print(line)
   end
 end
 
@@ -2095,6 +2151,34 @@ local function mixString(h, s)
   return h
 end
 
+-- Unread results stay until the UI drain marks them. Only a very long unread
+-- backlog drops the oldest, and that drop is logged.
+Civ6Ai_Orders.RESULT_CAP = 2048
+
+function Civ6Ai_Orders._TrimResults(shared)
+  local results = shared.OrderResults or {}
+  local unread = {}
+  for _, r in ipairs(results) do
+    if not r._taken then
+      unread[#unread + 1] = r
+    end
+  end
+  local drop = #unread - Civ6Ai_Orders.RESULT_CAP
+  if drop < 0 then
+    drop = 0
+  end
+  local kept = {}
+  for i, r in ipairs(unread) do
+    if i <= drop then
+      log("result_evicted|seq=" .. tostring(r.seq) .. "|kind=" .. tostring(r.kind)
+        .. "|player=" .. tostring(r.player) .. "|turn=" .. tostring(r.turn))
+    else
+      kept[#kept + 1] = r
+    end
+  end
+  shared.OrderResults = kept
+end
+
 function Civ6Ai_Orders._Record(sender, o, ok, reason)
   local shared = Civ6Ai_Orders._Shared()
   local turn = Game.GetCurrentGameTurn()
@@ -2107,9 +2191,9 @@ function Civ6Ai_Orders._Record(sender, o, ok, reason)
     apply_turn = turn, decision_turn = o.D ~= nil and o.D >= 0 and o.D or turn,
     ok = ok, reason = tostring(reason or ""),
   })
-  while #shared.OrderResults > 512 do
-    table.remove(shared.OrderResults, 1)
-  end
+  -- Moves are recorded before later attacks. Dropping the oldest unread row
+  -- made those moves time out as no_result_from_gameplay. Taken rows go first.
+  Civ6Ai_Orders._TrimResults(shared)
   log("result|turn=" .. turn .. "|from=" .. tostring(sender) .. "|seq=" .. tostring(o.S) .. "|kind=" .. tostring(o.K)
     .. "|player=" .. tostring(o.P) .. "|unit=" .. tostring(o.U) .. "|ok=" .. tostring(ok)
     .. "|reason=" .. tostring(reason or "") .. "|hash=" .. tostring(shared.OrderHash))
@@ -2903,7 +2987,26 @@ function Gov.MakePeace(owner, other)
   if not ok then
     return false, "the game refused peace" .. (err ~= nil and (": " .. tostring(err)) or "")
   end
-  if call(diplo, "IsAtWarWith", other) == true then
+  -- A one-sided call can leave the other seat at war, and a failed read (nil)
+  -- is not peace. Gold is paid only after this returns true.
+  local theirDiplo = call(Players[other], "GetDiplomacy")
+  if theirDiplo ~= nil then
+    local okGet, fn = pcall(function() return theirDiplo.MakePeaceWith end)
+    if okGet and type(fn) == "function" then
+      pcall(fn, theirDiplo, owner)
+    end
+  end
+  local ours = call(diplo, "IsAtWarWith", other)
+  local theirs = call(theirDiplo, "IsAtWarWith", owner)
+  if ours ~= false or theirs ~= false then
+    -- Their seat is still at war. Put our flag back so the snapshot does not
+    -- say peace while they keep attacking, and do not pay the gold.
+    if theirs == true and ours ~= true then
+      local okDecl, fn = pcall(function() return diplo.DeclareWarOn end)
+      if okDecl and type(fn) == "function" then
+        pcall(fn, diplo, other)
+      end
+    end
     return false, "peace did not take effect"
   end
   return true, "peace_with=" .. tostring(other)
@@ -3279,15 +3382,42 @@ end
 -- The formation is set while that partner is still alive. Killing it first
 -- makes SetMilitaryFormation a no-op and the order reports failure after the
 -- partner is already gone.
+-- Field lookup on the formation enum. A missing name is nil; using it as a
+-- table key throws "table index is nil". Live builds use STANDARD_FORMATION;
+-- the long *_MILITARY_FORMATION names are the other family.
+local function formationConst(F, ...)
+  for i = 1, select("#", ...) do
+    local name = select(i, ...)
+    local ok, value = pcall(function() return F[name] end)
+    if ok and type(value) == "number" then
+      return value
+    end
+  end
+  return nil
+end
+
 function Gov.JoinFormation(owner, unitId, otherId)
   local unit, other = Civ6Ai_Orders._Unit(owner, unitId), Civ6Ai_Orders._Unit(owner, otherId)
   local F = MilitaryFormationTypes
   if unit == nil or other == nil or F == nil then
     return false, "no_formation_route: a unit, its partner, or formation types are missing; nothing was removed"
   end
-  local nextF = { [F.STANDARD_MILITARY_FORMATION] = F.CORPS_MILITARY_FORMATION,
-    [F.CORPS_MILITARY_FORMATION] = F.ARMY_MILITARY_FORMATION }
-  local target = nextF[call(unit, "GetMilitaryFormation")]
+  local standard = formationConst(F, "STANDARD_MILITARY_FORMATION", "STANDARD_FORMATION")
+  local corps = formationConst(F, "CORPS_MILITARY_FORMATION", "CORPS_FORMATION")
+  local army = formationConst(F, "ARMY_MILITARY_FORMATION", "ARMY_FORMATION")
+  if corps == nil or army == nil then
+    return false, "no_formation_route: corps or army formation types are missing; nothing was removed"
+  end
+  local current = call(unit, "GetMilitaryFormation")
+  local target = nil
+  if current == corps then
+    target = army
+  elseif current == army then
+    target = nil
+  elseif current == standard or (standard == nil and current ~= corps and current ~= army) then
+    -- No standard constant: a formation that is neither corps nor army is a single unit.
+    target = corps
+  end
   if target == nil or unit:GetType() ~= other:GetType()
       or Map.GetPlotDistance(unit:GetX(), unit:GetY(), other:GetX(), other:GetY()) > 1 then
     return false, "needs an adjacent unit of the same type that is not already a corps or army"
@@ -4628,6 +4758,7 @@ function Civ6Ai_Orders.Init()
   shared.OrderChecksum = Civ6Ai_Orders.Checksum
   shared.PriorityLevels = Civ6Ai_Orders.PriorityLevels
   shared.Gov = Civ6Ai_Orders.Gov
+  shared.AutoRanged = Civ6Ai_Orders._AutoRanged
   shared.ReadUnitGoal = Civ6Ai_Orders._ReadGoal
   pcall(Civ6Ai_Orders.Gov.Probe)
   log("load|version=" .. Civ6Ai_Orders.VERSION .. "|prio_conditions=" .. tostring(nPrio) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))

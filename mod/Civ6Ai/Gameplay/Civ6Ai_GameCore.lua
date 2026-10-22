@@ -86,12 +86,40 @@ function Civ6Ai_GameCore.AppendFile(path, line)
   end
   Civ6Ai_GameCore._EnsureParentDirs(path)
   local file = Civ6Ai_GameCore._Open(path, "a")
-  if file == nil then
-    return false
+  if file ~= nil then
+    local okw = pcall(function()
+      file:write(line .. "\n")
+      file:close()
+    end)
+    if okw then
+      return true
+    end
+    pcall(function() file:close() end)
   end
-  file:write(line .. "\n")
-  file:close()
-  return true
+  -- Append open failed (missing parent after a no-op mkdir, or a cloud lock).
+  -- Read what is there and replace the file with that text plus the new line.
+  local existing = ""
+  local reader = Civ6Ai_GameCore._Open(path, "r")
+  if reader ~= nil then
+    local okRead, text = pcall(function() return reader:read("*a") end)
+    pcall(function() reader:close() end)
+    if okRead and type(text) == "string" then
+      existing = text
+    end
+  end
+  if existing ~= "" and string.sub(existing, -1) ~= "\n" then
+    existing = existing .. "\n"
+  end
+  local ok, wrote = pcall(function()
+    local out = Civ6Ai_GameCore._Open(path, "w")
+    if out == nil then
+      return false
+    end
+    out:write(existing .. line .. "\n")
+    out:close()
+    return true
+  end)
+  return ok and wrote == true
 end
 
 function Civ6Ai_GameCore.ResolvePlayerUnits(playerID)

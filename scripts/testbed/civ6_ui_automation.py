@@ -2407,23 +2407,72 @@ def lan_load_phase(blob: str) -> str:
     return "other"
 
 
-def load_lan_autosave(win: WindowInfo) -> list[str]:
-    """Main menu -> Multiplayer -> Local Network -> Load Game -> newest autosave -> Ready."""
-    steps: list[str] = []
+_AUTOSAVE_TOGGLE_DX = 40
+
+
+def _focus_civ_window(win: WindowInfo, steps: list[str]) -> WindowInfo:
+    """Bring Civ forward. A popup or another window is why the Multiplayer click misses."""
     raise_civ_via_taskbar()
     _alt_tab_to_civ(win)
+    focus_game(win.hwnd)
+    click_civ_title_bar(win)
     pin_civ_topmost(win.hwnd, True)
+    steps.append("focused")
+    log.info("lan-load focus hwnd=%s", win.hwnd)
+    time.sleep(0.35)
+    return refresh_window(win) or win
+
+
+def _dismiss_popup(win: WindowInfo, steps: list[str]) -> None:
+    """Esc closes a dialog. It is not a second click on the Autosaves toggle."""
+    press_escape(win)
+    steps.append("esc_popup")
+    log.info("lan-load esc popup")
+    time.sleep(0.45)
+
+
+def _click_autosaves_toggle_once(win: WindowInfo, steps: list[str], *, dry_run: bool) -> bool:
+    """One click about 40px left of the Autosaves label. Skip when save rows are already listed."""
+    rows = ocr_window(win)
+    if pick_newest_save_label(rows) is not None:
+        steps.append("autosave_rows_already_visible")
+        log.info("lan-load autosave rows already visible; toggle not clicked")
+        return True
+    match = find_text(
+        rows, "Autosaves", exact=False, prefer_top=True,
+        prefixes=("utosave", "autosave", "auto save"), win=win,
+    )
+    if match is None:
+        log.info("lan-load Autosaves label not found")
+        return False
+    _label, x, y = match
+    client_x = (x - win.x) - _AUTOSAVE_TOGGLE_DX
+    client_y = y - win.y
+    log.info("lan-load autosaves toggle once client=(%s,%s) dry_run=%s", client_x, client_y, dry_run)
+    steps.append(f"toggle_at_{client_x}_{client_y}")
+    if dry_run:
+        steps.append("dry_run_no_click")
+        return True
+    _hit_client(win, client_x, client_y, taps=1)
+    steps.append("clicked_autosaves_toggle_once")
+    time.sleep(1.2)
+    return True
+
+
+def load_lan_autosave(win: WindowInfo, *, dry_run: bool = False) -> list[str]:
+    """Main menu -> Multiplayer -> Local Network -> Load Game -> newest autosave -> Ready."""
+    steps: list[str] = []
+    if dry_run:
+        log.info("lan-load dry-run: clicks are logged and not sent")
+        steps.append("dry_run")
+    win = _focus_civ_window(win, steps)
     try:
-        click_civ_title_bar(win)
-        focus_game(win.hwnd)
-        pin_civ_topmost(win.hwnd, True)
-        time.sleep(0.4)
-        return _load_lan_autosave_clicks(win, steps)
+        return _load_lan_autosave_clicks(win, steps, dry_run=dry_run)
     finally:
         pin_civ_topmost(win.hwnd, False)
 
 
-def _load_lan_autosave_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
+def _load_lan_autosave_clicks(win: WindowInfo, steps: list[str], *, dry_run: bool = False) -> list[str]:
     entry = ocr_window(win)
     blob = " ".join(t.lower() for t, _, _ in entry)
     phase = lan_load_phase(blob)
@@ -2433,16 +2482,40 @@ def _load_lan_autosave_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
         blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
         phase = lan_load_phase(blob)
     if phase == "other":
-        opened = _open_multiplayer_flyout(win)
+        opened = False
+        for attempt in range(3):
+            win = _focus_civ_window(win, steps)
+            if attempt:
+                _dismiss_popup(win, steps)
+            if dry_run:
+                log.info("lan-load dry-run: would open Multiplayer then Local Network (attempt %s)", attempt + 1)
+                steps.append("dry_run_multiplayer")
+                opened = True
+                break
+            opened = _open_multiplayer_flyout(win)
+            if opened:
+                break
+            log.info("lan-load Multiplayer panel missed, attempt %s", attempt + 1)
         if not opened:
             raise RuntimeError("Could not open Multiplayer panel")
-        hit = _click_labels(win, ("Local Network",), timeout=8.0, min_x_fraction=0.48)
-        if hit is None:
-            raise RuntimeError("Could not click Local Network")
-        steps.append(f"clicked_{hit}")
-        time.sleep(1.6)
-        blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
-        phase = lan_load_phase(blob)
+        if dry_run:
+            steps.append("dry_run_local_network")
+            phase = "lan"
+        else:
+            hit = None
+            for attempt in range(3):
+                win = _focus_civ_window(win, steps)
+                hit = _click_labels(win, ("Local Network",), timeout=8.0, min_x_fraction=0.48)
+                if hit is not None:
+                    break
+                _dismiss_popup(win, steps)
+                log.info("lan-load Local Network missed, attempt %s", attempt + 1)
+            if hit is None:
+                raise RuntimeError("Could not click Local Network")
+            steps.append(f"clicked_{hit}")
+            time.sleep(1.6)
+            blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
+            phase = lan_load_phase(blob)
     if phase == "staging":
         steps.append("already_staging")
         return _ready_lan_staging(win, steps)
@@ -2455,29 +2528,30 @@ def _load_lan_autosave_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
         blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
         phase = lan_load_phase(blob)
     if phase != "autosaves":
-        opened_saves = click_text(
-            win, "Autosaves", timeout=6.0, exact=False,
-            prefixes=("utosave", "autosave", "auto save"), prefer_top=True, post_delay=0.5,
-        )
+        opened_saves = False
+        for attempt in range(3):
+            win = _focus_civ_window(win, steps)
+            if attempt:
+                _dismiss_popup(win, steps)
+            opened_saves = _click_autosaves_toggle_once(win, steps, dry_run=dry_run)
+            if opened_saves:
+                break
+            log.info("lan-load Autosaves toggle missed, attempt %s", attempt + 1)
         if not opened_saves:
-            press_escape(win)
-            raise_civ_via_taskbar()
-            focus_game(win.hwnd)
-            click_civ_title_bar(win)
-            pin_civ_topmost(win.hwnd, True)
-            time.sleep(0.4)
-            opened_saves = click_text(
-                win, "Autosaves", timeout=6.0, exact=False,
-                prefixes=("utosave", "autosave", "auto save"), prefer_top=True, post_delay=0.5,
-            )
-            if not opened_saves:
-                raise RuntimeError("Could not open Autosaves")
-            steps.append("clicked_autosaves_retry")
-        else:
-            steps.append("clicked_autosaves")
-        time.sleep(0.8)
+            raise RuntimeError("Could not open Autosaves")
+        if not dry_run:
+            time.sleep(0.8)
+            rows_now = ocr_window(win)
+            if pick_newest_save_label(rows_now) is None and "clicked_autosaves_toggle_once" in steps:
+                # The toggle was clicked once. Do not click it again; refocus and re-read.
+                win = _focus_civ_window(win, steps)
+                _dismiss_popup(win, steps)
+                time.sleep(0.6)
     else:
         steps.append("already_autosaves")
+    if dry_run:
+        log.info("lan-load dry-run steps: %s", steps)
+        return steps
     rows = ocr_window(win)
     newest = pick_newest_save_label(rows)
     if newest is None:

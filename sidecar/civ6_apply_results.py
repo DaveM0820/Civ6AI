@@ -54,6 +54,11 @@ NON_TRANSIENT_FAILURES = (
     "not_at_war",
     "out_of_range",
     "enemy_on_tile",
+    "move_not_applied",
+    "order_error",
+    "mountain",
+    "outside your borders",
+    "outside borders",
 )
 CHAT_NEAR_DUPE_THRESHOLD = 0.6
 CHAT_NEAR_DUPE_LOOKBACK_TURNS = 16
@@ -240,6 +245,12 @@ def describe_reason(reason: Any) -> str:
         detail = text[len("order_error:"):].strip()
         extra = f": {detail}" if detail else ""
         return "the game raised a script error on that order" + extra + "; do not reissue this same order"
+    if text.startswith("move_not_applied"):
+        return ("the game reported success but the unit did not leave its tile. "
+                "Do not order that destination again.")
+    if text.startswith("moved:"):
+        where = text[len("moved:"):]
+        return f"moved to ({where})" if where else "moved"
     if text.startswith("no_result_from_gameplay:"):
         detail = text[len("no_result_from_gameplay:"):].strip()
         base = "the game never reported a result for this order before the turn ended"
@@ -647,6 +658,14 @@ def inject_command_results(snapshot: dict[str, Any], session_dir: Path | None) -
     items = build_command_results(snapshot, rows, turn)
     items.extend(_earlier_failed_items(snapshot, all_rows, player_id, turn, rows))
     _annotate_repeat_failures(items, all_rows, player_id)
+    # A turn of hundreds of moves used to keep the first 12 and drop the
+    # mountain or border failure the next order would repeat.
+    def _keep_rank(item: dict[str, Any]) -> tuple[int, int]:
+        failed = item.get("kind") in (KIND_FAILED, KIND_FAILED_EARLIER)
+        reason = str(item.get("reason") or "") + " " + str(item.get("summary") or "")
+        tile = _reason_is_non_transient(reason)
+        return (0 if failed and tile else 1 if failed else 2, -int(item.get("turn") or 0))
+    items = sorted(items, key=_keep_rank)
     history["command_results"] = items[:PRIOR_APPLY_WIRE_CAP]
     return len(items)
 
@@ -1052,7 +1071,10 @@ def filter_repeat_public_chat(
 
 def _reason_is_non_transient(reason: str) -> bool:
     text = (reason or "").lower()
-    return any(token in text for token in NON_TRANSIENT_FAILURES)
+    if any(token in text for token in NON_TRANSIENT_FAILURES):
+        return True
+    # describe_reason prose no longer contains the raw token.
+    return "mountain" in text or "natural wonder" in text or "outside your borders" in text or "outside borders" in text
 
 
 def _command_fingerprint(command: dict[str, Any]) -> tuple[str, str, Any, Any]:
@@ -1073,6 +1095,14 @@ def _result_fingerprint(item: dict[str, Any]) -> tuple[str, str, Any, Any] | Non
         return None
     order_kind = str(item.get("order_kind") or "")
     unit = str(item.get("unit") or "")
+    if not unit:
+        named = re.search(
+            r"\b(?:move|attack with|strike from) (\S+)",
+            str(item.get("summary") or ""),
+            re.I,
+        )
+        if named:
+            unit = named.group(1).strip(".,")
     match = _BLOCKED_RE.match(str(item.get("summary") or "").strip())
     if match:
         return (
@@ -1086,11 +1116,20 @@ def _result_fingerprint(item: dict[str, Any]) -> tuple[str, str, Any, Any] | Non
         # match _BLOCKED_RE; take the target from the command id so repeats are still caught.
         # CMD_attack_UNIT_1_45_19 ends in _45_19, which the verb-shaped pattern missed.
         # Unknown coordinates must not match every later order by that unit.
-        for value in list(item.get("affected_ids") or []) + [item.get("command_id")]:
-            m = _CMD_TARGET_RE.search(str(value or ""))
+        for value in list(item.get("affected_ids") or []) + [item.get("command_id"), item.get("identity"), item.get("summary")]:
+            text = str(value or "")
+            m = _CMD_TARGET_RE.search(text)
             if m:
                 kind = "move_unit" if order_kind == "move_unit" else "attack_target"
                 return (kind, unit, int(m.group(1)), int(m.group(2)))
+            xy = re.search(r"\((-?\d+),(-?\d+)\)", text)
+            if xy:
+                kind = "move_unit" if order_kind == "move_unit" else "attack_target"
+                return (kind, unit, int(xy.group(1)), int(xy.group(2)))
+            ident = re.search(r"target_x=(-?\d+).*target_y=(-?\d+)", text)
+            if ident:
+                kind = "move_unit" if order_kind == "move_unit" else "attack_target"
+                return (kind, unit, int(ident.group(1)), int(ident.group(2)))
         return None
     return None
 

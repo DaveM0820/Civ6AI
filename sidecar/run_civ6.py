@@ -866,6 +866,10 @@ def main() -> None:
         "message": record.get("message"),
         "dropped": dropped,
     }
+    empire = snapshot.get("your_empire") if isinstance(snapshot.get("your_empire"), dict) else {}
+    score = empire.get("score")
+    if isinstance(score, int) and not isinstance(score, bool):
+        metrics["score"] = score
     pipeline.append_turn_metrics(metrics_dir, metrics)
     record["metrics"] = metrics
     report = civ6_turn_report.build_turn_report(

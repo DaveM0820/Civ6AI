@@ -250,9 +250,31 @@ function Civ6Ai_Production._QueueLocalBuild(city, buildId)
   local params = {}
   params[paramKey] = item.Hash
   params[CityOperationTypes.PARAM_INSERT_MODE] = CityOperationTypes.VALUE_EXCLUSIVE
+  local okField, canStart = pcall(function() return CityManager.CanStartOperation end)
+  if okField and type(canStart) == "function" then
+    local okCan, can = pcall(canStart, city, CityOperationTypes.BUILD, params)
+    if not okCan or can == false then
+      return false
+    end
+  end
   local ok, result = pcall(CityManager.RequestOperation, city, CityOperationTypes.BUILD, params)
-  return ok and result ~= false
+  -- A nil result is not success. The queue must actually show this build.
+  if not ok or result == false then
+    return false
+  end
+  local now = Civ6Ai_Production._GetCityProduction(city)
+  if now ~= buildId then
+    if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
+      Civ6Ai_Util.Log("production|autoqueue|not_stuck|city=" .. tostring(city:GetID())
+        .. "|wanted=" .. tostring(buildId) .. "|current=" .. tostring(now)
+        .. "|result=" .. tostring(result))
+    end
+    return false
+  end
+  return true
 end
+
+Civ6Ai_Production._autoTries = Civ6Ai_Production._autoTries or {}
 
 function Civ6Ai_Production.AutoqueueEmptyCities(playerID)
   if Civ6Ai_Config == nil or Civ6Ai_Config.IsAutotest == nil or not Civ6Ai_Config.IsAutotest() then
@@ -266,18 +288,27 @@ function Civ6Ai_Production.AutoqueueEmptyCities(playerID)
   if cities == nil or cities.Members == nil then
     return 0
   end
+  local turn = Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or 0
   local profile = Civ6Ai_Production._SeatAtWar(playerID) and Civ6Ai_Production.WAR_PROFILE
     or Civ6Ai_Production.PEACE_PROFILE
   local queued = 0
   for _, city in cities:Members() do
     local current = Civ6Ai_Production._GetCityProduction(city)
     if current == nil then
-      local buildId = Civ6Ai_Production._PickProfileItem(city, profile)
-      if buildId ~= nil and Civ6Ai_Production._QueueLocalBuild(city, buildId) then
-        queued = queued + 1
-        if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
-          Civ6Ai_Util.Log("production|autoqueue|player=" .. tostring(playerID)
-            .. "|city=" .. tostring(city:GetID()) .. "|build=" .. buildId)
+      local key = tostring(playerID) .. ":" .. tostring(city:GetID()) .. ":" .. tostring(turn)
+      local tries = Civ6Ai_Production._autoTries[key] or 0
+      -- A few attempts later in the same turn. A stuck request must not look done.
+      if tries < 3 then
+        Civ6Ai_Production._autoTries[key] = tries + 1
+        local buildId = Civ6Ai_Production._PickProfileItem(city, profile)
+        if buildId ~= nil and Civ6Ai_Production._QueueLocalBuild(city, buildId) then
+          queued = queued + 1
+          Civ6Ai_Production._autoTries[key] = 3
+          if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
+            Civ6Ai_Util.Log("production|autoqueue|player=" .. tostring(playerID)
+              .. "|city=" .. tostring(city:GetID()) .. "|build=" .. buildId
+              .. "|turn=" .. tostring(turn))
+          end
         end
       end
     end

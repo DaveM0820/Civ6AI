@@ -958,6 +958,115 @@ function Civ6Ai_Snapshot._BuildUnitCounts(playerID)
   return counts
 end
 
+function Civ6Ai_Snapshot._ReligionTypeName(index)
+  if type(index) ~= "number" or index < 0 or GameInfo == nil or GameInfo.Religions == nil then
+    return nil
+  end
+  local ok, row = pcall(function() return GameInfo.Religions[index] end)
+  if not ok or row == nil or type(row.ReligionType) ~= "string" or row.ReligionType == "" then
+    return nil
+  end
+  if row.ReligionType == "RELIGION_PANTHEON" then
+    return nil
+  end
+  return row.ReligionType
+end
+
+function Civ6Ai_Snapshot._EmpireReligion(player)
+  local rel = {
+    state_religion_id = Civ6Ai_Util.JsonNull(),
+    convertible_religion_ids = {},
+    conversion_timer = 0,
+  }
+  local obj = Civ6Ai_Snapshot._EconCall(player, "GetReligion")
+  local name = Civ6Ai_Snapshot._ReligionTypeName(Civ6Ai_Snapshot._EconCall(obj, "GetReligionType"))
+  if name == nil then
+    name = Civ6Ai_Snapshot._ReligionTypeName(Civ6Ai_Snapshot._EconCall(obj, "GetReligionInMajorityOfCities"))
+  end
+  if name ~= nil then
+    rel.state_religion_id = name
+  end
+  local faith = Civ6Ai_Snapshot._EconInt(Civ6Ai_Snapshot._EconCall(obj, "GetFaithBalance"))
+  if faith ~= nil then
+    rel.faith = faith
+  end
+  local per = Civ6Ai_Snapshot._EconInt(Civ6Ai_Snapshot._EconCall(obj, "GetFaithYield"))
+  if per ~= nil then
+    rel.faith_per_turn = per
+  end
+  return rel
+end
+
+function Civ6Ai_Snapshot._CityExtraRow(city)
+  local row = {}
+  local ident = Civ6Ai_Snapshot._EconCall(city, "GetCulturalIdentity")
+  local loyalty = Civ6Ai_Snapshot._EconInt(Civ6Ai_Snapshot._EconCall(ident, "GetLoyalty"))
+  if loyalty ~= nil then
+    row.loyalty = loyalty
+  end
+  local per = tonumber(Civ6Ai_Snapshot._EconCall(ident, "GetLoyaltyPerTurn"))
+  if per ~= nil then
+    row.loyalty_per_turn = math.floor(per * 10 + 0.5) / 10
+  end
+  local districts = Civ6Ai_Util.JsonArrayList()
+  local pDistricts = Civ6Ai_Snapshot._EconCall(city, "GetDistricts")
+  if pDistricts ~= nil and pDistricts.Members ~= nil and GameInfo ~= nil and GameInfo.Districts ~= nil then
+    pcall(function()
+      for _, district in pDistricts:Members() do
+        local dRow = GameInfo.Districts[district:GetType()]
+        if dRow ~= nil and type(dRow.DistrictType) == "string"
+            and dRow.DistrictType ~= "DISTRICT_CITY_CENTER" then
+          table.insert(districts, dRow.DistrictType)
+        end
+      end
+    end)
+  end
+  if #districts > 0 then
+    row.districts = districts
+  end
+  local wonders = Civ6Ai_Util.JsonArrayList()
+  local buildings = Civ6Ai_Snapshot._EconCall(city, "GetBuildings")
+  if buildings ~= nil and GameInfo ~= nil and GameInfo.Buildings ~= nil then
+    pcall(function()
+      for bRow in GameInfo.Buildings() do
+        if bRow.IsWonder == true and Civ6Ai_Snapshot._EconCall(buildings, "HasBuilding", bRow.Index) == true then
+          table.insert(wonders, bRow.BuildingType)
+        end
+      end
+    end)
+  end
+  if #wonders > 0 then
+    row.wonders = wonders
+  end
+  local cityRel = Civ6Ai_Snapshot._EconCall(city, "GetReligion")
+  local majority = Civ6Ai_Snapshot._ReligionTypeName(Civ6Ai_Snapshot._EconCall(cityRel, "GetMajorityReligion"))
+  if majority ~= nil then
+    row.religion = majority
+  end
+  return row
+end
+
+function Civ6Ai_Snapshot._BuildCityExtra(playerID)
+  local out = {}
+  local player = Players[playerID]
+  local cities = player ~= nil and player.GetCities ~= nil and player:GetCities() or nil
+  if cities == nil or cities.Members == nil then
+    return out
+  end
+  for _, city in cities:Members() do
+    local facts = Civ6Ai_Snapshot._CityExtraRow(city)
+    local has = false
+    for _, _ in pairs(facts) do
+      has = true
+      break
+    end
+    if has then
+      out[Civ6Ai_Production._WireCityId(city)] = facts
+    end
+  end
+  return out
+end
+
 function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
   local treasury = player:GetTreasury()
   local techs = player:GetTechs()
@@ -1066,11 +1175,7 @@ function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
       unit_cost = 0,
       unit_supply = 0,
     },
-    religion = {
-      state_religion_id = Civ6Ai_Util.JsonNull(),
-      convertible_religion_ids = {},
-      conversion_timer = 0,
-    },
+    religion = Civ6Ai_Snapshot._EmpireReligion(player),
     resources = {},
     victory_progress = {},
   }
@@ -1540,7 +1645,9 @@ function Civ6Ai_Snapshot._AttitudeReasons(fromID, towardID, limit)
         end
         text = text:gsub("%[[^%]]*%]", "")
         text = Civ6Ai_Util.CollapseAsciiWS(text)
-        table.insert(rows, { text = text:sub(1, 80), score = math.floor(score + 0.5) })
+        if string.find(string.lower(text), "unknown reason", 1, true) == nil then
+          table.insert(rows, { text = text:sub(1, 80), score = math.floor(score + 0.5) })
+        end
       end
     end
   end
@@ -1752,6 +1859,9 @@ function Civ6Ai_Snapshot._BuildDiplomacy(playerID)
     local facts = Civ6Ai_Snapshot._RelationFacts(playerID, otherID)
     local theirDiplo = Civ6Ai_Snapshot._Method(Players[otherID], "GetDiplomacy")
     local atWarWith = Civ6Ai_Snapshot._Arr()
+    if Civ6Ai_Snapshot._Method(theirDiplo, "IsAtWarWith", playerID) == true then
+      table.insert(atWarWith, Civ6Ai_Snapshot._PlayerLabel(playerID))
+    end
     for _, thirdID in ipairs(metMajors) do
       if thirdID ~= otherID and Civ6Ai_Snapshot._Method(theirDiplo, "IsAtWarWith", thirdID) == true then
         table.insert(atWarWith, Civ6Ai_Snapshot._PlayerLabel(thirdID))
@@ -1883,7 +1993,8 @@ function Civ6Ai_Snapshot._NotificationSection(typeName)
   if string.find(upper, "DIPLO") or string.find(upper, "DEAL") or string.find(upper, "GOSSIP") then
     return "diplomacy"
   end
-  if string.find(upper, "CITY") or string.find(upper, "LOYALTY") or string.find(upper, "DISTRICT") then
+  if string.find(upper, "CITY") or string.find(upper, "LOYALTY") or string.find(upper, "DISTRICT")
+      or string.find(upper, "WONDER") then
     return "city"
   end
   if string.find(upper, "GOLD") or string.find(upper, "TRADE") or string.find(upper, "BANKRUPT") then
@@ -3491,6 +3602,20 @@ function Civ6Ai_Snapshot._AddCityStrikeCommands(commands, playerID)
     if seen[key] then
       return
     end
+    -- Same 3-arg check the strike uses. A missing command API offers nothing,
+    -- so the order is not sent only to come back city_strike_unavailable.
+    if CityManager == nil or CityManager.CanStartCommand == nil
+        or CityCommandTypes == nil or CityCommandTypes.RANGE_ATTACK == nil
+        or CityCommandTypes.PARAM_X == nil or CityCommandTypes.PARAM_Y == nil then
+      return
+    end
+    local params = {}
+    params[CityCommandTypes.PARAM_X] = tx
+    params[CityCommandTypes.PARAM_Y] = ty
+    local okCan, can = pcall(CityManager.CanStartCommand, city, CityCommandTypes.RANGE_ATTACK, params)
+    if not okCan or can ~= true then
+      return
+    end
     seen[key] = true
     table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
       command_id = "CMD_citystrike_" .. tostring(city:GetID()) .. "_" .. tostring(tx) .. "_" .. tostring(ty),
@@ -5088,6 +5213,7 @@ function Civ6Ai_Snapshot.Build(playerID, options)
   local techId = Civ6Ai_Snapshot._CurrentTech(playerID)
   local sessionId = Civ6Ai_Bridge.SessionId()
   local yourEmpire = Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
+  local okExtra, cityExtra = pcall(Civ6Ai_Snapshot._BuildCityExtra, playerID)
   local civ6Block = {
     session_id = sessionId,
     research_tech = Civ6Ai_Snapshot._NullableId(techId),
@@ -5110,6 +5236,9 @@ function Civ6Ai_Snapshot.Build(playerID, options)
         .. " (measured north_dy=" .. tostring(northDy) .. "); river_edges across-v2",
     },
   }
+  if okExtra and type(cityExtra) == "table" then
+    civ6Block.city_extra = cityExtra
+  end
   local okEconomy, economy = pcall(Civ6Ai_Snapshot._BuildEconomy, playerID, legal)
   if okEconomy and type(economy) == "table" then
     civ6Block.economy = economy

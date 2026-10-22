@@ -55,7 +55,15 @@ def launch_civ(*, kill_existing: bool) -> None:
         raise RuntimeError(f"Civ6 launch failed: {err}")
 
 
-def run(*, kill_existing: bool) -> list[str]:
+def run(*, kill_existing: bool, dry_run: bool = False) -> list[str]:
+    if dry_run:
+        log.info("dry-run: no process kill, no clicks")
+        win = find_civ_window()
+        if win is None:
+            log.info("dry-run: Civ window not found; logging the click plan only")
+            print("LAN_LOAD_DRY_RUN", ["dry_run", "no_window"])
+            return ["dry_run", "no_window"]
+        return load_lan_autosave(win, dry_run=True)
     if kill_existing:
         launch_civ(kill_existing=True)
     elif find_civ_window() is None:
@@ -73,9 +81,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Do not restart Civ (use the window that is already open)",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Log the Multiplayer, Load Game, and Autosaves toggle plan without clicking",
+    )
     args = parser.parse_args(argv)
     try:
-        steps = run(kill_existing=not args.no_kill)
+        steps = run(kill_existing=not args.no_kill, dry_run=args.dry_run)
     except Exception as error:
         print(f"LAN_LOAD_FAIL {error}")
         return 1

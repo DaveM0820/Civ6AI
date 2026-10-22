@@ -386,6 +386,8 @@ class SnapshotLuaOffersTests(unittest.TestCase):
                 end
               end
             end
+            CityCommandTypes = { RANGE_ATTACK = 7, PARAM_X = "x", PARAM_Y = "y" }
+            CityManager = { CanStartCommand = function() return true end }
             Players = { [1] = { GetCities = function() return { Members = members({ city }) } end } }
             Civ6Ai_Snapshot._HostileTargets = function()
               return {

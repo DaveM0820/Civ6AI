@@ -391,6 +391,30 @@ def civ6_diplomacy_guidance(snapshot: dict[str, Any]) -> list[str]:
     return lines
 
 
+def civ6_loyalty_attention(snapshot: dict[str, Any]) -> list[str]:
+    """Cities near a loyalty flip, with the levers that stop it."""
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    extras = civ6.get("city_extra") if isinstance(civ6.get("city_extra"), dict) else {}
+    notes: list[str] = []
+    for city in snapshot.get("your_cities") or []:
+        if not isinstance(city, dict):
+            continue
+        extra = extras.get(str(city.get("city_id")))
+        if not isinstance(extra, dict):
+            continue
+        loyalty = extra.get("loyalty")
+        if not isinstance(loyalty, int) or isinstance(loyalty, bool) or loyalty >= 40:
+            continue
+        name = pipeline._city_prompt_name(city)
+        per = extra.get("loyalty_per_turn")
+        drift = f", {per:+g}/turn" if isinstance(per, (int, float)) and not isinstance(per, bool) else ""
+        notes.append(
+            f"LOYALTY: {name} is at {loyalty}{drift}. A city near 0 rebels. "
+            "Raise amenities, keep a governor, or ease the nearby pressure before it flips."
+        )
+    return notes
+
+
 def collect_civ6_attention_items(snapshot: dict[str, Any]) -> list[str]:
     items: list[str] = []
     for fn in (
@@ -401,6 +425,7 @@ def collect_civ6_attention_items(snapshot: dict[str, Any]) -> list[str]:
         note = fn(snapshot)
         if note:
             items.append(note)
+    items.extend(civ6_loyalty_attention(snapshot))
     items.extend(civ6_economy_attention(snapshot))
     return items
 

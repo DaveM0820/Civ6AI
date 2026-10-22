@@ -916,7 +916,12 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertEqual(self.rt.eval("Players[2].units[1].y"), 11)
 
     def test_far_move_uses_path_route(self):
-        self.rt.execute("ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = function(p,u,x,y) path_called = {p,u,x,y}; return true, 'path' end")
+        self.rt.execute(
+            "ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = function(p,u,x,y) "
+            "path_called = {p,u,x,y}; "
+            "for _, unit in ipairs(Players[p].units) do if unit.id == u then unit.x = x; unit.y = y end end; "
+            "return true, 'path' end"
+        )
         self.order(0, K=1, P=2, U=7, X=13, Y=13, S=20)
         self.assertEqual(self.last()["reason"], "path")
         self.assertEqual(self.rt.eval("path_called[3]"), 13)
@@ -1713,6 +1718,69 @@ class WpAApplyCoreTests(unittest.TestCase):
         self.assertIsNotNone(self.rt.eval("Players[2]:GetUnits():FindID(7)"))
         self.assertIsNotNone(self.rt.eval("Players[2]:GetUnits():FindID(8)"))
 
+    def test_formation_uses_the_short_constant_names_and_never_indexes_nil(self):
+        self.rt.execute(r"""
+          MilitaryFormationTypes = {
+            STANDARD_FORMATION = 0,
+            CORPS_FORMATION = 1,
+            ARMY_FORMATION = 2,
+          }
+          for _, u in ipairs(Players[2].units) do
+            u.formation = 0
+            function u:GetMilitaryFormation() return self.formation or 0 end
+            function u:SetMilitaryFormation(f)
+              local alive = false
+              for _, other in ipairs(Players[self.owner].units) do
+                if other.id ~= self.id and other.typ == self.typ and not other.dead then
+                  alive = true
+                end
+              end
+              if alive then self.formation = f end
+            end
+          end
+        """)
+        self.order(0, K=29, P=2, U=7, I=8, S=222)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertIn("formation=", self.last()["reason"])
+        self.rt.execute(r"""
+          MilitaryFormationTypes = { ARMY_FORMATION = 2 }
+          local partner = MkUnit(2, 8, 11, 10, 0)
+          partner.formation = 0
+          function partner:GetMilitaryFormation() return self.formation or 0 end
+          function partner:SetMilitaryFormation(f) end
+          table.insert(Players[2].units, partner)
+        """)
+        self.order(0, K=29, P=2, U=7, I=8, S=223)
+        self.assertFalse(self.last()["ok"], self.last())
+        self.assertIn("corps or army", self.last()["reason"])
+        self.assertIsNotNone(self.rt.eval("Players[2]:GetUnits():FindID(8)"))
+
+    def test_unread_move_results_are_not_evicted_at_512(self):
+        self.rt.execute(r"""
+          local shared = Civ6Ai_Orders._Shared()
+          shared.OrderResults = {}
+          for i = 1, 600 do
+            Civ6Ai_Orders._Record(0, {S=i, K=1, P=1, U=7, D=5}, true, "moved:1,1")
+          end
+        """)
+        self.assertEqual(600, self.rt.eval("#Civ6Ai_Orders._Shared().OrderResults"))
+        self.assertEqual(1, self.rt.eval("Civ6Ai_Orders._Shared().OrderResults[1].seq"))
+        self.rt.execute(r"""
+          local shared = Civ6Ai_Orders._Shared()
+          shared.OrderResults[1]._taken = true
+          Civ6Ai_Orders._Record(0, {S=601, K=1, P=1, U=7, D=5}, true, "moved:2,2")
+        """)
+        self.assertEqual(600, self.rt.eval("#Civ6Ai_Orders._Shared().OrderResults"))
+        self.assertNotEqual(1, self.rt.eval("Civ6Ai_Orders._Shared().OrderResults[1].seq"))
+
+    def test_a_success_that_does_not_move_the_unit_says_so(self):
+        self.rt.execute('ExposedMembers.Civ6Ai.MoveUnitForPlayer = function() return true, "" end')
+        self.order(0, K=1, P=2, U=7, X=10, Y=11, S=301)
+        self.assertFalse(self.last()["ok"], self.last())
+        self.assertIn("move_not_applied", self.last()["reason"])
+        self.assertEqual(10, self.rt.eval("Players[2]:GetUnits():FindID(7).x"))
+        self.assertEqual(10, self.rt.eval("Players[2]:GetUnits():FindID(7).y"))
+
     def test_spread_spends_a_charge_only_when_pressure_is_applied(self):
         self.rt.execute(r"""
           GameInfo.Units[0].ReligiousStrength = 80
@@ -1793,6 +1861,25 @@ class DealOrdersTests(unittest.TestCase):
         self.order(0, K=33, P=2, I=1, W=0, X=-1, Y=0, I2=-1, I3=0, A=1, S=2)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
         self.assertIsNone(self.rt.eval("Players[2].war[1]"))
+
+    def test_peace_that_leaves_the_other_side_at_war_does_not_pay(self):
+        self.rt.execute(r"""
+          Players[2]:GetDiplomacy(); Players[2].war[1] = true
+          Players[1]:GetDiplomacy(); Players[1].war[2] = true
+          Players[2]:GetTreasury(); Players[1]:GetTreasury()
+          local orig = Players[1].GetDiplomacy
+          Players[1].GetDiplomacy = function(self)
+            local d = orig(self)
+            d.MakePeaceWith = function() end
+            return d
+          end
+        """)
+        gold = self.rt.eval("Players[2].gold")
+        self.order(0, K=33, P=2, I=1, W=10, X=-1, Y=0, I2=-1, I3=0, A=1, S=9)
+        self.assertFalse(self.last()["ok"], self.last())
+        self.assertIn("peace did not take effect", self.last()["reason"])
+        self.assertEqual(gold, self.rt.eval("Players[2].gold"))
+        self.assertTrue(self.rt.eval("Players[2].war[1]"))
 
     def test_war_refused_when_already_at_war(self):
         self.rt.execute("Players[2]:GetDiplomacy(); Players[2].war[1]=true")
