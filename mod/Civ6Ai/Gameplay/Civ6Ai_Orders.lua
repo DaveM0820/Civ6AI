@@ -1064,6 +1064,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
     end
   end
   local pending, okUnits = orders, {}
+  local cityStrikeFailed = false
   local counts = { ok = { unit = 0, city = 0 }, fail = { unit = 0, city = 0 } }
   for pass = 1, Civ6Ai_Orders.MAX_PASSES do
     if #pending == 0 then
@@ -1071,11 +1072,20 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
     end
     local nextPending, progress = {}, false
     for _, o in ipairs(pending) do
+      -- A city strike that fails is not followed by the rest of the strike
+      -- list. The first refusal is the result; later strikes are not sent.
+      if o.K == Civ6Ai_Orders.K.CITY_STRIKE and cityStrikeFailed then
+        Civ6Ai_Orders._Record(sender, o, false, "city_strike_stopped")
+        noteAttack(counts, o, false)
+      else
       -- One order's script error is that order's result. It must not abort the
       -- rest of the turn (a thrown city:GetDistrictID used to do that).
       local ran, ok, reason = pcall(Civ6Ai_Orders._Execute, sender, o)
       if not ran then
         ok, reason = false, "order_error:" .. trimErr(ok)
+      end
+      if o.K == Civ6Ai_Orders.K.CITY_STRIKE and not ok then
+        cityStrikeFailed = true
       end
       if ok then
         progress = true
@@ -1087,6 +1097,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
       else
         Civ6Ai_Orders._Record(sender, o, false, reason)
         noteAttack(counts, o, false)
+      end
       end
     end
     if not progress then
@@ -2785,7 +2796,74 @@ function Gov.SpreadReligion(owner, unitId, x, y, mode)
   return true, "spread=" .. tostring(pressure) .. ":city=" .. tostring(city:GetID())
 end
 
--- City ranged strike from the city centre, once per city per turn (synced property).
+-- A live enemy unit, city, or district on the plot. The id is what the strike log records.
+function Civ6Ai_Orders._LiveStrikeTarget(owner, x, y)
+  local plot = Map ~= nil and Map.GetPlot ~= nil and Map.GetPlot(x, y) or nil
+  if plot ~= nil and Units ~= nil and Units.GetUnitsInPlot ~= nil then
+    local bestId, bestStrength = nil, -1
+    for _, other in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+      if other:GetOwner() ~= owner and not Civ6Ai_Orders._IsDead(other)
+          and Civ6Ai_Orders._AtWar(owner, other:GetOwner()) then
+        local row = GameInfo ~= nil and GameInfo.Units[other:GetType()] or nil
+        local strength = row ~= nil and (num(row.Combat) or 0) or 0
+        if strength > bestStrength then
+          bestId, bestStrength = other:GetID(), strength
+        end
+      end
+    end
+    if bestId ~= nil then
+      return bestId
+    end
+  end
+  if Cities ~= nil and Cities.GetCityInPlot ~= nil then
+    local okC, city = pcall(Cities.GetCityInPlot, x, y)
+    if okC and city ~= nil and city:GetOwner() ~= owner and Civ6Ai_Orders._AtWar(owner, city:GetOwner()) then
+      local id = city:GetID()
+      if id ~= nil then
+        return id
+      end
+    end
+  end
+  if Players ~= nil then
+    for pid = 0, 63 do
+      if pid ~= owner and Players[pid] ~= nil and Civ6Ai_Orders._AtWar(owner, pid) then
+        for _, district in ipairs(sortedMembers(call(Players[pid], "GetDistricts"))) do
+          if call(district, "GetX") == x and call(district, "GetY") == y then
+            local id = call(district, "GetID")
+            if id ~= nil then
+              return id
+            end
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
+-- The engine's city ranged attack. CanStartCommand is the gate; a district is
+-- never passed to forecast, ChangeDamage, or Kill (that read 0xffffffff).
+function Civ6Ai_Orders._CityRangeAttack(city, x, y)
+  if CityManager == nil or CityManager.CanStartCommand == nil or CityManager.RequestCommand == nil
+      or CityCommandTypes == nil or CityCommandTypes.RANGE_ATTACK == nil
+      or CityCommandTypes.PARAM_X == nil or CityCommandTypes.PARAM_Y == nil then
+    return false, "city_strike_unavailable"
+  end
+  local params = {}
+  params[CityCommandTypes.PARAM_X] = x
+  params[CityCommandTypes.PARAM_Y] = y
+  local okCan, can = pcall(CityManager.CanStartCommand, city, CityCommandTypes.RANGE_ATTACK, params)
+  if not okCan or can ~= true then
+    return false, "city_strike_refused"
+  end
+  local okReq, err = pcall(CityManager.RequestCommand, city, CityCommandTypes.RANGE_ATTACK, params)
+  if not okReq then
+    return false, "city_strike_refused:" .. trimErr(err)
+  end
+  return true, "city_strike"
+end
+
+-- City ranged strike, once per city per turn (synced property).
 function Gov.CityStrike(owner, cityId, x, y)
   local city = cityById(owner, cityId)
   local key = "CIV6AI_STRIKE_" .. tostring(owner) .. "_" .. tostring(cityId)
@@ -2795,27 +2873,21 @@ function Gov.CityStrike(owner, cityId, x, y)
   if num(Game:GetProperty(key)) == Game.GetCurrentGameTurn() then
     return false, "city already struck this turn"
   end
-  local district = Civ6Ai_Orders._CityCenterDistrict(city)
-  local defender = Civ6Ai_Orders._Defender(x, y, owner)
-  if district == nil then
-    return false, "no_city_district"
-  end
-  if defender == nil or not Civ6Ai_Orders._AtWar(owner, defender:GetOwner()) then
+  local defenderId = Civ6Ai_Orders._LiveStrikeTarget(owner, x, y)
+  if defenderId == nil then
     return false, "no_enemy_on_plot"
   end
   if Map.GetPlotDistance(city:GetX(), city:GetY(), x, y) > 2 then
     return false, "out_of_range"
   end
-  local _, toDefender = Civ6Ai_Orders._Forecast(district, defender, CombatTypes ~= nil and CombatTypes.RANGED or nil)
-  if (toDefender or 0) <= 0 then
-    return false, "no_effect:zero_damage"
+  log("city_strike|city=" .. tostring(cityId) .. "|x=" .. tostring(x) .. "|y=" .. tostring(y)
+    .. "|defender=" .. tostring(defenderId))
+  local ok, reason = Civ6Ai_Orders._CityRangeAttack(city, x, y)
+  if not ok then
+    return false, reason
   end
   Game:SetProperty(key, Game.GetCurrentGameTurn())
-  Civ6Ai_Orders._ChangeDamage(defender, toDefender)
-  if Civ6Ai_Orders._IsDead(defender) and call(defender, "IsDead") ~= true then
-    pcall(UnitManager.Kill, defender)
-  end
-  return true, "city_strike:dmg=" .. tostring(toDefender)
+  return true, reason
 end
 
 -- An improvement (builder, or fort) on the unit's tile; spends one build charge.

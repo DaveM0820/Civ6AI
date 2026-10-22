@@ -452,6 +452,16 @@ class OrdersGameplayTests(unittest.TestCase):
           Players[2].war = {[1]=true}
           table.insert(Players[2].units, MkUnit(2, 30, 20, 21, 0))
           table.insert(Players[1].units, MkUnit(1, 40, 31, 30, 0))
+          CityCommandTypes = { RANGE_ATTACK = 9, PARAM_X = "x", PARAM_Y = "y" }
+          cityStrikeCalls = {}
+          CityManager = {
+            CanStartCommand = function(city, cmd, params)
+              return params.x == 31 and params.y == 30
+            end,
+            RequestCommand = function(city, cmd, params)
+              cityStrikeCalls[#cityStrikeCalls + 1] = city:GetID()
+            end,
+          }
         """)
         self.assertIsNone(self.rt.eval("cityA.GetDistrictID"))
         self.assertIsNone(self.rt.eval("cityB.GetDistrictID"))
@@ -465,10 +475,70 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertIn("city_hp", by_seq[70]["reason"])
         self.assertGreater(self.rt.eval("centerA.wdmg"), 0)
         self.assertTrue(by_seq[71]["ok"], by_seq[71]["reason"])
-        self.assertTrue(str(by_seq[71]["reason"]).startswith("city_strike:"))
-        self.assertEqual(self.rt.eval("Players[1].units[#Players[1].units].dmg"), 30)
+        self.assertEqual(by_seq[71]["reason"], "city_strike")
+        self.assertEqual(self.rt.eval("Players[1].units[#Players[1].units].dmg"), 0)
+        self.assertEqual(self.rt.eval("#cityStrikeCalls"), 1)
         logs = [str(s) for s in _vals(self.rt.eval("logs"))]
+        self.assertTrue(any("city_strike|city=8|x=31|y=30|defender=40" in s for s in logs), logs)
         self.assertFalse(any("turn_start_error" in s for s in logs))
+
+    def test_city_strike_stops_after_the_first_failure(self):
+        # A dead unit is not a target. A district is. After one refusal the
+        # next strike in the batch is not sent to the engine.
+        self.rt.execute(r"""
+          CityCommandTypes = { RANGE_ATTACK = 9, PARAM_X = "x", PARAM_Y = "y" }
+          cityStrikeCalls = {}
+          CityManager = {
+            CanStartCommand = function() return true end,
+            RequestCommand = function(city, cmd, params)
+              cityStrikeCalls[#cityStrikeCalls + 1] = params.x
+            end,
+          }
+          local city = {id=8, owner=2, x=30, y=30}
+          function city:GetID() return self.id end
+          function city:GetOwner() return self.owner end
+          function city:GetX() return self.x end
+          function city:GetY() return self.y end
+          Players[2].GetCities = function()
+            return {Members=function()
+              local i=0
+              return function() i=i+1; if i==1 then return i, city end end
+            end}
+          end
+          Players[1].war = {[2]=true}
+          Players[2].war = {[1]=true}
+          local dead = MkUnit(1, 41, 32, 30, 0)
+          dead.dmg = 100
+          table.insert(Players[1].units, dead)
+          table.insert(Players[1].units, MkUnit(1, 40, 31, 30, 0))
+          local fort = {id=55, x=30, y=31}
+          function fort:GetID() return self.id end
+          function fort:GetX() return self.x end
+          function fort:GetY() return self.y end
+          Players[1].GetDistricts = function()
+            return {Members=function()
+              local i=0
+              return function() i=i+1; if i==1 then return i, fort end end
+            end}
+          end
+        """)
+        self.order(0, K=31, P=2, I=8, X=32, Y=30, S=1, B=1, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        self.assertEqual(self.last()["reason"], "no_enemy_on_plot")
+        self.assertEqual(self.rt.eval("#cityStrikeCalls"), 0)
+        self.order(0, K=31, P=2, I=8, X=30, Y=31, S=2, B=2, J=1, N=1, T=7)
+        self.turn_start(2, turn=7)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        logs = [str(s) for s in _vals(self.rt.eval("logs"))]
+        self.assertTrue(any("city_strike|city=8|x=30|y=31|defender=55" in s for s in logs), logs)
+        self.rt.execute("CityManager.CanStartCommand = function() return false end; cityStrikeCalls = {}")
+        self.order(0, K=31, P=2, I=8, X=31, Y=30, S=3, B=3, J=1, N=2, T=8)
+        self.order(0, K=31, P=2, I=8, X=30, Y=31, S=4, B=3, J=2, N=2, T=8)
+        self.turn_start(2, turn=8)
+        by_seq = {r["seq"]: r for r in self.results()}
+        self.assertEqual(by_seq[3]["reason"], "city_strike_refused")
+        self.assertEqual(by_seq[4]["reason"], "city_strike_stopped")
+        self.assertEqual(self.rt.eval("#cityStrikeCalls"), 0)
 
     def test_city_attack_survives_a_throwing_method_lookup(self):
         # Gameplay userdata throws "function expected instead of nil" from

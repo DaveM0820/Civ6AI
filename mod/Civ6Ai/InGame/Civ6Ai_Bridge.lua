@@ -1567,6 +1567,65 @@ function Civ6Ai_Bridge.ApplyJson(playerID, jsonText)
   return "ok"
 end
 
+-- Identity of a saved command batch: command ids in file order. Lua and the
+-- sidecar use the same string, so a reload can tell this batch from the next.
+function Civ6Ai_Bridge._CommandFingerprint(jsonText)
+  local ids = {}
+  for id in string.gmatch(jsonText or "", '"command_id"%s*:%s*"([^"]+)"') do
+    ids[#ids + 1] = id
+  end
+  return table.concat(ids, "|")
+end
+
+function Civ6Ai_Bridge._BatchHasResult(playerID, turn, fingerprint)
+  if fingerprint == nil or fingerprint == "" or Civ6Ai_Apply == nil or Civ6Ai_Apply._ApplyResultsPath == nil then
+    return false
+  end
+  local text = Civ6Ai_Util.ReadTextFile(Civ6Ai_Apply._ApplyResultsPath(playerID))
+  if text == nil or text == "" then
+    return false
+  end
+  local turnA = '"turn":' .. tostring(turn)
+  local turnB = '"turn": ' .. tostring(turn)
+  for line in string.gmatch(text, "[^\r\n]+") do
+    if string.find(line, turnA, 1, true) or string.find(line, turnB, 1, true) then
+      for id in string.gmatch(fingerprint, "[^|]+") do
+        if string.find(line, '"command_id":"' .. id .. '"', 1, true)
+            or string.find(line, '"command_id": "' .. id .. '"', 1, true) then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+-- A reload reads apply_commands.json again. If this batch was already handed
+-- to the game and no apply result was logged, it is the batch that died
+-- mid-strike. Do not run it again.
+function Civ6Ai_Bridge._DiscardUnloggedBatch(playerID, jsonText)
+  local fingerprint = Civ6Ai_Bridge._CommandFingerprint(jsonText)
+  if fingerprint == "" then
+    return false
+  end
+  local turn = Game.GetCurrentGameTurn()
+  local path = Civ6Ai_Util.JoinPath(Civ6Ai_Bridge._PlayerDir(playerID), "apply_started.txt")
+  local stamp = tostring(turn) .. "|" .. fingerprint
+  local prev = Civ6Ai_Util.ReadTextFile(path)
+  if prev ~= nil then
+    prev = string.gsub(prev, "%s+$", "")
+  end
+  if prev == stamp and not Civ6Ai_Bridge._BatchHasResult(playerID, turn, fingerprint) then
+    Civ6Ai_Util.Log(
+      "bridge|pending_apply_discarded|player=" .. tostring(playerID)
+        .. "|turn=" .. tostring(turn) .. "|reason=no_result"
+    )
+    return true
+  end
+  Civ6Ai_Util.WriteTextFile(path, stamp .. "\n")
+  return false
+end
+
 function Civ6Ai_Bridge.ApplyPayload(playerID, jsonText, options)
   options = options or {}
   if jsonText == nil or jsonText == "" then
@@ -1604,6 +1663,11 @@ function Civ6Ai_Bridge.ApplyPayload(playerID, jsonText, options)
     return false
   end
   if Civ6Ai_Bridge._IsGameplayReady(playerID) then
+    if not chatOnly and Civ6Ai_Bridge._DiscardUnloggedBatch(playerID, jsonText) then
+      Civ6Ai_Bridge._MarkEmptyApplied(playerID)
+      Civ6Ai_Bridge._CompleteTurnAfterApply(playerID, false)
+      return true
+    end
     if not chatOnly then
       Civ6Ai_Apply.ApplyDecision(playerID, decision, options.snapshotTurn)
     end

@@ -3464,7 +3464,7 @@ function Civ6Ai_Snapshot._AddBuilderImproveCommands(commands, playerID, unit, un
 end
 
 -- City ranged strike: an enemy unit within 2 tiles. Walls are not required to
--- offer the order; Gov.CityStrike refuses a zero forecast and says why.
+-- offer the order; the strike is the city's own ranged attack.
 function Civ6Ai_Snapshot._AddCityStrikeCommands(commands, playerID)
   local seen = {}
   local function offer(city, tx, ty)
