@@ -60,6 +60,11 @@ def board_for_turn_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
         cached = known.get("explored_percent") if isinstance(known, dict) else None
         if isinstance(cached, int) and not isinstance(cached, bool):
             out["explored_percent"] = max(0, min(100, cached))
+    metric = snapshot.get("_explore_metric") if isinstance(snapshot, dict) else None
+    if isinstance(metric, dict):
+        delta = metric.get("delta")
+        if isinstance(delta, int) and not isinstance(delta, bool):
+            out["revealed_delta"] = delta
     civ6 = snapshot.get("civ6") if isinstance(snapshot, dict) and isinstance(snapshot.get("civ6"), dict) else {}
     rankings = civ6.get("rankings") if isinstance(civ6, dict) and isinstance(civ6.get("rankings"), dict) else {}
     players: list[dict[str, Any]] = []
@@ -705,6 +710,7 @@ def main() -> None:
         from sidecar import civ6_seat_memory
 
         thought_memory = civ6_seat_memory.observe(snapshot, thought_memory)
+        thought_memory = civ6_seat_memory.note_exploration(snapshot, thought_memory)
         snapshot["_seat_memory"] = civ6_seat_memory.compact(thought_memory)
     except Exception as error:
         print(f"seat memory skipped: {error}", file=sys.stderr)

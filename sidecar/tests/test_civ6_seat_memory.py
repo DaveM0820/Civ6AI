@@ -32,6 +32,48 @@ def _snap(turn=40):
 
 
 class SeatMemoryTests(unittest.TestCase):
+    def test_exploration_metric_counts_new_tiles_and_nudges_a_stall(self):
+        from sidecar import civ6_prompt_coaching as coaching
+        from sidecar import civ6_wire
+
+        def snap(turn, revealed):
+            return {
+                "decision": {"player_id": "PLAYER_0", "turn": turn},
+                "game": {"map_width": 10, "map_height": 10},
+                "known_map": {"revealed_count": revealed},
+                "your_units": [],
+                "your_cities": [],
+                "legal_commands": [],
+            }
+
+        first = snap(1, 10)
+        stored = memory.note_exploration(first, {"tracked": {}})
+        self.assertEqual(10, first["_explore_metric"]["revealed"])
+        self.assertNotIn("delta", first["_explore_metric"])
+        early = coaching.civ6_exploration_attention(first)
+        self.assertIn("Map only 10% explored", early)
+
+        second = snap(2, 14)
+        stored = memory.note_exploration(second, stored)
+        self.assertEqual(4, second["_explore_metric"]["delta"])
+        self.assertEqual(1, second["_explore_metric"]["since_turn"])
+        self.assertNotIn("stalled", second["_explore_metric"])
+        prompt = civ6_wire.build_civ6_wire_prompt(second)
+        self.assertIn("map.revealed_delta = +4 tiles since T1", prompt)
+        self.assertNotIn("No new exploration", "\n".join(coaching.collect_civ6_attention_items(second)))
+
+        stalled = snap(7, 14)
+        stored = memory.note_exploration(stalled, stored)
+        self.assertTrue(stalled["_explore_metric"]["stalled"])
+        self.assertEqual(0, stalled["_explore_metric"]["stall_delta"])
+        note = coaching.civ6_exploration_attention(stalled)
+        self.assertIn("No new exploration in 5+ turns", note)
+        self.assertIn("14% explored", note)
+        self.assertIn("14 tiles, +0 since T2", note)
+        again = snap(7, 14)
+        stored = memory.note_exploration(again, stored)
+        self.assertEqual(1, sum(1 for row in stored["situation_log"] if "Exploration stalled" in row["text"]))
+
     def test_lethargy_is_an_alert_and_a_situation_line(self):
         snap = _snap(turn=40)
         snap["your_cities"][0]["production"] = {"item_id": "NONE"}

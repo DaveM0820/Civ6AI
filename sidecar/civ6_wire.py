@@ -1136,6 +1136,19 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
                 f"{revealed_tiles} of {map_tiles} tiles revealed on the whole map ({true_pct}%). "
                 "This is your real visibility, not the trimmed picture.",
             ))
+        explore_metric = context.get("_explore_metric")
+        if isinstance(explore_metric, dict):
+            delta = explore_metric.get("delta")
+            since_turn = explore_metric.get("since_turn")
+            if (
+                isinstance(delta, int) and not isinstance(delta, bool)
+                and isinstance(since_turn, int) and not isinstance(since_turn, bool)
+            ):
+                shown = f"+{delta}" if delta > 0 else str(delta)
+                map_lines.append(pipeline._wire_line(
+                    "map.revealed_delta",
+                    f"{shown} tiles since T{since_turn}",
+                ))
     naval = any(isinstance(u, dict) and u.get("domain_id") == "DOMAIN_SEA" for u in context.get("your_units") or [])
     grid = [list(r) for r in (context.get("known_map") or {}).get("visibility_grid") or []]
     todo = [tuple(map(int, str(o.get("plot_id")).split("_")[1:3])) for o in (context.get("your_units") or []) + (context.get("your_cities") or [])

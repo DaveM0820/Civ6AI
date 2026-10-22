@@ -299,6 +299,22 @@ def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
     explored = _civ6_explored_percent(snapshot)
     if not isinstance(explored, int) or explored >= CIV6_EXPLORE_STALL_BELOW_PCT:
         return None
+    metric = snapshot.get("_explore_metric")
+    if isinstance(metric, dict) and metric.get("stalled") is True:
+        extra = ""
+        revealed = metric.get("revealed")
+        delta = metric.get("stall_delta")
+        since = metric.get("stall_since_turn")
+        if (
+            isinstance(revealed, int) and not isinstance(revealed, bool)
+            and isinstance(delta, int) and not isinstance(delta, bool)
+            and isinstance(since, int) and not isinstance(since, bool)
+        ):
+            extra = f" ({revealed} tiles, {delta:+d} since T{since})"
+        return (
+            f"No new exploration in {CIV6_EXPLORE_STALL_TURNS}+ turns while map is only "
+            f"{explored}% explored{extra} — soft advice: send a scout or military unit into fog this turn."
+        )
     history = snapshot.get("history")
     tracking = history.get("explore_tracking") if isinstance(history, dict) else None
     samples = tracking.get("samples") if isinstance(tracking, dict) else None

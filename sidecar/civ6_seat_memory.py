@@ -503,6 +503,80 @@ def lethargy_line(snapshot: dict, memory: dict[str, Any] | None = None) -> str |
     return "LETHARGY: " + " ".join(text for _, text in parts)
 
 
+def note_exploration(snapshot: dict, memory: dict[str, Any]) -> dict[str, Any]:
+    """Remember revealed-tile counts so a later turn can see whether the map opened.
+
+    One sample per turn, kept on tracked (the seat file already reloads that).
+    The prompt reads the stamp on the snapshot. It is not a snapshot field the
+    schema has to allow.
+    """
+    from sidecar.civ6_prompt_coaching import (
+        CIV6_EXPLORE_STALL_BELOW_PCT,
+        CIV6_EXPLORE_STALL_TURNS,
+        civ6_true_explored,
+    )
+
+    if not isinstance(memory, dict):
+        memory = {}
+    true_map = civ6_true_explored(snapshot if isinstance(snapshot, dict) else {})
+    if true_map is None or not isinstance(snapshot, dict):
+        return memory
+    revealed, total, percent = true_map
+    turn = _turn(snapshot)
+    tracked = memory.setdefault("tracked", {})
+    if not isinstance(tracked, dict):
+        tracked = {}
+        memory["tracked"] = tracked
+    samples = []
+    for row in tracked.get("explore") or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            sample_turn = int(row.get("turn"))
+            sample_revealed = int(row.get("revealed"))
+        except (TypeError, ValueError):
+            continue
+        if isinstance(row.get("turn"), bool) or isinstance(row.get("revealed"), bool):
+            continue
+        if sample_turn == turn or sample_revealed < 0:
+            continue
+        samples.append({"turn": sample_turn, "revealed": sample_revealed})
+    samples.append({"turn": turn, "revealed": revealed})
+    samples.sort(key=lambda row: row["turn"])
+    tracked["explore"] = samples[-24:]
+    previous = samples[-2] if len(samples) >= 2 else None
+    metric: dict[str, Any] = {
+        "turn": turn,
+        "revealed": revealed,
+        "total": total,
+        "percent": percent,
+    }
+    if previous is not None:
+        metric["since_turn"] = previous["turn"]
+        metric["delta"] = revealed - previous["revealed"]
+    baseline = None
+    since = None
+    for row in samples:
+        if row["turn"] <= turn - CIV6_EXPLORE_STALL_TURNS:
+            since = row["turn"]
+            baseline = row["revealed"]
+    if baseline is not None and since is not None:
+        stall_delta = revealed - baseline
+        metric["stall_since_turn"] = since
+        metric["stall_delta"] = stall_delta
+        metric["stalled"] = stall_delta <= 0 and percent < CIV6_EXPLORE_STALL_BELOW_PCT
+        if metric["stalled"]:
+            _append_event(
+                memory,
+                turn,
+                f"explore|stall|{since}",
+                f"Exploration stalled at {revealed} tiles ({stall_delta:+d} since T{since}), map {percent}%.",
+            )
+    snapshot["_explore_metric"] = metric
+    snapshot["_explore_samples"] = list(tracked["explore"])
+    return memory
+
+
 def note_lethargy(snapshot: dict, memory: dict[str, Any]) -> dict[str, Any]:
     """Record a quiet war, idle cities, and idle armies on the situation log.
 
