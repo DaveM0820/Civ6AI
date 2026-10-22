@@ -238,6 +238,23 @@ function Civ6Ai_Config.AutotestStopTurn()
   return tonumber(setting("AutotestStopTurn")) or 50
 end
 
+-- 0 off, 2 include a human seat whose orders already ride the gameplay script,
+-- anything else is AI seats only. Absent AutoRangedAttack stays on.
+-- Gameplay cannot read Paths; the host puts this integer on the order batch.
+function Civ6Ai_Config.AutoRangedMode(playerID)
+  local attack = setting("AutoRangedAttack")
+  if attack ~= nil and tonumber(attack) == 0 then
+    return 0
+  end
+  if tonumber(setting("AutoRangedAttackHumans")) == 1 then
+    local player = playerID ~= nil and Players[playerID] or nil
+    if player ~= nil and player.IsHuman ~= nil and player:IsHuman() then
+      return 2
+    end
+  end
+  return 1
+end
+
 function Civ6Ai_Config.PersonalityPath(playerID)
   local repo = Civ6Ai_Config.RepoRoot()
   if repo == "" then

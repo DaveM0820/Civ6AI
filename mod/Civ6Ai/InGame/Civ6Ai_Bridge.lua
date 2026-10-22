@@ -1604,6 +1604,11 @@ end
 -- to the game and no apply result was logged, it is the batch that died
 -- mid-strike. Do not run it again.
 function Civ6Ai_Bridge._DiscardUnloggedBatch(playerID, jsonText)
+  -- The stamp lives in the seat directory. Without host files there is no
+  -- saved batch to replay and no place to record that this one started.
+  if Civ6Ai_Util.CanReadHostFiles == nil or not Civ6Ai_Util.CanReadHostFiles() then
+    return false
+  end
   local fingerprint = Civ6Ai_Bridge._CommandFingerprint(jsonText)
   if fingerprint == "" then
     return false

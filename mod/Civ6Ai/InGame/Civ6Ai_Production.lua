@@ -195,6 +195,96 @@ function Civ6Ai_Production.FindExperimentTarget(playerID)
   return cityWireId, nil
 end
 
+-- Autotest only. A real human game never queues for the local seat.
+-- Highest weight the city can produce, ties broken by list order. No randomness.
+Civ6Ai_Production.PEACE_PROFILE = {
+  {"BUILDING_MONUMENT", 5},
+  {"BUILDING_GRANARY", 4},
+  {"UNIT_BUILDER", 3},
+  {"UNIT_SETTLER", 3},
+  {"UNIT_WARRIOR", 2},
+  {"UNIT_SCOUT", 1},
+}
+Civ6Ai_Production.WAR_PROFILE = {
+  {"UNIT_WARRIOR", 5},
+  {"UNIT_ARCHER", 5},
+  {"UNIT_CATAPULT", 4},
+  {"BUILDING_WALLS", 4},
+  {"UNIT_SPEARMAN", 3},
+  {"BUILDING_MONUMENT", 1},
+}
+
+function Civ6Ai_Production._SeatAtWar(playerID)
+  local player = Players[playerID]
+  local diplo = player ~= nil and player.GetDiplomacy ~= nil and player:GetDiplomacy() or nil
+  if diplo == nil or diplo.IsAtWarWith == nil then
+    return false
+  end
+  for other = 0, 63 do
+    if other ~= playerID and Players[other] ~= nil then
+      local ok, atWar = pcall(diplo.IsAtWarWith, diplo, other)
+      if ok and atWar == true then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function Civ6Ai_Production._PickProfileItem(city, profile)
+  local bestId, bestWeight = nil, -1
+  for _, row in ipairs(profile) do
+    local buildId, weight = row[1], row[2]
+    if weight > bestWeight and Civ6Ai_Production._CanQueueBuild(city, buildId) then
+      bestId, bestWeight = buildId, weight
+    end
+  end
+  return bestId
+end
+
+function Civ6Ai_Production._QueueLocalBuild(city, buildId)
+  local item, paramKey = Civ6Ai_Production._ResolveBuildItem(buildId)
+  if item == nil or paramKey == nil or CityManager == nil or CityOperationTypes == nil then
+    return false
+  end
+  local params = {}
+  params[paramKey] = item.Hash
+  params[CityOperationTypes.PARAM_INSERT_MODE] = CityOperationTypes.VALUE_EXCLUSIVE
+  local ok, result = pcall(CityManager.RequestOperation, city, CityOperationTypes.BUILD, params)
+  return ok and result ~= false
+end
+
+function Civ6Ai_Production.AutoqueueEmptyCities(playerID)
+  if Civ6Ai_Config == nil or Civ6Ai_Config.IsAutotest == nil or not Civ6Ai_Config.IsAutotest() then
+    return 0
+  end
+  if Game == nil or Game.GetLocalPlayer == nil or Game.GetLocalPlayer() ~= playerID then
+    return 0
+  end
+  local player = Players[playerID]
+  local cities = player ~= nil and player.GetCities ~= nil and player:GetCities() or nil
+  if cities == nil or cities.Members == nil then
+    return 0
+  end
+  local profile = Civ6Ai_Production._SeatAtWar(playerID) and Civ6Ai_Production.WAR_PROFILE
+    or Civ6Ai_Production.PEACE_PROFILE
+  local queued = 0
+  for _, city in cities:Members() do
+    local current = Civ6Ai_Production._GetCityProduction(city)
+    if current == nil then
+      local buildId = Civ6Ai_Production._PickProfileItem(city, profile)
+      if buildId ~= nil and Civ6Ai_Production._QueueLocalBuild(city, buildId) then
+        queued = queued + 1
+        if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
+          Civ6Ai_Util.Log("production|autoqueue|player=" .. tostring(playerID)
+            .. "|city=" .. tostring(city:GetID()) .. "|build=" .. buildId)
+        end
+      end
+    end
+  end
+  return queued
+end
+
 function Civ6Ai_Production.QueueProduction(playerID, args)
   return false, "production_requires_local_player"
 end

@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "testbed"))
 
 from civ6_ui_automation import (  # noqa: E402
+    lan_load_phase,
     menu_blob_has,
     ocr_blob_is_loading_or_ingame,
     ocr_blob_is_main_menu,
@@ -74,6 +75,16 @@ class LoadingOrIngameBlobTests(unittest.TestCase):
     def test_loading_screen(self):
         blob = "loading world"
         self.assertTrue(ocr_blob_is_loading_or_ingame(blob))
+
+
+class LanLoadPhaseTests(unittest.TestCase):
+    def test_load_game_screen_is_not_the_button(self):
+        self.assertEqual("load_game", lan_load_phase("back oad game"))
+        self.assertEqual("autosaves", lan_load_phase("back load game utosaves"))
+        self.assertEqual("autosaves", lan_load_phase("auto save list"))
+        self.assertEqual("staging", lan_load_phase("staging room are you ready"))
+        self.assertEqual("lan", lan_load_phase("local network games join game refresh"))
+        self.assertEqual("other", lan_load_phase("single player multiplayer"))
 
 
 if __name__ == "__main__":

@@ -422,7 +422,7 @@ def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any])
             if not item or str(item).upper() in ("NONE", "NULL"):
                 lines.append(pipeline._wire_line(
                     f"{name}.currentProduction",
-                    "NONE (queue empty — choose from the catalog; nothing will be queued for you)",
+                    "NONE (queue empty)",
                 ))
             continue
         lines.append(pipeline._wire_line(f"{name}.population", int(city.get("population", 1))))
@@ -449,7 +449,7 @@ def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any])
         else:
             lines.append(pipeline._wire_line(
                 f"{name}.currentProduction",
-                "NONE (queue empty — choose from the catalog; nothing will be queued for you)",
+                "NONE (queue empty)",
             ))
 
 
@@ -587,7 +587,26 @@ def _civ6_unit_tokens(snapshot: dict[str, Any]) -> dict[str, list[str]]:
             tokens[:0] = [] if "MoveTo(x,y)" in tokens else ["MoveTo(x,y)"]
     for unit_id, tokens in out.items():
         tokens.sort(key=_token_sort_key)
+        out[unit_id] = _cap_attack_tokens(tokens)
     return out
+
+
+_ATTACK_DMG_RE = re.compile(r"~(\d+)dmg")
+_ATTACK_TOKEN_CAP = 4
+
+
+def _attack_token_damage(token: str) -> int:
+    match = _ATTACK_DMG_RE.search(token)
+    return int(match.group(1)) if match else 0
+
+
+def _cap_attack_tokens(tokens: list[str]) -> list[str]:
+    """Keep the four AttackTo options with the highest forecast damage. The rest stay legal if typed."""
+    attacks = [token for token in tokens if token.startswith("AttackTo(")]
+    if len(attacks) <= _ATTACK_TOKEN_CAP:
+        return tokens
+    best = set(sorted(attacks, key=lambda token: (-_attack_token_damage(token), token))[:_ATTACK_TOKEN_CAP])
+    return [token for token in tokens if not token.startswith("AttackTo(") or token in best]
 
 
 _DISTRICT_AT = re.compile(r"^(DISTRICT_[A-Z0-9_]+)@\((\d+),(\d+)\)$")
@@ -669,8 +688,9 @@ def city_strike_prompt_lines(snapshot: dict[str, Any]) -> list[str]:
         if not isinstance(city, dict):
             continue
         raw = (tokens.get(str(city.get("city_id") or "")) or {}).get("rangeStrike") or []
+        ranked = sorted(raw, key=lambda token: (-_attack_token_damage(str(token)), str(token)))
         coords: list[str] = []
-        for token in raw:
+        for token in ranked[:4]:
             pair = _plain_strike_coord(str(token))
             if pair and pair not in coords:
                 coords.append(pair)
@@ -807,8 +827,9 @@ def _civ6_required_rows(snapshot: dict[str, Any]) -> list[tuple[str, str]]:
         unit_id = unit.get("unit_id")
         if not isinstance(unit_id, str):
             continue
-        needs = unit.get("needs_orders") is True or unit.get("promotion_ready")
         options = _required_unit_options(unit_tokens.get(unit_id, []))
+        has_attack = any(str(option).startswith("AttackTo(") for option in options)
+        needs = unit.get("needs_orders") is True or unit.get("promotion_ready") or has_attack
         if not needs or not options:
             continue
         rows.append((f"{wire_ids.get(unit_id, unit_id)}.command", " | ".join(options)))
@@ -1141,6 +1162,10 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
             "units.inventory", ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
         ))
         wire_ids = pipeline._build_unit_wire_id_map(units)
+        lines.append(pipeline._wire_line(
+            "unit.ids",
+            " | ".join(wire_ids.get(str(unit.get("unit_id")), "unit") for unit in units),
+        ))
         unit_tokens = _civ6_unit_tokens(context)
         for title, group in (("Military", [u for u in units if not _is_civilian(u)]),
                              ("Civilian", [u for u in units if _is_civilian(u)])):
@@ -1843,6 +1868,10 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "- Attacks: AttackTo(x,y) options appear on the unit's own row only when a visible enemy (a civ you are at "
         "war with, or barbarians) is in reach — adjacent for melee, within range for ranged units.",
         *(
+            ["- The host fires any ranged shot or city strike you leave unused."]
+            if _offers_ranged_or_strike(snapshot) else []
+        ),
+        *(
             ["- A city with currentProduction set: leave cityName.production out unless you really mean to switch."]
             if _has_queue_production(snapshot) else []
         ),
@@ -1851,8 +1880,8 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     ]
     if any(isinstance(u, dict) and isinstance(u.get("goal"), dict) for u in snapshot.get("your_units") or []):
         resp.append(
-            "- A unit with a goal line is already walking to that tile and is left out of REQUIRED COMMANDS "
-            "until it arrives or the route fails (impassable or no_path). Order MoveTo only to redirect it."
+            "- A unit with a goal line is already walking. If its row lists AttackTo, that attack is required. "
+            "Order MoveTo only to redirect a unit that has no attack."
         )
     if any(isinstance(c, dict) and c.get("kind") == "found_city" for c in snapshot.get("legal_commands", [])):
         resp.append("- FoundCity is optional: prefer founding this turn on a decent tile (fresh water/coast, not "
@@ -1976,8 +2005,22 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     return "\n".join(resp) + "\n\n" + "\n".join(opt) + "\n\n" + "\n".join(req)
 
 
+def _offers_ranged_or_strike(snapshot: dict[str, Any]) -> bool:
+    for command in snapshot.get("legal_commands") or []:
+        if not isinstance(command, dict):
+            continue
+        if command.get("kind") == "city_attack":
+            return True
+        if command.get("kind") in ("attack_target", "range_attack", "melee_attack"):
+            fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+            if fixed.get("ranged") is True:
+                return True
+    return False
+
+
 def build_civ6_wire_prompt(context: dict[str, Any], map_stats: list[str] | None = None) -> str:
     """Sectioned Civ VI prompt in the Civ5 layout (everything above RESPONSE INSTRUCTIONS)."""
+    combat_wire.retain_runnable_attacks(context)
     sections = [
         pipeline._wire_section("GAME", _game_section(context, map_stats)),
         pipeline._wire_section("EMPIRE", _empire_section(context)),

@@ -350,12 +350,65 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertEqual([r["kind"] for r in res[:3]], [31, 7, 1])
         attack = next(r for r in res if r["kind"] == 7)
         self.assertTrue(attack["ok"], attack["reason"])
-        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
+        # Melee 35, then the idle archer's ranged auto-shot for 30.
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 65)
+        self.assertEqual(self.rt.eval("Players[2].units[2].dmg"), 0)
         logs = list(self.rt.eval("logs").values())
         self.assertTrue(any(
             "CIV6AI|attacks|player=2|turn=6|executed=1|failed=1|unit=1|city=0" in line
             for line in logs
         ), logs)
+        self.assertTrue(any("CIV6AI|attacks|auto|player=2|turn=6|unit=1|city=0" in line for line in logs), logs)
+        self.assertTrue(any("AUTO_U_9_10_11" in line for line in logs), logs)
+
+    def test_move_onto_enemy_attacks_when_it_can(self):
+        self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,3,10,11,0))")
+        self.order(0, K=1, P=2, U=7, X=10, Y=11, S=40)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertTrue(str(self.last()["reason"]).startswith("attack_instead:"), self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
+        self.order(0, K=1, P=2, U=9, X=10, Y=11, S=41)
+        self.assertTrue(str(self.last()["reason"]).startswith("attack_instead:"), self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 65)
+        self.rt.execute(
+            "Map.GetPlot(10,11):SetOwner(2); "
+            "GameInfo.Units[2] = {BuildCharges=3, Combat=0}; "
+            "table.insert(Players[2].units, MkUnit(2,40,8,10,2))"
+        )
+        self.order(0, K=1, P=2, U=40, X=10, Y=11, S=42)
+        self.assertFalse(self.last()["ok"])
+        self.assertIn("cannot attack", str(self.last()["reason"]))
+        self.rt.execute("table.insert(Players[1].units, MkUnit(1,5,15,15,0))")
+        self.order(0, K=1, P=2, U=8, X=15, Y=15, S=43)
+        self.assertFalse(self.last()["ok"])
+        self.assertTrue(str(self.last()["reason"]).startswith("enemy_on_tile:"), self.last()["reason"])
+
+    def test_ranged_auto_skips_melee_humans_and_lethal_forecasts(self):
+        self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,3,10,11,0))")
+        self.order(0, K=1, P=2, U=7, X=9, Y=10, S=50, B=1, J=1, N=1, T=6, AR=0)
+        self.turn_start(2, turn=6)
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 0)
+        self.rt.execute(
+            "Players[0].units[1].typ = 1; Players[0].war = {[1]=true}; "
+            "table.insert(Players[1].units, MkUnit(1,6,6,6,0))"
+        )
+        self.order(0, K=2, P=0, I=3, S=52, B=3, J=1, N=1, T=6, AR=2)
+        self.turn_start(0, turn=6)
+        logs = " ".join(list(self.rt.eval("logs").values()))
+        self.assertIn("attacks|auto|player=0", logs)
+        self.rt.execute("Players[0].units[1].moves = 2")
+        self.order(0, K=2, P=0, I=4, S=55, B=6, J=1, N=1, T=7)
+        self.turn_start(0, turn=7)
+        human_logs = [line for line in list(self.rt.eval("logs").values()) if "attacks|auto|player=0" in line]
+        self.assertEqual(1, len(human_logs), human_logs)
+        self.rt.execute(
+            "CombatManager.SimulateAttackVersus = function(a, d, ctype) return {A={dmg=100}, D={dmg=30}} end; "
+            "Players[2].units[3].moves = 2"
+        )
+        self.order(0, K=2, P=2, I=3, S=53, B=4, J=1, N=1, T=8)
+        self.turn_start(2, turn=8)
+        logs = list(self.rt.eval("logs").values())
+        self.assertTrue(any("skipped=1" in line and "attacks|auto|player=2" in line for line in logs), logs)
 
     def test_refused_attack_batch_logs_why_it_did_not_run(self):
         self.order(0, K=7, P=2, U=7, X=10, Y=11, S=1, B=9, J=1, N=1, T=4)

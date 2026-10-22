@@ -55,6 +55,7 @@ Athens.currentProduction = UNIT_SPEARMAN
 Corinth.population = 3
 Corinth.currentProduction = BUILDING_GRANARY
 units.inventory = Scout 1, Settler 1, Spearman 1
+unit.ids = scout_1 | settler_1 | spearman_1
 # == Units — Military ==
 # SCOUT legalCommands = MoveTo(x,y)
 # SPEARMAN legalCommands = MoveTo(x,y), Fortify, Skip

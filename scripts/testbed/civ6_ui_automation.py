@@ -2388,6 +2388,25 @@ def start_lan_test_game(win: WindowInfo) -> list[str]:
         pin_civ_topmost(win.hwnd, False)
 
 
+def lan_load_phase(blob: str) -> str:
+    """Which LAN-load screen this OCR blob is: staging, autosaves, load_game, lan, or other.
+
+    'Oad Game' is the Load Game title with a dropped first letter. That screen is
+    load_game, not a button to click again.
+    """
+    text = blob if isinstance(blob, str) else ""
+    low = _normalize(text)
+    if menu_blob_has(text, "staging room"):
+        return "staging"
+    if "autosave" in low or "auto save" in low or "utosave" in low:
+        return "autosaves"
+    if (menu_blob_has(text, "load game") or "oad game" in low) and "back" in low:
+        return "load_game"
+    if menu_blob_has(text, "local network games") or ("join game" in low and "refresh" in low):
+        return "lan"
+    return "other"
+
+
 def load_lan_autosave(win: WindowInfo) -> list[str]:
     """Main menu -> Multiplayer -> Local Network -> Load Game -> newest autosave -> Ready."""
     steps: list[str] = []
@@ -2407,13 +2426,13 @@ def load_lan_autosave(win: WindowInfo) -> list[str]:
 def _load_lan_autosave_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
     entry = ocr_window(win)
     blob = " ".join(t.lower() for t, _, _ in entry)
-    on_lan_browser = menu_blob_has(blob, "local network games") or ("join game" in blob and "refresh" in blob)
-    on_staging = menu_blob_has(blob, "staging room")
-    on_load = menu_blob_has(blob, "autosaves") or (menu_blob_has(blob, "load game") and "back" in blob)
-    if detect_menu(win) == "single_player" and not on_lan_browser and not on_staging and not on_load:
+    phase = lan_load_phase(blob)
+    if detect_menu(win) == "single_player" and phase == "other":
         press_escape(win)
         time.sleep(0.5)
-    if not on_lan_browser and not on_staging and not on_load:
+        blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
+        phase = lan_load_phase(blob)
+    if phase == "other":
         opened = _open_multiplayer_flyout(win)
         if not opened:
             raise RuntimeError("Could not open Multiplayer panel")
@@ -2422,20 +2441,40 @@ def _load_lan_autosave_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
             raise RuntimeError("Could not click Local Network")
         steps.append(f"clicked_{hit}")
         time.sleep(1.6)
-    blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
-    if menu_blob_has(blob, "staging room"):
+        blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
+        phase = lan_load_phase(blob)
+    if phase == "staging":
         steps.append("already_staging")
         return _ready_lan_staging(win, steps)
-    if not menu_blob_has(blob, "autosaves"):
+    # Already on Load Game: the title is "Load Game". Clicking it hits the title, not a button.
+    if phase == "lan":
         if not click_text(win, "Load Game", timeout=8.0, exact=True, prefixes=("oad game",), post_delay=0.6):
             raise RuntimeError("Could not click Load Game")
         steps.append("clicked_load_game")
         time.sleep(1.0)
-    blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
-    if not menu_blob_has(blob, "autosaves"):
-        if not click_text(win, "Autosaves", timeout=6.0, exact=False, prefixes=("utosave",), post_delay=0.5):
-            raise RuntimeError("Could not open Autosaves")
-        steps.append("clicked_autosaves")
+        blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
+        phase = lan_load_phase(blob)
+    if phase != "autosaves":
+        opened_saves = click_text(
+            win, "Autosaves", timeout=6.0, exact=False,
+            prefixes=("utosave", "autosave", "auto save"), prefer_top=True, post_delay=0.5,
+        )
+        if not opened_saves:
+            press_escape(win)
+            raise_civ_via_taskbar()
+            focus_game(win.hwnd)
+            click_civ_title_bar(win)
+            pin_civ_topmost(win.hwnd, True)
+            time.sleep(0.4)
+            opened_saves = click_text(
+                win, "Autosaves", timeout=6.0, exact=False,
+                prefixes=("utosave", "autosave", "auto save"), prefer_top=True, post_delay=0.5,
+            )
+            if not opened_saves:
+                raise RuntimeError("Could not open Autosaves")
+            steps.append("clicked_autosaves_retry")
+        else:
+            steps.append("clicked_autosaves")
         time.sleep(0.8)
     else:
         steps.append("already_autosaves")

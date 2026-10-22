@@ -224,5 +224,26 @@ class BlobSplitAcrossReadsTests(unittest.TestCase):
         self.assertEqual(len(b"noise line\n"), incomplete_blob_offset(partial))
         self.assertEqual(3, incomplete_blob_offset(b"ab\ncd"))
 
+    def test_failed_apply_append_uses_the_session_in_the_path(self):
+        from civ6_lua_log_bridge import record_apply_results
+
+        row = {
+            "event": "apply_result", "turn": 4, "player_id": "PLAYER_1",
+            "command_id": "CMD_1", "kind": "move_unit", "ok": False, "reason": "impassable",
+        }
+        line = json.dumps(row, separators=(",", ":"))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "sessions" / "sess-9" / "PLAYER_1" / "apply-results.jsonl"
+            chunk = (
+                f"CIV6AI|io|append_failed|{path}|{line[:12]}\n"
+                f"CIV6AI|jsonl|{line}\n"
+            )
+            self.assertEqual(1, record_apply_results(root, chunk, [], ""))
+            saved = path.read_text(encoding="utf-8")
+            self.assertIn("CMD_1", saved)
+            self.assertEqual(0, record_apply_results(root, chunk, [], ""))
+
+
 if __name__ == "__main__":
     unittest.main()

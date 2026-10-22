@@ -2888,6 +2888,10 @@ def chat_target_rivals(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         if not player_is_major_civ(rival) or not rival_has_met(rival):
             continue
+        self_name = str(((snapshot.get("personality") or {}).get("leader_name")) or "").strip().lower()
+        rival_name = _rival_leader_name(rival).strip().lower()
+        if self_name and rival_name == self_name:
+            continue
         seen.add(player_id)
         out.append(rival)
     return out

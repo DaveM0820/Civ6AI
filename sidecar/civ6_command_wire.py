@@ -356,6 +356,35 @@ def _unit_maps(snapshot: dict[str, Any]) -> dict[str, str]:
     return {wire: unit_id for unit_id, wire in wire_ids.items()}
 
 
+_UNIT_ALIAS_RE = re.compile(r"^([a-z]+)_?0*(\d+)$")
+
+
+def resolve_unit_alias(head: str, units: dict[str, str]) -> str | None:
+    """Map Builder_1, builder-1, builder1, and builder_01 onto a real wire id.
+
+    An index past the units of that type stays unresolved: builder_10 is not
+    the only builder.
+    """
+    raw = re.sub(r"[\s\-]+", "_", str(head or "").strip().lower())
+    raw = re.sub(r"_+", "_", raw).strip("_")
+    if raw in units:
+        return raw
+    match = _UNIT_ALIAS_RE.match(raw)
+    if match is None:
+        return None
+    prefix, number = match.group(1), int(match.group(2))
+    canonical = f"{prefix}_{number}"
+    if canonical in units:
+        return canonical
+    same = sorted(
+        name for name in units
+        if name.startswith(prefix + "_") and name[len(prefix) + 1:].isdigit()
+    )
+    if 1 <= number <= len(same):
+        return same[number - 1]
+    return None
+
+
 def _city_maps(snapshot: dict[str, Any]) -> dict[str, str]:
     out: dict[str, str] = {}
     for city in snapshot.get("your_cities", []) or []:
@@ -597,11 +626,15 @@ def _self_tile_command(snapshot: dict[str, Any], unit_id: str) -> str | None:
                 "affected_ids": [unit_id],
                 "runtime_status": "tested",
             })
-    LAST_UNRESOLVED.append(
-        f"dropped: MoveTo your own tile for {unit_id} does nothing. "
-        "Order Fortify to hold, or choose a different tile."
-    )
-    return None
+    return _append_legal(snapshot, {
+        "command_id": f"CMD_skip_{unit_id}",
+        "kind": "unit_skip",
+        "description": f"Skip {unit_id}",
+        "fixed_arguments": {"unit_id": unit_id},
+        "parameter_domains": {},
+        "affected_ids": [unit_id],
+        "runtime_status": "tested",
+    })
 
 
 def _pick_improve(improves: list[tuple[str, str]], value: Any, coord: Any) -> str | None:
@@ -632,6 +665,24 @@ def _hex_dist(x1: int, y1: int, x2: int, y2: int) -> int:
     return max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[2] - b[2]))
 
 
+def _legal_attack_at(snapshot: dict[str, Any], unit_id: str, x: int, y: int) -> str | None:
+    """The offered AttackTo for this unit and tile, when the game already listed one."""
+    for command in snapshot.get("legal_commands") or []:
+        if not isinstance(command, dict):
+            continue
+        if command.get("kind") not in ("attack_target", "range_attack", "melee_attack"):
+            continue
+        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+        if fixed.get("unit_id") != unit_id:
+            continue
+        try:
+            if int(fixed.get("target_x")) == x and int(fixed.get("target_y")) == y:
+                return str(command.get("command_id"))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 def _synthesize_far_move(
     snapshot: dict[str, Any],
     unit_id: str,
@@ -653,6 +704,10 @@ def _synthesize_far_move(
     here = _plot_xy_of_unit(unit)
     if here == (x, y):
         return _self_tile_command(snapshot, unit_id)
+    if intent == INTENT_MOVE:
+        attack = _legal_attack_at(snapshot, unit_id, x, y)
+        if attack:
+            return attack
     if intent == INTENT_MOVE and _is_listed_settle_site(snapshot, unit, x, y):
         intent = INTENT_FOUND
     cmd_id = f"CMD_{unit_id}_moveto_{x}_{y}"
@@ -879,6 +934,9 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
     if not isinstance(response, dict) or not isinstance(snapshot, dict):
         return response
     LAST_UNRESOLVED.clear()
+    from sidecar import civ6_combat_wire as combat_wire
+
+    combat_wire.retain_runnable_attacks(snapshot)
     units = _unit_maps(snapshot)
     cities = _city_maps(snapshot)
     out: dict[str, Any] = {}
@@ -898,6 +956,17 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
             from sidecar import civ6_priorities as prio
 
             wanted, problems = prio.parse_reply(value)
+            if wanted is not None:
+                from sidecar import civ6_combat_wire as combat_wire
+
+                if combat_wire.war_active(snapshot):
+                    bankruptcy = next(c["id"] for c in prio.CATEGORIES if c["key"] == "fix_bankruptcy")
+                    level = wanted.get(bankruptcy)
+                    if isinstance(level, int) and level > 2:
+                        wanted[bankruptcy] = 2
+                        problems.append(
+                            "fix_bankruptcy capped at 2 while at war; level 3 blocks military production"
+                        )
             unresolved.extend(f"{key}:{p}" for p in problems)
             if wanted is not None and prio.priorities_supported(snapshot):
                 legal_ids = {c.get("command_id") for c in snapshot.get("legal_commands", []) if isinstance(c, dict)}
@@ -919,6 +988,10 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
             unresolved.extend(diplo_notes)
             continue
         head, _, prop = key.partition(".")
+        if prop and head not in units and head.lower() not in cities:
+            alias = resolve_unit_alias(head, units)
+            if alias is not None:
+                head = alias
         if prop.lower() in ("settle",) and head in units:
             coord = _COORD_RE.search(str(value))
             if coord:

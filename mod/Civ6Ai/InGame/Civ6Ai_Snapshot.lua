@@ -4062,6 +4062,17 @@ function Civ6Ai_Snapshot._BuildCombat(playerID)
     row.target_kind = kind
     row.target_name = target.name
     row.target_owner = target.owner
+    -- A unit standing on an enemy city is that city's defender. Name the city.
+    if kind == "unit" then
+      for _, c in ipairs(cities) do
+        if c.x == target.x and c.y == target.y and c.name ~= nil then
+          row.target_name = c.name
+          row.target_kind = "city"
+          row.target_owner = c.owner or row.target_owner
+          break
+        end
+      end
+    end
     row.ranged = ranged
     row.distance = dist
     row.needs_move = dist > reachNow

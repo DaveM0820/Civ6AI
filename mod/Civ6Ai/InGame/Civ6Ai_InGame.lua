@@ -83,9 +83,16 @@ function Civ6Ai_InGame._WatchTurnStarts()
   end
 end
 
+function Civ6Ai_InGame._PulseTurn(playerID)
+  if Civ6Ai_Production ~= nil and Civ6Ai_Production.AutoqueueEmptyCities ~= nil then
+    pcall(Civ6Ai_Production.AutoqueueEmptyCities, playerID)
+  end
+  Civ6Ai_Bridge.RunTurnPulse(playerID)
+end
+
 function Civ6Ai_InGame.PulseAfterTurnStart(playerID, turn)
   if Civ6Ai_InGame._TurnStartDone(playerID, turn) then
-    Civ6Ai_Bridge.RunTurnPulse(playerID)
+    Civ6Ai_InGame._PulseTurn(playerID)
     return
   end
   Civ6Ai_InGame._waitingTurnStart = Civ6Ai_InGame._waitingTurnStart or {}
@@ -106,7 +113,7 @@ function Civ6Ai_InGame.PulseAfterTurnStart(playerID, turn)
       Civ6Ai_Util.Log("bridge|local_pulse_after_turn_start|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
         .. "|complete=" .. tostring(done) .. "|ticks=" .. tostring(ticks))
       if Game.GetCurrentGameTurn() == turn then
-        Civ6Ai_Bridge.RunTurnPulse(playerID)
+        Civ6Ai_InGame._PulseTurn(playerID)
       end
       return false
     end

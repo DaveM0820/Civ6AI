@@ -229,6 +229,10 @@ def render_paths_lua(s: dict) -> str:
         f"  SeatSnapshotAt = {_lua_str(s.get('seat_snapshot_at') or 'host_end')},\n"
         f"  BuildStamp = {_lua_str(s.get('build_stamp') or '')},\n"
         f"  SeatTurnCapSeconds = {int(s.get('seat_turn_cap_seconds') or s.get('sidecar_timeout_seconds') or 180)},\n"
+        "  -- 0 disables the ranged auto-attack fallback. 1 (default) fires it for AI seats.\n"
+        "  AutoRangedAttack = 1,\n"
+        "  -- 1 also fires it for a human seat whose orders already go through gameplay.\n"
+        "  AutoRangedAttackHumans = 0,\n"
         "}\n"
     )
 

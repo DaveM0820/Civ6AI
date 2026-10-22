@@ -583,6 +583,17 @@ function Civ6Ai_Util.AppendJsonLine(path, payload)
   if Civ6Ai_Util.AppendTextLine(path, line) then
     return true
   end
-  Civ6Ai_Util.Log("jsonl|" .. line)
+  -- The file write failed. Log a short copy: empire telemetry truncates the line
+  -- before the bridge can parse it, and the bridge does not read empire anyway.
+  local logged = payload
+  if type(payload) == "table" and payload.empire ~= nil then
+    logged = {}
+    for key, value in pairs(payload) do
+      if key ~= "empire" then
+        logged[key] = value
+      end
+    end
+  end
+  Civ6Ai_Util.Log("jsonl|" .. Civ6Ai_Util.EncodeJsonObject(logged))
   return false
 end
