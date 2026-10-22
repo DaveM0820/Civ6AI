@@ -74,7 +74,7 @@ class RepeatFailureTests(unittest.TestCase):
         snap["history"]["command_results"] = [{
             "kind": results.KIND_FAILED,
             "turn": 36,
-            "summary": "warrior_1 MoveTo(9,9): FAILED — the game found no route to that tile (water, mountains, or closed borders in the way)",
+            "summary": "warrior_1 MoveTo(9,9): FAILED — no path: the game found no route to that tile (water or closed borders in the way)",
             "reason": "no_path",
             "order_kind": "move_unit",
             "unit": "warrior_1",

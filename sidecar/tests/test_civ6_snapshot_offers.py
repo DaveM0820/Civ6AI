@@ -435,7 +435,10 @@ class SnapshotLuaOffersTests(unittest.TestCase):
             Map = {
               GetPlotDistance = function(ax, ay, bx, by) return math.abs(ax - bx) + math.abs(ay - by) end,
               GetPlot = function(x, y)
-                return { GetX = function() return x end, GetY = function() return y end }
+                return {
+                  GetX = function() return x end, GetY = function() return y end,
+                  GetIndex = function() return x * 1000 + y end,
+                }
               end,
               GetNeighborPlots = function(x, y, dist)
                 return { { GetX = function() return x + 1 end, GetY = function() return y end } }
@@ -518,7 +521,7 @@ class SnapshotLuaOffersTests(unittest.TestCase):
             end }
             local scientist = {
               GetType = function() return 3 end, GetX = function() return 4 end, GetY = function() return 4 end,
-              GetGreatPerson = function() return {} end,
+              GetGreatPerson = function() return { Activate = function() end } end,
             }
             local general = {
               GetType = function() return 4 end, GetX = function() return 4 end, GetY = function() return 4 end,
@@ -529,7 +532,10 @@ class SnapshotLuaOffersTests(unittest.TestCase):
             }
             Cities = { GetCityInPlot = function() return ownCity end }
             Game = { GetTradeManager = function()
-              return { CanStartRoute = function(_, oOwner, oId, dOwner, dId) return dId == 131072 end }
+              return {
+                CanCreateTradeRoute = function(_, owner, fromIdx, toIdx) return toIdx == 5004 end,
+                CreateTradeRoute = function() return true end,
+              }
             end }
             APOSTLE, GURU, SCIENTIST, GENERAL, TRADER = apostle, guru, scientist, general, trader
             """
@@ -564,6 +570,13 @@ class SnapshotLuaOffersTests(unittest.TestCase):
         self.assertEqual("trade_route", trade[0][0])
         self.assertEqual("CITY_131072", trade[0][1]["city_id"])
         self.assertEqual(5, trade[0][1]["target_x"])
+        self.lua.execute(
+            "Game = { GetTradeManager = function() return { CanStartRoute = function() return true end } end }"
+        )
+        self.assertEqual([], kinds_for(self.lua.globals().TRADER, "UNIT_T", snap._AddTradeRouteCommands))
+        self.lua.execute("SCIENTIST.GetGreatPerson = function() return {} end")
+        retired = kinds_for(self.lua.globals().SCIENTIST, "UNIT_S", snap._AddActivateCommand)
+        self.assertEqual([("activate_great_person", {"unit_id": "UNIT_S", "retire": 1})], retired)
 
     def test_embark_site_is_recorded_when_nothing_is_walkable(self):
         self.lua.execute(

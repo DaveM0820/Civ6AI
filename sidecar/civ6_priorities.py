@@ -297,7 +297,8 @@ def prompt_lines(snapshot: dict) -> list[str]:
         f"Current: {_fmt(current_levels(snapshot))}",
         "Levels: 1 = light, 2 = strong, 3 = all-in (almost nothing else gets built).",
         f"Pick at most ONE posture: {posture}",
-        f"Pick at most {MAX_FOCUS} focuses: {focus}",
+        f"Pick at most {MAX_FOCUS} focuses. The maximum is {MAX_FOCUS}; any focus past that is rejected "
+        f"and not applied: {focus}",
         f'To change them, add the optional key "{REPLY_KEY}" with your COMPLETE new set, e.g. '
         f'"{REPLY_KEY}": "war:2, production:1, expansion:1". Anything you leave out is switched off. '
         f'"{REPLY_KEY}": "none" switches all off. Omit the key to keep the current set.',

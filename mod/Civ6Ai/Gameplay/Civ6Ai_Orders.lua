@@ -339,6 +339,12 @@ function Civ6Ai_Orders._PlotEnterOk(owner, unit, x, y)
   if plot == nil then
     return false, "plot_not_found"
   end
+  -- A mountain destination must say impassable, not the vaguer no_path that
+  -- pathfinding returns when it refuses to route onto the peak.
+  if (plot.IsImpassable ~= nil and plot:IsImpassable() == true)
+      or (plot.IsMountain ~= nil and plot:IsMountain() == true) then
+    return false, "impassable"
+  end
   return true, ""
 end
 
@@ -1966,32 +1972,30 @@ function Gov.MakeTradeRoute(owner, unitId, destCityId)
     return false, "stale_city_id:" .. tostring(destCityId)
   end
   local tm = Game.GetTradeManager ~= nil and Game.GetTradeManager() or nil
-  if tm ~= nil then
-    local origin = Map.GetPlot(unit:GetX(), unit:GetY())
-    local destPlot = Map.GetPlot(dest:GetX(), dest:GetY())
-    local fromIdx = origin ~= nil and call(origin, "GetIndex") or nil
-    local toIdx = destPlot ~= nil and call(destPlot, "GetIndex") or nil
-    if fromIdx ~= nil and toIdx ~= nil and tm.CanCreateTradeRoute ~= nil then
-      local okCan, can = pcall(tm.CanCreateTradeRoute, tm, owner, fromIdx, toIdx)
-      if okCan and can == false then
-        return false, "cannot_start_trade_route"
-      end
-    end
-    if fromIdx ~= nil and toIdx ~= nil and tm.CreateTradeRoute ~= nil then
-      local okMake, made = pcall(tm.CreateTradeRoute, tm, owner, fromIdx, toIdx)
-      if okMake and made ~= false then
-        pcall(UnitManager.FinishMoves, unit)
-        return true, "trade_route:city=" .. tostring(destCityId)
-      end
-      log("trade_fallback|CreateTradeRoute|" .. tostring(made))
-    end
+  if tm == nil or tm.CanCreateTradeRoute == nil or tm.CreateTradeRoute == nil then
+    return false, "trade_route_unavailable:no_trade_manager"
   end
-  local okOp, whyOp = startOperation(unit, "UNITOPERATION_MAKE_TRADE_ROUTE", { x = dest:GetX(), y = dest:GetY() })
-  if okOp then
-    return true, whyOp .. ":city=" .. tostring(destCityId)
+  local origin = Map.GetPlot(unit:GetX(), unit:GetY())
+  local destPlot = Map.GetPlot(dest:GetX(), dest:GetY())
+  local fromIdx = origin ~= nil and call(origin, "GetIndex") or nil
+  local toIdx = destPlot ~= nil and call(destPlot, "GetIndex") or nil
+  if fromIdx == nil or toIdx == nil then
+    return false, "trade_route_unavailable:no_plot"
   end
-  log("trade_unavailable|" .. tostring(whyOp))
-  return false, "trade_route_unavailable:" .. tostring(whyOp)
+  -- Same call the snapshot uses before it offers TradeRoute. CanStartRoute
+  -- (city ids) is a different API and was true for routes this call rejects.
+  -- Gameplay has no UNITOPERATION_MAKE_TRADE_ROUTE, so do not fall through to it.
+  local okCan, can = pcall(tm.CanCreateTradeRoute, tm, owner, fromIdx, toIdx)
+  if not okCan or can ~= true then
+    return false, "cannot_start_trade_route"
+  end
+  local okMake, made = pcall(tm.CreateTradeRoute, tm, owner, fromIdx, toIdx)
+  if okMake and made ~= false then
+    pcall(UnitManager.FinishMoves, unit)
+    return true, "trade_route:city=" .. tostring(destCityId)
+  end
+  log("trade_unavailable|CreateTradeRoute|" .. tostring(made))
+  return false, "trade_route_unavailable:" .. tostring(made)
 end
 
 -- Explore: RequestOperation does not exist in gameplay script, so walk the unit
@@ -2091,29 +2095,19 @@ function Gov.ActivateGreatPerson(owner, unitId, mode)
     end
     return true, "retired"
   end
+  -- Activate is the gameplay great-person action. UNITOPERATION_GREAT_PERSON_HEAL
+  -- is not available from a gameplay script; falling through to it reported
+  -- every activate as "great person heal unavailable".
   local gp = call(unit, "GetGreatPerson")
-  if gp ~= nil and gp.Activate ~= nil then
-    local ok, err = pcall(gp.Activate, gp)
-    if ok then
-      return true, "activate_gp"
-    end
-    log("activate_fallback|GreatPerson.Activate|" .. tostring(err))
+  if gp == nil or gp.Activate == nil then
+    return false, "activate_unavailable:no_activate"
   end
-  if UnitManager ~= nil and UnitManager.RequestCommand ~= nil and UnitCommandTypes ~= nil then
-    local cmd = UnitCommandTypes.UNITCOMMAND_ACTIVATE or UnitCommandTypes.ACTIVATE
-    if cmd ~= nil then
-      local ok, err = pcall(UnitManager.RequestCommand, unit, cmd)
-      if ok then
-        return true, "activate_gp:command"
-      end
-      log("activate_fallback|RequestCommand|" .. tostring(err))
-    end
+  local ok, err = pcall(gp.Activate, gp)
+  if ok then
+    return true, "activate_gp"
   end
-  local okOp, whyOp = startOperation(unit, "UNITOPERATION_GREAT_PERSON_HEAL", {})
-  if okOp then
-    return true, whyOp
-  end
-  return false, "activate_unavailable:" .. tostring(whyOp)
+  log("activate_unavailable|GreatPerson.Activate|" .. tostring(err))
+  return false, "activate_unavailable:" .. tostring(err)
 end
 
 local function cityById(owner, cityId)

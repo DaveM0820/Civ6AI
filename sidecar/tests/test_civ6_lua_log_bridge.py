@@ -125,8 +125,17 @@ class Civ6LuaLogBridgeTests(unittest.TestCase):
         import threading
         import time
         import civ6_lua_log_bridge as bridge
+        import civ6_sidecar_jobs as seat_jobs
 
         bridge._PROCESSED_BLOBS.clear()
+
+        # A shut-down pool of the same size must not swallow this batch.
+        if seat_jobs._POOL is not None:
+            try:
+                seat_jobs._POOL.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                seat_jobs._POOL.shutdown(wait=False)
+        seat_jobs._ACTIVE = 0
         started = []
         entered = threading.Event()
         release = threading.Event()

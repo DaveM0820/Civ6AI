@@ -2084,15 +2084,29 @@ end
 -- Movement the unit has for the model's orders. Prefers the GameCore view (see
 -- Civ6Ai_GameCore.UnitMovesForPlayer): the UI cache reads 0 at turn start.
 function Civ6Ai_Snapshot._UnitMoves(unit)
+  local owner = unit:GetOwner()
+  local planning = Civ6Ai_Snapshot._PlansNextTurn(owner)
+  -- Pass 1/0. A boolean across the UI/gameplay boundary can arrive as nil,
+  -- and a nil planning flag reads GetMovesRemaining (0 at turn start), which
+  -- hid every unit of a non-local seat from the prompt.
   local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
   if routes ~= nil and routes.UnitMovesForPlayer ~= nil then
-    local owner = unit:GetOwner()
-    local ok, moves = pcall(routes.UnitMovesForPlayer, owner, unit:GetID(), Civ6Ai_Snapshot._PlansNextTurn(owner))
-    if ok and type(moves) == "number" then
+    local ok, moves = pcall(routes.UnitMovesForPlayer, owner, unit:GetID(), planning and 1 or 0)
+    if ok and type(moves) == "number" and (moves > 0 or not planning) then
       return moves
     end
   end
-  return unit:GetMovesRemaining()
+  if planning then
+    local maxMoves = tonumber(Civ6Ai_Snapshot._Method(unit, "GetMaxMoves")) or 0
+    if maxMoves <= 0 and GameInfo ~= nil and GameInfo.Units ~= nil then
+      local row = GameInfo.Units[unit:GetType()]
+      maxMoves = row ~= nil and (tonumber(row.BaseMoves) or tonumber(row.Moves) or 0) or 0
+    end
+    if maxMoves > 0 then
+      return maxMoves
+    end
+  end
+  return tonumber(Civ6Ai_Snapshot._Method(unit, "GetMovesRemaining")) or 0
 end
 
 -- found_city legality. The UI test (nil plot, test only) does not check the site:
@@ -2148,7 +2162,7 @@ function Civ6Ai_Snapshot._GameCoreCanMove(unit, x, y)
     return true
   end
   local owner = unit:GetOwner()
-  local ok, can = pcall(routes.CanMoveUnitToForPlayer, owner, unit:GetID(), x, y, Civ6Ai_Snapshot._PlansNextTurn(owner))
+  local ok, can = pcall(routes.CanMoveUnitToForPlayer, owner, unit:GetID(), x, y, Civ6Ai_Snapshot._PlansNextTurn(owner) and 1 or 0)
   return not ok or can == true
 end
 
@@ -2174,13 +2188,33 @@ function Civ6Ai_Snapshot._BuildCharges(unit)
   return charges, ui, core
 end
 
+function Civ6Ai_Snapshot._PlotImpassable(plot)
+  if plot == nil then
+    return false
+  end
+  if plot.IsImpassable ~= nil and plot:IsImpassable() == true then
+    return true
+  end
+  if plot.IsMountain ~= nil and plot:IsMountain() == true then
+    return true
+  end
+  return false
+end
+
 function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   if unit == nil or unit:GetX() == -9999 then
     return false
   end
   local goal = Civ6Ai_Snapshot._UnitGoal(unit:GetOwner(), unit:GetID())
   if goal ~= nil then
-    return false
+    local plot = Map ~= nil and Map.GetPlot ~= nil and Map.GetPlot(goal.x, goal.y) or nil
+    if not Civ6Ai_Snapshot._PlotImpassable(plot) then
+      return false
+    end
+    -- The standing destination is a mountain. Keep the unit in the prompt so
+    -- the seat can pick a different tile; gameplay also drops this goal.
+    Civ6Ai_Util.Log("snapshot|goal_impassable|unit=" .. tostring(unit:GetID())
+      .. "|xy=" .. tostring(goal.x) .. "," .. tostring(goal.y))
   end
   if Civ6Ai_Snapshot._UnitMoves(unit) <= 0 then
     return false
@@ -3101,6 +3135,22 @@ function Civ6Ai_Snapshot._AddPillageCommand(commands, unit, unitId)
   }))
 end
 
+function Civ6Ai_Snapshot._TradeRouteCanStart(tm, owner, fromPlot, destPlot)
+  -- Gov.MakeTradeRoute: CanCreateTradeRoute(owner, fromPlotIndex, toPlotIndex)
+  -- must be true, and CreateTradeRoute must exist. CanStartRoute(city ids) is
+  -- not that check and was offering routes the game then refused.
+  if tm == nil or tm.CanCreateTradeRoute == nil or tm.CreateTradeRoute == nil then
+    return false
+  end
+  local fromIdx = fromPlot ~= nil and fromPlot.GetIndex ~= nil and fromPlot:GetIndex() or nil
+  local toIdx = destPlot ~= nil and destPlot.GetIndex ~= nil and destPlot:GetIndex() or nil
+  if type(fromIdx) ~= "number" or type(toIdx) ~= "number" then
+    return false
+  end
+  local ok, can = pcall(tm.CanCreateTradeRoute, tm, owner, fromIdx, toIdx)
+  return ok and can == true
+end
+
 function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId)
   local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
   if row == nil then
@@ -3110,38 +3160,16 @@ function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId
   if not isTrader then
     return
   end
-  local origin = nil
-  if Cities ~= nil and Cities.GetCityInPlot ~= nil then
-    local ok, city = pcall(Cities.GetCityInPlot, unit:GetX(), unit:GetY())
-    if ok then origin = city end
-  end
-  if origin == nil then
-    local player = Players[playerID]
-    local best, bestDist = nil, nil
-    pcall(function()
-      for _, city in player:GetCities():Members() do
-        local dist = Map.GetPlotDistance ~= nil
-          and Map.GetPlotDistance(unit:GetX(), unit:GetY(), city:GetX(), city:GetY()) or 99
-        if bestDist == nil or dist < bestDist then
-          best, bestDist = city, dist
-        end
-      end
-    end)
-    origin = best
-  end
   local tm = nil
   if Game ~= nil and Game.GetTradeManager ~= nil then
     local ok, mgr = pcall(function() return Game.GetTradeManager() end)
     if ok then tm = mgr end
   end
-  local canStart = tm ~= nil and (tm.CanStartRoute or tm.CanCreateTradeRoute) or nil
-  if tm == nil or canStart == nil then
-    Civ6Ai_Util.Log("snapshot|trade_api_missing|CanStartRoute")
+  if tm == nil or tm.CanCreateTradeRoute == nil or tm.CreateTradeRoute == nil then
+    Civ6Ai_Util.Log("snapshot|trade_api_missing|CanCreateTradeRoute")
     return
   end
-  if origin == nil or origin.GetID == nil then
-    return
-  end
+  local origin = Map ~= nil and Map.GetPlot ~= nil and Map.GetPlot(unit:GetX(), unit:GetY()) or nil
   local added = 0
   for pid = 0, 63 do
     if added >= 8 then break end
@@ -3150,10 +3178,8 @@ function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId
     if cities ~= nil and cities.Members ~= nil then
       for _, city in cities:Members() do
         if added >= 8 then break end
-        local ok, can = pcall(function()
-          return canStart(tm, origin:GetOwner(), origin:GetID(), city:GetOwner(), city:GetID())
-        end)
-        if ok and can == true then
+        local dest = Map.GetPlot(city:GetX(), city:GetY())
+        if Civ6Ai_Snapshot._TradeRouteCanStart(tm, playerID, origin, dest) then
           table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
             command_id = "CMD_trade_" .. unitId .. "_" .. tostring(city:GetOwner()) .. "_" .. tostring(city:GetID()),
             kind = "trade_route",
@@ -3624,12 +3650,21 @@ function Civ6Ai_Snapshot._AddActivateCommand(commands, playerID, unit, unitId)
   if not isGP then
     return
   end
+  local canActivate = gp ~= nil and gp.Activate ~= nil
+  if not canActivate then
+    local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+    if routes ~= nil and routes.CanActivateGreatPersonForPlayer ~= nil and unit.GetOwner ~= nil then
+      local okCan, allowed = pcall(routes.CanActivateGreatPersonForPlayer, unit:GetOwner(), unit:GetID())
+      canActivate = okCan and allowed == true
+    end
+  end
   local class = row.GreatPersonClassType
   local passive = class == "GREAT_PERSON_CLASS_GENERAL" or class == "GREAT_PERSON_CLASS_ADMIRAL"
   local sites = Civ6Ai_Snapshot.GP_DISTRICT[class]
   -- A prophet founds a religion by moving onto a holy site (offered below),
-  -- not by the generic activate command.
-  if not passive and class ~= "GREAT_PERSON_CLASS_PROPHET" and sites ~= nil
+  -- not by the generic activate command. Activate is offered only when
+  -- gameplay has GreatPerson:Activate; the heal operation is not that action.
+  if canActivate and not passive and class ~= "GREAT_PERSON_CLASS_PROPHET" and sites ~= nil
       and Civ6Ai_Snapshot._DistrictWithin(playerID, unit, sites, 0) then
     table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
       command_id = "CMD_activate_" .. unitId,

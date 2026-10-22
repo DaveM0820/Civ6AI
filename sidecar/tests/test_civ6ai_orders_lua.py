@@ -873,6 +873,29 @@ class PathMoveTests(unittest.TestCase):
         self.assertEqual(reason, "partial_path:0,0>2,0:steps=2:len=4:stop=no_moves_left")
         self.assertEqual(rt.eval("unit.x"), 2)
 
+    def test_mountain_destination_is_impassable_not_no_path(self):
+        rt, _ = self.run_path(3)
+        rt.execute(
+            """
+            function Map.GetPlot(x, y)
+              return {
+                GetIndex = function() return 1 end,
+                IsMountain = function() return true end,
+                IsImpassable = function() return false end,
+              }
+            end
+            path_calls = 0
+            function UnitManager.GetMoveToPath()
+              path_calls = path_calls + 1
+              return {}
+            end
+            """
+        )
+        ok, reason = rt.eval("Civ6Ai_GameCore.MoveUnitAlongPathForPlayer(1, 7, 3, 0)")
+        self.assertFalse(ok)
+        self.assertEqual("impassable", reason)
+        self.assertEqual(0, rt.eval("path_calls"))
+
 
 class MpTestModuleTests(unittest.TestCase):
     @unittest.skipIf(lupa is None, "lupa not installed")

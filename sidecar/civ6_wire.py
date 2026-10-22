@@ -1788,7 +1788,9 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, "
         "except that a unit that has not moved this turn can always enter one adjacent tile, however rough "
         "(that uses all its movement).",
-        "- Never MoveTo a mountain or a tile one of your own units already holds.",
+        "- Never MoveTo a mountain or a tile one of your own units already holds. "
+        "A rejected move says impassable when the tile is a mountain or natural wonder, "
+        "and no_path when no route exists. Do not repeat that destination.",
         f"- Coordinates: {coaching.civ6_y_axis_phrase(snapshot)} and x increases east; see the GAME "
         "section for X-wrap.",
         f"- {coaching.CIV6_UNIT_STACKING_GUIDANCE}",
@@ -1802,6 +1804,11 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "- Hybrid control: " + native_fallback_policy(snapshot),
         "- Optional commands (chat, research, civics, remember) are encouraged when useful; chat.all only when you have an original line.",
     ]
+    if any(isinstance(u, dict) and isinstance(u.get("goal"), dict) for u in snapshot.get("your_units") or []):
+        resp.append(
+            "- A unit with a goal line is already walking to that tile and is left out of REQUIRED COMMANDS "
+            "until it arrives or the route fails (impassable or no_path). Order MoveTo only to redirect it."
+        )
     if any(isinstance(c, dict) and c.get("kind") == "found_city" for c in snapshot.get("legal_commands", [])):
         resp.append("- FoundCity is optional: prefer founding this turn on a decent tile (fresh water/coast, not "
                     "cramped). Walking up to ~3 tiles for a clearly better site is fine; long treks are not.")

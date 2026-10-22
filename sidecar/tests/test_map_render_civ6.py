@@ -790,5 +790,22 @@ class LoneRevealedCapitalTests(unittest.TestCase):
             self.assertLess(abs(mid - even), abs(mid - odd))
 
 
+class PeakGlyphTests(unittest.TestCase):
+    def test_peak_glyph_is_visible_on_a_pale_tile(self):
+        from PIL import Image, ImageDraw
+
+        from sidecar.map_render_civ6 import _draw_peak_glyph
+
+        image = Image.new("RGB", (48, 48), (244, 244, 244))
+        _draw_peak_glyph(ImageDraw.Draw(image), 24, 24, 18)
+        dark = 0
+        for x in range(8, 40):
+            for y in range(8, 40):
+                pixel = image.getpixel((x, y))
+                if pixel[0] < 80 and pixel[1] < 80 and pixel[2] < 80:
+                    dark += 1
+        self.assertGreater(dark, 8, "mountain peak has no dark ridge on a pale tile")
+
+
 if __name__ == "__main__":
     unittest.main()
