@@ -1952,34 +1952,65 @@ end
 
 -- Explore: RequestOperation does not exist in gameplay script, so walk the unit
 -- to the nearest revealed, passable plot of its domain that borders the unknown.
+-- IsRevealed takes a plot index. Passing (x, y) tested index == x, so the order
+-- returned map_known or walked to a nonsense tile while most of the map was fog.
 function Gov.Explore(owner, unitId)
   local unit = Civ6Ai_Orders._Unit(owner, unitId)
   if unit == nil then
     return false, "stale_unit_id"
   end
   local vis = PlayersVisibility ~= nil and PlayersVisibility[owner] or nil
-  if vis == nil then
+  if vis == nil or vis.IsRevealed == nil then
     return false, "explore_unavailable:no_visibility"
+  end
+  local function revealed(plot)
+    if plot == nil or plot.GetIndex == nil then
+      return false
+    end
+    local ok, result = pcall(function() return vis:IsRevealed(plot:GetIndex()) end)
+    return ok and result == true
+  end
+  local function areaOf(plot)
+    if plot ~= nil and plot.GetArea ~= nil then
+      local ok, area = pcall(function() return plot:GetArea() end)
+      if ok then return area end
+    end
+    return nil
   end
   local row = GameInfo.Units[unit:GetType()]
   local sea = row ~= nil and row.Domain == "DOMAIN_SEA"
   local ux, uy = unit:GetX(), unit:GetY()
-  local best, bestD = nil, 1e9
-  for i = 0, Map.GetPlotCount() - 1 do
-    local p = Map.GetPlotByIndex(i)
-    local x, y = p:GetX(), p:GetY()
-    if vis:IsRevealed(x, y) and p:IsWater() == sea and not p:IsImpassable() and not (x == ux and y == uy) then
-      local d = Map.GetPlotDistance(ux, uy, x, y)
-      if d < bestD then
-        for dir = 0, 5 do
-          local a = Map.GetAdjacentPlot(x, y, dir)
-          if a ~= nil and not vis:IsRevealed(a:GetX(), a:GetY()) then
-            best, bestD = p, d
-            break
+  local here = Map.GetPlot(ux, uy)
+  local unitArea = areaOf(here)
+  -- Same landmass or water body first. The nearest fog edge on another
+  -- continent sends a land unit into the coast, where it stops.
+  local function nearest(requireArea)
+    local best, bestD = nil, 1e9
+    for i = 0, Map.GetPlotCount() - 1 do
+      local p = Map.GetPlotByIndex(i)
+      local x, y = p:GetX(), p:GetY()
+      if revealed(p) and p:IsWater() == sea and not p:IsImpassable() and not (x == ux and y == uy) then
+        if not requireArea or unitArea == nil or areaOf(p) == unitArea then
+          local d = Map.GetPlotDistance(ux, uy, x, y)
+          if d < bestD then
+            for dir = 0, 5 do
+              local a = Map.GetAdjacentPlot(x, y, dir)
+              if a ~= nil and not revealed(a) then
+                best, bestD = p, d
+                break
+              end
+            end
           end
         end
       end
     end
+    return best, bestD
+  end
+  local best, bestD = nearest(true)
+  local otherArea = false
+  if best == nil then
+    best, bestD = nearest(false)
+    otherArea = best ~= nil
   end
   if best == nil then
     return false, "explore_unavailable:map_known"
@@ -1988,7 +2019,11 @@ function Gov.Explore(owner, unitId)
   if not ok then
     return false, "explore_unavailable:move_error"
   end
-  return true, "explore_to=" .. best:GetX() .. "," .. best:GetY() .. ":d=" .. bestD
+  local reason = "explore_to=" .. best:GetX() .. "," .. best:GetY() .. ":d=" .. bestD
+  if otherArea then
+    reason = reason .. ":other_area"
+  end
+  return true, reason
 end
 
 function Gov.ActivateGreatPerson(owner, unitId)

@@ -959,7 +959,17 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
     pipeline._append_map_wire_stats(map_lines, context, map_stats)
     explored = coaching._civ6_explored_percent(context)
     if isinstance(explored, int):
+        unexplored = max(0, 100 - explored)
         map_lines.append(pipeline._wire_line("map.explored", f"{explored}%"))
+        map_lines.append(pipeline._wire_line("map.unexplored", f"{unexplored}%"))
+        map_lines.append(
+            f"Whole world: {explored}% revealed, {unexplored}% still black fog. "
+            "The percent in map.strategic.window, and on the strategic image banner, is how much of the "
+            "world that picture shows, not how much you have explored. "
+            "A city sitting alone in black fog is one revealed tile — an embassy, or capitals exchanged "
+            "when you first met. A delegation does not reveal the map, and the black hexes around that "
+            "city were not explored."
+        )
     naval = any(isinstance(u, dict) and u.get("domain_id") == "DOMAIN_SEA" for u in context.get("your_units") or [])
     grid = [list(r) for r in (context.get("known_map") or {}).get("visibility_grid") or []]
     todo = [tuple(map(int, str(o.get("plot_id")).split("_")[1:3])) for o in (context.get("your_units") or []) + (context.get("your_cities") or [])
@@ -1644,6 +1654,18 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
                 "a clearly better tile is within about three moves."
             )
     lines.extend(combat_wire.tactics_advice_lines(context))
+    explored = coaching._civ6_explored_percent(context)
+    if isinstance(explored, int) and explored < 100 and not combat_wire.war_active(context):
+        command = ""
+        if _explore_offered(context):
+            command = (
+                " Automate(explore), when it is listed on a unit's row, walks that scout, soldier, or ship "
+                "toward the nearest fog it can reach this turn. Order it again next turn to keep going. "
+                "Land units stop at the coast; ships explore water. MoveTo a tile you chose is just as valid."
+            )
+        lines.append(
+            f"- The world map is {explored}% explored and {100 - explored}% still black fog.{command}"
+        )
     lines.append("- Pick research and civics before they run out so science and culture are never wasted.")
     lines.append(
         "- For legal.research.tech / legal.research.civic, pick only from the listed options — never re-pick a "
@@ -1652,6 +1674,15 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
     if _has_queue_production(context):
         lines.append("- Do not queue production that is already building.")
     return lines
+
+
+def _explore_offered(snapshot: dict[str, Any] | None) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    return any(
+        isinstance(command, dict) and command.get("kind") == "explore"
+        for command in snapshot.get("legal_commands") or []
+    )
 
 
 def _orders_execute_clause(snapshot: dict[str, Any] | None) -> str:
@@ -1703,7 +1734,9 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         f"Required Event.* logs this turn: {event_count} (numbered under REQUIRED COMMANDS).",
         "",
         "Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):",
-        "unitId.command = MoveTo(x,y) | AttackTo(x,y) | FoundCity | Improve(x,y,IMPROVEMENT_X) (builders) | Fortify | Skip "
+        "unitId.command = MoveTo(x,y) | AttackTo(x,y) | "
+        + ("Automate(explore) | " if _explore_offered(snapshot) else "")
+        + "FoundCity | Improve(x,y,IMPROVEMENT_X) (builders) | Fortify | Skip "
         "(one option per unit from its row; MoveTo(x,y) = any destination tile, the unit walks toward it).",
         *(
             ["cityName.production = UNIT_* | BUILDING_* | PROJECT_* from that city's listed options (only when "
@@ -1712,6 +1745,12 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         ),
         f"legal.research.tech, legal.research.civic, chat.all, {chat_dm_examples(snapshot)} — see OPTIONAL COMMANDS.",
         "Do not use Skip when another option is listed.",
+        *(
+            ["Automate(explore), when it is listed on that unit's row, walks a scout, soldier, or ship toward "
+             "unrevealed tiles this turn. Order it again next turn to continue. Land units stop at the coast; "
+             "ships explore water. Nothing assigns this for you."]
+            if _explore_offered(snapshot) else []
+        ),
         "",
         "GOOD JSON (entire reply — row numbers on keys; host strips the prefix):",
         "  {" + ", ".join(example_rows) + "}",

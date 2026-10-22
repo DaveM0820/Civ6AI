@@ -607,5 +607,137 @@ class Civ6MapRenderTests(unittest.TestCase):
         self.assertEqual("image/png", large["mime_type"])
 
 
+class LoneRevealedCapitalTests(unittest.TestCase):
+    """An embassy or a shared capital reveals one tile. Fog around it stays fog."""
+
+    def _snapshot(self) -> dict:
+        width = height = 7
+        grid = ["?" * width for _ in range(height)]
+        row = list(grid[3])
+        row[3] = "."
+        grid[3] = "".join(row)
+        return {
+            "decision": {"player_id": "PLAYER_1", "turn": 131},
+            "game": {"map_width": width, "map_height": height, "wrap_x": True},
+            "personality": {"leader_name": "Test"},
+            "your_units": [],
+            "your_cities": [],
+            "known_other_cities": [{
+                "city_id": "CITY_4_1",
+                "name": "Kabul",
+                "plot_id": "PLOT_3_3",
+                "owner_player_id": "PLAYER_4",
+                "is_capital": True,
+                "population": 9,
+                "knowledge": "remembered",
+            }],
+            "known_map": {
+                "viewport": {"x0": 0, "y0": 0, "width": width, "height": height},
+                "visibility_grid": grid,
+                "plots": [{
+                    "plot_id": "PLOT_3_3",
+                    "x": 3,
+                    "y": 3,
+                    "knowledge": "remembered",
+                    "terrain_id": "TERRAIN_PLAINS",
+                    "water": False,
+                    "peak": False,
+                    "revealed_owner_id": "PLAYER_4",
+                }],
+                "explored_percent": 1,
+            },
+            "legal_commands": [],
+        }
+
+    def test_fog_neighbors_stay_black_and_legend_names_embassy(self):
+        import io
+        from unittest import mock
+        from PIL import Image
+
+        from sidecar.map_render_civ6 import (
+            LONE_CITY_LEGEND,
+            _BASE_LAYER_CACHE,
+            _axis_gutter_for_tile,
+            _hex_metrics,
+            _odd_r_cell_center,
+            render_civ6_map_png,
+        )
+
+        def keep_source(image, **_kwargs):
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            return buf.getvalue(), "image/png"
+
+        viewport = {"x0": 0, "y0": 0, "width": 7, "height": 7}
+        player = map_render._hex_to_rgb(map_render._player_color("PLAYER_4"))
+
+        def distance(pixel, rgb):
+            return sum((int(pixel[i]) - rgb[i]) ** 2 for i in range(3))
+
+        for sprites in (False, True):
+            with self.subTest(sprites=sprites):
+                _BASE_LAYER_CACHE.clear()
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / "lone.png"
+                    with mock.patch("sidecar.map_render.encode_model_image_bytes", keep_source):
+                        meta = render_civ6_map_png(
+                            self._snapshot(),
+                            path,
+                            prefer_civ5_sprites=sprites,
+                            viewport=viewport,
+                        )
+                    self.assertEqual(LONE_CITY_LEGEND, meta.get("legend_note"))
+                    image = Image.open(path).convert("RGBA")
+                    tile_px = int(meta["tile_px"])
+                    gutter = _axis_gutter_for_tile(
+                        tile_px, 0, 0, 7, 7,
+                        show_axis=bool(meta.get("show_axis_labels")),
+                        prefer_civ5_sprites=sprites,
+                    )
+                    radius = _hex_metrics(tile_px)[0]
+                    cx, cy, _, _ = _odd_r_cell_center(
+                        3, 3, 0, 0, tile_px, gutter,
+                        flip_y=bool(meta.get("north_up")), vh=7,
+                    )
+                    plains = (176, 160, 112)
+                    colored = 0
+                    for dx in range(-3, 4):
+                        for dy in range(-3, 4):
+                            pixel = image.getpixel((int(cx) + dx, int(cy) + dy))
+                            if distance(pixel, (0, 0, 0)) > 800:
+                                colored += 1
+                    self.assertGreater(colored, 4, "the revealed capital tile was not drawn")
+                    # Odd row: the six neighbours. Their centres must stay fog.
+                    for nx, ny in ((4, 3), (4, 4), (3, 4), (2, 3), (3, 2), (4, 2)):
+                        ncx, ncy, _, _ = _odd_r_cell_center(
+                            nx, ny, 0, 0, tile_px, gutter,
+                            flip_y=bool(meta.get("north_up")), vh=7,
+                        )
+                        pixel = image.getpixel((int(ncx), int(ncy)))
+                        self.assertLess(distance(pixel, (0, 0, 0)), 500, pixel)
+                        self.assertLess(distance(pixel, (0, 0, 0)), distance(pixel, player))
+                        self.assertLess(distance(pixel, (0, 0, 0)), distance(pixel, plains))
+                    del radius
+
+    def test_a_revealed_neighbor_is_not_an_embassy_tile(self):
+        from sidecar.map_render_civ6 import isolated_revealed_cities
+
+        snapshot = self._snapshot()
+        grid = snapshot["known_map"]["visibility_grid"]
+        row = list(grid[3])
+        row[4] = "."
+        grid[3] = "".join(row)
+        snapshot["known_map"]["plots"].append({
+            "plot_id": "PLOT_4_3", "x": 4, "y": 3, "knowledge": "visible",
+            "terrain_id": "TERRAIN_PLAINS", "water": False,
+        })
+        from sidecar import pipeline_v2 as pipeline
+        pipeline.ensure_known_map_plots(snapshot)
+        index = map_render.build_render_plot_index(snapshot)
+        known = snapshot["known_map"]
+        normalized = map_render._normalize_visibility_grid(known["visibility_grid"], 7, 7)
+        self.assertEqual(set(), isolated_revealed_cities(snapshot, index, normalized, known, True))
+
+
 if __name__ == "__main__":
     unittest.main()

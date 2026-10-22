@@ -1065,6 +1065,73 @@ class WpAApplyCoreTests(unittest.TestCase):
         self.order(0, K=19, P=2, U=0, X=131072, Y=0, I=0, V=40, S=99)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
 
+    def test_explore_uses_plot_index_and_stays_on_its_landmass(self):
+        # IsRevealed(x, y) used to pass x as the plot index, so explore returned
+        # map_known or walked somewhere else. A nearer fog edge on another
+        # continent must not beat a fog edge this unit can walk to.
+        self.rt.execute(r"""
+          EXPLORE_ARGS = {}
+          local spec = {}
+          local function put(x, y, area, revealed)
+            spec[tostring(x) .. "," .. tostring(y)] = {area = area, revealed = revealed}
+          end
+          put(0, 1, 1, false)
+          put(1, 1, 1, true)
+          put(2, 1, 1, true)
+          put(3, 1, 2, true)
+          put(4, 1, 2, false)
+          Players[2].units[1].x = 2
+          Players[2].units[1].y = 1
+          local oldGet = Map.GetPlot
+          function Map.GetPlot(x, y)
+            local p = oldGet(x, y)
+            local s = spec[tostring(x) .. "," .. tostring(y)]
+            p.area = s and s.area or 1
+            p.revealed = s and s.revealed or false
+            p.water = false
+            function p:IsWater() return self.water end
+            function p:IsImpassable() return false end
+            function p:GetArea() return self.area end
+            function p:GetIndex() return self.y * 10 + self.x end
+            return p
+          end
+          function Map.GetPlotCount() return 6 end
+          function Map.GetPlotByIndex(i)
+            local coords = {{2, 1}, {3, 1}, {1, 1}, {0, 1}, {4, 1}, {5, 1}}
+            local c = coords[i + 1]
+            if c == nil then return Map.GetPlot(0, 0) end
+            return Map.GetPlot(c[1], c[2])
+          end
+          function Map.GetAdjacentPlot(x, y, dir)
+            local odd = (y % 2) == 1
+            local d = odd and {{1, 0}, {1, 1}, {0, 1}, {-1, 0}, {0, -1}, {1, -1}}
+              or {{1, 0}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}}
+            local step = d[dir + 1]
+            if step == nil then return nil end
+            return Map.GetPlot(x + step[1], y + step[2])
+          end
+          function Map.GetPlotDistance(x1, y1, x2, y2)
+            return math.abs(x1 - x2) + math.abs(y1 - y2)
+          end
+          PlayersVisibility = {}
+          PlayersVisibility[2] = {
+            IsRevealed = function(_, index)
+              table.insert(EXPLORE_ARGS, index)
+              local x = index % 10
+              local y = math.floor(index / 10)
+              return Map.GetPlot(x, y).revealed == true
+            end,
+          }
+        """)
+        self.order(0, K=25, P=2, U=7, S=110)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertIn("explore_to=1,1", self.last()["reason"])
+        self.assertNotIn("other_area", self.last()["reason"])
+        args = [int(value) for value in _vals(self.rt.eval("EXPLORE_ARGS"))]
+        # Plot index is y * 10 + x. The unit stands on (2, 1), index 12.
+        # The old call passed x, which is never 12 on this map.
+        self.assertIn(12, args)
+
     def test_trade_explore_activate_guarded_fallback(self):
         self.order(0, K=25, P=2, U=7, S=100)
         self.assertFalse(self.last()["ok"])

@@ -131,6 +131,56 @@ def _hex_neighbors_odd_r(x: int, y: int) -> list[tuple[int, int, int]]:
     return [(x + dx, y + dy, edge) for dx, dy, edge in deltas]
 
 
+# Embassy (Diplomatic Service) and exchanging capitals on first meeting reveal
+# that one city tile. A delegation does not. A coloured ring on the black
+# neighbours reads as land the seat explored.
+LONE_CITY_LEGEND = (
+    "Lone city in black fog: an embassy or exchanging capitals revealed that tile only. "
+    "A delegation does not. Black neighbors were not explored."
+)
+
+
+def _reveal_state(
+    plot_index: dict[tuple[int, int], dict[str, Any]],
+    normalized: list[str] | None,
+    known_map: dict[str, Any],
+    has_visibility_grid: bool,
+    x: int,
+    y: int,
+) -> str:
+    grid_char = map_render._grid_char_at(
+        normalized, x, y, origin=map_render.visibility_grid_origin(known_map),
+    )
+    return map_render._tile_terrain_state(plot_index.get((x, y)), grid_char, has_visibility_grid)
+
+
+def isolated_revealed_cities(
+    snapshot: dict[str, Any],
+    plot_index: dict[tuple[int, int], dict[str, Any]],
+    normalized: list[str] | None,
+    known_map: dict[str, Any],
+    has_visibility_grid: bool,
+) -> set[tuple[int, int]]:
+    """Revealed city plots whose six neighbours are still fog."""
+    found: set[tuple[int, int]] = set()
+    cities = list(snapshot.get("your_cities") or []) + list(snapshot.get("known_other_cities") or [])
+    for city in cities:
+        if not isinstance(city, dict):
+            continue
+        coords = map_render._parse_plot_coords(city.get("plot_id"))
+        if coords is None:
+            continue
+        x, y = coords
+        if _reveal_state(plot_index, normalized, known_map, has_visibility_grid, x, y) != "revealed":
+            continue
+        if all(
+            _reveal_state(plot_index, normalized, known_map, has_visibility_grid, nx, ny) != "revealed"
+            for nx, ny, _edge in _hex_neighbors_odd_r(x, y)
+        ):
+            found.add((x, y))
+    return found
+
+
 def _hex_metrics(tile_px: int) -> tuple[float, float, float]:
     """Flat-top hex: radius, horizontal center pitch, vertical center pitch."""
     radius = max(4, tile_px // 2 - 1)
@@ -776,6 +826,7 @@ def _draw_city_nameplate(
     hex_radius: float,
     name: str,
     population: Any,
+    confine: bool = False,
 ) -> None:
     pop_text = ""
     if population is not None:
@@ -785,6 +836,9 @@ def _draw_city_nameplate(
             pop_text = str(population)
     label = f"{name}  {pop_text}" if pop_text else name
     label = label[:22]
+    if confine:
+        _draw_label_inside_hex(draw, font, cx, cy + hex_radius * 0.55, hex_radius, label)
+        return
     text_y = cy - hex_radius * 1.05
     bbox = draw.textbbox((cx, text_y), label, font=font, anchor="mm")
     pad = 2
@@ -1150,7 +1204,7 @@ def _draw_hex_ring(
     draw.line(points, fill=map_render._rgb_tuple(color), width=max(1, width))
 
 
-def _wrap_legend_line(text: str, font: Any, max_width: int) -> list[str]:
+def _wrap_legend_line(text: str, font: Any, max_width: int, max_lines: int = 4) -> list[str]:
     """Break a legend header so it stays inside the image."""
     words = text.split()
     if not words:
@@ -1166,7 +1220,26 @@ def _wrap_legend_line(text: str, font: Any, max_width: int) -> list[str]:
             lines.append(current)
             current = word
     lines.append(current)
-    return lines[:4]
+    return lines[:max_lines]
+
+
+def _draw_label_inside_hex(
+    draw: Any,
+    font: Any,
+    cx: float,
+    cy: float,
+    hex_radius: float,
+    label: str,
+) -> None:
+    """City name kept on the one revealed hex, with no filled plate on the fog."""
+    limit = max(8, int(math.sqrt(3) * hex_radius * 0.9))
+    text = (label or "City").strip() or "City"
+    while len(text) > 1:
+        bbox = draw.textbbox((cx, cy), text, font=font, anchor="mm")
+        if bbox[2] - bbox[0] <= limit:
+            break
+        text = text[:-1]
+    _draw_outlined_text(draw, (cx, cy), text, font)
 
 
 def _draw_outlined_text(
@@ -1272,8 +1345,11 @@ def _draw_civ6_nameplate(
     hex_radius: float,
     label: str,
     fill_rgb: tuple[int, int, int],
+    confine: bool = False,
 ) -> None:
-    del hex_radius
+    if confine:
+        _draw_label_inside_hex(draw, font, cx, top_y, hex_radius, label)
+        return
     bbox = draw.textbbox((cx, top_y), label, font=font, anchor="mm")
     pad = 2
     draw.rectangle(
@@ -1312,9 +1388,10 @@ def _draw_civ6_tile_markers(
     cy: float,
     hex_radius: float,
     tile_px: int,
-    nameplates: list[tuple[Any, float, float, float, str, tuple[int, int, int]]],
+    nameplates: list[tuple[Any, ...]],
     *,
     stacked: bool = False,
+    confine_label: bool = False,
 ) -> None:
     for marker in cities:
         owner = str(marker.get("owner_player_id") or "")
@@ -1337,7 +1414,8 @@ def _draw_civ6_tile_markers(
         if marker.get("is_capital") and not foreign and len(label) <= 12:
             label = f"{label}*"
         font = map_render._load_bitmap_font(max(8, min(11, tile_px // 5)))
-        nameplates.append((font, cx, cy - hex_radius * 0.92, hex_radius, label, owner_rgb))
+        label_y = cy + hex_radius * 0.55 if confine_label else cy - hex_radius * 0.92
+        nameplates.append((font, cx, label_y, hex_radius, label, owner_rgb, confine_label))
 
     units = [m for m in others if m.get("kind") in ("unit", "stack")]
     if not units:
@@ -1522,6 +1600,11 @@ def render_civ6_map_png(
     font = legend_font_pil
     axis_label_font = map_render._load_bitmap_font(axis_font)
     has_visibility_grid = normalized is not None
+    isolated_cities = isolated_revealed_cities(
+        snapshot, plot_index, normalized, known_map if isinstance(known_map, dict) else {},
+        has_visibility_grid,
+    )
+    legend_note = LONE_CITY_LEGEND if isolated_cities else ""
     terrain_sample_plots: dict[str, dict[str, Any]] = {}
     if prefer_civ5_sprites:
         terrain_items, terrain_strip_h = [], 0
@@ -1596,10 +1679,29 @@ def render_civ6_map_png(
         icon_slugs_for_draw.extend(mark_slugs)
     # Header line plus room for the first legend row (whose baseline sits one
     # swatch below the header); the old value let row 1 overlap the header text.
+    if prefer_civ5_sprites:
+        header_text = f"viewport x0={x0} y0={y0} {vw}x{vh} flat-top odd-r hex"
+    else:
+        direction = "north up (y grows up)" if flip_y else "y grows down"
+        owned = (
+            "improvement left, district right, resource center"
+            if zoomed else
+            "improvement lower-left, district lower-right (blank = unimproved)"
+        )
+        header_text = (
+            f"x {x0}-{x0 + vw - 1}, y {y0}-{y0 + vh - 1} | {direction} | odd rows shifted right | {owned}"
+        )
+    header_lines = _wrap_legend_line(header_text, font, map_w - 8)
+    note_lines = _wrap_legend_line(legend_note, font, map_w - 8, max_lines=6) if legend_note else []
+    line_h = legend_font + 2
     viewport_header_h = legend_font + map_render.LEGEND_HEADER_GAP + max(legend_font, legend_swatch)
     if not prefer_civ5_sprites:
         # The owned-tile sentence wraps onto a second line instead of clipping.
         viewport_header_h += legend_font + 2
+    viewport_header_h = max(
+        viewport_header_h,
+        (len(header_lines) + len(note_lines)) * line_h + map_render.LEGEND_HEADER_GAP + max(legend_font, legend_swatch),
+    )
     legend_strip_h = viewport_header_h + terrain_strip_h + river_strip_h
     if settle_items:
         legend_strip_h += map_render.LEGEND_HEADER_GAP + settle_strip_h
@@ -1769,6 +1871,12 @@ def render_civ6_map_png(
                     continue
                 owner_color = map_render._player_color(territory_owner)
                 for nx, ny, edge in _hex_neighbors_odd_r(wx, wy):
+                    if _reveal_state(
+                        plot_index, normalized, known_map, has_visibility_grid, nx, ny,
+                    ) != "revealed":
+                        # A stroke on a black hex reads as explored land around a
+                        # one-tile embassy capital.
+                        continue
                     neighbor_owner = owner_index.get((nx, ny))
                     if neighbor_owner != territory_owner:
                         inset = 0.0 if prefer_civ5_sprites else 0.15
@@ -1812,6 +1920,7 @@ def render_civ6_map_png(
         cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
         cities = [m for m in markers if m.get("kind") == "city"]
         others = [m for m in markers if m.get("kind") != "city"]
+        confine_label = (wx, wy) in isolated_cities
         if prefer_civ5_sprites:
             for marker in cities:
                 slug = map_icons.city_icon_slug(bool(marker.get("is_capital")))
@@ -1820,6 +1929,7 @@ def render_civ6_map_png(
                 civ5_nameplates.append((
                     name_font, cx, cy, hex_radius,
                     str(marker.get("name", "City")), marker.get("population"),
+                    confine_label,
                 ))
             player_id = str(snapshot.get("decision", {}).get("player_id", "PLAYER_0"))
             own_rgb = map_render._hex_to_rgb(map_render._player_color(player_id))
@@ -1842,7 +1952,7 @@ def render_civ6_map_png(
             continue
         _draw_civ6_tile_markers(
             canvas, draw, snapshot, cities, others, cx, cy, hex_radius, tile_px, nameplates,
-            stacked=zoomed,
+            stacked=zoomed, confine_label=confine_label,
         )
 
     settle_rings_drawn = 0
@@ -1883,20 +1993,7 @@ def render_civ6_map_png(
 
     draw.line((0, map_h, map_w, map_h), fill="#444444", width=1)
     ly_header = map_h + 6
-    if prefer_civ5_sprites:
-        header_text = f"viewport x0={x0} y0={y0} {vw}x{vh} flat-top odd-r hex"
-    else:
-        direction = "north up (y grows up)" if flip_y else "y grows down"
-        owned = (
-            "improvement left, district right, resource center"
-            if zoomed else
-            "improvement lower-left, district lower-right (blank = unimproved)"
-        )
-        header_text = (
-            f"x {x0}-{x0 + vw - 1}, y {y0}-{y0 + vh - 1} | {direction} | odd rows shifted right | {owned}"
-        )
-    header_lines = _wrap_legend_line(header_text, font, map_w - 8)
-    for index, line in enumerate(header_lines):
+    for index, line in enumerate(header_lines + note_lines):
         draw.text((4, ly_header + index * (legend_font + 2)), line, fill="#cccccc", font=font)
     legend_y = ly_header + viewport_header_h
     for lx, ly_row, label, color in terrain_items:
@@ -2014,6 +2111,7 @@ def render_civ6_map_png(
         "show_tile_coords": show_tile_coords,
         "legend_has_terrain": bool(terrain_items),
         "legend_has_markers": bool(marker_entries) or bool(mark_rows),
+        "legend_note": legend_note,
         "improvements_drawn": improvements_drawn,
         "districts_drawn": districts_drawn,
         "tile_mark_legend": [label for label, _color in mark_rows],

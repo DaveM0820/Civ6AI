@@ -199,15 +199,24 @@ def civ6_wounded_hp_label(pct: int | None) -> str | None:
 
 
 def _civ6_explored_percent(snapshot: dict[str, Any]) -> int | None:
+    """Whole-map reveal percent. The strategic image's crop percent is not this."""
     known = snapshot.get("known_map")
-    if isinstance(known, dict):
-        cached = known.get("explored_percent")
-        if isinstance(cached, int):
-            return cached
-    try:
-        return pipeline._map_explored_percent(snapshot)
-    except Exception:
+    if not isinstance(known, dict):
         return None
+    cached = known.get("explored_percent")
+    if isinstance(cached, int):
+        return max(0, min(100, cached))
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    try:
+        width = int(game.get("map_width") or 0)
+        height = int(game.get("map_height") or 0)
+        revealed = int(known.get("revealed_count"))
+    except (TypeError, ValueError):
+        return None
+    total = width * height
+    if total <= 0 or revealed < 0:
+        return None
+    return max(0, min(100, (revealed * 100) // total))
 
 
 def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:

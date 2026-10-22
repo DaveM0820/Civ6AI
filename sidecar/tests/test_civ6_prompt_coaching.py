@@ -136,6 +136,67 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         self.assertIn("Settler", coaching.CIV6_EXPANSION_COACHING)
         self.assertIn("do not repeat", coaching.CIV6_CHAT_VARIETY_COACHING.lower())
 
+    def test_explored_percent_is_the_whole_map_not_the_picture(self):
+        from sidecar.map_situational import format_strategic_window
+
+        snap = {
+            "game": {"map_width": 74, "map_height": 46, "wrap_x": True},
+            "decision": {"turn": 131, "player_id": "PLAYER_0"},
+            "personality": {"leader_name": "Montezuma", "civilization_id": "CIVILIZATION_AZTEC"},
+            "your_units": [{
+                "unit_id": "UNIT_9",
+                "unit_type_id": "UNIT_SCOUT",
+                "needs_orders": True,
+                "movement": {"current": 3},
+            }],
+            "your_cities": [],
+            "legal_commands": [{
+                "command_id": "CMD_explore_UNIT_9",
+                "kind": "explore",
+                "fixed_arguments": {"unit_id": "UNIT_9"},
+            }],
+            "known_map": {
+                "explored_percent": 18,
+                "revealed_count": 612,
+                "visibility_grid": ["." * 31] * 34,
+                "viewport": {"x0": 25, "y0": 2, "width": 31, "height": 34},
+            },
+        }
+        self.assertEqual(18, coaching._civ6_explored_percent(snap))
+        window = format_strategic_window(snap["known_map"]["viewport"], 74, 46)
+        self.assertIn("window 31% of the map", window)
+        self.assertNotIn("(31%)", window)
+        prompt = civ6_wire.build_civ6_wire_prompt(snap)
+        self.assertIn("map.explored = 18%", prompt)
+        self.assertIn("map.unexplored = 82%", prompt)
+        self.assertIn("delegation does not", prompt.lower())
+        instructions = civ6_wire.build_civ6_response_instructions(snap)
+        self.assertIn("Automate(explore)", instructions)
+        self.assertIn("Nothing assigns this for you", instructions)
+        advice = "\n".join(civ6_wire._advice_section(snap))
+        self.assertIn("82% still black fog", advice)
+        self.assertIn("Automate(explore)", advice)
+        self.assertIn("just as valid", advice)
+
+    def test_revealed_count_fills_explored_percent_when_the_field_is_missing(self):
+        snap = {
+            "game": {"map_width": 74, "map_height": 46},
+            "known_map": {"revealed_count": 612, "visibility_grid": ["...."]},
+        }
+        self.assertEqual((612 * 100) // (74 * 46), coaching._civ6_explored_percent(snap))
+
+    def test_explore_command_is_not_advertised_when_it_is_not_legal(self):
+        snap = {
+            "personality": {"leader_name": "Pericles", "civilization_id": "CIVILIZATION_GREECE"},
+            "your_units": [],
+            "your_cities": [],
+            "legal_commands": [],
+            "decision": {"turn": 3},
+            "game": {"map_width": 60, "wrap_x": True},
+        }
+        text = civ6_wire.build_civ6_response_instructions(snap)
+        self.assertNotIn("Automate(explore)", text)
+
     def test_advice_mentions_expansion_when_settler_present(self):
         snap = {
             "your_units": [{"unit_id": "UNIT_1", "unit_type_id": "UNIT_SETTLER"}],

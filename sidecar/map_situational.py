@@ -94,7 +94,7 @@ def focus_map_attached(snapshot: dict[str, Any]) -> bool:
 
 
 def format_strategic_window(viewport: dict[str, Any], map_width: int, map_height: int) -> str:
-    """Human-readable crop vs full map, e.g. '(39,25)-(54,41) of 80x52 (8%)'."""
+    """Crop vs full map. The percent is the picture's window, not tiles explored."""
     x0 = int(viewport.get("x0") or 0)
     y0 = int(viewport.get("y0") or 0)
     width = max(1, int(viewport.get("width") or 1))
@@ -103,7 +103,10 @@ def format_strategic_window(viewport: dict[str, Any], map_width: int, map_height
     y1 = y0 + height - 1
     total = max(1, int(map_width) * int(map_height))
     pct = max(1, min(100, int(round(100.0 * (width * height) / total))))
-    return f"({x0},{y0})-({x1},{y1}) of {int(map_width)}x{int(map_height)} ({pct}%)"
+    return (
+        f"({x0},{y0})-({x1},{y1}) of {int(map_width)}x{int(map_height)} "
+        f"(window {pct}% of the map)"
+    )
 
 
 def map_images_manifest(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
