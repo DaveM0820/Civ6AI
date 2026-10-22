@@ -430,6 +430,7 @@ class PipelineV2Tests(unittest.TestCase):
         self.assertEqual(sorted([
             "end_turn", "auto_moves", "choose_research", "adopt_civics", "change_commerce",
             "unit_posture_mission", "found_city", "worker_build", "set_upgrade_reserve",
+            "set_diplomacy_posture",
         ]), tested)
 
     def test_snapshot_is_strict_and_prompt_has_no_host_metadata(self):
@@ -701,8 +702,8 @@ class PipelineV2Tests(unittest.TestCase):
             self.assertIn("viewport", svg_text)
 
     def test_map_tile_px_default(self):
-        self.assertEqual(24, map_render.DEFAULT_TILE_PX)
-        self.assertEqual(24, map_render.resolve_map_tile_px())
+        self.assertEqual(32, map_render.DEFAULT_TILE_PX)
+        self.assertEqual(32, map_render.resolve_map_tile_px())
 
     def test_map_stack_suppresses_duplicate_unit_marker(self):
         state = snapshot()
@@ -926,8 +927,8 @@ class PipelineV2Tests(unittest.TestCase):
         # P0 east stripe and P1 west stripe sit on opposite sides of the shared edge.
         self.assertIn('stroke="#1e4884"', svg)  # darkened PLAYER_0 blue
         self.assertIn('stroke="#901e1e"', svg)  # darkened PLAYER_1 red
-        self.assertIn('x1="34" y1="14" x2="34" y2="34"', svg)  # P0 inward east stripe
-        self.assertIn('x1="38" y1="14" x2="38" y2="34"', svg)  # P1 inward west stripe
+        self.assertIn('x1="43" y1="15" x2="43" y2="43"', svg)  # P0 inward east stripe
+        self.assertIn('x1="47" y1="15" x2="47" y2="43"', svg)  # P1 inward west stripe
         legend = {entry["meaning"] for entry in meta["legend"]}
         self.assertTrue(any("territory" in meaning for meaning in legend))
 
@@ -958,9 +959,11 @@ class PipelineV2Tests(unittest.TestCase):
             state = json.loads(path.read_text(encoding="utf-8"))
             state.setdefault("known_map", {}).setdefault("image", {})["attached"] = True
             with tempfile.TemporaryDirectory() as directory:
-                a = map_render.render_known_map_svg(state, Path(directory) / "a.svg")
-                b = map_render.render_known_map_svg(state, Path(directory) / "b.svg")
-                self.assertEqual(a["sha256"], b["sha256"])
+                # The renderer records revealed plots on the snapshot, so each
+                # render needs its own copy or the second hash is a different map.
+                a = map_render.render_known_map_svg(copy.deepcopy(state), Path(directory) / "a.svg")
+                b = map_render.render_known_map_svg(copy.deepcopy(state), Path(directory) / "b.svg")
+                self.assertEqual(a["sha256"], b["sha256"], name)
 
     def test_map_wire_includes_legend_and_advciv_policy(self):
         state = snapshot()
@@ -1775,7 +1778,7 @@ class PipelineV2Tests(unittest.TestCase):
         wire = p.build_model_wire_text(state)
         self.assertIn("sparse", wire.lower())
         self.assertIn("skip most turns", wire)
-        self.assertIn("Never spam chat.all", wire)
+        self.assertIn("never generic filler", wire)
         self.assertIn("sharp banter", wire)
         self.assertIn("chat.public", wire)
         self.assertIn("hold off", wire.lower())
@@ -1831,7 +1834,7 @@ class PipelineV2Tests(unittest.TestCase):
         ]
         wire = p.build_model_wire_text(state)
         self.assertIn("DMs received this turn: Caesar (PLAYER_1)", wire)
-        self.assertIn("you may reply privately on turn 1", wire)
+        self.assertIn("you may reply privately if you have something worth saying", wire)
 
     def test_model_instructions_keep_stale_dms_in_wire_but_not_pending(self):
         state = snapshot()
@@ -1842,7 +1845,7 @@ class PipelineV2Tests(unittest.TestCase):
         ]
         wire = p.build_model_wire_text(state)
         self.assertIn("chat.private.t0.0", wire)
-        self.assertIn("reply only to turn 5", wire)
+        self.assertIn("reply only to DMs from this turn", wire)
         self.assertNotIn("DMs received this turn:", wire)
 
     def test_chat_shortcut_syntax(self):
@@ -1902,9 +1905,9 @@ class PipelineV2Tests(unittest.TestCase):
         role = p._model_role_instruction(state)
         self.assertIn("unhinged Gandhi", wire)
         self.assertIn("nuclear weapons", wire)
-        self.assertIn("Gandhi exception", wire)
-        self.assertIn("standalone bombs", wire)
-        self.assertIn("Rapid chat.all chains", wire)
+        self.assertIn("Ignore peaceful trait labels", wire)
+        self.assertIn("unhinged solo ALL bombs", wire)
+        self.assertIn("hold off on chat.all", wire)
         self.assertIn("legendary unhinged Gandhi", role)
         self.assertIn("nuclear-apocalypse energy", role)
 
