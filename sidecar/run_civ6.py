@@ -658,6 +658,13 @@ def main() -> None:
         civ6_economy.update_tracking(snapshot, args.session_dir)
     except Exception:
         pass
+    try:
+        from sidecar import civ6_seat_memory
+
+        thought_memory = civ6_seat_memory.note_lethargy(snapshot, thought_memory)
+        snapshot["_seat_memory"] = civ6_seat_memory.compact(thought_memory)
+    except Exception as error:
+        print(f"lethargy note skipped: {error}", file=sys.stderr)
 
     attach_maps = pipeline.map_image_attach_turn(snapshot)
     limit_info = context_budget.resolve_model_context_limit()

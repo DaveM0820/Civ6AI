@@ -20,6 +20,9 @@ MILESTONE_CAP = 12
 PROMISE_CAP = 20
 ALERT_CAP = 24
 EVENT_KEY_CAP = 200
+# A seat at war, a city, or a military unit with nothing happening for this many turns.
+LETHARGY_TURNS = 3
+_ATTACK_KINDS = frozenset({"attack_target", "city_attack", "range_attack", "melee_attack"})
 KEPT_KEYS = ("plan", "situation_log", "milestones", "promises", "alerts", "tracked", "dropped")
 
 OBJECTIVE_ORDERS = {
@@ -372,6 +375,179 @@ def contradiction_notes(promises: list[str], commands: list[dict[str, Any]]) -> 
         elif aggressive and peace:
             notes.append(f"chat promised an attack but orders include peace: {raw[:160]}")
     return notes
+
+
+def _attack_turn(item: dict[str, Any]) -> int | None:
+    kind = str(item.get("order_kind") or "")
+    summary = str(item.get("summary") or "").lower()
+    if kind not in _ATTACK_KINDS and "attack" not in summary and "battle" not in summary:
+        return None
+    try:
+        return int(item.get("turn"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _last_attack_turn(snapshot: dict, memory: dict[str, Any] | None) -> int | None:
+    last: int | None = None
+    tracked = memory.get("tracked") if isinstance(memory, dict) else None
+    if isinstance(tracked, dict) and isinstance(tracked.get("last_attack_turn"), int):
+        last = int(tracked["last_attack_turn"])
+    history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
+    for item in history.get("command_results") or []:
+        if not isinstance(item, dict):
+            continue
+        turn = _attack_turn(item)
+        if turn is not None and (last is None or turn > last):
+            last = turn
+    stamped = snapshot.get("_lethargy_last_attack")
+    if isinstance(stamped, int) and not isinstance(stamped, bool) and (last is None or stamped > last):
+        last = stamped
+    return last
+
+
+def _idle_city_names(snapshot: dict) -> list[str]:
+    names: list[str] = []
+    for city in snapshot.get("your_cities") or []:
+        if not isinstance(city, dict):
+            continue
+        production = city.get("production") if isinstance(city.get("production"), dict) else {}
+        item = production.get("item_id")
+        if item and str(item).upper() not in ("NONE", "NULL"):
+            continue
+        names.append(str(city.get("name") or city.get("city_id") or "city"))
+    return names
+
+
+def _idle_army_bits(snapshot: dict) -> list[str]:
+    from sidecar.civ6_wire import _is_civilian
+
+    economy = (snapshot.get("civ6") or {}).get("economy") if isinstance(snapshot.get("civ6"), dict) else {}
+    tracking = economy.get("tracking") if isinstance(economy, dict) else {}
+    idle = tracking.get("idle_turns") if isinstance(tracking, dict) else {}
+    idle = idle if isinstance(idle, dict) else {}
+    bits: list[str] = []
+    for unit in snapshot.get("your_units") or []:
+        if not isinstance(unit, dict) or _is_civilian(unit):
+            continue
+        uid = str(unit.get("unit_id") or "")
+        n = idle.get(uid)
+        if isinstance(n, bool) or not isinstance(n, int) or n < LETHARGY_TURNS:
+            continue
+        label = str(unit.get("unit_type_id") or uid).replace("UNIT_", "") or uid
+        bits.append(f"{label} idle {n} turns")
+    return bits
+
+
+def lethargy_parts(snapshot: dict, memory: dict[str, Any] | None = None) -> list[tuple[str, str]]:
+    """(log key, sentence) for a quiet war, an empty city, or an idle army."""
+    turn = _turn(snapshot)
+    parts: list[tuple[str, str]] = []
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    diplo = civ6.get("diplomacy") if isinstance(civ6.get("diplomacy"), dict) else {}
+    last_attack = _last_attack_turn(snapshot, memory)
+    attack_quiet = last_attack is None or turn - last_attack >= LETHARGY_TURNS
+    names: list[str] = []
+    if attack_quiet:
+        for major in diplo.get("majors") or []:
+            if not isinstance(major, dict) or major.get("at_war") is not True:
+                continue
+            pid = str(major.get("player_id") or "")
+            since = major.get("war_since_turn")
+            start: int | None
+            try:
+                start = int(since) if since is not None and not isinstance(since, bool) else None
+            except (TypeError, ValueError):
+                start = None
+            if start is None and isinstance(memory, dict):
+                seen = (memory.get("tracked") or {}).get("wars") if isinstance(memory.get("tracked"), dict) else None
+                if isinstance(seen, dict) and isinstance(seen.get(pid), int):
+                    start = int(seen[pid])
+            if start is None or turn - start < LETHARGY_TURNS:
+                continue
+            names.append(_name(snapshot, pid) if pid else "that civilization")
+    if names:
+        who = ", ".join(names[:4])
+        more = f" (+{len(names) - 4} more)" if len(names) > 4 else ""
+        parts.append((
+            "lethargy|war",
+            f"At war with {who}{more} and no attack or battle for {LETHARGY_TURNS}+ turns.",
+        ))
+    cities = _idle_city_names(snapshot)
+    if cities:
+        shown = ", ".join(cities[:4])
+        more = f" (+{len(cities) - 4} more)" if len(cities) > 4 else ""
+        parts.append((
+            "lethargy|cities",
+            f"Idle cities with nothing in production: {shown}{more}.",
+        ))
+    armies = _idle_army_bits(snapshot)
+    if armies:
+        shown = ", ".join(armies[:4])
+        more = f" (+{len(armies) - 4} more)" if len(armies) > 4 else ""
+        parts.append((
+            "lethargy|armies",
+            f"Idle armies have not moved: {shown}{more}.",
+        ))
+    return parts
+
+
+def lethargy_line(snapshot: dict, memory: dict[str, Any] | None = None) -> str | None:
+    """One prominent alert, or the line note_lethargy already stamped on this snapshot."""
+    stamped = snapshot.get("_lethargy_alert")
+    if isinstance(stamped, str) and stamped.strip():
+        return stamped
+    parts = lethargy_parts(snapshot, memory)
+    if not parts:
+        return None
+    return "LETHARGY: " + " ".join(text for _, text in parts)
+
+
+def note_lethargy(snapshot: dict, memory: dict[str, Any]) -> dict[str, Any]:
+    """Record a quiet war, idle cities, and idle armies on the situation log.
+
+    Runs after economy idle tracking, which is what the army streak reads.
+    """
+    if not isinstance(memory, dict):
+        memory = {}
+    turn = _turn(snapshot)
+    tracked = memory.setdefault("tracked", {})
+    if not isinstance(tracked, dict):
+        tracked = {}
+        memory["tracked"] = tracked
+    last = _last_attack_turn(snapshot, memory)
+    if isinstance(last, int):
+        tracked["last_attack_turn"] = last
+        snapshot["_lethargy_last_attack"] = last
+    wars = tracked.get("wars")
+    if not isinstance(wars, dict):
+        wars = {}
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    diplo = civ6.get("diplomacy") if isinstance(civ6.get("diplomacy"), dict) else {}
+    live: set[str] = set()
+    for major in diplo.get("majors") or []:
+        if isinstance(major, dict) and major.get("at_war") is True and major.get("player_id"):
+            pid = str(major["player_id"])
+            live.add(pid)
+            if pid not in wars:
+                since = major.get("war_since_turn")
+                try:
+                    wars[pid] = int(since) if since is not None and not isinstance(since, bool) else turn
+                except (TypeError, ValueError):
+                    wars[pid] = turn
+    for pid in list(wars):
+        if pid not in live:
+            wars.pop(pid, None)
+    tracked["wars"] = wars
+    parts = lethargy_parts(snapshot, memory)
+    active = {key for key, _ in parts}
+    for key in list(tracked.get("events") or []):
+        if str(key).startswith("lethargy|") and str(key) not in active:
+            _forget_events(memory, str(key))
+    for key, text in parts:
+        _append_event(memory, turn, key, "LETHARGY: " + text)
+    snapshot["_lethargy_alert"] = ("LETHARGY: " + " ".join(text for _, text in parts)) if parts else None
+    return memory
 
 
 def compact(memory: dict[str, Any]) -> dict[str, Any]:

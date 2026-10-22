@@ -288,6 +288,13 @@ def civ6_naval_explore_attention(snapshot: dict[str, Any]) -> str | None:
     )
 
 
+def civ6_lethargy_attention(snapshot: dict[str, Any]) -> str | None:
+    """War with no fighting, an empty city queue, or a military unit that has sat still."""
+    from sidecar import civ6_seat_memory
+
+    return civ6_seat_memory.lethargy_line(snapshot)
+
+
 def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
     explored = _civ6_explored_percent(snapshot)
     if not isinstance(explored, int) or explored >= CIV6_EXPLORE_STALL_BELOW_PCT:
@@ -486,6 +493,7 @@ def collect_civ6_attention_items(snapshot: dict[str, Any]) -> list[str]:
     for fn in (
         civ6_exploration_attention,
         civ6_naval_explore_attention,
+        civ6_lethargy_attention,
         civ6_low_hp_retreat_attention,
         civ6_focus_fire_attention,
     ):

@@ -32,6 +32,34 @@ def _snap(turn=40):
 
 
 class SeatMemoryTests(unittest.TestCase):
+    def test_lethargy_is_an_alert_and_a_situation_line(self):
+        snap = _snap(turn=40)
+        snap["your_cities"][0]["production"] = {"item_id": "NONE"}
+        snap["your_units"] = [{
+            "unit_id": "UNIT_1",
+            "unit_type_id": "UNIT_WARRIOR",
+            "unit_class_id": "FORMATION_CLASS_LAND_COMBAT",
+        }]
+        snap["civ6"]["economy"]["tracking"] = {"idle_turns": {"UNIT_1": 4}}
+        snap["history"] = {"command_results": [{
+            "turn": 30, "order_kind": "attack_target", "summary": "warrior attacked",
+        }]}
+        stored = memory.note_lethargy(snap, {"tracked": {}})
+        text = " ".join(row["text"] for row in stored["situation_log"])
+        self.assertIn("LETHARGY", text)
+        self.assertIn("Cleopatra", text)
+        self.assertIn("Idle cities", text)
+        self.assertIn("WARRIOR", text)
+        line = memory.lethargy_line(snap)
+        self.assertTrue(line.startswith("LETHARGY:"))
+        # A fresh attack this turn clears the war clause. The city and army remain.
+        snap["history"]["command_results"].append({
+            "turn": 40, "order_kind": "city_attack", "summary": "city strike",
+        })
+        snap.pop("_lethargy_alert", None)
+        again = memory.note_lethargy(snap, stored)
+        self.assertNotIn("no attack", memory.lethargy_line(snap))
+        self.assertEqual(1, sum(1 for row in again["situation_log"] if row["text"].startswith("LETHARGY: At war")))
     def test_observe_fills_history_and_keeps_alerts(self):
         snap = _snap()
         stored = memory.observe(snap, {"session_key": "g:player:0", "thoughts": []})
