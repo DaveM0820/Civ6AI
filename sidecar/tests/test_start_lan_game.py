@@ -4,23 +4,28 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "testbed"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 from civ6_ui_automation import (  # noqa: E402
     lan_create_button,
     lan_host_screen,
     lan_load_phase,
     lan_option_button,
+    lan_start_failed,
     lan_test_setup,
     menu_blob_has,
     ocr_blob_is_loading_or_ingame,
     ocr_blob_is_main_menu,
     ocr_dropped_initial,
     pick_newest_save_label,
+    _is_create_game_phrase,
     _text_matches_target,
 )
+import start_lan_game  # noqa: E402
 
 
 class MainMenuBlobTests(unittest.TestCase):
@@ -121,6 +126,59 @@ class LanCreateGameTests(unittest.TestCase):
         assert hit is not None
         self.assertIn("reate", hit[0])
         self.assertGreater(hit[1], 1100)
+
+    def test_garbled_rea_e_ame_is_create_and_load_is_not(self):
+        self.assertTrue(_is_create_game_phrase("rea e ame"))
+        self.assertFalse(_is_create_game_phrase("oad game"))
+        self.assertFalse(_is_create_game_phrase("oadgame"))
+        self.assertFalse(_is_create_game_phrase("game"))
+        rows = [
+            ("Load", 900, 1000),
+            ("Game", 980, 1000),
+            ("rea", 1180, 1000),
+            ("e", 1220, 1000),
+            ("ame", 1280, 1000),
+        ]
+        hit = lan_create_button(rows)
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        self.assertIn("rea", hit[0])
+        self.assertIn("ame", hit[0])
+        self.assertNotIn("load", hit[0])
+        self.assertGreater(hit[1], 1100)
+
+    def test_unreadable_button_right_of_load_is_create(self):
+        rows = [("Load Game", 900, 1000), ("btn", 1200, 1000)]
+        hit = lan_create_button(rows)
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        self.assertEqual(1200, hit[1])
+        self.assertEqual(1000, hit[2])
+        self.assertIsNone(lan_create_button([
+            ("Load Game", 900, 1001),
+            ("Join Game", 400, 400),
+            ("Refresh", 200, 400),
+        ]))
+        self.assertIsNone(lan_create_button([
+            ("Load Game", 900, 1000),
+            ("oad game", 1200, 1000),
+        ]))
+
+    def test_missing_create_is_a_failed_start(self):
+        self.assertTrue(lan_start_failed([
+            "already_lan_browser", "create_game_not_found", "never_reached_mp_setup",
+        ]))
+        self.assertTrue(lan_start_failed(["create_game_not_found"]))
+        self.assertFalse(lan_start_failed([
+            "create_game_not_found", "reached_mp_setup",
+        ]))
+        self.assertFalse(lan_start_failed(["already_mp_setup"]))
+        self.assertFalse(lan_start_failed(["already_staging"]))
+        failed = ["create_game_not_found", "never_reached_mp_setup"]
+        with mock.patch.object(start_lan_game, "run", return_value=failed):
+            self.assertEqual(1, start_lan_game.main(["--no-kill"]))
+        with mock.patch.object(start_lan_game, "run", return_value=["reached_mp_setup"]):
+            self.assertEqual(0, start_lan_game.main(["--no-kill"]))
 
     def test_no_turn_timer_assembles_and_off_is_exact(self):
         rows = [

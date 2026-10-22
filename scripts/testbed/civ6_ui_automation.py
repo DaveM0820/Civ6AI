@@ -2709,31 +2709,130 @@ def _is_load_game_phrase(phrase: str) -> bool:
     return "load game" in text or "oad game" in text
 
 
+def _letters(text: str) -> str:
+    return re.sub(r"[^a-z]", "", _normalize(text))
+
+
+def _edit_distance(left: str, right: str) -> int:
+    if left == right:
+        return 0
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
+    prev = list(range(len(right) + 1))
+    for i, ch in enumerate(left, 1):
+        cur = [i]
+        for j, other in enumerate(right, 1):
+            insert = cur[j - 1] + 1
+            delete = prev[j] + 1
+            swap = prev[j - 1] + (ch != other)
+            cur.append(min(insert, delete, swap))
+        prev = cur
+    return prev[-1]
+
+
+def _is_subsequence(needle: str, hay: str) -> bool:
+    index = 0
+    for ch in hay:
+        if index < len(needle) and needle[index] == ch:
+            index += 1
+    return index == len(needle)
+
+
 def _is_create_game_phrase(phrase: str) -> bool:
+    """Create Game, including OCR that drops letters ('rea e ame' for Create Game).
+
+    A dropped first letter ('Reate Game') still matches. So does a short run of
+    the remaining letters when it is closer to Create/Host than to Load. 'oad game'
+    and a bare 'game' stay Load, or nothing.
+    """
     text = _normalize(phrase)
     if _is_load_game_phrase(text):
         return False
-    return any(
+    if any(
         name in text
         for name in ("create game", "reate game", "host game", "ost game", "create a game")
-    )
+    ):
+        return True
+    letters = _letters(text)
+    if len(letters) < 6:
+        return False
+    create_distance = min(_edit_distance(letters, "creategame"), _edit_distance(letters, "hostgame"))
+    load_distance = _edit_distance(letters, "loadgame")
+    if load_distance <= create_distance:
+        return False
+    if create_distance <= 3:
+        return True
+    for target in ("creategame", "hostgame"):
+        if _is_subsequence(letters, target) and len(letters) >= len(target) - 3:
+            return True
+    return False
+
+
+# Bottom-row words that are not the Create Game button. Positional fallback
+# uses these so a garbled label to the right of Load Game is still Create.
+_CREATE_POSITIONAL_SKIP = ("refresh", "join", "back", "mod", "hall")
+
+
+def _cluster_mid(cluster: list[tuple[str, int, int]]) -> tuple[str, int, int]:
+    phrase, ordered = _cluster_phrase(cluster)
+    mid = ordered[len(ordered) // 2]
+    return phrase, mid[1], mid[2]
 
 
 def lan_create_button(rows: list[tuple[str, int, int]]) -> tuple[str, int, int] | None:
     """OCR hit for Create Game / Host Game. None when the only button is Load Game.
 
-    Does not return a coordinate. The LAN browser's old fixed click is Load Game.
+    Fuzzy text first ('rea e ame'). If that misses, the bottom-row cluster to the
+    right of Load Game. Never a fixed coordinate: that point is Load Game.
     """
+    clusters = _ocr_clusters(rows)
     hits: list[tuple[str, int, int]] = []
-    for cluster in _ocr_clusters(rows):
-        phrase, ordered = _cluster_phrase(cluster)
-        if not _is_create_game_phrase(phrase):
-            continue
-        mid = ordered[len(ordered) // 2]
-        hits.append((phrase, mid[1], mid[2]))
-    if not hits:
+    for cluster in clusters:
+        phrase, x, y = _cluster_mid(cluster)
+        if _is_create_game_phrase(phrase):
+            hits.append((phrase, x, y))
+    if hits:
+        return max(hits, key=lambda hit: hit[2])
+    if not clusters:
         return None
-    return max(hits, key=lambda hit: hit[2])
+    max_y = max(token[2] for cluster in clusters for token in cluster)
+    bottom: list[tuple[str, int, int]] = []
+    for cluster in clusters:
+        phrase, x, y = _cluster_mid(cluster)
+        if abs(y - max_y) <= 30:
+            bottom.append((phrase, x, y))
+    load_x = [x for phrase, x, _y in bottom if _is_load_game_phrase(phrase)]
+    if not load_x:
+        return None
+    right_of_load = max(load_x)
+    candidates = [
+        (phrase, x, y)
+        for phrase, x, y in bottom
+        if x > right_of_load
+        and not _is_load_game_phrase(phrase)
+        and not any(word in phrase for word in _CREATE_POSITIONAL_SKIP)
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda hit: hit[1])
+
+
+def lan_start_failed(steps: list[str]) -> bool:
+    """True when Create Game never opened multiplayer setup.
+
+    An early create_game_not_found is fine when a later attempt reaches setup.
+    never_reached_mp_setup is always a failure.
+    """
+    if "never_reached_mp_setup" in steps:
+        return True
+    reached = (
+        "reached_mp_setup" in steps
+        or "already_mp_setup" in steps
+        or "already_staging" in steps
+    )
+    return "create_game_not_found" in steps and not reached
 
 
 def lan_option_button(rows: list[tuple[str, int, int]], option: str) -> tuple[str, int, int] | None:

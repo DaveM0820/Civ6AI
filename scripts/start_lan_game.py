@@ -27,6 +27,7 @@ from windows_process import run_hidden  # noqa: E402
 
 from civ6_ui_automation import (  # noqa: E402
     find_civ_window,
+    lan_start_failed,
     start_lan_test_game,
     wait_for_host_click_ui,
 )
@@ -79,6 +80,9 @@ def main(argv: list[str] | None = None) -> int:
         steps = run(kill_existing=not args.no_kill)
     except Exception as error:
         print(f"LAN_START_FAIL {error}")
+        return 1
+    if lan_start_failed(steps):
+        print("LAN_START_FAIL", steps)
         return 1
     print("LAN_START_OK", steps)
     return 0
