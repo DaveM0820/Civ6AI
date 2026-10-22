@@ -969,6 +969,11 @@ Civ6Ai_Production._autoMiss = Civ6Ai_Production._autoMiss or {}
 Civ6Ai_Production._lastQueued = Civ6Ai_Production._lastQueued or {}
 Civ6Ai_Production._pendingQueue = Civ6Ai_Production._pendingQueue or {}
 Civ6Ai_Production._queuePass = Civ6Ai_Production._queuePass or 0
+Civ6Ai_Production._turnTries = Civ6Ai_Production._turnTries or {}
+Civ6Ai_Production._lastReqPass = Civ6Ai_Production._lastReqPass or {}
+Civ6Ai_Production._gaveUp = Civ6Ai_Production._gaveUp or {}
+Civ6Ai_Production.AUTO_GAP = 1
+Civ6Ai_Production.AUTO_TURN_CAP = 6
 Civ6Ai_Production._queuePassDepth = Civ6Ai_Production._queuePassDepth or 0
 
 function Civ6Ai_Production.BeginQueuePass()
@@ -1066,7 +1071,20 @@ function Civ6Ai_Production._AutoqueuePass(playerID)
         Civ6Ai_Production._autoMiss[cityId] = (Civ6Ai_Production._autoMiss[cityId] or 0) + 1
       end
     end
-    if Civ6Ai_Production._GetCityProduction(city) == nil and Civ6Ai_Production._pendingQueue[key] == nil then
+    -- Throttle: at most one request per city per pass, and AUTO_TURN_CAP
+    -- requests per city per turn. Per-tick retries flooded the UI and hung the game.
+    local tries = Civ6Ai_Production._turnTries[key] or 0
+    local lastPass = Civ6Ai_Production._lastReqPass[key]
+    local throttled = (lastPass ~= nil and pass - lastPass < Civ6Ai_Production.AUTO_GAP)
+      or tries >= Civ6Ai_Production.AUTO_TURN_CAP
+    if tries >= Civ6Ai_Production.AUTO_TURN_CAP and not Civ6Ai_Production._gaveUp[key]
+        and Civ6Ai_Production._GetCityProduction(city) == nil then
+      Civ6Ai_Production._gaveUp[key] = true
+      _logProduction("production|autoqueue|gave_up|city=" .. tostring(cityId) .. "|tries=" .. tostring(tries) .. "|turn=" .. tostring(turn))
+    end
+    if not throttled and Civ6Ai_Production._GetCityProduction(city) == nil and Civ6Ai_Production._pendingQueue[key] == nil then
+      Civ6Ai_Production._lastReqPass[key] = pass
+      Civ6Ai_Production._turnTries[key] = tries + 1
       -- Hard guarantee: an empty queue is retried on every pass until it sticks.
       -- A pick that did not stick moves to the next ranked item, wrapping round.
       do

@@ -1073,7 +1073,7 @@ function Civ6Ai_Autotest._ScheduleEndTurnRetry(playerID, origPlayer, maxAttempts
     if UI.CanEndTurn ~= nil and UI.CanEndTurn() then
       local endOk, endReason = Civ6Ai_Autotest._RequestEndTurn()
       pcall(function()
-        if origPlayer ~= nil and PlayerManager ~= nil and PlayerManager.SetLocalPlayerAndObserver ~= nil then
+        if origPlayer ~= nil and origPlayer ~= playerID and PlayerManager ~= nil and PlayerManager.SetLocalPlayerAndObserver ~= nil then
           PlayerManager.SetLocalPlayerAndObserver(origPlayer)
         end
       end)
@@ -1089,7 +1089,7 @@ function Civ6Ai_Autotest._ScheduleEndTurnRetry(playerID, origPlayer, maxAttempts
     end
     if attempts >= maxAttempts then
       pcall(function()
-        if origPlayer ~= nil and PlayerManager ~= nil and PlayerManager.SetLocalPlayerAndObserver ~= nil then
+        if origPlayer ~= nil and origPlayer ~= playerID and PlayerManager ~= nil and PlayerManager.SetLocalPlayerAndObserver ~= nil then
           PlayerManager.SetLocalPlayerAndObserver(origPlayer)
         end
       end)
@@ -1151,7 +1151,11 @@ function Civ6Ai_Autotest._EndManagedTurn(playerID)
     return
   end
   local ok, err = pcall(function()
-    PlayerManager.SetLocalPlayerAndObserver(playerID)
+    -- Never re-set the local seat onto itself: SetLocalPlayerAndObserver also makes
+    -- it an observer, and the game then drops its UI city/player operations.
+    if origPlayer ~= playerID then
+      PlayerManager.SetLocalPlayerAndObserver(playerID)
+    end
     local endOk, endReason = Civ6Ai_Autotest._TryEndTurnNow(playerID)
     if endOk then
       return
@@ -1161,7 +1165,7 @@ function Civ6Ai_Autotest._EndManagedTurn(playerID)
   end)
   if ok then
     pcall(function()
-      if origPlayer ~= nil then
+      if origPlayer ~= nil and origPlayer ~= playerID then
         PlayerManager.SetLocalPlayerAndObserver(origPlayer)
       end
     end)
