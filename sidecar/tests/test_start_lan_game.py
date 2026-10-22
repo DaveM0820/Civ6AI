@@ -9,7 +9,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts" / "testbed"))
 
 from civ6_ui_automation import (  # noqa: E402
+    lan_create_button,
+    lan_host_screen,
     lan_load_phase,
+    lan_option_button,
+    lan_test_setup,
     menu_blob_has,
     ocr_blob_is_loading_or_ingame,
     ocr_blob_is_main_menu,
@@ -75,6 +79,83 @@ class LoadingOrIngameBlobTests(unittest.TestCase):
     def test_loading_screen(self):
         blob = "loading world"
         self.assertTrue(ocr_blob_is_loading_or_ingame(blob))
+
+
+class LanCreateGameTests(unittest.TestCase):
+    def test_setup_is_four_players_and_timers_off(self):
+        setup = {labels[0]: option for labels, option in lan_test_setup()}
+        self.assertEqual(setup["choose number of players"], "4")
+        self.assertEqual(setup["turn timer"], "No Turn Timer")
+        self.assertEqual(setup["smart timer"], "Off")
+
+    def test_load_game_screen_is_not_the_create_button(self):
+        self.assertEqual("load_game", lan_host_screen("back oad game no file"))
+        self.assertEqual("file_picker", lan_host_screen("back load game utosaves"))
+        self.assertEqual("lan", lan_host_screen("local network games join game refresh load game"))
+        self.assertEqual("setup", lan_host_screen("multiplayer game setup"))
+        rows = [
+            ("Load Game", 900, 1001),
+            ("Join Game", 400, 400),
+            ("Refresh", 200, 400),
+        ]
+        self.assertIsNone(lan_create_button(rows))
+
+    def test_split_create_game_beats_load_game_on_the_same_row(self):
+        rows = [
+            ("Load", 900, 1000),
+            ("Game", 980, 1000),
+            ("Create", 1180, 1000),
+            ("Game", 1260, 1000),
+        ]
+        hit = lan_create_button(rows)
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        self.assertIn("create", hit[0])
+        self.assertNotIn("load", hit[0])
+        self.assertGreater(hit[1], 1100)
+
+    def test_dropped_initial_still_finds_create(self):
+        rows = [("Reate", 1180, 900), ("Game", 1260, 900), ("Oad", 900, 900), ("Game", 980, 900)]
+        hit = lan_create_button(rows)
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        self.assertIn("reate", hit[0])
+        self.assertGreater(hit[1], 1100)
+
+    def test_no_turn_timer_assembles_and_off_is_exact(self):
+        rows = [
+            ("No", 500, 400),
+            ("Turn", 560, 402),
+            ("Timer", 640, 400),
+            ("Classic", 500, 460),
+            ("Offer", 500, 520),
+        ]
+        hit = lan_option_button(rows, "No Turn Timer")
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        self.assertIn("no turn timer", hit[0])
+        self.assertIsNone(lan_option_button(rows, "Off"))
+        rows.append(("Off", 500, 580))
+        off = lan_option_button(rows, "Off")
+        self.assertIsNotNone(off)
+        assert off is not None
+        self.assertEqual(off[0], "off")
+        self.assertIsNone(lan_option_button([("14", 10, 10), ("Offer", 10, 40)], "4"))
+        four = lan_option_button([("2", 10, 10), ("4", 10, 40), ("6", 10, 70)], "4")
+        self.assertIsNotNone(four)
+        assert four is not None
+        self.assertEqual(four[0], "4")
+
+    def test_create_click_does_not_use_the_load_game_coordinate(self):
+        text = (ROOT / "scripts" / "testbed" / "civ6_ui_automation.py").read_text(encoding="utf-8")
+        start = text.index("def _start_lan_test_game_clicks")
+        end = text.index("\ndef bootstrap_create_game_timed")
+        body = text[start:end]
+        self.assertNotIn("1180, 1001", body)
+        self.assertNotIn("1180,1001", body)
+        self.assertNotIn("958, 511", body)
+        self.assertIn("_configure_lan_test_setup", body)
+        self.assertIn("lan_create_button", body)
 
 
 class LanLoadPhaseTests(unittest.TestCase):

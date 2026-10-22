@@ -2373,7 +2373,7 @@ def pick_newest_save_label(rows: list[tuple[str, int, int]]) -> tuple[str, int, 
 
 
 def start_lan_test_game(win: WindowInfo) -> list[str]:
-    """Main menu -> Multiplayer -> LAN -> Create Game -> test config -> 2 AI -> Start."""
+    """Main menu -> Multiplayer -> LAN -> Create Game -> 4 players, no turn timer -> Start."""
     steps: list[str] = []
     raise_civ_via_taskbar()
     _alt_tab_to_civ(win)
@@ -2636,6 +2636,194 @@ def _ready_lan_staging(win: WindowInfo, steps: list[str]) -> list[str]:
     return steps
 
 
+# Host a LAN game: 4 players, turn timer off, smart timer off.
+# The old fallback click (1180, 1001) is the Load Game control on the LAN browser.
+LAN_TEST_SETUP: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("choose number of players", "number of players"), "4"),
+    (("turn timer",), "No Turn Timer"),
+    (("smart timer",), "Off"),
+)
+
+
+def lan_test_setup() -> tuple[tuple[tuple[str, ...], str], ...]:
+    return LAN_TEST_SETUP
+
+
+def lan_host_screen(blob: str) -> str:
+    """Create-game screen: staging, file_picker, setup, lan, load_game, or other.
+
+    The LAN browser lists Load Game as a button. That is still the browser.
+    load_game is the file screen (Back plus a Load Game title, no Create Game).
+    """
+    text = blob if isinstance(blob, str) else ""
+    low = _normalize(text)
+    if menu_blob_has(text, "staging room"):
+        return "staging"
+    if "autosave" in low or "auto save" in low or "utosave" in low:
+        return "file_picker"
+    if "multiplayer game setup" in low:
+        return "setup"
+    if menu_blob_has(text, "local network games") or ("join game" in low and "refresh" in low):
+        return "lan"
+    has_create = "create game" in low or "reate game" in low or "host game" in low
+    if (menu_blob_has(text, "load game") or "oad game" in low) and "back" in low and not has_create:
+        return "load_game"
+    return "other"
+
+
+def _ocr_clusters(
+    rows: list[tuple[str, int, int]],
+    y_slop: int = 18,
+    x_gap: int = 120,
+) -> list[list[tuple[str, int, int]]]:
+    """Group OCR tokens into buttons. Words in one label sit close in x; two
+    bottom buttons (Load Game, Create Game) share a y and are far apart in x."""
+    items = sorted(rows, key=lambda row: (row[2], row[1]))
+    lines: list[list[tuple[str, int, int]]] = []
+    for text, x, y in items:
+        if lines and abs(y - lines[-1][0][2]) <= y_slop:
+            lines[-1].append((text, x, y))
+        else:
+            lines.append([(text, x, y)])
+    clusters: list[list[tuple[str, int, int]]] = []
+    for line in lines:
+        ordered = sorted(line, key=lambda token: token[1])
+        current = [ordered[0]]
+        for token in ordered[1:]:
+            if token[1] - current[-1][1] > x_gap:
+                clusters.append(current)
+                current = [token]
+            else:
+                current.append(token)
+        clusters.append(current)
+    return clusters
+
+
+def _cluster_phrase(cluster: list[tuple[str, int, int]]) -> tuple[str, list[tuple[str, int, int]]]:
+    ordered = sorted(cluster, key=lambda token: token[1])
+    return _normalize(" ".join(token[0] for token in ordered)), ordered
+
+
+def _is_load_game_phrase(phrase: str) -> bool:
+    text = _normalize(phrase)
+    return "load game" in text or "oad game" in text
+
+
+def _is_create_game_phrase(phrase: str) -> bool:
+    text = _normalize(phrase)
+    if _is_load_game_phrase(text):
+        return False
+    return any(
+        name in text
+        for name in ("create game", "reate game", "host game", "ost game", "create a game")
+    )
+
+
+def lan_create_button(rows: list[tuple[str, int, int]]) -> tuple[str, int, int] | None:
+    """OCR hit for Create Game / Host Game. None when the only button is Load Game.
+
+    Does not return a coordinate. The LAN browser's old fixed click is Load Game.
+    """
+    hits: list[tuple[str, int, int]] = []
+    for cluster in _ocr_clusters(rows):
+        phrase, ordered = _cluster_phrase(cluster)
+        if not _is_create_game_phrase(phrase):
+            continue
+        mid = ordered[len(ordered) // 2]
+        hits.append((phrase, mid[1], mid[2]))
+    if not hits:
+        return None
+    return max(hits, key=lambda hit: hit[2])
+
+
+def lan_option_button(rows: list[tuple[str, int, int]], option: str) -> tuple[str, int, int] | None:
+    """Dropdown option. '4' and 'Off' do not match '14' or 'Offer'.
+
+    A split label ('No' 'Turn' 'Timer') is one cluster when the words are adjacent.
+    A short option is the token itself, so a row of digits still yields '4'.
+    """
+    want = _normalize(option)
+    if not want:
+        return None
+    clusters = _ocr_clusters(rows)
+    for cluster in clusters:
+        phrase, ordered = _cluster_phrase(cluster)
+        if phrase == want:
+            mid = ordered[len(ordered) // 2]
+            return phrase, mid[1], mid[2]
+    if len(want) < 5:
+        for cluster in clusters:
+            for text, x, y in cluster:
+                if _normalize(text) == want:
+                    return text, x, y
+        return None
+    for cluster in clusters:
+        phrase, ordered = _cluster_phrase(cluster)
+        if want in phrase:
+            mid = ordered[len(ordered) // 2]
+            return phrase, mid[1], mid[2]
+    return None
+
+
+def lan_row_button(rows: list[tuple[str, int, int]], label: str) -> tuple[str, int, int] | None:
+    """Topmost setup-row cluster whose text contains the row label."""
+    want = _normalize(label)
+    if len(want) < 5:
+        return None
+    hits: list[tuple[str, int, int]] = []
+    for cluster in _ocr_clusters(rows):
+        phrase, ordered = _cluster_phrase(cluster)
+        if want in phrase:
+            mid = ordered[len(ordered) // 2]
+            hits.append((phrase, mid[1], mid[2]))
+    if not hits:
+        return None
+    hits.sort(key=lambda hit: hit[2])
+    return hits[0]
+
+
+def _click_ocr_hit(win: WindowInfo, hit: tuple[str, int, int]) -> None:
+    _text, x, y = hit
+    _hit_client(win, x - win.x, y - win.y, taps=1)
+
+
+def _select_lan_setup_row(win: WindowInfo, labels: tuple[str, ...], option: str) -> bool:
+    rows = ocr_window(win)
+    hit = None
+    for label in labels:
+        hit = lan_row_button(rows, label)
+        if hit is not None:
+            break
+    if hit is None:
+        return False
+    _click_ocr_hit(win, hit)
+    time.sleep(0.45)
+    picked = lan_option_button(ocr_window(win), option)
+    if picked is None:
+        return False
+    _click_ocr_hit(win, picked)
+    time.sleep(0.35)
+    return True
+
+
+def _configure_lan_test_setup(win: WindowInfo, steps: list[str]) -> None:
+    """4 players, No Turn Timer, Smart Timer Off. No slot-coordinate clicks."""
+    for labels, option in lan_test_setup():
+        key = labels[0].replace(" ", "_")
+        if _select_lan_setup_row(win, labels, option):
+            steps.append(f"{key}={option}")
+        else:
+            steps.append(f"{key}_missed")
+            log.warning("lan setup missed %s = %s", labels[0], option)
+
+
+def _back_out_of_load(win: WindowInfo, steps: list[str]) -> None:
+    """Leave Load Game / the file picker. Do not click Create from here."""
+    _hit_client(win, 1240, 148, taps=1)
+    steps.append("clicked_back_load_game")
+    time.sleep(1.0)
+
+
 def _start_lan_test_game_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
     entry = ocr_window(win)
     blob = " ".join(t.lower() for t, _, _ in entry)
@@ -2678,83 +2866,67 @@ def _start_lan_test_game_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
         steps.append("already_staging")
         return _ready_lan_staging(win, steps)
 
-    if not on_mp_setup:
-        if on_lan_browser:
-            steps.append("already_lan_browser")
-            _hit_client(win, 1180, 1001, taps=1)
-            hit = "CreateGame_fallback"
-        else:
-            hit = None
-            for label in ("Create Game", "Host Game", "Create a Game"):
-                hit = _click_labels(win, (label,), timeout=3.0, min_x_fraction=0.20)
-                if hit:
-                    break
-            if hit is None:
-                _hit_client(win, 1180, 1001, taps=1)
-                hit = "CreateGame_fallback"
-        steps.append(f"clicked_{hit}")
-        deadline = time.monotonic() + 8.0
-        while time.monotonic() < deadline:
-            blob_now = " ".join(t.lower() for t, _, _ in ocr_window(win))
-            if "multiplayer game setup" in blob_now:
-                on_mp_setup = True
+    # Create Game is an OCR label. Never click a fixed point: on this browser
+    # that point is Load Game, which opens the file picker and then used to
+    # give up. A file picker is backed out of, and Create Game is tried again.
+    reached = on_mp_setup
+    if reached:
+        steps.append("already_mp_setup")
+    else:
+        for _attempt in range(4):
+            rows = ocr_window(win)
+            blob_now = " ".join(t.lower() for t, _, _ in rows)
+            screen = lan_host_screen(blob_now)
+            if screen == "staging":
+                steps.append("already_staging")
+                return _ready_lan_staging(win, steps)
+            if screen in ("file_picker", "load_game"):
+                _back_out_of_load(win, steps)
+                steps.append("backed_out_file_picker")
+                continue
+            if screen == "setup":
+                reached = True
+                steps.append("reached_mp_setup")
                 break
-            if "confirm delete" in blob_now:
-                press_escape(win)
-                time.sleep(0.4)
-            time.sleep(0.5)
-        if not on_mp_setup:
-            _hit_client(win, 1180, 1001, taps=1)
-            time.sleep(1.5)
-            blob_now = " ".join(t.lower() for t, _, _ in ocr_window(win))
-            on_mp_setup = "multiplayer game setup" in blob_now
-        if not on_mp_setup:
+            if screen == "lan" and "already_lan_browser" not in steps:
+                steps.append("already_lan_browser")
+            hit = lan_create_button(rows)
+            if hit is None:
+                steps.append("create_game_not_found")
+                time.sleep(0.8)
+                continue
+            _click_ocr_hit(win, hit)
+            steps.append(f"clicked_{hit[0]}")
+            deadline = time.monotonic() + 8.0
+            while time.monotonic() < deadline:
+                rows = ocr_window(win)
+                blob_now = " ".join(t.lower() for t, _, _ in rows)
+                screen = lan_host_screen(blob_now)
+                if screen == "setup":
+                    reached = True
+                    break
+                if "confirm delete" in blob_now:
+                    press_escape(win)
+                    time.sleep(0.4)
+                    continue
+                if screen in ("file_picker", "load_game"):
+                    _back_out_of_load(win, steps)
+                    steps.append("backed_out_file_picker")
+                    break
+                time.sleep(0.5)
+            if reached:
+                steps.append("reached_mp_setup")
+                break
+        if not reached:
             steps.append("never_reached_mp_setup")
             return steps
-    else:
-        steps.append("already_mp_setup")
 
-    # Never open the file picker from the LAN browser: OCR "Load Configuration"
-    # there is the wrong control, and later clicks hit Delete on the picker.
     blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
     if "confirm delete" in blob:
         press_escape(win)
         steps.append("escaped_confirm_delete")
         time.sleep(0.5)
-        blob = " ".join(t.lower() for t, _, _ in ocr_window(win))
-    if "autosaves" in blob:
-        _hit_client(win, 1240, 148, taps=1)
-        steps.append("backed_out_file_picker")
-        time.sleep(1.0)
-        return steps
-
-    added = 0
-    for _ in range(2):
-        if _click_labels(win, ("Open",), timeout=2.0):
-            _click_labels(win, ("AI", "Computer", "Civilization"), timeout=3.0)
-            added += 1
-            steps.append("ai_from_open")
-        elif _click_labels(win, ("Closed",), timeout=2.0):
-            _click_labels(win, ("AI", "Computer"), timeout=3.0)
-            added += 1
-            steps.append("ai_from_closed")
-        elif _click_labels(win, ("Add AI", "Add Player"), timeout=2.0):
-            added += 1
-            steps.append("clicked_add_ai")
-        else:
-            break
-        time.sleep(0.4)
-    if added == 0:
-        _hit_client(win, 958, 511, taps=1)
-        time.sleep(0.4)
-        if _click_labels(win, ("AI", "Computer"), timeout=2.0):
-            added += 1
-        _hit_client(win, 957, 623, taps=1)
-        time.sleep(0.4)
-        if _click_labels(win, ("AI", "Computer"), timeout=2.0):
-            added += 1
-        steps.append("ai_from_slots")
-    steps.append(f"ai_added={added}")
+    _configure_lan_test_setup(win, steps)
 
     if _click_labels(win, ("Confirm Settings", "Start Game"), timeout=6.0) is None:
         _hit_client(win, 1057, 1005, taps=1)

@@ -6,7 +6,8 @@
 
 Kills the running Civ process by default so a fresh Mods/Paths.lua load (Autotest
 on) actually applies. Then waits for the main menu and clicks Multiplayer ->
-Local Network -> Create Game -> setup -> staging Ready.
+Local Network -> Create Game (never Load Game) -> 4 players, Smart Timer Off,
+No Turn Timer -> staging Ready.
 """
 from __future__ import annotations
 
