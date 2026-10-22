@@ -1128,6 +1128,14 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
             "when you first met. A delegation does not reveal the map, and the black hexes around that "
             "city were not explored."
         )
+        true_map = coaching.civ6_true_explored(context)
+        if true_map is not None:
+            revealed_tiles, map_tiles, true_pct = true_map
+            map_lines.append(pipeline._wire_line(
+                "map.revealed_tiles",
+                f"{revealed_tiles} of {map_tiles} tiles revealed on the whole map ({true_pct}%). "
+                "This is your real visibility, not the trimmed picture.",
+            ))
     naval = any(isinstance(u, dict) and u.get("domain_id") == "DOMAIN_SEA" for u in context.get("your_units") or [])
     grid = [list(r) for r in (context.get("known_map") or {}).get("visibility_grid") or []]
     todo = [tuple(map(int, str(o.get("plot_id")).split("_")[1:3])) for o in (context.get("your_units") or []) + (context.get("your_cities") or [])

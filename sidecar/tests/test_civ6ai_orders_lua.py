@@ -1551,15 +1551,15 @@ class WpAApplyCoreTests(unittest.TestCase):
         self.order(0, K=19, P=2, U=0, X=131072, Y=0, I=0, V=40, S=99)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
 
-    def test_explore_uses_plot_index_and_stays_on_its_landmass(self):
-        # IsRevealed(x, y) used to pass x as the plot index, so explore returned
-        # map_known or walked somewhere else. A nearer fog edge on another
-        # continent must not beat a fog edge this unit can walk to.
-        self.rt.execute(r"""
+    def _install_explore_map(self, *, sea=False, reveal_on_move=False, move=True):
+        # (2,1) unit, same landmass fog edge at revealed (1,1) beside fog (0,1).
+        # (4,1) is a nearer other-area fog edge and must not win for a land unit.
+        self.rt.execute(
+            """
           EXPLORE_ARGS = {}
-          local spec = {}
+          EXPLORE_SPEC = {}
           local function put(x, y, area, revealed)
-            spec[tostring(x) .. "," .. tostring(y)] = {area = area, revealed = revealed}
+            EXPLORE_SPEC[tostring(x) .. "," .. tostring(y)] = {area = area, revealed = revealed}
           end
           put(0, 1, 1, false)
           put(1, 1, 1, true)
@@ -1568,13 +1568,14 @@ class WpAApplyCoreTests(unittest.TestCase):
           put(4, 1, 2, false)
           Players[2].units[1].x = 2
           Players[2].units[1].y = 1
+          GameInfo.Units[0].Domain = "%s"
           local oldGet = Map.GetPlot
           function Map.GetPlot(x, y)
             local p = oldGet(x, y)
-            local s = spec[tostring(x) .. "," .. tostring(y)]
+            local s = EXPLORE_SPEC[tostring(x) .. "," .. tostring(y)]
             p.area = s and s.area or 1
             p.revealed = s and s.revealed or false
-            p.water = false
+            p.water = %s
             function p:IsWater() return self.water end
             function p:IsImpassable() return false end
             function p:GetArea() return self.area end
@@ -1589,7 +1590,7 @@ class WpAApplyCoreTests(unittest.TestCase):
             return Map.GetPlot(c[1], c[2])
           end
           function Map.GetAdjacentPlot(x, y, dir)
-            local odd = (y % 2) == 1
+            local odd = (y %% 2) == 1
             local d = odd and {{1, 0}, {1, 1}, {0, 1}, {-1, 0}, {0, -1}, {1, -1}}
               or {{1, 0}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}}
             local step = d[dir + 1]
@@ -1603,20 +1604,165 @@ class WpAApplyCoreTests(unittest.TestCase):
           PlayersVisibility[2] = {
             IsRevealed = function(_, index)
               table.insert(EXPLORE_ARGS, index)
+              local x = index %% 10
+              local y = math.floor(index / 10)
+              return Map.GetPlot(x, y).revealed == true
+            end,
+          }
+          local function applyMove(p, uid, x, y)
+            if not %s then return true, "moved" end
+            for _, u in ipairs(Players[p].units) do
+              if u.id == uid then u.x = x; u.y = y; u.moves = 0 end
+            end
+            if %s then
+              local function reveal(px, py)
+                local row = EXPLORE_SPEC[tostring(px) .. "," .. tostring(py)]
+                if row ~= nil then row.revealed = true end
+              end
+              reveal(x, y)
+              for dir = 0, 5 do
+                local a = Map.GetAdjacentPlot(x, y, dir)
+                if a ~= nil then reveal(a:GetX(), a:GetY()) end
+              end
+            end
+            return true, "moved"
+          end
+          ExposedMembers.Civ6Ai.MoveUnitForPlayer = applyMove
+          ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = applyMove
+            """
+            % (
+                "DOMAIN_SEA" if sea else "DOMAIN_LAND",
+                "true" if sea else "false",
+                "true" if move else "false",
+                "true" if reveal_on_move else "false",
+            )
+        )
+
+    def test_explore_uses_plot_index_and_stays_on_its_landmass(self):
+        # IsRevealed(x, y) used to pass x as the plot index, so explore returned
+        # map_known or walked somewhere else. A nearer fog edge on another
+        # continent must not beat a fog edge this unit can walk to.
+        # Success requires the move to reveal a tile. Arriving at (1,1) reveals (0,1).
+        self._install_explore_map(reveal_on_move=True)
+        self.order(0, K=25, P=2, U=7, S=110)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertIn("explore_to=1,1", self.last()["reason"])
+        self.assertNotIn("other_area", self.last()["reason"])
+        self.assertIn(":new=", self.last()["reason"])
+        args = [int(value) for value in _vals(self.rt.eval("EXPLORE_ARGS"))]
+        # Plot index is y * 10 + x. The unit stands on (2, 1), index 12.
+        # The old call passed x, which is never 12 on this map.
+        self.assertIn(12, args)
+
+    def test_explore_without_a_new_tile_is_not_success(self):
+        self._install_explore_map(reveal_on_move=False)
+        self.order(0, K=25, P=2, U=7, S=111)
+        self.assertFalse(self.last()["ok"], self.last())
+        self.assertIn("explore_no_reveal", self.last()["reason"])
+        self.assertIn("explore_to=1,1", self.last()["reason"])
+
+    def test_stuck_explorer_steps_onto_the_nearest_fog(self):
+        # The unit never leaves (2,1) and never reveals. After two turns with
+        # no new tiles, the order targets the fog tile itself.
+        self._install_explore_map(move=False)
+        self.rt.globals().SetTurn(5)
+        self.order(0, K=25, P=2, U=7, S=112, T=5)
+        self.assertIn("explore_no_reveal", self.last()["reason"])
+        self.assertIn("explore_to=1,1", self.last()["reason"])
+        self.assertNotIn(":stuck", self.last()["reason"])
+        self.rt.globals().SetTurn(6)
+        self.order(0, K=25, P=2, U=7, S=113, T=6)
+        self.assertIn("explore_to=1,1", self.last()["reason"])
+        self.assertNotIn(":stuck", self.last()["reason"])
+        self.rt.globals().SetTurn(7)
+        self.order(0, K=25, P=2, U=7, S=114, T=7)
+        self.assertFalse(self.last()["ok"])
+        self.assertIn("explore_no_reveal", self.last()["reason"])
+        self.assertIn(":stuck", self.last()["reason"])
+        self.assertIn("explore_to=0,1", self.last()["reason"])
+
+    def test_stuck_explorer_walks_toward_a_revealed_city_state(self):
+        # Two fog tiles. The nearer one is not the one beside the revealed
+        # city-state, so a stuck explorer steps toward the city-state.
+        self.rt.execute(r"""
+          EXPLORE_SPEC = {}
+          local function put(x, y, revealed)
+            EXPLORE_SPEC[tostring(x) .. "," .. tostring(y)] = {area = 1, revealed = revealed}
+          end
+          put(0, 0, true)
+          put(1, 0, false)
+          put(0, 1, true)
+          put(0, 2, false)
+          Players[2].units[1].x = 0
+          Players[2].units[1].y = 0
+          GameInfo.Units[0].Domain = "DOMAIN_LAND"
+          local oldGet = Map.GetPlot
+          function Map.GetPlot(x, y)
+            local p = oldGet(x, y)
+            local s = EXPLORE_SPEC[tostring(x) .. "," .. tostring(y)]
+            p.area = 1
+            p.revealed = s and s.revealed or false
+            p.water = false
+            function p:IsWater() return false end
+            function p:IsImpassable() return false end
+            function p:GetArea() return 1 end
+            function p:GetIndex() return self.y * 10 + self.x end
+            return p
+          end
+          function Map.GetPlotCount() return 4 end
+          function Map.GetPlotByIndex(i)
+            local coords = {{0, 0}, {1, 0}, {0, 1}, {0, 2}}
+            local c = coords[i + 1]
+            return Map.GetPlot(c[1], c[2])
+          end
+          function Map.GetAdjacentPlot(x, y, dir)
+            local steps = {{1, 0}, {0, 1}, {-1, 0}, {0, -1}, {1, 1}, {-1, -1}}
+            local step = steps[dir + 1]
+            if step == nil then return nil end
+            return Map.GetPlot(x + step[1], y + step[2])
+          end
+          function Map.GetPlotDistance(x1, y1, x2, y2)
+            return math.abs(x1 - x2) + math.abs(y1 - y2)
+          end
+          PlayersVisibility = {}
+          PlayersVisibility[2] = {
+            IsRevealed = function(_, index)
               local x = index % 10
               local y = math.floor(index / 10)
               return Map.GetPlot(x, y).revealed == true
             end,
           }
+          local city = {}
+          function city:GetX() return 0 end
+          function city:GetY() return 1 end
+          Players[3] = {
+            IsAlive = function() return true end,
+            IsMajor = function() return false end,
+            IsBarbarian = function() return false end,
+            GetCities = function()
+              return { Members = function()
+                local done = false
+                return function()
+                  if not done then done = true; return 1, city end
+                end
+              end }
+            end,
+          }
+          Game:SetProperty("CIV6AI_EXPLORE_2_7_S", 2)
+          ExposedMembers.Civ6Ai.MoveUnitForPlayer = function() return true, "moved" end
+          ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = function() return true, "moved" end
         """)
-        self.order(0, K=25, P=2, U=7, S=110)
+        self.order(0, K=25, P=2, U=7, S=116)
+        self.assertIn(":stuck", self.last()["reason"])
+        self.assertIn("explore_to=0,2", self.last()["reason"])
+
+    def test_a_ship_explores_unrevealed_water_first(self):
+        self._install_explore_map(sea=True, reveal_on_move=True)
+        self.order(0, K=25, P=2, U=7, S=115)
         self.assertTrue(self.last()["ok"], self.last())
-        self.assertIn("explore_to=1,1", self.last()["reason"])
-        self.assertNotIn("other_area", self.last()["reason"])
-        args = [int(value) for value in _vals(self.rt.eval("EXPLORE_ARGS"))]
-        # Plot index is y * 10 + x. The unit stands on (2, 1), index 12.
-        # The old call passed x, which is never 12 on this map.
-        self.assertIn(12, args)
+        self.assertIn("explore_to=0,1", self.last()["reason"])
+        self.assertIn(":sea", self.last()["reason"])
+        self.assertIn(":new=", self.last()["reason"])
 
     def test_trade_explore_activate_guarded_fallback(self):
         self.order(0, K=25, P=2, U=7, S=100)

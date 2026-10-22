@@ -177,6 +177,35 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         self.assertIn("82% still black fog", advice)
         self.assertIn("Automate(explore)", advice)
         self.assertIn("just as valid", advice)
+        # 612 / (74*46) is the real visibility. The cached 18% stays on map.explored.
+        self.assertIn("map.revealed_tiles = 612 of 3404 tiles", prompt)
+        self.assertIn("17%", prompt)
+        self.assertNotIn("NAVAL EXPLORE", prompt)
+
+    def test_naval_explore_is_pushed_when_a_ship_can_move(self):
+        snap = {
+            "game": {"map_width": 74, "map_height": 46},
+            "decision": {"turn": 40, "player_id": "PLAYER_0"},
+            "your_units": [{
+                "unit_id": "UNIT_3",
+                "unit_type_id": "UNIT_GALLEY",
+                "domain_id": "DOMAIN_SEA",
+                "needs_orders": True,
+                "movement": {"current": 2},
+            }],
+            "your_cities": [],
+            "known_map": {"explored_percent": 12},
+        }
+        note = coaching.civ6_naval_explore_attention(snap)
+        self.assertIn("NAVAL EXPLORE", note)
+        self.assertIn("12%", note)
+        snap["your_units"][0]["movement"]["current"] = 0
+        self.assertIsNone(coaching.civ6_naval_explore_attention(snap))
+        from sidecar.civ6_apply_results import describe_reason
+        self.assertIn(
+            "did not reveal",
+            describe_reason("explore_no_reveal:explore_to=1,1:d=1:no_new_tiles"),
+        )
 
     def test_revealed_count_fills_explored_percent_when_the_field_is_missing(self):
         snap = {

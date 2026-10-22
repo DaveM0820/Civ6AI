@@ -245,6 +245,15 @@ def describe_reason(reason: Any) -> str:
         detail = text[len("order_error:"):].strip()
         extra = f": {detail}" if detail else ""
         return "the game raised a script error on that order" + extra + "; do not reissue this same order"
+    if text.startswith("explore_no_reveal"):
+        where = ""
+        if "explore_to=" in text:
+            where = text.split("explore_to=", 1)[1].split(":", 1)[0]
+        place = f" toward ({where})" if where else ""
+        stuck = ""
+        if ":stuck" in text:
+            stuck = " The unit has revealed nothing for 2+ turns; the next explore steps onto the nearest fog, or toward a revealed unmet city or city-state."
+        return "explore did not reveal any new tiles" + place + "." + stuck
     if text.startswith("move_not_applied"):
         return ("the game reported success but the unit did not leave its tile. "
                 "Do not order that destination again.")

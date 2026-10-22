@@ -2762,10 +2762,13 @@ function Gov.MakeTradeRoute(owner, unitId, destCityId)
     .. ":unit=" .. tostring(unitId) .. ":city=" .. tostring(destCityId)
 end
 
--- Explore: RequestOperation does not exist in gameplay script, so walk the unit
--- to the nearest revealed, passable plot of its domain that borders the unknown.
--- IsRevealed takes a plot index. Passing (x, y) tested index == x, so the order
--- returned map_known or walked to a nonsense tile while most of the map was fog.
+-- Explore walks toward fog. A move that reveals nothing is not a success: a
+-- scout can be ordered onto a tile it already sees, the move call returns, and
+-- the revealed count stays flat. Success is a higher revealed count.
+-- IsRevealed takes a plot index. Passing (x, y) tested index == x.
+-- After two turns with no new tiles, the next order steps onto the nearest
+-- unrevealed frontier (or the frontier nearest a revealed unmet city or
+-- city-state). Ships step onto unrevealed water from the first order.
 function Gov.Explore(owner, unitId)
   local unit = Civ6Ai_Orders._Unit(owner, unitId)
   if unit == nil then
@@ -2774,6 +2777,13 @@ function Gov.Explore(owner, unitId)
   local vis = PlayersVisibility ~= nil and PlayersVisibility[owner] or nil
   if vis == nil or vis.IsRevealed == nil then
     return false, "explore_unavailable:no_visibility"
+  end
+  if Map == nil or Map.GetPlotCount == nil or Map.GetPlotByIndex == nil then
+    return false, "explore_unavailable:no_plot_index"
+  end
+  local plotCount = Map.GetPlotCount()
+  if type(plotCount) ~= "number" or plotCount <= 0 then
+    return false, "explore_unavailable:no_plot_index"
   end
   local function revealed(plot)
     if plot == nil or plot.GetIndex == nil then
@@ -2789,24 +2799,88 @@ function Gov.Explore(owner, unitId)
     end
     return nil
   end
+  local function adjacent(x, y, dir)
+    if Map.GetAdjacentPlot == nil then
+      return nil
+    end
+    local ok, plot = pcall(Map.GetAdjacentPlot, x, y, dir)
+    if ok then
+      return plot
+    end
+    return nil
+  end
+  local function countRevealed()
+    local count = 0
+    for i = 0, plotCount - 1 do
+      local p = Map.GetPlotByIndex(i)
+      if revealed(p) then
+        count = count + 1
+      end
+    end
+    return count
+  end
+  local function propKey(field)
+    return "CIV6AI_EXPLORE_" .. tostring(owner) .. "_" .. tostring(unitId) .. "_" .. field
+  end
+  local function propGet(field)
+    if Game == nil or Game.GetProperty == nil then
+      return nil
+    end
+    local ok, value = pcall(function() return Game:GetProperty(propKey(field)) end)
+    if ok then
+      return num(value)
+    end
+    return nil
+  end
+  local function propSet(field, value)
+    if Game == nil or Game.SetProperty == nil then
+      return
+    end
+    pcall(function() Game:SetProperty(propKey(field), value) end)
+  end
+  local before = countRevealed()
+  local turn = (Game ~= nil and Game.GetCurrentGameTurn ~= nil) and (num(Game.GetCurrentGameTurn()) or 0) or 0
+  local lastN = propGet("N")
+  local lastT = propGet("T")
+  local streak = propGet("S") or 0
+  local lastX, lastY = propGet("X"), propGet("Y")
+  if lastN ~= nil and lastT ~= nil and turn > lastT then
+    if before > lastN then
+      streak = 0
+    else
+      streak = streak + (turn - lastT)
+    end
+  elseif lastN ~= nil and before > lastN then
+    streak = 0
+  end
+  local stuck = streak >= 2
   local row = GameInfo.Units[unit:GetType()]
   local sea = row ~= nil and row.Domain == "DOMAIN_SEA"
   local ux, uy = unit:GetX(), unit:GetY()
   local here = Map.GetPlot(ux, uy)
   local unitArea = areaOf(here)
+  local function waterOf(plot)
+    return call(plot, "IsWater") == true
+  end
+  local function blocked(plot)
+    return call(plot, "IsImpassable") == true
+  end
+  local function sameBody(plot, requireArea)
+    return (not requireArea) or unitArea == nil or areaOf(plot) == unitArea
+  end
   -- Same landmass or water body first. The nearest fog edge on another
   -- continent sends a land unit into the coast, where it stops.
-  local function nearest(requireArea)
+  local function nearestBorder(requireArea)
     local best, bestD = nil, 1e9
-    for i = 0, Map.GetPlotCount() - 1 do
+    for i = 0, plotCount - 1 do
       local p = Map.GetPlotByIndex(i)
-      local x, y = p:GetX(), p:GetY()
-      if revealed(p) and p:IsWater() == sea and not p:IsImpassable() and not (x == ux and y == uy) then
-        if not requireArea or unitArea == nil or areaOf(p) == unitArea then
+      if p ~= nil and p.GetX ~= nil then
+        local x, y = p:GetX(), p:GetY()
+        if revealed(p) and waterOf(p) == sea and not blocked(p) and not (x == ux and y == uy) and sameBody(p, requireArea) then
           local d = Map.GetPlotDistance(ux, uy, x, y)
           if d < bestD then
             for dir = 0, 5 do
-              local a = Map.GetAdjacentPlot(x, y, dir)
+              local a = adjacent(x, y, dir)
               if a ~= nil and not revealed(a) then
                 best, bestD = p, d
                 break
@@ -2818,24 +2892,123 @@ function Gov.Explore(owner, unitId)
     end
     return best, bestD
   end
-  local best, bestD = nearest(true)
+  -- Revealed city of an unmet major, or any city-state. Hidden city plots are
+  -- not beacons: the coordinate is used only after IsRevealed is true.
+  local function beacons()
+    local marks = {}
+    if Players == nil then
+      return marks
+    end
+    local diplo = call(Players[owner], "GetDiplomacy")
+    for id = 0, 63 do
+      if id ~= owner and Players[id] ~= nil and call(Players[id], "IsAlive") == true
+        and call(Players[id], "IsBarbarian") ~= true then
+        local major = call(Players[id], "IsMajor")
+        local met = diplo ~= nil and call(diplo, "HasMet", id) == true
+        if major == false or (major == true and not met) then
+          local cities = call(Players[id], "GetCities")
+          if cities ~= nil and cities.Members ~= nil then
+            pcall(function()
+              for _, city in cities:Members() do
+                local x, y = call(city, "GetX"), call(city, "GetY")
+                local plot = (x ~= nil and y ~= nil and Map.GetPlot ~= nil) and Map.GetPlot(x, y) or nil
+                if revealed(plot) then
+                  marks[#marks + 1] = { x = x, y = y }
+                end
+              end
+            end)
+          end
+        end
+      end
+    end
+    return marks
+  end
+  local function nearestFog(requireArea, marks)
+    local best, bestD, bestBeacon = nil, 1e9, 1e9
+    for i = 0, plotCount - 1 do
+      local p = Map.GetPlotByIndex(i)
+      if p ~= nil and p.GetX ~= nil then
+        local x, y = p:GetX(), p:GetY()
+        local skip = stuck and lastX ~= nil and lastY ~= nil and x == lastX and y == lastY
+        if not skip and not revealed(p) and waterOf(p) == sea and not blocked(p) and sameBody(p, requireArea) then
+          local frontier = Map.GetPlotDistance(ux, uy, x, y) <= 1
+          if not frontier then
+            for dir = 0, 5 do
+              local a = adjacent(x, y, dir)
+              if a ~= nil and revealed(a) then
+                frontier = true
+                break
+              end
+            end
+          end
+          if frontier then
+            local dUnit = Map.GetPlotDistance(ux, uy, x, y)
+            local dBeacon = 1e9
+            for _, mark in ipairs(marks) do
+              local db = Map.GetPlotDistance(x, y, mark.x, mark.y)
+              if db < dBeacon then
+                dBeacon = db
+              end
+            end
+            local better = false
+            if #marks > 0 then
+              better = dBeacon < bestBeacon or (dBeacon == bestBeacon and dUnit < bestD)
+            else
+              better = dUnit < bestD
+            end
+            if better then
+              best, bestD, bestBeacon = p, dUnit, dBeacon
+            end
+          end
+        end
+      end
+    end
+    return best, bestD
+  end
+  local best, bestD = nil, nil
   local otherArea = false
+  if sea or stuck then
+    local marks = beacons()
+    best, bestD = nearestFog(true, marks)
+    if best == nil then
+      best, bestD = nearestFog(false, marks)
+      otherArea = best ~= nil
+    end
+  end
   if best == nil then
-    best, bestD = nearest(false)
-    otherArea = best ~= nil
+    otherArea = false
+    best, bestD = nearestBorder(true)
+    if best == nil then
+      best, bestD = nearestBorder(false)
+      otherArea = best ~= nil
+    end
   end
   if best == nil then
     return false, "explore_unavailable:map_known"
   end
-  local ok = pcall(UnitManager.MoveUnit, unit, best:GetX(), best:GetY())
-  if not ok then
-    return false, "explore_unavailable:move_error"
-  end
-  local reason = "explore_to=" .. best:GetX() .. "," .. best:GetY() .. ":d=" .. bestD
+  local tx, ty = best:GetX(), best:GetY()
+  local okMove, why = Civ6Ai_Orders._MoveOnce(owner, unitId, tx, ty)
+  local after = countRevealed()
+  propSet("N", after)
+  propSet("T", turn)
+  propSet("S", streak)
+  propSet("X", tx)
+  propSet("Y", ty)
+  local reason = "explore_to=" .. tostring(tx) .. "," .. tostring(ty) .. ":d=" .. tostring(bestD)
   if otherArea then
     reason = reason .. ":other_area"
   end
-  return true, reason
+  if sea then
+    reason = reason .. ":sea"
+  end
+  if stuck then
+    reason = reason .. ":stuck"
+  end
+  if after > before then
+    return true, reason .. ":new=" .. tostring(after - before)
+  end
+  local detail = (okMove and "no_new_tiles") or tostring(why or "no_new_tiles")
+  return false, "explore_no_reveal:" .. reason .. ":" .. detail
 end
 
 function Gov.ActivateGreatPerson(owner, unitId, mode)
