@@ -221,7 +221,9 @@ function Civ6Ai_Production._SeatAtWar(playerID)
     return false
   end
   for other = 0, 63 do
-    if other ~= playerID and Players[other] ~= nil then
+    -- Only wars with major civs count. Barbarians are always at war with everyone.
+    local p = Players[other]
+    if other ~= playerID and p ~= nil and p.IsMajor ~= nil and p:IsMajor() then
       local ok, atWar = pcall(diplo.IsAtWarWith, diplo, other)
       if ok and atWar == true then
         return true
