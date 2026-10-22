@@ -847,6 +847,7 @@ end
 
 function Civ6Ai_GameCore.CanActivateGreatPersonForPlayer(playerID, unitNumericId)
   -- The great-person action is UI-only. This script does not read or call it.
+  -- A host UI request does not sync for an AI seat; see Gov.MakeTradeRoute.
   return false
 end
 

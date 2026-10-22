@@ -2192,6 +2192,35 @@ class GameplayApiTests(unittest.TestCase):
         ):
             self.assertNotIn(banned, body)
 
+    def test_host_ui_path_cannot_sync_trade_gp_envoy_or_formation(self):
+        # These four have no Gameplay call. A host InGame RequestOperation is
+        # not a synced command for an AI seat; the comment records why, and
+        # the stripped script still must not call the UI operation.
+        text = (MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text(encoding="utf-8")
+        for phrase in (
+            "They stay unoffered",
+            "Game.GetLocalPlayer()",
+            "EXECUTE_SCRIPT",
+            "local_player_swap_blocked_mp",
+            "do not cross the network",
+            "GetInfluence()",
+            "only on the host desyncs",
+        ):
+            self.assertIn(phrase, text)
+        stripped = _strip_lua_comments(text)
+        for banned in (
+            "UnitManager.RequestOperation",
+            "UI.RequestPlayerOperation",
+            "CreateTradeRoute",
+            "ChangeTokensToGive",
+            ".Activate(",
+            ":Activate(",
+        ):
+            self.assertNotIn(banned, stripped)
+        self.assertIn("trade_route_unavailable:no_gameplay_route", stripped)
+        self.assertIn("activate_unavailable:no_gameplay_activate", stripped)
+        self.assertIn("envoy_unavailable:no_gameplay_route", stripped)
+
     def test_ui_only_operation_is_rejected_and_comments_are_not(self):
         sample = (
             "UnitManager.RequestOperation(unit, op, params)\n"

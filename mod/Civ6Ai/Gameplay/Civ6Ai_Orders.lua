@@ -2755,7 +2755,38 @@ function Gov.Governor(owner)
     .. "(the game only offers that to the local player's screen); the game's own AI manages this seat's governors"
 end
 
--- Trade routes. Creating one is a UI operation. This script does not call it.
+-- Trade routes, great-person activation, envoys, and corps/army have no
+-- call in this Gameplay script. A host InGame script cannot apply them for
+-- an AI seat either. They stay unoffered. An order that still arrives fails
+-- closed here.
+--
+-- The command that replicates is the local player's own operation.
+-- OrderChannel.Send calls UI.RequestPlayerOperation with Game.GetLocalPlayer()
+-- and PlayerOperations.EXECUTE_SCRIPT. Every PC runs that handler in this
+-- file. Passing an AI player id is the governor path: the screen ignores a
+-- seat that is not the local player, and the request never becomes a command
+-- the other PCs replay.
+--
+-- UnitManager.RequestOperation and RequestCommand (make a route, activate a
+-- great person, form a corps) start only for the local player's unit. They
+-- are nil in this script. An AI unit fails the owner check on the host, the
+-- same way CanStartOperation is empty for an AI seat. GetInfluence() only
+-- reads the token pool. The token setters are not in this script, and a host
+-- UI write of them is the same local-only mutation: live sends never moved
+-- a token.
+--
+-- Aiming a UI operation at an AI seat would require
+-- PlayerManager.SetLocalPlayerAndObserver. Civ6Ai_Apply._WithLocalPlayer
+-- refuses that in a network game (local_player_swap_blocked_mp). The swap
+-- is this PC's view. The other PCs do not swap, so a mutation that lands
+-- only on the host desyncs. ExposedMembers and LuaEvents stay inside one
+-- process. They do not cross the network.
+--
+-- Re-offering the orders would only send them back through EXECUTE_SCRIPT
+-- into these fail-closed returns. The game's own AI keeps traders, great
+-- people, envoys, and formations.
+--
+-- Trade routes. This script does not call the UI route creator.
 -- Traders stay with the game's own AI (they are not model-commanded).
 function Gov.MakeTradeRoute(owner, unitId, destCityId)
   return false, "trade_route_unavailable:no_gameplay_route:player=" .. tostring(owner)
@@ -3032,10 +3063,10 @@ function Gov.ActivateGreatPerson(owner, unitId, mode)
     end
     return true, "retired"
   end
-  -- The great-person action is a UI command. Calling it from this script
-  -- throws and every activation comes back failed. Retire (mode 1) still
-  -- uses UnitManager.Kill above. The snapshot does not offer either action;
-  -- the game's own AI uses the unit.
+  -- The great-person action is a UI command. See Gov.MakeTradeRoute: a host
+  -- RequestOperation does not sync for an AI seat, and this script cannot
+  -- call it. Retire (mode 1) still uses UnitManager.Kill above. The snapshot
+  -- does not offer either action; the game's own AI uses the unit.
   return false, "activate_unavailable:no_gameplay_activate"
 end
 
@@ -3176,8 +3207,10 @@ local function knows(p, id)
 end
 
 -- Envoys. The influence-token setters are not available in this script: every
--- live send came back without moving a token. Do not call them. The snapshot
--- does not offer the order; the game's own AI sends envoys.
+-- live send came back without moving a token. Do not call them. A host UI
+-- write through GetInfluence does not sync for an AI seat (see
+-- Gov.MakeTradeRoute). The snapshot does not offer the order; the game's
+-- own AI sends envoys.
 function Gov.SendEnvoy(owner, minor)
   return false, "envoy_unavailable:no_gameplay_route"
 end
@@ -3537,8 +3570,9 @@ function Gov.JoinFormation(owner, unitId, otherId)
     pcall(unit.SetMilitaryFormation, unit, target)
   end
   if call(unit, "GetMilitaryFormation") ~= target then
-    -- The formation operation is UI-only. Leave both units when the gameplay
-    -- setter does not stick.
+    -- The formation operation is UI-only. A host RequestOperation does not
+    -- sync for an AI seat (see Gov.MakeTradeRoute). Leave both units when
+    -- the gameplay setter does not stick.
     return false, "the game refused to form the corps or army; both units are unchanged (SetMilitaryFormation did not stick)"
   end
   if Civ6Ai_Orders._Unit(owner, otherId) ~= nil then

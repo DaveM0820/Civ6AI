@@ -3360,7 +3360,8 @@ function Civ6Ai_Snapshot._TradeRouteCanStart(tm, owner, fromPlot, destPlot)
 end
 
 function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId)
-  -- Creating a route is a UI operation. Offering it failed on every send.
+  -- Creating a route is a UI operation, and a host UI request does not sync
+  -- for an AI seat (Gov.MakeTradeRoute). Offering it failed on every send.
   -- Traders stay with the game's own AI.
 end
 
@@ -3450,8 +3451,9 @@ function Civ6Ai_Snapshot._AddProgressionCommands(commands, playerID, unit, unitI
     can = (form == F.STANDARD_MILITARY_FORMATION and civic(sea and "CIVIC_MERCANTILISM" or "CIVIC_NATIONALISM"))
       or (form == F.CORPS_MILITARY_FORMATION and civic(sea and "CIVIC_NATIONALISM" or "CIVIC_MOBILIZATION"))
   end
-  -- SetMilitaryFormation does not stick from a gameplay script. Offering the
-  -- order failed every time and removed nothing. Leave both units as they are.
+  -- SetMilitaryFormation does not stick from a gameplay script, and a host
+  -- UI form-corps request does not sync for an AI seat (Gov.MakeTradeRoute).
+  -- Offering the order failed every time and removed nothing. Leave both units.
   can = false
   if can and row.FormationClass ~= "FORMATION_CLASS_CIVILIAN" and row.FormationClass ~= "FORMATION_CLASS_SUPPORT" then
     for _, other in ipairs(Civ6Ai_Snapshot._IterateUnits(p:GetUnits())) do
@@ -3821,7 +3823,8 @@ function Civ6Ai_Snapshot._DistrictWithin(playerID, unit, names, maxDist)
 end
 
 function Civ6Ai_Snapshot._AddActivateCommand(commands, playerID, unit, unitId)
-  -- Activation and retire are not offered. The action is UI-only and every
+  -- Activation and retire are not offered. The action is UI-only, a host UI
+  -- request does not sync for an AI seat (Gov.MakeTradeRoute), and every
   -- live order failed. A Great Prophet still gets a move onto the Holy Site,
   -- which founds the religion through the gameplay route on arrival.
   local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
@@ -4396,8 +4399,9 @@ Civ6Ai_Snapshot.LEGAL_COMMAND_CAP = 500
 -- One envoy per met city-state when this seat still has tokens to give.
 -- Gameplay applies it (Gov.SendEnvoy); the UI influence-token request is not used.
 function Civ6Ai_Snapshot._AddEnvoyCommands(commands, playerID)
-  -- The influence-token setters are not available in a gameplay script.
-  -- Every live envoy order failed. The game's own AI sends them.
+  -- The influence-token setters are not available in a gameplay script, and a
+  -- host UI write does not sync for an AI seat (Gov.MakeTradeRoute). Every
+  -- live envoy order failed. The game's own AI sends them.
 end
 
 function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
