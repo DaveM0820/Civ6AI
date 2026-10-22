@@ -692,6 +692,9 @@ function Civ6Ai_Production._SavedLevels(playerID)
   return levels
 end
 
+-- Only wars with major civs turn on the war list. Barbarians are always at
+-- war with everyone, and counting them made the old profile build warriors
+-- forever. A barbarian unit next to a city is a threat and uses the defense list.
 function Civ6Ai_Production._MajorWars(playerID)
   local diplo = call(Players ~= nil and Players[playerID] or nil, "GetDiplomacy")
   if diplo == nil or diplo.IsAtWarWith == nil or Players == nil then
