@@ -420,13 +420,6 @@ def session_id_of(player_dir: Path) -> str:
     return player_dir.parent.name
 
 
-def _parallel_seats() -> int:
-    try:
-        return max(1, int(os.environ.get("CIV6AI_PARALLEL_SEATS") or 1))
-    except ValueError:
-        return 1
-
-
 def latest_blob_per_seat(blobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Keep only the newest snapshot blob per (session, player, kind).
 
@@ -613,13 +606,30 @@ def process_lua_log_blobs(
         for _job, _player, _is_chat, _dir in jobs:
             if not _is_chat:
                 _QUEUED_SEATS.add(str(_dir))
-    workers = max(1, min(len(jobs), _parallel_seats(), parallel_seat_limit()))
-    if workers <= 1:
+    workers = max(1, min(len(jobs), parallel_seat_limit())) if jobs else 1
+    if workers <= 1 or len(jobs) <= 1:
         ran = sum(1 for item in jobs if _one(item))
     else:
         # Persistent pool: a slow seat does not open/close a ThreadPoolExecutor
-        # around the whole batch (that serialized two-wave turns).
-        futures = [_pool(workers).submit(_one, item) for item in jobs]
+        # around the whole batch (that serialized two-wave turns). Return once
+        # the jobs are submitted so the next log read can enqueue more seats.
+        from civ6_sidecar_jobs import note_pool_job
+
+        # Resolve the pool before counting this batch as active, so a shut-down
+        # or saturated leftover pool is replaced and these seats actually overlap.
+        pool = _pool(workers)
+        futures = []
+        for item in jobs:
+            note_pool_job(True)
+            try:
+                fut = pool.submit(_one, item)
+            except RuntimeError:
+                note_pool_job(False)
+                pool = _pool(workers)
+                note_pool_job(True)
+                fut = pool.submit(_one, item)
+            fut.add_done_callback(lambda _done: note_pool_job(False))
+            futures.append(fut)
         ran = len(futures)
     return ran
 

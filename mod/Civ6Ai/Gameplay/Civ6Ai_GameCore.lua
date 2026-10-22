@@ -677,6 +677,10 @@ function Civ6Ai_GameCore.MoveUnitAlongPathForPlayer(playerID, unitNumericId, x, 
   if target == nil then
     return false, "plot_not_found"
   end
+  if (target.IsImpassable ~= nil and target:IsImpassable() == true)
+      or (target.IsMountain ~= nil and target:IsMountain() == true) then
+    return false, "impassable"
+  end
   local fromX, fromY = unit:GetX(), unit:GetY()
   if fromX == x and fromY == y then
     return true, "already_there"
@@ -813,6 +817,18 @@ function Civ6Ai_GameCore.BuildChargesForPlayer(playerID, unitNumericId)
   return nil
 end
 
+function Civ6Ai_GameCore.CanActivateGreatPersonForPlayer(playerID, unitNumericId)
+  local _, unit = Civ6Ai_GameCore._FindUnit(playerID, unitNumericId)
+  if unit == nil or unit.GetGreatPerson == nil then
+    return false
+  end
+  local ok, gp = pcall(function() return unit:GetGreatPerson() end)
+  if not ok or gp == nil then
+    return false
+  end
+  return gp.Activate ~= nil
+end
+
 function Civ6Ai_GameCore.UnitMovesForPlayer(playerID, unitNumericId, planning)
   local _, unit = Civ6Ai_GameCore._FindUnit(playerID, unitNumericId)
   if unit == nil then
@@ -834,6 +850,7 @@ function Civ6Ai_InitializeGameCore()
   ExposedMembers.Civ6Ai.SetCivicForPlayer = Civ6Ai_GameCore.SetCivicForPlayer
   ExposedMembers.Civ6Ai.FinishMovesForPlayer = Civ6Ai_GameCore.FinishMovesForPlayer
   ExposedMembers.Civ6Ai.UnitMovesForPlayer = Civ6Ai_GameCore.UnitMovesForPlayer
+  ExposedMembers.Civ6Ai.CanActivateGreatPersonForPlayer = Civ6Ai_GameCore.CanActivateGreatPersonForPlayer
   ExposedMembers.Civ6Ai.BuildChargesForPlayer = Civ6Ai_GameCore.BuildChargesForPlayer
   ExposedMembers.Civ6Ai.WriteFile = Civ6Ai_GameCore.WriteFile
   ExposedMembers.Civ6Ai.ReadFile = Civ6Ai_GameCore.ReadFile

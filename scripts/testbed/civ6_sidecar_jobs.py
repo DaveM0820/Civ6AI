@@ -117,6 +117,9 @@ _POOL_LOCK = threading.Lock()
 _POOL: ThreadPoolExecutor | None = None
 _POOL_SIZE = 0
 _IN_FLIGHT: set[str] = set()
+# Jobs submitted to the pool and not finished. A shutdown or saturated pool
+# with nothing in flight is a leftover from an earlier run, not a live seat.
+_ACTIVE = 0
 
 
 def claim_sidecar_slot(player_dir: Path) -> Path | None:
@@ -247,12 +250,63 @@ def _claimed_run(job_path: Path, claim: Path) -> bool:
             _IN_FLIGHT.discard(str(job_path.resolve()))
 
 
+def note_pool_job(starting: bool) -> None:
+    """Count jobs handed to the seat pool so a dead pool can be replaced safely."""
+    global _ACTIVE
+    with _POOL_LOCK:
+        _ACTIVE += 1 if starting else -1
+        if _ACTIVE < 0:
+            _ACTIVE = 0
+
+
+def _executor_alive(executor: ThreadPoolExecutor | None) -> bool:
+    return executor is not None and not getattr(executor, "_shutdown", False)
+
+
+def _idle_workers(executor: ThreadPoolExecutor) -> int:
+    """How many workers are waiting. 0 when the pool is shut down or still starting."""
+    sem = getattr(executor, "_idle_semaphore", None)
+    if sem is None or not _executor_alive(executor):
+        return 0
+    got = 0
+    while sem.acquire(blocking=False):
+        got += 1
+    for _ in range(got):
+        sem.release()
+    return got
+
+
+def _shutdown_executor(executor: ThreadPoolExecutor) -> None:
+    try:
+        executor.shutdown(wait=False, cancel_futures=True)
+    except TypeError:
+        executor.shutdown(wait=False)
+
+
 def _pool(size: int) -> ThreadPoolExecutor:
-    global _POOL, _POOL_SIZE
-    if _POOL is None or _POOL_SIZE != size:
-        _POOL = ThreadPoolExecutor(max_workers=size, thread_name_prefix="civ6ai-seat")
-        _POOL_SIZE = size
-    return _POOL
+    """Shared seat pool. A shut-down or saturated leftover pool is replaced.
+
+    Replacing only when nothing is in flight: a live turn keeps its workers,
+    and a pool left blocked by an earlier run does not swallow the next batch.
+    """
+    global _POOL, _POOL_SIZE, _ACTIVE
+    size = max(1, int(size))
+    with _POOL_LOCK:
+        stuck = (
+            _executor_alive(_POOL)
+            and _POOL_SIZE == size
+            and not _IN_FLIGHT
+            and _ACTIVE == 0
+            and _POOL is not None
+            and _idle_workers(_POOL) < size
+        )
+        if not _executor_alive(_POOL) or _POOL_SIZE != size or stuck:
+            previous = _POOL
+            _POOL = ThreadPoolExecutor(max_workers=size, thread_name_prefix="civ6ai-seat")
+            _POOL_SIZE = size
+            if previous is not None and _executor_alive(previous) and not _IN_FLIGHT and _ACTIVE == 0:
+                _shutdown_executor(previous)
+        return _POOL
 
 
 def process_sidecar_jobs(civ6ai_roots: list[Path] | Path, *, parallel: int | None = None) -> int:

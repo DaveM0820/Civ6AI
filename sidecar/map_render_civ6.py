@@ -30,6 +30,7 @@ HEX_AXIS_ONLY_MIN_CELLS = 8 * 12 * 2
 CIV5_RIVER_EDGE_INDEX: dict[str, int] = {"E": 5, "SE": 0, "SW": 1}
 RIVER_TILE_LABEL = "river on this tile (edge unknown)"
 HILLS_LABEL = "hills (brown bumps)"
+PEAK_LABEL = "mountain (white peak, impassable)"
 NORTH_UP_ENV = "CIV6_MAP_NORTH_UP"
 FOREIGN_RING = (255, 64, 64)
 # Feature sprite (forest/jungle/marsh) drawn over the base terrain at this scale,
@@ -780,6 +781,25 @@ def civ6_strategic_layers(plot: dict[str, Any] | None) -> list[tuple[Path, float
     return [(top, 1.0)]
 
 
+def _plot_is_peak(plot: dict[str, Any] | None) -> bool:
+    if not isinstance(plot, dict):
+        return False
+    if plot.get("peak"):
+        return True
+    return str(plot.get("terrain_id") or "").upper().endswith("_MOUNTAIN")
+
+
+def _draw_peak_glyph(draw: Any, cx: float, cy: float, hex_radius: float) -> None:
+    """Tall white peak with a dark ridge. A missing or pale mountain sprite reads as grass."""
+    height = max(6.0, hex_radius * 0.92)
+    width = height * 0.72
+    apex = (cx, cy - height * 0.55)
+    left = (cx - width, cy + height * 0.38)
+    right = (cx + width, cy + height * 0.38)
+    draw.polygon([apex, left, right], fill=(244, 244, 244), outline=(24, 24, 32))
+    draw.line([left, apex, right], fill=(32, 32, 40), width=max(2, int(hex_radius * 0.08)))
+
+
 def _plot_is_hills(plot: dict[str, Any] | None) -> bool:
     if not isinstance(plot, dict):
         return False
@@ -1486,6 +1506,8 @@ def _civ6_marker_legend_entries(
     ]
     if any(_plot_is_hills(plot) for plot in in_view):
         entries.append(("__hills__", HILLS_LABEL))
+    if any(_plot_is_peak(plot) for plot in in_view):
+        entries.append(("__peak__", PEAK_LABEL))
     return entries
 
 
@@ -1516,6 +1538,8 @@ def _draw_legend_special(
         )
     elif slug == "__hills__":
         _draw_hills_glyph(draw, cx + size * 0.1, cy - size * 0.3, size * 0.6)
+    elif slug == "__peak__":
+        _draw_peak_glyph(draw, cx, cy, size * 0.55)
 
 
 def render_civ6_map_png(
@@ -1839,9 +1863,15 @@ def render_civ6_map_png(
                     normalized, wx, wy, origin=map_render.visibility_grid_origin(known_map),
                 )
                 state = map_render._tile_terrain_state(plot, grid_char, has_visibility_grid)
-                if state != "revealed" or prefer_civ5_sprites:
+                if state != "revealed":
                     continue
                 cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
+                if _plot_is_peak(plot):
+                    # On top of the terrain sprite. A pale mountain tile otherwise
+                    # reads as grass, and the model walks units onto it.
+                    _draw_peak_glyph(draw, cx, cy, hex_radius)
+                if prefer_civ5_sprites:
+                    continue
                 if _plot_is_hills(plot):
                     _draw_hills_glyph(draw, cx, cy, hex_radius)
                 if not rivers_trusted and isinstance(plot, dict) and plot.get("river_edges"):
@@ -2006,7 +2036,9 @@ def render_civ6_map_png(
             swatch_r,
             layer_scales=[scale for _path, scale in layers],
         ):
-            if _plot_is_hills(sample):
+            if _plot_is_peak(sample):
+                _draw_peak_glyph(draw, lx + legend_swatch / 2, row_y - legend_swatch / 2, swatch_r)
+            elif _plot_is_hills(sample):
                 _draw_hills_glyph(draw, lx + legend_swatch / 2, row_y - legend_swatch / 2, swatch_r)
         else:
             draw.rectangle(

@@ -339,6 +339,12 @@ function Civ6Ai_Orders._PlotEnterOk(owner, unit, x, y)
   if plot == nil then
     return false, "plot_not_found"
   end
+  -- A mountain destination must say impassable, not the vaguer no_path that
+  -- pathfinding returns when it refuses to route onto the peak.
+  if (plot.IsImpassable ~= nil and plot:IsImpassable() == true)
+      or (plot.IsMountain ~= nil and plot:IsMountain() == true) then
+    return false, "impassable"
+  end
   return true, ""
 end
 
@@ -985,6 +991,38 @@ function Civ6Ai_Orders._Execute(sender, o)
   return Civ6Ai_Orders._DoCommand(sender, o)
 end
 
+-- Unit attacks and city strikes before every other order. A move that fails
+-- or spends the unit must not run first and make a listed attack illegal.
+-- Stable: attacks keep their relative order, and so does everything else.
+function Civ6Ai_Orders._AttacksBeforeMoves(orders)
+  local attacks, rest = {}, {}
+  for _, o in ipairs(orders or {}) do
+    if o.K == Civ6Ai_Orders.K.ATTACK or o.K == Civ6Ai_Orders.K.CITY_STRIKE then
+      attacks[#attacks + 1] = o
+    else
+      rest[#rest + 1] = o
+    end
+  end
+  for _, o in ipairs(rest) do
+    attacks[#attacks + 1] = o
+  end
+  return attacks
+end
+
+local function noteAttack(counts, o, ok)
+  local which = nil
+  if o.K == Civ6Ai_Orders.K.ATTACK then
+    which = "unit"
+  elseif o.K == Civ6Ai_Orders.K.CITY_STRIKE then
+    which = "city"
+  end
+  if which == nil then
+    return
+  end
+  local bucket = ok and counts.ok or counts.fail
+  bucket[which] = bucket[which] + 1
+end
+
 -- Play one seat's orders with retry passes and record each result, then end
 -- the turn of the seat's units the model left in place.
 function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
@@ -996,6 +1034,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
       end
     end
   end
+  orders = Civ6Ai_Orders._AttacksBeforeMoves(orders)
   local ordered = {}
   for _, o in ipairs(orders) do
     if o.U ~= nil and o.U >= 0 then
@@ -1004,6 +1043,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
     end
   end
   local pending, okUnits = orders, {}
+  local counts = { ok = { unit = 0, city = 0 }, fail = { unit = 0, city = 0 } }
   for pass = 1, Civ6Ai_Orders.MAX_PASSES do
     if #pending == 0 then
       break
@@ -1020,10 +1060,12 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
         progress = true
         okUnits[o.U or -1] = o.K ~= Civ6Ai_Orders.K.SKIP or nil
         Civ6Ai_Orders._Record(sender, o, true, reason)
+        noteAttack(counts, o, true)
       elseif retryable(o.K, reason) and pass < Civ6Ai_Orders.MAX_PASSES then
         nextPending[#nextPending + 1] = o
       else
         Civ6Ai_Orders._Record(sender, o, false, reason)
+        noteAttack(counts, o, false)
       end
     end
     if not progress then
@@ -1046,11 +1088,17 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
         else
           Civ6Ai_Orders._Record(sender, o, false, "plot_occupied_exhausted")
         end
+        noteAttack(counts, o, false)
       end
       break
     end
     pending = nextPending
   end
+  local executed = counts.ok.unit + counts.ok.city
+  local failed = counts.fail.unit + counts.fail.city
+  print("CIV6AI|attacks|player=" .. tostring(owner) .. "|turn=" .. tostring(Game.GetCurrentGameTurn())
+    .. "|executed=" .. tostring(executed) .. "|failed=" .. tostring(failed)
+    .. "|unit=" .. tostring(counts.ok.unit) .. "|city=" .. tostring(counts.ok.city))
   Civ6Ai_Orders._ContinueGoals(owner, ordered, okUnits)
   Civ6Ai_Orders._FinishIdleUnits(owner, ordered, okUnits)
 end
@@ -1966,32 +2014,30 @@ function Gov.MakeTradeRoute(owner, unitId, destCityId)
     return false, "stale_city_id:" .. tostring(destCityId)
   end
   local tm = Game.GetTradeManager ~= nil and Game.GetTradeManager() or nil
-  if tm ~= nil then
-    local origin = Map.GetPlot(unit:GetX(), unit:GetY())
-    local destPlot = Map.GetPlot(dest:GetX(), dest:GetY())
-    local fromIdx = origin ~= nil and call(origin, "GetIndex") or nil
-    local toIdx = destPlot ~= nil and call(destPlot, "GetIndex") or nil
-    if fromIdx ~= nil and toIdx ~= nil and tm.CanCreateTradeRoute ~= nil then
-      local okCan, can = pcall(tm.CanCreateTradeRoute, tm, owner, fromIdx, toIdx)
-      if okCan and can == false then
-        return false, "cannot_start_trade_route"
-      end
-    end
-    if fromIdx ~= nil and toIdx ~= nil and tm.CreateTradeRoute ~= nil then
-      local okMake, made = pcall(tm.CreateTradeRoute, tm, owner, fromIdx, toIdx)
-      if okMake and made ~= false then
-        pcall(UnitManager.FinishMoves, unit)
-        return true, "trade_route:city=" .. tostring(destCityId)
-      end
-      log("trade_fallback|CreateTradeRoute|" .. tostring(made))
-    end
+  if tm == nil or tm.CanCreateTradeRoute == nil or tm.CreateTradeRoute == nil then
+    return false, "trade_route_unavailable:no_trade_manager"
   end
-  local okOp, whyOp = startOperation(unit, "UNITOPERATION_MAKE_TRADE_ROUTE", { x = dest:GetX(), y = dest:GetY() })
-  if okOp then
-    return true, whyOp .. ":city=" .. tostring(destCityId)
+  local origin = Map.GetPlot(unit:GetX(), unit:GetY())
+  local destPlot = Map.GetPlot(dest:GetX(), dest:GetY())
+  local fromIdx = origin ~= nil and call(origin, "GetIndex") or nil
+  local toIdx = destPlot ~= nil and call(destPlot, "GetIndex") or nil
+  if fromIdx == nil or toIdx == nil then
+    return false, "trade_route_unavailable:no_plot"
   end
-  log("trade_unavailable|" .. tostring(whyOp))
-  return false, "trade_route_unavailable:" .. tostring(whyOp)
+  -- Same call the snapshot uses before it offers TradeRoute. CanStartRoute
+  -- (city ids) is a different API and was true for routes this call rejects.
+  -- Gameplay has no UNITOPERATION_MAKE_TRADE_ROUTE, so do not fall through to it.
+  local okCan, can = pcall(tm.CanCreateTradeRoute, tm, owner, fromIdx, toIdx)
+  if not okCan or can ~= true then
+    return false, "cannot_start_trade_route"
+  end
+  local okMake, made = pcall(tm.CreateTradeRoute, tm, owner, fromIdx, toIdx)
+  if okMake and made ~= false then
+    pcall(UnitManager.FinishMoves, unit)
+    return true, "trade_route:city=" .. tostring(destCityId)
+  end
+  log("trade_unavailable|CreateTradeRoute|" .. tostring(made))
+  return false, "trade_route_unavailable:" .. tostring(made)
 end
 
 -- Explore: RequestOperation does not exist in gameplay script, so walk the unit
@@ -2091,29 +2137,19 @@ function Gov.ActivateGreatPerson(owner, unitId, mode)
     end
     return true, "retired"
   end
+  -- Activate is the gameplay great-person action. UNITOPERATION_GREAT_PERSON_HEAL
+  -- is not available from a gameplay script; falling through to it reported
+  -- every activate as "great person heal unavailable".
   local gp = call(unit, "GetGreatPerson")
-  if gp ~= nil and gp.Activate ~= nil then
-    local ok, err = pcall(gp.Activate, gp)
-    if ok then
-      return true, "activate_gp"
-    end
-    log("activate_fallback|GreatPerson.Activate|" .. tostring(err))
+  if gp == nil or gp.Activate == nil then
+    return false, "activate_unavailable:no_activate"
   end
-  if UnitManager ~= nil and UnitManager.RequestCommand ~= nil and UnitCommandTypes ~= nil then
-    local cmd = UnitCommandTypes.UNITCOMMAND_ACTIVATE or UnitCommandTypes.ACTIVATE
-    if cmd ~= nil then
-      local ok, err = pcall(UnitManager.RequestCommand, unit, cmd)
-      if ok then
-        return true, "activate_gp:command"
-      end
-      log("activate_fallback|RequestCommand|" .. tostring(err))
-    end
+  local ok, err = pcall(gp.Activate, gp)
+  if ok then
+    return true, "activate_gp"
   end
-  local okOp, whyOp = startOperation(unit, "UNITOPERATION_GREAT_PERSON_HEAL", {})
-  if okOp then
-    return true, whyOp
-  end
-  return false, "activate_unavailable:" .. tostring(whyOp)
+  log("activate_unavailable|GreatPerson.Activate|" .. tostring(err))
+  return false, "activate_unavailable:" .. tostring(err)
 end
 
 local function cityById(owner, cityId)

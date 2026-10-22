@@ -2534,7 +2534,23 @@ def _start_lan_test_game_clicks(win: WindowInfo, steps: list[str]) -> list[str]:
 
 
 def bootstrap_create_game_timed(win: WindowInfo) -> list[str]:
-    """Host a LAN test game (Multiplayer / Local Network), then Begin Game."""
+    """Replay the recorded menu sequence, then Begin Game.
+
+    LAN host clicks are the fallback when that sequence file has no steps.
+    """
+    sequence = load_menu_sequence() if has_menu_sequence() else {}
+    steps = sequence.get("steps") if isinstance(sequence, dict) else None
+    if steps:
+        win = _ensure_civ_foreground(win, "bootstrap_start")
+        time.sleep(_BOOTSTRAP_BEFORE_MENU_CLICKS_S)
+        events = replay_menu_sequence(win)
+        win = refresh_window(win)
+        if win is None:
+            win = find_civ_window()
+        if win is not None:
+            bootstrap_click_begin_game_timed(win)
+            events.append("begin_game_after_sequence")
+        return events
     time.sleep(_BOOTSTRAP_BEFORE_MENU_CLICKS_S)
     return start_lan_test_game(win)
 

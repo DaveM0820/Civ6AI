@@ -70,6 +70,15 @@ class PrioritiesModelTests(unittest.TestCase):
         ok = [c["command_id"] for c in validated["commands"]]
         self.assertIn(prio.command_id(war, 2), ok)
 
+    def test_prompt_states_the_focus_cap_of_three(self):
+        from sidecar import civ6_apply_results
+
+        lines = "\n".join(prio.prompt_lines(_snapshot({})))
+        self.assertIn("at most 3 focuses", lines)
+        self.assertIn("The maximum is 3", lines)
+        self.assertIn("rejected", lines)
+        self.assertIn("maximum is 3", civ6_apply_results.describe_reason("too_many_focus"))
+
     def test_prompt_says_priorities_steer_production_when_queue_is_absent(self):
         from sidecar import civ6_wire
         snap = _snapshot({})

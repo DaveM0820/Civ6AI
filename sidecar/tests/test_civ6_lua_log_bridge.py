@@ -125,8 +125,17 @@ class Civ6LuaLogBridgeTests(unittest.TestCase):
         import threading
         import time
         import civ6_lua_log_bridge as bridge
+        import civ6_sidecar_jobs as seat_jobs
 
         bridge._PROCESSED_BLOBS.clear()
+
+        # A shut-down pool of the same size must not swallow this batch.
+        if seat_jobs._POOL is not None:
+            try:
+                seat_jobs._POOL.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                seat_jobs._POOL.shutdown(wait=False)
+        seat_jobs._ACTIVE = 0
         started = []
         entered = threading.Event()
         release = threading.Event()
@@ -159,6 +168,12 @@ class Civ6LuaLogBridgeTests(unittest.TestCase):
                     time.sleep(0.01)
                 self.assertEqual(2, len(started))
                 release.set()
+                # The workers write into this temp dir after release. Wait until
+                # those writes finish or deleting the directory races them.
+                deadline = time.time() + 2
+                while seat_jobs._ACTIVE > 0 and time.time() < deadline:
+                    time.sleep(0.01)
+                self.assertEqual(0, seat_jobs._ACTIVE)
 
 
 class BlobSplitAcrossReadsTests(unittest.TestCase):

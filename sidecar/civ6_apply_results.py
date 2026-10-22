@@ -75,11 +75,12 @@ _SIMPLE_REASONS = {
     "district_needs_tile": "a district needs a tile; pick one of the offered DISTRICT_X@(x,y) rows",
     "not_your_territory": "the tile is outside your territory",
     "no_build_charges": "the builder has no build charges left",
-    "no_path": "the game found no route to that tile (water, mountains, or closed borders in the way)",
+    "no_path": "no path: the game found no route to that tile (water or closed borders in the way)",
+    "too_many_focus": "too many focuses: the maximum is 3, and any focus past that is rejected",
     "water": "that tile is water and this unit cannot embark there yet",
     "water_no_ocean_embark": "that tile is ocean and this unit cannot embark onto ocean yet",
     "land": "naval units cannot enter land tiles",
-    "impassable": "that tile is impassable (mountain or natural wonder)",
+    "impassable": "impassable: that tile is a mountain or natural wonder; do not move there",
     "occupied_foreign": "another civilization's unit is standing on that tile",
     "stack_limit": "one of your own military units already holds that tile (one military unit per tile)",
     "not_adjacent": "the tile is not next to the unit",
@@ -175,6 +176,12 @@ def describe_reason(reason: Any) -> str:
         return "the forecast dealt damage but the game did not apply it" + extra
     if text.startswith("out_of_range"):
         return "the target is outside this unit's attack range"
+    if text.startswith("too_many_focus"):
+        return _SIMPLE_REASONS["too_many_focus"]
+    if text.startswith("activate_unavailable"):
+        return "the game could not activate that great person"
+    if text.startswith("cannot_start_trade_route") or text.startswith("trade_route_unavailable") or text.startswith("trade_unavailable"):
+        return "no trade route can start for this unit right now"
     if text.startswith("order_error:"):
         detail = text[len("order_error:"):].strip()
         extra = f": {detail}" if detail else ""
