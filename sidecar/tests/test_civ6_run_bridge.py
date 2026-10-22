@@ -38,8 +38,11 @@ class Civ6RunBridgeTests(unittest.TestCase):
         self.assertEqual(12, board["explored_percent"])
         self.assertEqual(12, board["revealed_tiles"])
         self.assertEqual(100, board["map_tiles"])
-        snap["_explore_metric"] = {"delta": 3, "since_turn": 8}
-        self.assertEqual(3, run_civ6.board_for_turn_metrics(snap)["revealed_delta"])
+        snap["_explore_metric"] = {"turns_since_reveal": 5, "new_tiles_this_turn": 0}
+        board = run_civ6.board_for_turn_metrics(snap)
+        self.assertEqual(5, board["turns_since_reveal"])
+        self.assertEqual(0, board["new_tiles_this_turn"])
+        self.assertNotIn("revealed_delta", board)
         rows = {row["player_id"]: row for row in board["players"]}
         self.assertEqual(rows["PLAYER_0"]["era"], "ERA_CLASSICAL")
         self.assertEqual(rows["PLAYER_0"]["era_score"], 8)

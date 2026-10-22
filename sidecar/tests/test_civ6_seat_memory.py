@@ -36,6 +36,11 @@ class SeatMemoryTests(unittest.TestCase):
         from sidecar import civ6_prompt_coaching as coaching
         from sidecar import civ6_wire
 
+        line = (
+            "It has been {n} turns without revealing any new tiles. "
+            "Continue exploring: send scouts/ships into unexplored areas."
+        )
+
         def snap(turn, revealed):
             return {
                 "decision": {"player_id": "PLAYER_0", "turn": turn},
@@ -46,33 +51,84 @@ class SeatMemoryTests(unittest.TestCase):
                 "legal_commands": [],
             }
 
+        def nudge_rows(stored_memory):
+            return [
+                row for row in stored_memory.get("situation_log") or []
+                if "without revealing any new tiles" in row.get("text", "")
+            ]
+
         first = snap(1, 10)
         stored = memory.note_exploration(first, {"tracked": {}})
         self.assertEqual(10, first["_explore_metric"]["revealed"])
-        self.assertNotIn("delta", first["_explore_metric"])
+        self.assertEqual(0, first["_explore_metric"]["turns_since_reveal"])
+        self.assertNotIn("new_tiles_this_turn", first["_explore_metric"])
         early = coaching.civ6_exploration_attention(first)
         self.assertIn("Map only 10% explored", early)
+        self.assertNotIn("without revealing any new tiles", early)
 
         second = snap(2, 14)
         stored = memory.note_exploration(second, stored)
-        self.assertEqual(4, second["_explore_metric"]["delta"])
-        self.assertEqual(1, second["_explore_metric"]["since_turn"])
-        self.assertNotIn("stalled", second["_explore_metric"])
+        self.assertEqual(4, second["_explore_metric"]["new_tiles_this_turn"])
+        self.assertEqual(0, second["_explore_metric"]["turns_since_reveal"])
         prompt = civ6_wire.build_civ6_wire_prompt(second)
-        self.assertIn("map.revealed_delta = +4 tiles since T1", prompt)
-        self.assertNotIn("No new exploration", "\n".join(coaching.collect_civ6_attention_items(second)))
+        self.assertNotIn("without revealing any new tiles", prompt)
+        self.assertEqual([], nudge_rows(stored))
+
+        # T2 revealed. T6 is four quiet turns later, which is not yet > 4.
+        quiet = snap(6, 14)
+        stored = memory.note_exploration(quiet, stored)
+        self.assertEqual(0, quiet["_explore_metric"]["new_tiles_this_turn"])
+        self.assertEqual(4, quiet["_explore_metric"]["turns_since_reveal"])
+        self.assertNotIn("without revealing any new tiles", coaching.civ6_exploration_attention(quiet) or "")
+        self.assertEqual([], nudge_rows(stored))
 
         stalled = snap(7, 14)
         stored = memory.note_exploration(stalled, stored)
-        self.assertTrue(stalled["_explore_metric"]["stalled"])
-        self.assertEqual(0, stalled["_explore_metric"]["stall_delta"])
+        self.assertEqual(0, stalled["_explore_metric"]["new_tiles_this_turn"])
+        self.assertEqual(5, stalled["_explore_metric"]["turns_since_reveal"])
+        self.assertEqual(14, stalled["_explore_metric"]["percent"])
         note = coaching.civ6_exploration_attention(stalled)
-        self.assertIn("No new exploration in 5+ turns", note)
-        self.assertIn("14% explored", note)
-        self.assertIn("14 tiles, +0 since T2", note)
+        self.assertEqual(line.format(n=5), note)
+        prompt = civ6_wire.build_civ6_wire_prompt(stalled)
+        self.assertIn("=== ATTENTION ===", prompt)
+        self.assertIn(line.format(n=5), prompt)
+        self.assertEqual([line.format(n=5)], [row["text"] for row in nudge_rows(stored)])
+
         again = snap(7, 14)
         stored = memory.note_exploration(again, stored)
-        self.assertEqual(1, sum(1 for row in stored["situation_log"] if "Exploration stalled" in row["text"]))
+        self.assertEqual(1, len(nudge_rows(stored)))
+        self.assertEqual(line.format(n=5), nudge_rows(stored)[0]["text"])
+
+        still = snap(8, 14)
+        stored = memory.note_exploration(still, stored)
+        self.assertEqual(6, still["_explore_metric"]["turns_since_reveal"])
+        self.assertEqual([line.format(n=6)], [row["text"] for row in nudge_rows(stored)])
+        self.assertEqual(line.format(n=6), coaching.civ6_exploration_attention(still))
+
+        # A reveal clears the prompt line and the situation log.
+        opened = snap(9, 20)
+        stored = memory.note_exploration(opened, stored)
+        self.assertEqual(6, opened["_explore_metric"]["new_tiles_this_turn"])
+        self.assertEqual(0, opened["_explore_metric"]["turns_since_reveal"])
+        self.assertNotIn("without revealing any new tiles", coaching.civ6_exploration_attention(opened) or "")
+        self.assertNotIn("without revealing any new tiles", civ6_wire.build_civ6_wire_prompt(opened))
+        self.assertEqual([], nudge_rows(stored))
+
+        # A drop in revealed tiles is not a reveal, so the clock keeps running.
+        shrunk = snap(10, 12)
+        stored = memory.note_exploration(shrunk, stored)
+        self.assertEqual(-8, shrunk["_explore_metric"]["new_tiles_this_turn"])
+        self.assertEqual(1, shrunk["_explore_metric"]["turns_since_reveal"])
+        self.assertEqual([], nudge_rows(stored))
+
+        # 80% explored does not nudge, even after a long quiet stretch.
+        covered = snap(8, 80)
+        covered_memory = memory.note_exploration(covered, {
+            "tracked": {"explore": [{"turn": 1, "revealed": 80}], "last_reveal_turn": 1},
+        })
+        self.assertEqual(7, covered["_explore_metric"]["turns_since_reveal"])
+        self.assertIsNone(coaching.civ6_exploration_attention(covered))
+        self.assertEqual([], nudge_rows(covered_memory))
 
     def test_lethargy_is_an_alert_and_a_situation_line(self):
         snap = _snap(turn=40)

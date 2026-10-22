@@ -503,16 +503,52 @@ def lethargy_line(snapshot: dict, memory: dict[str, Any] | None = None) -> str |
     return "LETHARGY: " + " ".join(text for _, text in parts)
 
 
-def note_exploration(snapshot: dict, memory: dict[str, Any]) -> dict[str, Any]:
-    """Remember revealed-tile counts so a later turn can see whether the map opened.
+def _clear_explore_nudge(memory: dict[str, Any]) -> None:
+    """Drop the stall sentence. _forget_events only removes the dedupe key."""
+    _forget_events(memory, "explore|stall")
+    log = memory.get("situation_log")
+    if not isinstance(log, list):
+        return
+    memory["situation_log"] = [
+        row for row in log
+        if not (
+            isinstance(row, dict)
+            and "without revealing any new tiles" in str(row.get("text") or "")
+        )
+    ]
 
-    One sample per turn, kept on tracked (the seat file already reloads that).
-    The prompt reads the stamp on the snapshot. It is not a snapshot field the
-    schema has to allow.
+
+def _write_explore_nudge(memory: dict[str, Any], turn: int, text: str) -> None:
+    """Keep a single current stall line. A later quiet turn replaces N."""
+    _clear_explore_nudge(memory)
+    _append_event(memory, turn, "explore|stall", text)
+
+
+def _infer_last_reveal_turn(samples: list[dict[str, int]], turn: int) -> int:
+    """Latest earlier sample whose reveal count went up. The first sample is the baseline."""
+    last = None
+    prev_revealed = None
+    for row in samples:
+        if row["turn"] >= turn:
+            break
+        if prev_revealed is None or row["revealed"] > prev_revealed:
+            last = row["turn"]
+        prev_revealed = row["revealed"]
+    return turn if last is None else last
+
+
+def note_exploration(snapshot: dict, memory: dict[str, Any]) -> dict[str, Any]:
+    """Count consecutive turns that revealed no new tiles, per seat.
+
+    The first sample is a baseline, not a quiet turn. A later increase resets
+    the clock and removes the stall line. The prompt reads the snapshot stamp.
+    Samples stay on tracked, which the seat file already reloads. This does
+    not issue an explore order.
     """
     from sidecar.civ6_prompt_coaching import (
-        CIV6_EXPLORE_STALL_BELOW_PCT,
-        CIV6_EXPLORE_STALL_TURNS,
+        CIV6_EXPLORE_NUDGE_BELOW_PCT,
+        CIV6_EXPLORE_QUIET_TURNS,
+        civ6_explore_stall_line,
         civ6_true_explored,
     )
 
@@ -527,7 +563,7 @@ def note_exploration(snapshot: dict, memory: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(tracked, dict):
         tracked = {}
         memory["tracked"] = tracked
-    samples = []
+    samples: list[dict[str, int]] = []
     for row in tracked.get("explore") or []:
         if not isinstance(row, dict):
             continue
@@ -544,34 +580,38 @@ def note_exploration(snapshot: dict, memory: dict[str, Any]) -> dict[str, Any]:
     samples.append({"turn": turn, "revealed": revealed})
     samples.sort(key=lambda row: row["turn"])
     tracked["explore"] = samples[-24:]
-    previous = samples[-2] if len(samples) >= 2 else None
+    previous = None
+    for row in tracked["explore"]:
+        if row["turn"] < turn:
+            previous = row
     metric: dict[str, Any] = {
         "turn": turn,
         "revealed": revealed,
         "total": total,
         "percent": percent,
     }
-    if previous is not None:
-        metric["since_turn"] = previous["turn"]
-        metric["delta"] = revealed - previous["revealed"]
-    baseline = None
-    since = None
-    for row in samples:
-        if row["turn"] <= turn - CIV6_EXPLORE_STALL_TURNS:
-            since = row["turn"]
-            baseline = row["revealed"]
-    if baseline is not None and since is not None:
-        stall_delta = revealed - baseline
-        metric["stall_since_turn"] = since
-        metric["stall_delta"] = stall_delta
-        metric["stalled"] = stall_delta <= 0 and percent < CIV6_EXPLORE_STALL_BELOW_PCT
-        if metric["stalled"]:
-            _append_event(
-                memory,
-                turn,
-                f"explore|stall|{since}",
-                f"Exploration stalled at {revealed} tiles ({stall_delta:+d} since T{since}), map {percent}%.",
-            )
+    if previous is None:
+        # No prior sample: start the clock at this turn. Do not call it a stall.
+        metric["turns_since_reveal"] = 0
+        tracked["last_reveal_turn"] = turn
+        _clear_explore_nudge(memory)
+    else:
+        delta = revealed - previous["revealed"]
+        metric["new_tiles_this_turn"] = delta
+        if delta > 0:
+            tracked["last_reveal_turn"] = turn
+            metric["turns_since_reveal"] = 0
+        else:
+            anchor = tracked.get("last_reveal_turn")
+            if not isinstance(anchor, int) or isinstance(anchor, bool) or anchor > turn:
+                anchor = _infer_last_reveal_turn(tracked["explore"], turn)
+                tracked["last_reveal_turn"] = anchor
+            metric["turns_since_reveal"] = turn - anchor
+        since = metric["turns_since_reveal"]
+        if delta <= 0 and percent < CIV6_EXPLORE_NUDGE_BELOW_PCT and since > CIV6_EXPLORE_QUIET_TURNS:
+            _write_explore_nudge(memory, turn, civ6_explore_stall_line(since))
+        else:
+            _clear_explore_nudge(memory)
     snapshot["_explore_metric"] = metric
     snapshot["_explore_samples"] = list(tracked["explore"])
     return memory

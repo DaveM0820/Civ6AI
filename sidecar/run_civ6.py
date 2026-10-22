@@ -62,9 +62,10 @@ def board_for_turn_metrics(snapshot: dict[str, Any]) -> dict[str, Any]:
             out["explored_percent"] = max(0, min(100, cached))
     metric = snapshot.get("_explore_metric") if isinstance(snapshot, dict) else None
     if isinstance(metric, dict):
-        delta = metric.get("delta")
-        if isinstance(delta, int) and not isinstance(delta, bool):
-            out["revealed_delta"] = delta
+        for key in ("turns_since_reveal", "new_tiles_this_turn"):
+            value = metric.get(key)
+            if isinstance(value, int) and not isinstance(value, bool):
+                out[key] = value
     civ6 = snapshot.get("civ6") if isinstance(snapshot, dict) and isinstance(snapshot.get("civ6"), dict) else {}
     rankings = civ6.get("rankings") if isinstance(civ6, dict) and isinstance(civ6.get("rankings"), dict) else {}
     players: list[dict[str, Any]] = []

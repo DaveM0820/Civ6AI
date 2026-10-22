@@ -12,6 +12,10 @@ from sidecar import pipeline_v2 as pipeline
 CIV6_RETREAT_HEAL_HP_THRESHOLD = 30
 CIV6_EXPLORE_STALL_TURNS = 5
 CIV6_EXPLORE_STALL_BELOW_PCT = 90
+# Consecutive turns with no newly revealed tiles. The line fires on the next
+# turn after this gap, and only while the true map is still under 80%.
+CIV6_EXPLORE_QUIET_TURNS = 4
+CIV6_EXPLORE_NUDGE_BELOW_PCT = 80
 
 CIV6_SETTLER_MAP_ADVICE = (
     "Carefully observe the attached map to choose a settle location, and remember it for "
@@ -295,26 +299,29 @@ def civ6_lethargy_attention(snapshot: dict[str, Any]) -> str | None:
     return civ6_seat_memory.lethargy_line(snapshot)
 
 
+def civ6_explore_stall_line(turns_since_reveal: int) -> str:
+    """The temporary exploration nudge. N is the consecutive quiet-turn count."""
+    return (
+        f"It has been {int(turns_since_reveal)} turns without revealing any new tiles. "
+        "Continue exploring: send scouts/ships into unexplored areas."
+    )
+
+
 def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
+    metric = snapshot.get("_explore_metric")
+    if isinstance(metric, dict):
+        since = metric.get("turns_since_reveal")
+        percent = metric.get("percent")
+        if (
+            isinstance(since, int) and not isinstance(since, bool)
+            and isinstance(percent, int) and not isinstance(percent, bool)
+            and percent < CIV6_EXPLORE_NUDGE_BELOW_PCT
+            and since > CIV6_EXPLORE_QUIET_TURNS
+        ):
+            return civ6_explore_stall_line(since)
     explored = _civ6_explored_percent(snapshot)
     if not isinstance(explored, int) or explored >= CIV6_EXPLORE_STALL_BELOW_PCT:
         return None
-    metric = snapshot.get("_explore_metric")
-    if isinstance(metric, dict) and metric.get("stalled") is True:
-        extra = ""
-        revealed = metric.get("revealed")
-        delta = metric.get("stall_delta")
-        since = metric.get("stall_since_turn")
-        if (
-            isinstance(revealed, int) and not isinstance(revealed, bool)
-            and isinstance(delta, int) and not isinstance(delta, bool)
-            and isinstance(since, int) and not isinstance(since, bool)
-        ):
-            extra = f" ({revealed} tiles, {delta:+d} since T{since})"
-        return (
-            f"No new exploration in {CIV6_EXPLORE_STALL_TURNS}+ turns while map is only "
-            f"{explored}% explored{extra} — soft advice: send a scout or military unit into fog this turn."
-        )
     history = snapshot.get("history")
     tracking = history.get("explore_tracking") if isinstance(history, dict) else None
     samples = tracking.get("samples") if isinstance(tracking, dict) else None
