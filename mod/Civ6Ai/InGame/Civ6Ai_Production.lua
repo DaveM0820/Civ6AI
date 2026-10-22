@@ -530,6 +530,31 @@ function Civ6Ai_Production.PickBuild(candidates, situation)
   return bestId, bestScore
 end
 
+-- Every candidate, best first (same score and tie order as PickBuild).
+function Civ6Ai_Production.RankBuilds(candidates, situation)
+  local scored = {}
+  for _, cand in ipairs(candidates or {}) do
+    local tags, kind = cand.tags, cand.kind or ""
+    if tags == nil and cand.id ~= nil then
+      tags, kind = Civ6Ai_Production._TagsFor(cand.id)
+    end
+    if cand.id ~= nil then
+      table.insert(scored, { id = cand.id, score = Civ6Ai_Production.ScoreBuild(cand.id, tags, situation, kind) })
+    end
+  end
+  table.sort(scored, function(a, b)
+    if a.score ~= b.score then
+      return a.score > b.score
+    end
+    return a.id < b.id
+  end)
+  local out = {}
+  for _, row in ipairs(scored) do
+    table.insert(out, row.id)
+  end
+  return out
+end
+
 function Civ6Ai_Production._TagsFor(buildId)
   local tags = {}
   local seen = {}
@@ -939,6 +964,8 @@ function Civ6Ai_Production._QueueLocalBuild(city, buildId)
 end
 
 Civ6Ai_Production._autoTries = Civ6Ai_Production._autoTries or {}
+-- Per city: how many picks failed to stick. Each miss moves to the next ranked item.
+Civ6Ai_Production._autoMiss = Civ6Ai_Production._autoMiss or {}
 Civ6Ai_Production._lastQueued = Civ6Ai_Production._lastQueued or {}
 Civ6Ai_Production._pendingQueue = Civ6Ai_Production._pendingQueue or {}
 Civ6Ai_Production._queuePass = Civ6Ai_Production._queuePass or 0
@@ -1028,6 +1055,7 @@ function Civ6Ai_Production._AutoqueuePass(playerID)
     local pending = Civ6Ai_Production._pendingQueue[key]
     if pending ~= nil and pending.pass ~= pass then
       if current == pending.build then
+        Civ6Ai_Production._autoMiss[cityId] = 0
         confirm(cityId, pending.build, key)
         queued = queued + 1
       else
@@ -1035,13 +1063,13 @@ function Civ6Ai_Production._AutoqueuePass(playerID)
           .. "|wanted=" .. tostring(pending.build) .. "|current=" .. tostring(current)
           .. "|result=" .. tostring(pending.result))
         Civ6Ai_Production._pendingQueue[key] = nil
+        Civ6Ai_Production._autoMiss[cityId] = (Civ6Ai_Production._autoMiss[cityId] or 0) + 1
       end
     end
     if Civ6Ai_Production._GetCityProduction(city) == nil and Civ6Ai_Production._pendingQueue[key] == nil then
-      local tries = Civ6Ai_Production._autoTries[key] or 0
-      -- A few attempts later in the same turn. A stuck request must not look done.
-      if tries < 3 then
-        Civ6Ai_Production._autoTries[key] = tries + 1
+      -- Hard guarantee: an empty queue is retried on every pass until it sticks.
+      -- A pick that did not stick moves to the next ranked item, wrapping round.
+      do
         local hasMonument = Civ6Ai_Production._HasBuilding(city, "BUILDING_MONUMENT")
         local hasGranary = Civ6Ai_Production._HasBuilding(city, "BUILDING_GRANARY")
         local situation = Civ6Ai_Production.ComposeSituation({
@@ -1062,18 +1090,31 @@ function Civ6Ai_Production._AutoqueuePass(playerID)
           last = Civ6Ai_Production._lastQueued[cityId],
           unit_counts = unitCounts,
         })
-        local buildId = Civ6Ai_Production.PickBuild(Civ6Ai_Production._Candidates(city), situation)
-        if buildId ~= nil then
+        local ranked = Civ6Ai_Production.RankBuilds(Civ6Ai_Production._Candidates(city), situation)
+        if #ranked == 0 then
+          _logProduction("production|autoqueue|no_candidates|city=" .. tostring(cityId) .. "|turn=" .. tostring(turn))
+        end
+        local miss = Civ6Ai_Production._autoMiss[cityId] or 0
+        for step = 0, #ranked - 1 do
+          local buildId = ranked[((miss + step) % #ranked) + 1]
           local stuck, status, result = Civ6Ai_Production._QueueLocalBuild(city, buildId)
+          if miss + step > 0 then
+            _logProduction("production|autoqueue|retry|city=" .. tostring(cityId) .. "|attempt=" .. tostring(miss + step)
+              .. "|build=" .. tostring(buildId) .. "|status=" .. tostring(stuck and "stuck" or status) .. "|turn=" .. tostring(turn))
+          end
           if stuck then
+            Civ6Ai_Production._autoMiss[cityId] = 0
             confirm(cityId, buildId, key)
             queued = queued + 1
+            break
           elseif status == "pending" then
+            Civ6Ai_Production._autoMiss[cityId] = miss + step
             local record = { build = buildId, pass = pass }
             if result ~= nil then
               record.result = result
             end
             Civ6Ai_Production._pendingQueue[key] = record
+            break
           end
         end
       end
