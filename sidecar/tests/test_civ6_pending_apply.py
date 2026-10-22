@@ -169,6 +169,56 @@ class Civ6PendingApplyTests(unittest.TestCase):
         with mock.patch("civ6_host_channel.write_pending_apply_lua", return_value=0):
             self.assertFalse(publish_pending_apply('{"commands":[]}', "sess", 1, 2))
 
+    def test_unlogged_batch_is_discarded_on_reload(self):
+        strike = {
+            "kind": "city_attack",
+            "command_id": "CMD_citystrike_65536_45_15",
+            "arguments": {"city_id": 65536, "target_x": 45, "target_y": 15},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            player_dir = self._player_dir(tmp, turn=202, commands=[strike])
+            (player_dir / "apply_commands.json").write_text(
+                json.dumps({"commands": [strike]}), encoding="utf-8"
+            )
+            (player_dir / "apply_started.txt").write_text(
+                "202|CMD_citystrike_65536_45_15\n", encoding="utf-8"
+            )
+            payload = json.loads(load_apply_payload(player_dir, expected_turn=202) or "{}")
+            self.assertEqual([], payload["commands"])
+            self.assertEqual(
+                [],
+                json.loads((player_dir / "apply_commands.json").read_text(encoding="utf-8"))["commands"],
+            )
+            self.assertEqual(
+                [],
+                json.loads((player_dir / "decision.json").read_text(encoding="utf-8"))["commands"],
+            )
+
+    def test_logged_batch_and_fresh_batch_are_kept(self):
+        strike = {
+            "kind": "city_attack",
+            "command_id": "CMD_citystrike_65536_45_15",
+            "arguments": {},
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            fresh = self._player_dir(tmp, turn=202, commands=[strike])
+            self.assertEqual(
+                "CMD_citystrike_65536_45_15",
+                json.loads(load_apply_payload(fresh, expected_turn=202) or "{}")["commands"][0]["command_id"],
+            )
+        with tempfile.TemporaryDirectory() as tmp:
+            logged = self._player_dir(tmp, turn=203, commands=[strike])
+            (logged / "apply_started.txt").write_text(
+                "203|CMD_citystrike_65536_45_15\n", encoding="utf-8"
+            )
+            (logged / "apply-results.jsonl").write_text(
+                '{"event":"apply_result","turn":203,"command_id":"CMD_citystrike_65536_45_15","ok":true}\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                1, len(json.loads(load_apply_payload(logged, expected_turn=203) or "{}")["commands"])
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

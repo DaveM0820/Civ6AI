@@ -494,6 +494,45 @@ function Civ6Ai_Orders._ArrivalAction(owner, unit, intent, extra, sender)
   return true, "arrived"
 end
 
+-- A foreign unit or city on the destination. War is checked by the attack.
+function Civ6Ai_Orders._EnemyOnPlot(owner, x, y)
+  local city = Cities ~= nil and Cities.GetCityInPlot ~= nil and Cities.GetCityInPlot(x, y) or nil
+  if city ~= nil and city:GetOwner() ~= owner then
+    return "city"
+  end
+  if Civ6Ai_Orders._Defender(x, y, owner) ~= nil then
+    return "unit"
+  end
+  return nil
+end
+
+-- Melee and anti-cavalry have Combat. Ranged, siege, and naval ranged have a range.
+function Civ6Ai_Orders._CanFight(unit)
+  if Civ6Ai_Orders._IsRanged(unit) then
+    return true
+  end
+  local row = GameInfo ~= nil and GameInfo.Units[unit:GetType()] or nil
+  return row ~= nil and (num(row.Combat) or 0) > 0
+end
+
+-- MoveTo onto an enemy tile is an attack when this unit can fight it this turn.
+-- Melee and anti-cavalry attack when adjacent. Ranged attacks if in range.
+-- nil means the tile has no enemy and the move continues. Otherwise
+-- true, "attack_instead:..." or false, "enemy_on_tile:...".
+function Civ6Ai_Orders._MoveAsAttack(unit, x, y)
+  if Civ6Ai_Orders._EnemyOnPlot(unit:GetOwner(), x, y) == nil then
+    return nil
+  end
+  if not Civ6Ai_Orders._CanFight(unit) then
+    return false, "enemy_on_tile: this unit cannot attack; pick a different tile"
+  end
+  local ok, why = Civ6Ai_Orders._ResolveAttack(unit, x, y)
+  if ok then
+    return true, "attack_instead:" .. tostring(why)
+  end
+  return false, "enemy_on_tile:" .. tostring(why)
+end
+
 function Civ6Ai_Orders._DoMove(sender, o)
   local owner = o.P
   local unit = Civ6Ai_Orders._Unit(owner, o.U)
@@ -516,6 +555,13 @@ function Civ6Ai_Orders._DoMove(sender, o)
   end
   if Civ6Ai_Orders._BuilderOutsideBorders(unit, x, y) then
     return false, "outside_borders"
+  end
+  local attacked, attackWhy = Civ6Ai_Orders._MoveAsAttack(unit, x, y)
+  if attacked ~= nil then
+    if attacked then
+      Civ6Ai_Orders._ClearGoal(owner, o.U)
+    end
+    return attacked, attackWhy
   end
   if unit:GetX() == x and unit:GetY() == y then
     Civ6Ai_Orders._ClearGoal(owner, o.U)
@@ -701,8 +747,16 @@ function Civ6Ai_Orders._Attack(owner, o)
 end
 
 function Civ6Ai_Orders._IsRanged(unit)
-  local row = GameInfo.Units[unit:GetType()]
-  return row ~= nil and (num(row.RangedCombat) or 0) > 0 and (num(row.Range) or 0) > 0
+  local row = GameInfo ~= nil and GameInfo.Units[unit:GetType()] or nil
+  if row == nil then
+    return false
+  end
+  local range = num(row.Range) or 0
+  if range <= 0 then
+    return false
+  end
+  -- Archers, siege (Bombard), and naval ranged. Melee and land melee have no range.
+  return (num(row.RangedCombat) or 0) > 0 or (num(row.Bombard) or 0) > 0
 end
 
 function Civ6Ai_Orders._CombatType(unit)
@@ -712,7 +766,10 @@ function Civ6Ai_Orders._CombatType(unit)
   if not Civ6Ai_Orders._IsRanged(unit) then
     return CombatTypes.MELEE
   end
-  if (call(unit, "GetBombardCombat") or 0) > (call(unit, "GetRangedCombat") or 0) then
+  local row = GameInfo ~= nil and GameInfo.Units[unit:GetType()] or nil
+  local bombard = call(unit, "GetBombardCombat") or (row ~= nil and num(row.Bombard)) or 0
+  local ranged = call(unit, "GetRangedCombat") or (row ~= nil and num(row.RangedCombat)) or 0
+  if bombard > ranged and CombatTypes.BOMBARD ~= nil then
     return CombatTypes.BOMBARD
   end
   return CombatTypes.RANGED
@@ -764,32 +821,59 @@ end
 
 -- Damage each side takes, from the engine's forecast. Returns
 -- attackerDamage, defenderDamage, or nil, reason.
+function Civ6Ai_Orders._ReadForecast(res)
+  if type(res) ~= "table" or CombatResultParameters == nil then
+    return nil
+  end
+  local P = CombatResultParameters
+  local a = res[P.ATTACKER]
+  local d = res[P.DEFENDER]
+  if type(a) ~= "table" or type(d) ~= "table" then
+    return nil
+  end
+  local toDef = num(d[P.DAMAGE_TO]) or 0
+  local wall = P.DEFENSE_DAMAGE_TO ~= nil and (num(d[P.DEFENSE_DAMAGE_TO]) or 0) or 0
+  return num(a[P.DAMAGE_TO]) or 0, math.max(toDef, wall)
+end
+
 function Civ6Ai_Orders._ForecastOnce(unit, defender, combatType)
   -- Arguments to pcall are evaluated first. A city district with no
   -- GetComponentID throws "function expected instead of nil" on that lookup
   -- and never enters pcall, which aborted the seat's turn on a city attack.
   local attackerId = call(unit, "GetComponentID")
   local defenderId = call(defender, "GetComponentID")
-  if attackerId == nil or defenderId == nil or CombatManager == nil then
-    return nil
+  if attackerId == nil or CombatManager == nil then
+    return nil, "no_component_id"
   end
   local okFn, simulate = pcall(function() return CombatManager.SimulateAttackVersus end)
+  if defenderId ~= nil and okFn and type(simulate) == "function" then
+    local ok, res = pcall(simulate, attackerId, defenderId, combatType)
+    if ok then
+      local toA, toD = Civ6Ai_Orders._ReadForecast(res)
+      if toA ~= nil then
+        return toA, toD
+      end
+    end
+  end
+  -- A district often has no component id. SimulateAttackInto only needs the attacker.
+  local x, y = call(defender, "GetX"), call(defender, "GetY")
+  local okInto, into = pcall(function() return CombatManager.SimulateAttackInto end)
+  if x ~= nil and y ~= nil and okInto and type(into) == "function" then
+    local ok, res = pcall(into, attackerId, combatType, x, y)
+    if ok then
+      local toA, toD = Civ6Ai_Orders._ReadForecast(res)
+      if toA ~= nil then
+        return toA, toD
+      end
+    end
+  end
+  if defenderId == nil then
+    return nil, "no_component_id"
+  end
   if not okFn or type(simulate) ~= "function" then
-    return nil
+    return nil, "no_simulate"
   end
-  local ok, res = pcall(simulate, attackerId, defenderId, combatType)
-  if not ok or type(res) ~= "table" then
-    return nil
-  end
-  local a = res[CombatResultParameters.ATTACKER]
-  local d = res[CombatResultParameters.DEFENDER]
-  if type(a) ~= "table" or type(d) ~= "table" then
-    return nil
-  end
-  local P = CombatResultParameters
-  local toDef = num(d[P.DAMAGE_TO]) or 0
-  local wall = P.DEFENSE_DAMAGE_TO ~= nil and (num(d[P.DEFENSE_DAMAGE_TO]) or 0) or 0
-  return num(a[P.DAMAGE_TO]) or 0, math.max(toDef, wall)
+  return nil, "bad_result"
 end
 
 -- The unit panel's hover preview passes nil for melee. A MELEE type that
@@ -805,15 +889,23 @@ function Civ6Ai_Orders._Forecast(unit, defender, combatType)
   if simulate == nil or CombatResultParameters == nil then
     return nil, "no_combat_forecast"
   end
+  local function usable(a, d)
+    return a ~= nil and type(d) == "number"
+  end
   local toA, toD = Civ6Ai_Orders._ForecastOnce(unit, defender, combatType)
-  if toA == nil or (toD or 0) <= 0 then
+  local why = type(toD) == "string" and toD or nil
+  if not usable(toA, toD) or toD <= 0 then
     local a2, d2 = Civ6Ai_Orders._ForecastOnce(unit, defender, nil)
-    if a2 ~= nil and (d2 or 0) > (toD or 0) then
+    local soFar = usable(toA, toD) and toD or 0
+    if usable(a2, d2) and d2 > soFar then
       toA, toD = a2, d2
+      why = nil
+    elseif type(d2) == "string" then
+      why = d2
     end
   end
-  if toA == nil then
-    return nil, "forecast_failed"
+  if not usable(toA, toD) then
+    return nil, "forecast_failed:" .. tostring(why or "no_result")
   end
   return toA, toD
 end
@@ -1044,9 +1136,278 @@ local function noteAttack(counts, o, ok)
   bucket[which] = bucket[which] + 1
 end
 
+-- Remaining hit points. A missing max is treated as the usual 100.
+function Civ6Ai_Orders._HpLeft(target)
+  local maxHp = call(target, "GetMaxDamage") or 100
+  local dmg = call(target, "GetDamage") or 0
+  if maxHp < dmg then
+    return 0
+  end
+  return maxHp - dmg
+end
+
+function Civ6Ai_Orders._WouldDie(target, damage)
+  return type(damage) == "number" and damage > 0 and damage >= Civ6Ai_Orders._HpLeft(target)
+end
+
+-- auto: 0 off, 2 include a human seat, anything else is AI seats only.
+-- A nil mode is the default: not IsHuman(). The local human (P0 in a real
+-- game) is IsHuman and is never auto-fired unless the host sent mode 2.
+function Civ6Ai_Orders._AutoRangedEnabled(owner, mode)
+  if mode == 0 then
+    return false
+  end
+  if call(Players[owner], "IsHuman") and mode ~= 2 then
+    return false
+  end
+  return true
+end
+
+function Civ6Ai_Orders._AutoJson(owner, kind, reason, commandId, fixed)
+  local function esc(text)
+    text = tostring(text or "")
+    text = string.gsub(text, "\\", "\\\\")
+    text = string.gsub(text, '"', '\\"')
+    return text
+  end
+  local extra = ""
+  if type(fixed) == "table" then
+    local bits = {}
+    if fixed.unit ~= nil then
+      bits[#bits + 1] = '"unit_id":"' .. esc(fixed.unit) .. '"'
+    end
+    if fixed.city ~= nil then
+      bits[#bits + 1] = '"city_id":"' .. esc(fixed.city) .. '"'
+    end
+    if fixed.x ~= nil then
+      bits[#bits + 1] = '"target_x":' .. tostring(fixed.x)
+    end
+    if fixed.y ~= nil then
+      bits[#bits + 1] = '"target_y":' .. tostring(fixed.y)
+    end
+    if #bits > 0 then
+      extra = ',"fixed_arguments":{' .. table.concat(bits, ",") .. "}"
+    end
+  end
+  print("CIV6AI|jsonl|{\"event\":\"apply_result\",\"turn\":" .. tostring(Game.GetCurrentGameTurn())
+    .. ",\"player_id\":\"PLAYER_" .. tostring(owner)
+    .. "\",\"command_id\":\"" .. esc(commandId)
+    .. "\",\"kind\":\"" .. esc(kind)
+    .. "\",\"ok\":true,\"reason\":\"" .. esc(reason) .. "\"" .. extra .. "}")
+end
+
+function Civ6Ai_Orders._AutoRank(kind, killable)
+  if kind == "unit" and killable then
+    return 1
+  end
+  if kind == "unit" then
+    return 2
+  end
+  if killable then
+    return 3
+  end
+  return 4
+end
+
+-- One ranged shot, or nil when the forecast is unusable or would kill the shooter.
+function Civ6Ai_Orders._AutoPreview(attacker, defender, combatType)
+  local toA, toD = Civ6Ai_Orders._Forecast(attacker, defender, combatType)
+  if type(toA) ~= "number" or type(toD) ~= "number" or toD <= 0 then
+    return nil
+  end
+  if Civ6Ai_Orders._WouldDie(attacker, toA) then
+    return nil, "attacker_would_die"
+  end
+  return toA, toD
+end
+
+function Civ6Ai_Orders._AutoCandidates(owner, x, y, reach)
+  local out = {}
+  for pid = 0, 63 do
+    if pid ~= owner and Civ6Ai_Orders._AtWar(owner, pid) then
+      local them = Players[pid]
+      for _, unit in ipairs(sortedMembers(call(them, "GetUnits"))) do
+        local dist = Map.GetPlotDistance(x, y, unit:GetX(), unit:GetY())
+        if dist >= 1 and dist <= reach and call(unit, "IsDead") ~= true then
+          out[#out + 1] = { kind = "unit", obj = unit, x = unit:GetX(), y = unit:GetY(), id = unit:GetID() }
+        end
+      end
+      for _, city in ipairs(sortedMembers(call(them, "GetCities"))) do
+        local dist = Map.GetPlotDistance(x, y, city:GetX(), city:GetY())
+        if dist >= 1 and dist <= reach then
+          out[#out + 1] = { kind = "city", obj = city, x = city:GetX(), y = city:GetY(), id = city:GetID() }
+        end
+      end
+    end
+  end
+  return out
+end
+
+function Civ6Ai_Orders._PickAutoTarget(attacker, owner, x, y, reach, combatType)
+  local best = nil
+  local sawDie = false
+  for _, cand in ipairs(Civ6Ai_Orders._AutoCandidates(owner, x, y, reach)) do
+    local defender = cand.obj
+    if cand.kind == "city" then
+      defender = Civ6Ai_Orders._CityCenterDistrict(cand.obj) or cand.obj
+    end
+    local toA, toD = Civ6Ai_Orders._AutoPreview(attacker, defender, combatType)
+    if toA == nil and toD == "attacker_would_die" then
+      sawDie = true
+    elseif type(toD) == "number" then
+      local hp = Civ6Ai_Orders._HpLeft(cand.kind == "unit" and cand.obj or defender)
+      local row = {
+        cand = cand, dmg = toD, hp = hp,
+        rank = Civ6Ai_Orders._AutoRank(cand.kind, toD >= hp),
+      }
+      if best == nil or row.rank < best.rank or (row.rank == best.rank and row.hp < best.hp)
+          or (row.rank == best.rank and row.hp == best.hp and row.dmg > best.dmg)
+          or (row.rank == best.rank and row.hp == best.hp and row.dmg == best.dmg and row.cand.x < best.cand.x)
+          or (row.rank == best.rank and row.hp == best.hp and row.dmg == best.dmg
+              and row.cand.x == best.cand.x and row.cand.y < best.cand.y) then
+        best = row
+      end
+    end
+  end
+  return best, sawDie
+end
+
+-- After the model's orders: unused ranged, siege, and naval ranged units, plus
+-- city and encampment strikes. Melee is left alone. Runs inside _ApplyOrders,
+-- so every PC plays the same shots. The host chooses the mode on the batch.
+function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFailed, mode)
+  if not Civ6Ai_Orders._AutoRangedEnabled(owner, mode) then
+    return
+  end
+  local turn = Game.GetCurrentGameTurn()
+  local unitOk, cityOk, skipped = 0, 0, 0
+  local function note(kind, reason, commandId, order, fixed)
+    Civ6Ai_Orders._Record(sender, order, true, reason)
+    Civ6Ai_Orders._AutoJson(owner, kind, reason, commandId, fixed)
+  end
+  local p = Players[owner]
+  for _, unit in ipairs(sortedMembers(call(p, "GetUnits"))) do
+    local uid = unit:GetID()
+    local failedAttack = attackFailed[uid] == true and attackOk[uid] ~= true
+    local untouched = ordered[uid] ~= true
+    if Civ6Ai_Orders._IsRanged(unit) and (untouched or failedAttack)
+        and (call(unit, "GetMovesRemaining") or 0) > 0
+        and (call(unit, "GetAttacksRemaining") == nil or (call(unit, "GetAttacksRemaining") or 0) > 0) then
+      local row = GameInfo.Units[unit:GetType()]
+      local reach = num(row and row.Range) or 1
+      local best, sawDie = Civ6Ai_Orders._PickAutoTarget(
+        unit, owner, unit:GetX(), unit:GetY(), reach, Civ6Ai_Orders._CombatType(unit))
+      if best == nil then
+        if sawDie then
+          skipped = skipped + 1
+        end
+      else
+        local ok, why = Civ6Ai_Orders._ResolveAttack(unit, best.cand.x, best.cand.y)
+        local reason = "auto:" .. tostring(why or "")
+        if ok then
+          unitOk = unitOk + 1
+          note("attack_target", reason, "AUTO_U_" .. tostring(uid) .. "_" .. best.cand.x .. "_" .. best.cand.y, {
+            S = -1, K = Civ6Ai_Orders.K.ATTACK, P = owner, U = uid,
+            X = best.cand.x, Y = best.cand.y, D = turn,
+          }, { unit = uid, x = best.cand.x, y = best.cand.y })
+        else
+          skipped = skipped + 1
+        end
+      end
+    end
+  end
+  -- Same command as an ordered strike. No forecast, and no damage applied here.
+  -- The first refusal stops the rest, matching the ordered batch.
+  local function bestStrike(x, y)
+    local best = nil
+    for _, cand in ipairs(Civ6Ai_Orders._AutoCandidates(owner, x, y, 2)) do
+      local hp = Civ6Ai_Orders._HpLeft(cand.obj)
+      local rank = cand.kind == "unit" and 1 or 2
+      if best == nil or rank < best.rank or (rank == best.rank and hp < best.hp)
+          or (rank == best.rank and hp == best.hp and cand.x < best.cand.x)
+          or (rank == best.rank and hp == best.hp and cand.x == best.cand.x and cand.y < best.cand.y) then
+        best = { cand = cand, hp = hp, rank = rank }
+      end
+    end
+    return best
+  end
+  local function cityOf(district)
+    local found = call(district, "GetCity")
+    if found ~= nil and found.GetID ~= nil then
+      return found
+    end
+    local cid = call(district, "GetCityID")
+    if cid == nil then
+      return nil
+    end
+    for _, city in ipairs(sortedMembers(call(p, "GetCities"))) do
+      if city:GetID() == cid then
+        return city
+      end
+    end
+    return nil
+  end
+  local stopped = false
+  local function fire(city, fromX, fromY, commandId)
+    if stopped or city == nil then
+      return
+    end
+    local cityId = city:GetID()
+    local key = "CIV6AI_STRIKE_" .. tostring(owner) .. "_" .. tostring(cityId)
+    if num(Game:GetProperty(key)) == turn then
+      return
+    end
+    local best = bestStrike(fromX, fromY)
+    if best == nil then
+      return
+    end
+    local tx, ty = best.cand.x, best.cand.y
+    local ok, why
+    if fromX == city:GetX() and fromY == city:GetY() then
+      ok, why = Civ6Ai_Orders.Gov.CityStrike(owner, cityId, tx, ty)
+    else
+      local defenderId = Civ6Ai_Orders._LiveStrikeTarget(owner, tx, ty)
+      if defenderId == nil then
+        ok, why = false, "no_enemy_on_plot"
+      else
+        log("city_strike|city=" .. tostring(cityId) .. "|x=" .. tostring(tx) .. "|y=" .. tostring(ty)
+          .. "|defender=" .. tostring(defenderId))
+        ok, why = Civ6Ai_Orders._CityRangeAttack(city, tx, ty)
+        if ok then
+          Game:SetProperty(key, turn)
+        end
+      end
+    end
+    if ok then
+      cityOk = cityOk + 1
+      note("city_attack", "auto:" .. tostring(why or ""), commandId .. "_" .. tx .. "_" .. ty, {
+        S = -1, K = Civ6Ai_Orders.K.CITY_STRIKE, P = owner, I = cityId,
+        X = tx, Y = ty, D = turn,
+      }, { city = cityId, x = tx, y = ty })
+    else
+      stopped = true
+      skipped = skipped + 1
+    end
+  end
+  for _, city in ipairs(sortedMembers(call(p, "GetCities"))) do
+    fire(city, city:GetX(), city:GetY(), "AUTO_C_" .. tostring(city:GetID()))
+  end
+  for _, district in ipairs(sortedMembers(call(p, "GetDistricts"))) do
+    local row = GameInfo ~= nil and GameInfo.Districts ~= nil and GameInfo.Districts[call(district, "GetType")] or nil
+    if row ~= nil and row.DistrictType == "DISTRICT_ENCAMPMENT" then
+      local city = cityOf(district)
+      fire(city, call(district, "GetX"), call(district, "GetY"), "AUTO_E_" .. tostring(call(district, "GetID") or 0))
+    end
+  end
+  if unitOk + cityOk + skipped > 0 then
+    print("CIV6AI|attacks|auto|player=" .. tostring(owner) .. "|turn=" .. tostring(turn)
+      .. "|unit=" .. tostring(unitOk) .. "|city=" .. tostring(cityOk) .. "|skipped=" .. tostring(skipped))
+  end
+end
+
 -- Play one seat's orders with retry passes and record each result, then end
 -- the turn of the seat's units the model left in place.
-function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
+function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
   if Game.GetCurrentGameTurn() == 1 then
     for _, o in ipairs(orders) do
       local unit = o.U ~= nil and Civ6Ai_Orders._Unit(owner, o.U) or nil
@@ -1064,6 +1425,28 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
     end
   end
   local pending, okUnits = orders, {}
+  local cityStrikeFailed = false
+  local attackOk, attackFailed = {}, {}
+  local function markAttack(o, succeeded, reason)
+    if o.U == nil then
+      return
+    end
+    local text = tostring(reason or "")
+    local attackish = o.K == Civ6Ai_Orders.K.ATTACK
+    if o.K == Civ6Ai_Orders.K.MOVE
+        and (string.find(text, "attack_instead:", 1, true) or string.find(text, "enemy_on_tile:", 1, true)) then
+      attackish = true
+    end
+    if not attackish then
+      return
+    end
+    if succeeded then
+      attackOk[o.U] = true
+      attackFailed[o.U] = nil
+    elseif not attackOk[o.U] then
+      attackFailed[o.U] = true
+    end
+  end
   local counts = { ok = { unit = 0, city = 0 }, fail = { unit = 0, city = 0 } }
   for pass = 1, Civ6Ai_Orders.MAX_PASSES do
     if #pending == 0 then
@@ -1071,22 +1454,34 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
     end
     local nextPending, progress = {}, false
     for _, o in ipairs(pending) do
+      -- A city strike that fails is not followed by the rest of the strike
+      -- list. The first refusal is the result; later strikes are not sent.
+      if o.K == Civ6Ai_Orders.K.CITY_STRIKE and cityStrikeFailed then
+        Civ6Ai_Orders._Record(sender, o, false, "city_strike_stopped")
+        noteAttack(counts, o, false)
+      else
       -- One order's script error is that order's result. It must not abort the
       -- rest of the turn (a thrown city:GetDistrictID used to do that).
       local ran, ok, reason = pcall(Civ6Ai_Orders._Execute, sender, o)
       if not ran then
         ok, reason = false, "order_error:" .. trimErr(ok)
       end
+      if o.K == Civ6Ai_Orders.K.CITY_STRIKE and not ok then
+        cityStrikeFailed = true
+      end
       if ok then
         progress = true
         okUnits[o.U or -1] = o.K ~= Civ6Ai_Orders.K.SKIP or nil
+        markAttack(o, true, reason)
         Civ6Ai_Orders._Record(sender, o, true, reason)
         noteAttack(counts, o, true)
       elseif retryable(o.K, reason) and pass < Civ6Ai_Orders.MAX_PASSES then
         nextPending[#nextPending + 1] = o
       else
+        markAttack(o, false, reason)
         Civ6Ai_Orders._Record(sender, o, false, reason)
         noteAttack(counts, o, false)
+      end
       end
     end
     if not progress then
@@ -1109,6 +1504,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
         else
           Civ6Ai_Orders._Record(sender, o, false, "plot_occupied_exhausted")
         end
+        markAttack(o, false)
         noteAttack(counts, o, false)
       end
       break
@@ -1119,6 +1515,13 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
   local failed = counts.fail.unit + counts.fail.city
   Civ6Ai_Orders._LogAttackBatch(
     owner, Game.GetCurrentGameTurn(), executed, failed, nil, counts.ok.unit, counts.ok.city)
+  -- After the model's orders, before goals and finish-moves. Empty queues never
+  -- reach here, so a seat the model did not answer stays with the game's AI.
+  local ranAuto, autoErr = pcall(
+    Civ6Ai_Orders._AutoRanged, sender, owner, ordered, attackOk, attackFailed, autoMode)
+  if not ranAuto then
+    log("auto_error|player=" .. tostring(owner) .. "|" .. trimErr(autoErr))
+  end
   Civ6Ai_Orders._ContinueGoals(owner, ordered, okUnits)
   Civ6Ai_Orders._FinishIdleUnits(owner, ordered, okUnits)
 end
@@ -1298,7 +1701,7 @@ function Civ6Ai_Orders._DropUnplayedQueue(owner)
   log("queue_replaced|player=" .. tostring(owner) .. "|old_turn=" .. tostring(oldT) .. "|orders=" .. tostring(n))
 end
 
-function Civ6Ai_Orders._Store(sender, owner, turn, orders)
+function Civ6Ai_Orders._Store(sender, owner, turn, orders, autoMode)
   Civ6Ai_Orders._DropUnplayedQueue(owner)
   for j, o in ipairs(orders) do
     for _, f in ipairs(Civ6Ai_Orders.QUEUE_FIELDS) do
@@ -1308,6 +1711,8 @@ function Civ6Ai_Orders._Store(sender, owner, turn, orders)
   Game:SetProperty(qkey(owner, "N"), #orders)
   Game:SetProperty(qkey(owner, "FROM"), sender)
   Game:SetProperty(qkey(owner, "T"), turn)
+  -- -1 means the host did not send a mode (AI seats only). 0 is off. 2 includes humans.
+  Game:SetProperty(qkey(owner, "AR"), autoMode == nil and -1 or autoMode)
   log("queued|player=" .. tostring(owner) .. "|for_turn=" .. tostring(turn) .. "|orders=" .. #orders
     .. "|from=" .. tostring(sender))
 end
@@ -1326,8 +1731,13 @@ function Civ6Ai_Orders._Take(owner)
     end
     orders[j] = o
   end
+  local autoMode = num(Game:GetProperty(qkey(owner, "AR")))
+  if autoMode ~= nil and autoMode < 0 then
+    autoMode = nil
+  end
   Game:SetProperty(qkey(owner, "T"), -1)
-  return turn, num(Game:GetProperty(qkey(owner, "FROM"))), orders
+  Game:SetProperty(qkey(owner, "AR"), -1)
+  return turn, num(Game:GetProperty(qkey(owner, "FROM"))), orders, autoMode
 end
 
 -- A complete batch: the sender's orders for one seat's turn T. Queued until
@@ -1365,10 +1775,10 @@ function Civ6Ai_Orders._Deliver(sender, batch)
   end
   if started then
     log("late_batch|player=" .. tostring(owner) .. "|turn=" .. tostring(t))
-    Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
+    Civ6Ai_Orders._ApplyOrders(sender, owner, orders, batch.auto)
     return
   end
-  Civ6Ai_Orders._Store(sender, owner, t, orders)
+  Civ6Ai_Orders._Store(sender, owner, t, orders, batch.auto)
 end
 
 -- A seat's turn start, on every PC: note it, then play the seat's queue for
@@ -1378,11 +1788,11 @@ function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
   local turn = Game.GetCurrentGameTurn()
   log("turn_start|player=" .. tostring(owner) .. "|turn=" .. tostring(turn))
   Game:SetProperty("CIV6AI_STARTED_" .. tostring(owner), turn)
-  local t, sender, orders = Civ6Ai_Orders._Take(owner)
+  local t, sender, orders, autoMode = Civ6Ai_Orders._Take(owner)
   if t == turn then
     log("queue_apply|player=" .. tostring(owner) .. "|turn=" .. turn .. "|orders=" .. #orders)
     Civ6Ai_Orders._LogQueueUnits(owner, turn)
-    Civ6Ai_Orders._ApplyOrders(sender, owner, orders)
+    Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
   elseif t ~= nil then
     local attacks = 0
     local why = "stale_turn:" .. tostring(t)
@@ -1659,8 +2069,10 @@ function Civ6Ai_Orders._Batch(sender, o, params)
     cur = nil
   end
   if cur == nil then
-    cur = { id = b, n = n, p = o.P, t = t, orders = {} }
+    cur = { id = b, n = n, p = o.P, t = t, orders = {}, auto = num(params.AR) }
     Civ6Ai_Orders._batches[sender] = cur
+  elseif cur.auto == nil then
+    cur.auto = num(params.AR)
   end
   cur.orders[j] = o
   if j == n then
@@ -2785,7 +3197,74 @@ function Gov.SpreadReligion(owner, unitId, x, y, mode)
   return true, "spread=" .. tostring(pressure) .. ":city=" .. tostring(city:GetID())
 end
 
--- City ranged strike from the city centre, once per city per turn (synced property).
+-- A live enemy unit, city, or district on the plot. The id is what the strike log records.
+function Civ6Ai_Orders._LiveStrikeTarget(owner, x, y)
+  local plot = Map ~= nil and Map.GetPlot ~= nil and Map.GetPlot(x, y) or nil
+  if plot ~= nil and Units ~= nil and Units.GetUnitsInPlot ~= nil then
+    local bestId, bestStrength = nil, -1
+    for _, other in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+      if other:GetOwner() ~= owner and not Civ6Ai_Orders._IsDead(other)
+          and Civ6Ai_Orders._AtWar(owner, other:GetOwner()) then
+        local row = GameInfo ~= nil and GameInfo.Units[other:GetType()] or nil
+        local strength = row ~= nil and (num(row.Combat) or 0) or 0
+        if strength > bestStrength then
+          bestId, bestStrength = other:GetID(), strength
+        end
+      end
+    end
+    if bestId ~= nil then
+      return bestId
+    end
+  end
+  if Cities ~= nil and Cities.GetCityInPlot ~= nil then
+    local okC, city = pcall(Cities.GetCityInPlot, x, y)
+    if okC and city ~= nil and city:GetOwner() ~= owner and Civ6Ai_Orders._AtWar(owner, city:GetOwner()) then
+      local id = city:GetID()
+      if id ~= nil then
+        return id
+      end
+    end
+  end
+  if Players ~= nil then
+    for pid = 0, 63 do
+      if pid ~= owner and Players[pid] ~= nil and Civ6Ai_Orders._AtWar(owner, pid) then
+        for _, district in ipairs(sortedMembers(call(Players[pid], "GetDistricts"))) do
+          if call(district, "GetX") == x and call(district, "GetY") == y then
+            local id = call(district, "GetID")
+            if id ~= nil then
+              return id
+            end
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
+-- The engine's city ranged attack. CanStartCommand is the gate; a district is
+-- never passed to forecast, ChangeDamage, or Kill (that read 0xffffffff).
+function Civ6Ai_Orders._CityRangeAttack(city, x, y)
+  if CityManager == nil or CityManager.CanStartCommand == nil or CityManager.RequestCommand == nil
+      or CityCommandTypes == nil or CityCommandTypes.RANGE_ATTACK == nil
+      or CityCommandTypes.PARAM_X == nil or CityCommandTypes.PARAM_Y == nil then
+    return false, "city_strike_unavailable"
+  end
+  local params = {}
+  params[CityCommandTypes.PARAM_X] = x
+  params[CityCommandTypes.PARAM_Y] = y
+  local okCan, can = pcall(CityManager.CanStartCommand, city, CityCommandTypes.RANGE_ATTACK, params)
+  if not okCan or can ~= true then
+    return false, "city_strike_refused"
+  end
+  local okReq, err = pcall(CityManager.RequestCommand, city, CityCommandTypes.RANGE_ATTACK, params)
+  if not okReq then
+    return false, "city_strike_refused:" .. trimErr(err)
+  end
+  return true, "city_strike"
+end
+
+-- City ranged strike, once per city per turn (synced property).
 function Gov.CityStrike(owner, cityId, x, y)
   local city = cityById(owner, cityId)
   local key = "CIV6AI_STRIKE_" .. tostring(owner) .. "_" .. tostring(cityId)
@@ -2795,27 +3274,21 @@ function Gov.CityStrike(owner, cityId, x, y)
   if num(Game:GetProperty(key)) == Game.GetCurrentGameTurn() then
     return false, "city already struck this turn"
   end
-  local district = Civ6Ai_Orders._CityCenterDistrict(city)
-  local defender = Civ6Ai_Orders._Defender(x, y, owner)
-  if district == nil then
-    return false, "no_city_district"
-  end
-  if defender == nil or not Civ6Ai_Orders._AtWar(owner, defender:GetOwner()) then
+  local defenderId = Civ6Ai_Orders._LiveStrikeTarget(owner, x, y)
+  if defenderId == nil then
     return false, "no_enemy_on_plot"
   end
   if Map.GetPlotDistance(city:GetX(), city:GetY(), x, y) > 2 then
     return false, "out_of_range"
   end
-  local _, toDefender = Civ6Ai_Orders._Forecast(district, defender, CombatTypes ~= nil and CombatTypes.RANGED or nil)
-  if (toDefender or 0) <= 0 then
-    return false, "no_effect:zero_damage"
+  log("city_strike|city=" .. tostring(cityId) .. "|x=" .. tostring(x) .. "|y=" .. tostring(y)
+    .. "|defender=" .. tostring(defenderId))
+  local ok, reason = Civ6Ai_Orders._CityRangeAttack(city, x, y)
+  if not ok then
+    return false, reason
   end
   Game:SetProperty(key, Game.GetCurrentGameTurn())
-  Civ6Ai_Orders._ChangeDamage(defender, toDefender)
-  if Civ6Ai_Orders._IsDead(defender) and call(defender, "IsDead") ~= true then
-    pcall(UnitManager.Kill, defender)
-  end
-  return true, "city_strike:dmg=" .. tostring(toDefender)
+  return true, reason
 end
 
 -- An improvement (builder, or fort) on the unit's tile; spends one build charge.

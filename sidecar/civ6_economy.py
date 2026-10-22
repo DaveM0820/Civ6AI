@@ -449,7 +449,7 @@ def attention_items(snapshot: dict[str, Any]) -> list[str]:
 
         names = ", ".join(idle_cities)
         if _has_queue_production(snapshot):
-            detail = "Choose an item from each city's catalog this turn. Nothing will be queued for you."
+            detail = "Choose an item from each city's catalog this turn."
         elif priorities_supported(snapshot):
             detail = (
                 "The engine AI picks the next item under the current build priorities. "

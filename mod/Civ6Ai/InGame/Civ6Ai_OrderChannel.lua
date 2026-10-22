@@ -434,6 +434,10 @@ function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn, snapshotT
     logAttackChannel()
     return 0
   end
+  local autoMode = 1
+  if Civ6Ai_Config ~= nil and Civ6Ai_Config.AutoRangedMode ~= nil then
+    autoMode = Civ6Ai_Config.AutoRangedMode(playerID)
+  end
   Civ6Ai_OrderChannel._batch = Civ6Ai_OrderChannel._batch + 1
   local batch = Game.GetLocalPlayer() * 100000 + Civ6Ai_OrderChannel._batch
   local sent = 0
@@ -441,6 +445,7 @@ function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn, snapshotT
   for j, entry in ipairs(orders) do
     local f = entry.fields
     f.D = decisionTurn
+    f.AR = autoMode
     f.B, f.J, f.N = batch, j, #orders
     local kind = f.K
     f.K = nil

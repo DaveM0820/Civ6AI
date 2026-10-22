@@ -153,6 +153,7 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
     table.insert(pending, command)
   end
   local executedUnit, executedCity, failedAttacks = 0, 0, 0
+  local cityStrikeFailed = false
   local function noteLocal(command, ok)
     local kind = command.kind
     local attack = kind == "attack_target" or kind == "city_attack" or kind == "range_attack" or kind == "melee_attack"
@@ -176,8 +177,16 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
     local nextPending = {}
     local progress = false
     for _, command in ipairs(pending) do
+      if command.kind == "city_attack" and cityStrikeFailed then
+        Civ6Ai_Apply._RecordResult(playerID, command, false, "city_strike_stopped", command.arguments or {})
+        noteLocal(command, false)
+        Civ6Ai_Util.Log("apply|fail|city_attack|city_strike_stopped|" .. tostring(command.command_id))
+      else
       local ok, reason, fixedArgs = Civ6Ai_Apply._ApplyCommand(playerID, command)
       local deferred = reason == Civ6Ai_Apply.DEFERRED
+      if command.kind == "city_attack" and not ok and not deferred then
+        cityStrikeFailed = true
+      end
       if not deferred then
         Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs)
       end
@@ -211,6 +220,7 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
           noteLocal(command, false)
           Civ6Ai_Util.Log("apply|fail|" .. tostring(command.kind) .. "|" .. tostring(reason))
         end
+      end
       end
     end
     if not progress then

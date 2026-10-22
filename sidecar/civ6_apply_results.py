@@ -44,6 +44,16 @@ NON_TRANSIENT_FAILURES = (
     "steps=0",
     "no_progress",
     "stack_limit",
+    "impassable",
+    "outside_borders",
+    "forecast_failed",
+    "no_combat_forecast",
+    "no_effect",
+    "no_city_district",
+    "no_enemy_on_plot",
+    "not_at_war",
+    "out_of_range",
+    "enemy_on_tile",
 )
 CHAT_NEAR_DUPE_THRESHOLD = 0.6
 CHAT_NEAR_DUPE_LOOKBACK_TURNS = 16
@@ -80,7 +90,7 @@ _SIMPLE_REASONS = {
     "water": "that tile is water and this unit cannot embark there yet",
     "water_no_ocean_embark": "that tile is ocean and this unit cannot embark onto ocean yet",
     "land": "naval units cannot enter land tiles",
-    "impassable": "impassable: that tile is a mountain or natural wonder; do not move there",
+    "impassable": "impassable: that tile is a mountain or natural wonder; do not move there. Do not order that destination again.",
     "occupied_foreign": "another civilization's unit is standing on that tile",
     "stack_limit": "one of your own military units already holds that tile (one military unit per tile)",
     "not_adjacent": "the tile is not next to the unit",
@@ -124,16 +134,16 @@ _SIMPLE_REASONS = {
     "explore_unavailable": "the game has no explore operation for this unit",
     "activate_unavailable": "the game could not activate that great person",
     "no_result_from_gameplay": "the game never reported a result for this order before the turn ended; reissue it if it is still legal",
-    "no_city_district": "the city centre could not be resolved, so the attack was not made",
-    "no_effect:zero_damage": "the combat forecast is 0 damage, so the attack was not made",
-    "not_at_war": "you are not at war with that owner",
-    "no_enemy_on_plot": "no enemy unit or city is on that tile",
+    "no_city_district": "the city centre could not be resolved, so the attack was not made. Do not order that destination again.",
+    "no_effect:zero_damage": "the combat forecast is 0 damage, so the attack was not made. Do not order that destination again.",
+    "not_at_war": "you are not at war with that owner. Do not order that destination again.",
+    "no_enemy_on_plot": "no enemy unit or city is on that tile. Do not order that destination again.",
     "no_attacks_left": "this unit has no attacks left this turn",
-    "no_combat_forecast": "the game could not forecast that attack, so it was not made",
-    "forecast_failed": "the game could not forecast that attack, so it was not made",
-    "forecast_empty": "the game could not forecast that attack, so it was not made",
-    "out_of_range": "the target is outside this unit's attack range",
-    "outside_borders": "builders can only move onto your own tiles; that destination is outside your borders",
+    "no_combat_forecast": "the game could not forecast that attack, so it was not made. Do not order that destination again.",
+    "forecast_failed": "the game could not forecast that attack, so it was not made. Do not order that destination again.",
+    "forecast_empty": "the game could not forecast that attack, so it was not made. Do not order that destination again.",
+    "out_of_range": "the target is outside this unit's attack range. Do not order that destination again.",
+    "outside_borders": "builders can only move onto your own tiles; that destination is outside your borders. Do not order that destination again.",
     "send_failed": "the order never left the host, so it was not played",
 }
 
@@ -170,14 +180,41 @@ def describe_reason(reason: Any) -> str:
                 f"moved toward ({match.group('nx')},{match.group('ny')}) instead")
     if text.startswith("retargeted:"):
         return "destination occupied; the game picked a free neighbouring tile"
+    if text.startswith("auto:"):
+        detail = describe_reason(text[len("auto:"):])
+        base = "the host fired this unused ranged shot or city strike"
+        return f"{base} ({detail})" if detail else base
+    if text.startswith("attack_instead:"):
+        detail = describe_reason(text[len("attack_instead:"):])
+        base = "the destination held an enemy, so the unit attacked instead"
+        return f"{base} ({detail})" if detail else base
+    if text.startswith("enemy_on_tile:"):
+        detail = text[len("enemy_on_tile:"):].strip()
+        if "cannot attack" in detail:
+            return detail if detail.endswith(".") else detail + "."
+        plain = describe_reason(detail) or detail.replace("_", " ")
+        return (
+            "that tile has an enemy and this unit cannot attack it this turn "
+            f"({plain}). Do not order that destination again."
+        )
+    if text.startswith("forecast_failed") or text.startswith("no_combat_forecast") or text.startswith("forecast_empty"):
+        return _SIMPLE_REASONS["forecast_failed"]
     if text.startswith("no_effect:zero_damage"):
-        return "the combat forecast is 0 damage, so the attack was not made"
+        return _SIMPLE_REASONS["no_effect:zero_damage"]
     if text.startswith("no_effect:damage_not_applied"):
         forecast = text.split("forecast=", 1)[-1] if "forecast=" in text else ""
         extra = f" (forecast {forecast})" if forecast else ""
-        return "the forecast dealt damage but the game did not apply it" + extra
+        return "the forecast dealt damage but the game did not apply it" + extra + ". Do not order that destination again."
+    if text.startswith("no_effect:"):
+        return "the attack would have had no effect. Do not order that destination again."
     if text.startswith("out_of_range"):
-        return "the target is outside this unit's attack range"
+        return _SIMPLE_REASONS["out_of_range"]
+    if text.startswith("not_at_war"):
+        return _SIMPLE_REASONS["not_at_war"]
+    if text.startswith("no_enemy_on_plot"):
+        return _SIMPLE_REASONS["no_enemy_on_plot"]
+    if text.startswith("no_city_district"):
+        return _SIMPLE_REASONS["no_city_district"]
     if text.startswith("too_many_focus"):
         return _SIMPLE_REASONS["too_many_focus"]
     if text.startswith("activate_unavailable"):
@@ -636,6 +673,12 @@ def thoughts_lines(context: dict[str, Any]) -> list[str]:
         if noop:
             bits.append(f"{noop} no effect")
         lines.append(pipeline._wire_line("prior.turn", f"{label}: {', '.join(bits)}"))
+        auto = sum(1 for i in result_items if str(i.get("reason") or "").startswith("auto:"))
+        if auto:
+            lines.append(pipeline._wire_line(
+                "apply.auto",
+                f"{auto} unused ranged shots or city strikes fired by the host",
+            ))
         for index, item in enumerate(result_items):
             text = str(item["summary"]).strip()
             repeats = item.get("repeats")
@@ -1023,17 +1066,21 @@ def _result_fingerprint(item: dict[str, Any]) -> tuple[str, str, Any, Any] | Non
             int(match.group("x")),
             int(match.group("y")),
         )
-    if order_kind in ("move_unit", "attack_target"):
+    if order_kind in ("move_unit", "attack_target", "city_attack", "range_attack", "melee_attack"):
         # Tile-failure summaries ("...move scout_1 to (43,10) but it failed...") no longer
         # match _BLOCKED_RE; take the target from the command id so repeats are still caught.
-        for value in item.get("affected_ids") or []:
-            m = _CMD_TARGET_RE.search(str(value))
+        # CMD_attack_UNIT_1_45_19 ends in _45_19, which the verb-shaped pattern missed.
+        # Unknown coordinates must not match every later order by that unit.
+        for value in list(item.get("affected_ids") or []) + [item.get("command_id")]:
+            m = _CMD_TARGET_RE.search(str(value or ""))
             if m:
-                return (order_kind, unit, int(m.group(1)), int(m.group(2)))
-    return (order_kind, unit, None, None)
+                kind = "move_unit" if order_kind == "move_unit" else "attack_target"
+                return (kind, unit, int(m.group(1)), int(m.group(2)))
+        return None
+    return None
 
 
-_CMD_TARGET_RE = re.compile(r"_(?:moveto|found|attack|improve|trade|religion)_(-?\d+)_(-?\d+)$")
+_CMD_TARGET_RE = re.compile(r"_(-?\d+)_(-?\d+)$")
 
 
 def _explore_substitute(snapshot: dict[str, Any], dropped_move: dict[str, Any],
@@ -1087,6 +1134,8 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
     builders = {u.get("unit_id") for u in units if u.get("unit_type_id") == "UNIT_BUILDER"}
     builders |= {wire_ids.get(uid) for uid in list(builders) if wire_ids.get(uid)}
 
+    seen_orders: set[tuple[Any, ...]] = set()
+
     def _explore_instead(command: dict[str, Any]) -> None:
         unit = str((command.get("arguments") or {}).get("unit_id") or "")
         if any(str((c.get("arguments") or {}).get("unit_id") or "") == unit for c in kept + substitutes
@@ -1127,16 +1176,78 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
                 break
         if matched is not None:
             dropped.append(
-                f"dropped: repeat of T{matched[0]} failure ({matched[1].split(':')[0] or 'non-transient'})"
+                f"dropped: repeat of T{matched[0]} failure ({matched[1].split(':')[0] or 'non-transient'}). "
+                "Do not order that destination again."
             )
             if fp[0] == "move_unit":
                 _explore_instead(command)
                 failed_tiles.add((fp[2], fp[3]))
             continue
+        if fp[0] in ("move_unit", "attack_target") and fp[2] is not None and fp[3] is not None:
+            signature = (fp[0], fp[1], fp[2], fp[3])
+            if signature in seen_orders:
+                dropped.append(
+                    f"dropped: duplicate order to ({fp[2]},{fp[3]}). Do not order that destination again."
+                )
+                continue
+            seen_orders.add(signature)
         kept.append(command)
     kept_units = {str((c.get("arguments") or {}).get("unit_id") or "") for c in kept if isinstance(c.get("arguments"), dict)}
     kept.extend(s for s in substitutes if s["arguments"]["unit_id"] not in kept_units)
     return _one_site_per_builder(snapshot, kept, dropped, failed_tiles), dropped
+
+
+def suppress_failed_offers(snapshot: dict[str, Any]) -> None:
+    """Drop legal moves and attacks that repeat a located non-transient failure.
+
+    A failure with no coordinates is ignored: it must not hide every attack by that unit.
+    """
+    legal = snapshot.get("legal_commands")
+    if not isinstance(legal, list):
+        return
+    units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
+    wire_ids = pipeline._build_unit_wire_id_map(units)
+    reverse = {v: k for k, v in wire_ids.items()}
+    blocked: list[tuple[str, str, Any, Any]] = []
+    for item in command_result_items(snapshot):
+        fp = _result_fingerprint(item)
+        if fp is None or fp[2] is None or fp[3] is None:
+            continue
+        blocked.append(fp)
+    if not blocked:
+        return
+    attack_kinds = {"attack_target", "range_attack", "melee_attack", "city_attack"}
+    kept: list[Any] = []
+    for command in legal:
+        if not isinstance(command, dict):
+            kept.append(command)
+            continue
+        kind = str(command.get("kind") or "")
+        if kind != "move_unit" and kind not in attack_kinds:
+            kept.append(command)
+            continue
+        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+        order = "move_unit" if kind == "move_unit" else "attack_target"
+        unit = str(fixed.get("unit_id") or fixed.get("city_id") or "")
+        try:
+            x, y = int(fixed["target_x"]), int(fixed["target_y"])
+        except (KeyError, TypeError, ValueError):
+            kept.append(command)
+            continue
+        drop = False
+        for fail in blocked:
+            unit_ok = (
+                fail[1] == unit
+                or wire_ids.get(unit) == fail[1]
+                or reverse.get(fail[1]) == unit
+                or wire_ids.get(fail[1]) == unit
+            )
+            if fail[0] == order and unit_ok and fail[2] == x and fail[3] == y:
+                drop = True
+                break
+        if not drop:
+            kept.append(command)
+    snapshot["legal_commands"] = kept
 
 
 def _one_site_per_builder(snapshot: dict[str, Any], commands: list[dict[str, Any]],

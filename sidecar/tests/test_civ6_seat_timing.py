@@ -237,6 +237,31 @@ class BridgePendingApplyLuaTests(unittest.TestCase):
         self.g.Civ6Ai_Bridge._delivered["1|1"] = False
         self.assertFalse(self.g.Civ6Ai_Bridge.SeatAnswerOutstanding(1, 1))
 
+    def test_reload_discards_a_batch_that_never_logged_a_result(self):
+        self.lua.execute(r"""
+          FILES = {}
+          Civ6Ai_Util.CanReadHostFiles = function() return true end
+          Civ6Ai_Config.RootDir = function() return "root" end
+          Civ6Ai_Util.JoinPath = function(...)
+            local parts = {}
+            for i = 1, select("#", ...) do parts[i] = select(i, ...) end
+            return table.concat(parts, "/")
+          end
+          Civ6Ai_Util.ReadTextFile = function(path) return FILES[path] end
+          Civ6Ai_Util.WriteTextFile = function(path, content) FILES[path] = content; return true end
+        """)
+        payload = '{"commands":[{"kind":"city_attack","command_id":"CMD_citystrike_65536_45_15","arguments":{}}]}'
+        self._publish([(0, 1, payload, "sess")])
+        self.g.CURRENT_TURN = 1
+        self.assertTrue(self.g.Civ6Ai_Bridge._TryPendingApplyFromMod(0))
+        self.assertEqual(1, len(self.g.APPLIED))
+        self.lua.execute("Civ6Ai_Bridge._consumedApplyIds = {}; Civ6Ai_Bridge._appliedKeys = {}")
+        self.g.Civ6Ai_Bridge._lastPendingReload = None
+        self._publish([(0, 1, payload, "sess")])
+        self.assertTrue(self.g.Civ6Ai_Bridge._TryPendingApplyFromMod(0))
+        self.assertEqual(1, len(self.g.APPLIED))
+        self.assertTrue(any("pending_apply_discarded" in line and "no_result" in line for line in self._log()))
+
     def test_empty_pending_apply_is_replaced_by_later_commands(self):
         key = self.g.Civ6Ai_Bridge._PulseKey(0)
         self.g.Civ6Ai_Bridge._pulseKeys[key] = True

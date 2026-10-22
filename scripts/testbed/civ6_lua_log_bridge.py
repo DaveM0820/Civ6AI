@@ -283,15 +283,77 @@ def record_failed_appends(civ6ai_root: Path, chunk: str) -> int:
     return n
 
 
+_APPLY_PATH_RE = re.compile(
+    r"sessions[/\\](?P<session>[^/\\]+)[/\\](?P<player>PLAYER_\d+)[/\\]apply-results\.jsonl",
+    re.I,
+)
+
+
+def _apply_row_from_text(text: str) -> dict[str, Any] | None:
+    body = str(text or "").strip()
+    if not body.startswith("{"):
+        return None
+    try:
+        row = json.loads(body)
+    except ValueError:
+        return None
+    if not isinstance(row, dict) or row.get("event") != "apply_result":
+        return None
+    player = str(row.get("player_id") or "")
+    if not re.fullmatch(r"PLAYER_\d+", player):
+        return None
+    try:
+        row["turn"] = int(row.get("turn"))
+    except (TypeError, ValueError):
+        return None
+    return {key: row.get(key) for key in _APPLY_RESULT_KEEP if key in row}
+
+
+def failed_apply_appends(chunk: str) -> tuple[str, list[dict[str, Any]]]:
+    """Session id and apply rows recovered from io|append_failed lines.
+
+    The gameplay script cannot write the file, so it logs the path and the JSON.
+    A truncated append line still names the session; the compact jsonl line is the row.
+    """
+    session = ""
+    rows: list[dict[str, Any]] = []
+    for raw in chunk.splitlines():
+        _, sep, rest = raw.partition("CIV6AI|io|append_failed|")
+        if not sep:
+            continue
+        path, bar, line = rest.partition("|")
+        if not bar or not path.replace("\\", "/").lower().endswith(APPLY_RESULTS_NAME):
+            continue
+        match = _APPLY_PATH_RE.search(path.replace("\\", "/"))
+        if match and not session:
+            session = match.group("session")
+        row = _apply_row_from_text(line)
+        if row is None:
+            continue
+        if match and not row.get("player_id"):
+            row["player_id"] = match.group("player")
+        rows.append(row)
+    return session, rows
+
+
 def record_apply_results(civ6ai_root: Path, chunk: str, blobs: list[dict[str, Any]], active_session: str) -> int:
     """Persist this chunk's apply_result rows before the seats' next prompts are built."""
     rows = parse_apply_result_lines(chunk)
+    failed_session, failed_rows = failed_apply_appends(chunk)
+    seen = {_apply_result_key(row) for row in rows}
+    for row in failed_rows:
+        key = _apply_result_key(row)
+        if key not in seen:
+            rows.append(row)
+            seen.add(key)
     if not rows:
         return 0
     session_id = active_session
     if not session_id:
         sessions = [str(b.get("session") or "") for b in blobs if b.get("session")]
         session_id = sessions[-1] if sessions else ""
+    if not session_id:
+        session_id = failed_session
     if not session_id:
         _log_once("apply_results_no_session", "apply_result rows seen but no active session; not recorded")
         return 0

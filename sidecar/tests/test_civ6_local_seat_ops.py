@@ -225,6 +225,34 @@ class PolicyApplyTests(unittest.TestCase):
         self.assertEqual(0, len(lua.globals().OPS))
         self.assertEqual([], recorded)
 
+    def test_city_strikes_stop_after_the_first_failure(self):
+        lua = _apply(r"""
+          STRIKES = {}
+          RESULTS = {}
+          Game = { GetLocalPlayer = function() return 0 end, GetCurrentGameTurn = function() return 202 end }
+          GameConfiguration = { IsNetworkMultiplayer = function() return false end }
+          Civ6Ai_Apply._RecordResult = function(pid, cmd, ok, reason)
+            table.insert(RESULTS, { id = cmd.command_id, ok = ok, reason = reason })
+          end
+          Civ6Ai_Apply._GovRoute = function(name)
+            table.insert(STRIKES, name)
+            return false, "city_strike_refused"
+          end
+          Civ6Ai_OrderChannel = { _Fields = function() return { K = 31, I = 65536, X = 45, Y = 15 } end }
+        """)
+        lua.execute(r"""
+          Civ6Ai_Apply.ApplyDecision(0, { commands = {
+            { kind = "city_attack", command_id = "CMD_citystrike_65536_45_15", arguments = {} },
+            { kind = "city_attack", command_id = "CMD_citystrike_65536_46_16", arguments = {} },
+          } })
+        """)
+        strikes = list(lua.globals().STRIKES.values())
+        results = [dict(row) for row in lua.globals().RESULTS.values()]
+        self.assertEqual(["CityStrike"], strikes)
+        self.assertEqual("city_strike_refused", results[0]["reason"])
+        self.assertEqual("CMD_citystrike_65536_46_16", results[1]["id"])
+        self.assertEqual("city_strike_stopped", results[1]["reason"])
+
     def test_names_the_empty_slot_instead_of_applying_a_partial_plan(self):
         lua, ok, reason, recorded = self._run("1=POLICY_SURVEY", "slots[0] = -1")
         self.assertFalse(ok)

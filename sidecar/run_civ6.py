@@ -602,6 +602,7 @@ def main() -> None:
     _apply_personality(snapshot, args.personality)
     try:
         civ6_apply_results.inject_command_results(snapshot, args.session_dir)
+        civ6_apply_results.suppress_failed_offers(snapshot)
         if args.session_dir:
             snapshot["_session_dir"] = str(args.session_dir)
     except Exception as error:  # never block a seat-turn on feedback rows

@@ -71,7 +71,7 @@ class Civ6EngineIoTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2] / "mod" / "Civ6Ai" / "InGame"
         snapshot_lua = (root / "Civ6Ai_Snapshot.lua").read_text(encoding="utf-8")
         apply_lua = (root / "Civ6Ai_Apply.lua").read_text(encoding="utf-8")
-        offered = set(re.findall(r'kind\s*=\s*"([a-z_]+)"', snapshot_lua))
+        offered = set(re.findall(r'(?<![A-Za-z0-9_])kind\s*=\s*"([a-z_]+)"', snapshot_lua))
         applied = set(re.findall(r'command\.kind\s*==\s*"([a-z_]+)"', apply_lua))
         self.assertTrue(offered)
         self.assertLessEqual(offered, applied)

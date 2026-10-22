@@ -170,13 +170,28 @@ def unit_strength_text(unit: dict[str, Any], context: dict[str, Any]) -> str | N
     return ", ".join(parts) if parts else None
 
 
+def _city_on_tile(context: dict[str, Any], x: int | None, y: int | None) -> dict[str, Any] | None:
+    if x is None or y is None:
+        return None
+    for city in _rows(_combat(context), "hostile_cities"):
+        if _int(city.get("x")) == x and _int(city.get("y")) == y and city.get("name"):
+            return city
+    return None
+
+
 def _target_text(context: dict[str, Any], row: dict[str, Any]) -> str:
-    owner = _owner_label(context, row.get("target_owner"))
-    name = str(row.get("target_name") or "unit")
-    if row.get("target_kind") == "city":
+    city = _city_on_tile(context, _int(row.get("target_x")), _int(row.get("target_y")))
+    if city is not None:
+        owner = _owner_label(context, city.get("owner_player_id") or row.get("target_owner"))
+        name = str(city.get("name"))
         label = f"{owner} city {name}"
     else:
-        label = f"{owner} {name}"
+        owner = _owner_label(context, row.get("target_owner"))
+        name = str(row.get("target_name") or "unit")
+        if row.get("target_kind") == "city":
+            label = f"{owner} city {name}"
+        else:
+            label = f"{owner} {name}"
     bits: list[str] = []
     if _int(row.get("defender_strength")) is not None:
         bits.append(f"{_int(row['defender_strength'])} str")
@@ -189,13 +204,19 @@ def _target_text(context: dict[str, Any], row: dict[str, Any]) -> str:
 
 
 def attack_forecast_note(row: dict[str, Any] | None) -> str:
-    """Parenthetical forecast for an attack option, or '' when the engine said nothing."""
+    """Short parenthetical forecast for an attack option, or '' when the engine said nothing.
+
+    The war section still prints the full outcome_text. Tokens only need the damage.
+    """
     if not isinstance(row, dict):
         return ""
-    text = outcome_text(row)
-    if not text or text == "no engine preview":
+    to_it = _int(row.get("damage_to_defender"))
+    if to_it is None:
         return ""
-    return f" ({text})"
+    if row.get("ranged"):
+        return f" (~{to_it}dmg)"
+    to_you = _int(row.get("damage_to_attacker")) or 0
+    return f" (~{to_it}dmg/~{to_you}dmg)"
 
 
 def _preview_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -271,10 +292,16 @@ def outcome_text(row: dict[str, Any]) -> str:
     return " ".join(parts)
 
 
+def _is_civilian_capture(row: dict[str, Any]) -> bool:
+    return (not row.get("ranged") and row.get("target_kind") != "city"
+            and not _int(row.get("defender_strength")))
+
+
 def _previews(context: dict[str, Any]) -> list[dict[str, Any]]:
     # A ranged shot at a 0-strength civilian is wasted; a melee unit captures it instead.
     return [r for r in _rows(_combat(context), "previews")
-            if not (r.get("ranged") and r.get("target_kind") != "city" and not _int(r.get("defender_strength")))]
+            if not (r.get("ranged") and r.get("target_kind") != "city" and not _int(r.get("defender_strength")))
+            and not _is_civilian_capture(r)]
 
 
 def unit_row_lines(prefix: str, unit: dict[str, Any], context: dict[str, Any]) -> list[str]:
@@ -317,6 +344,70 @@ def _strike_sort_key(row: dict[str, Any]) -> tuple[int, int, int]:
         1 if str(row.get("prediction") or "").upper() in BAD_PREDICTIONS else 0,
         -(_int(row.get("damage_to_defender")) or 0),
     )
+
+
+def capture_lines(context: dict[str, Any]) -> list[str]:
+    """Melee captures of 0-strength civilians, listed apart from combat strikes."""
+    wire_ids = _wire_ids(context)
+    lines: list[str] = []
+    for row in _rows(_combat(context), "previews"):
+        if not _is_civilian_capture(row):
+            continue
+        x, y = _int(row.get("target_x")), _int(row.get("target_y"))
+        if x is None or y is None:
+            continue
+        name = wire_ids.get(str(row.get("unit_id")), str(row.get("unit_id") or "unit"))
+        who = _target_text(context, row)
+        extra = " after moving into reach" if row.get("needs_move") else ""
+        lines.append(pipeline._wire_line(
+            "war.capture",
+            f"{name} can capture {who} at ({x},{y}){extra}",
+        ))
+    return lines
+
+
+_SIEGE_TAGS = ("CATAPULT", "TREBUCHET", "BOMBARD", "SIEGE")
+
+
+def _army_has_siege(context: dict[str, Any]) -> bool:
+    for unit in context.get("your_units") or []:
+        if not isinstance(unit, dict):
+            continue
+        type_id = str(unit.get("unit_type_id") or "").upper()
+        if any(tag in type_id for tag in _SIEGE_TAGS):
+            return True
+    return False
+
+
+def siege_guidance_line(context: dict[str, Any]) -> str | None:
+    """Walled enemy cities and no siege unit: say so, and that an all-in economy blocks the army."""
+    walled = [c for c in _rows(_combat(context), "hostile_cities") if _int(c.get("wall_max_hp"))]
+    if not walled or _army_has_siege(context):
+        return None
+    names = ", ".join(str(c.get("name") or "city") for c in walled[:4])
+    verb = "needs" if len(walled) == 1 else "need"
+    return pipeline._wire_line(
+        "war.siege",
+        f"{names} {verb} siege and this army has none. Set war:3 or build a Catapult. "
+        "An all-in economic focus (fix_bankruptcy:3) blocks military production.",
+    )
+
+
+def _staging_tile(context: dict[str, Any], cx: int, cy: int) -> tuple[int, int]:
+    """Nearest known land tile beside the city: lowest x, then y. Else the tile west of it."""
+    known = context.get("known_map") if isinstance(context.get("known_map"), dict) else {}
+    candidates: list[tuple[int, int]] = []
+    for plot in known.get("plots") or []:
+        if not isinstance(plot, dict) or plot.get("water") or plot.get("peak"):
+            continue
+        x, y = _int(plot.get("x")), _int(plot.get("y"))
+        if x is None or y is None:
+            continue
+        if _distance(context, (x, y), (cx, cy)) == 1:
+            candidates.append((x, y))
+    if candidates:
+        return min(candidates)
+    return (cx - 1, cy)
 
 
 def strike_lines(context: dict[str, Any]) -> list[str]:
@@ -397,10 +488,18 @@ def war_section_lines(context: dict[str, Any]) -> list[str]:
         near = [u for u, xy in mine if xy is not None and cxy[0] is not None and _distance(context, xy, cxy) <= 3]
         far = sum(1 for u in near if _int((stats.get(str(u.get("unit_id"))) or {}).get("ranged_strength")))
         stat.append(f"you have {len(near)} military within 3 ({far} siege/ranged)")
+        stage = ""
+        if cxy[0] is not None and cxy[1] is not None:
+            sx, sy = _staging_tile(context, cxy[0], cxy[1])
+            stage = f"; mass at ({sx},{sy}) and bring siege"
         lines.append(pipeline._wire_line(
             f"war.city.{c.get('name') or 'city'}",
-            f"{_owner_label(context, c.get('owner_player_id'))} ({_int(c.get('x'))},{_int(c.get('y'))}) {', '.join(stat)}"))
+            f"{_owner_label(context, c.get('owner_player_id'))} ({_int(c.get('x'))},{_int(c.get('y'))}) {', '.join(stat)}{stage}"))
     lines.extend(city_threat_lines(context))
+    siege = siege_guidance_line(context)
+    if siege:
+        lines.append(siege)
+    lines.extend(capture_lines(context))
     strikes = strike_lines(context)
     if strikes:
         lines.append("# == Attack previews (engine combat simulation, same as the in-game hover preview) ==")
@@ -560,6 +659,59 @@ def _threat_lines(context: dict[str, Any]) -> list[str]:
     return lines[:MAX_THREAT_LINES]
 
 
+def retain_runnable_attacks(snapshot: dict[str, Any]) -> None:
+    """Drop attack offers the combat preview says the game cannot run.
+
+    Only when civ6.combat.previews is a list. Snapshots with no combat block keep
+    every offer, so unit tests that never simulated a fight stay unchanged.
+    A usable preview is simulated (or the flag is absent), deals damage, and
+    does not require a move first.
+    """
+    if not isinstance(snapshot, dict):
+        return
+    civ6 = snapshot.get("civ6")
+    combat = civ6.get("combat") if isinstance(civ6, dict) else None
+    previews = combat.get("previews") if isinstance(combat, dict) else None
+    if not isinstance(previews, list):
+        return
+    legal = snapshot.get("legal_commands")
+    if not isinstance(legal, list):
+        return
+    good: set[tuple[str, str, int, int]] = set()
+    for row in previews:
+        if not isinstance(row, dict) or row.get("needs_move") or row.get("simulated") is False:
+            continue
+        damage = row.get("damage_to_defender")
+        if not isinstance(damage, int) or isinstance(damage, bool) or damage <= 0:
+            continue
+        try:
+            x, y = int(row["target_x"]), int(row["target_y"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if row.get("city_id"):
+            good.add(("city", str(row.get("city_id")), x, y))
+        elif row.get("unit_id"):
+            good.add(("unit", str(row.get("unit_id")), x, y))
+    attack_kinds = {"attack_target", "range_attack", "melee_attack", "city_attack"}
+    kept: list[Any] = []
+    for command in legal:
+        if not isinstance(command, dict) or command.get("kind") not in attack_kinds:
+            kept.append(command)
+            continue
+        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+        try:
+            x, y = int(fixed["target_x"]), int(fixed["target_y"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if command.get("kind") == "city_attack":
+            key = ("city", str(fixed.get("city_id") or ""), x, y)
+        else:
+            key = ("unit", str(fixed.get("unit_id") or ""), x, y)
+        if key in good:
+            kept.append(command)
+    snapshot["legal_commands"] = kept
+
+
 def _distance(context: dict[str, Any], a: tuple[int, int], b: tuple[int, int]) -> int:
     from sidecar import civ6_wire
 
@@ -615,8 +767,7 @@ def _undefended_city_lines(context: dict[str, Any]) -> list[str]:
             h, d = min(near, key=lambda item: item[1])
             build = (city.get("production") or {}).get("item_id") or "nothing"
             out.append(f"undefended: {city.get('name')} has no garrison, {h.get('name') or 'enemy'} is {_tiles(d)} away, "
-                       f"building {build}. Walls and military units are listed first in that city's catalog; "
-                       "nothing will be queued for you.")
+                       f"building {build}. Walls and military units are listed first in that city's catalog.")
     return out
 
 

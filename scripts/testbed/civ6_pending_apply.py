@@ -144,6 +144,77 @@ def decision_turn(player_dir: Path) -> int | None:
         return None
 
 
+def command_fingerprint(commands: list[Any]) -> str:
+    """Command ids in order. The same string is written by the in-game bridge."""
+    ids: list[str] = []
+    for command in commands:
+        if isinstance(command, dict) and command.get("command_id"):
+            ids.append(str(command["command_id"]))
+    return "|".join(ids)
+
+
+def _batch_has_logged_result(player_dir: Path, turn: int, fingerprint: str) -> bool:
+    path = player_dir / "apply-results.jsonl"
+    if not fingerprint or not path.is_file():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except OSError:
+        return False
+    ids = [part for part in fingerprint.split("|") if part]
+    turn_tokens = (f'"turn":{turn}', f'"turn": {turn}')
+    for line in text.splitlines():
+        if not any(token in line for token in turn_tokens):
+            continue
+        if any(f'"command_id":"{cid}"' in line or f'"command_id": "{cid}"' in line for cid in ids):
+            return True
+    return False
+
+
+def unlogged_replay(player_dir: Path, commands: list[Any], turn: int | None = None) -> bool:
+    """True when this batch was already handed to the game and never logged a result.
+
+    A reload of that batch is how a city strike that killed the process runs again.
+    """
+    fingerprint = command_fingerprint(commands)
+    if not fingerprint:
+        return False
+    path = player_dir / "apply_started.txt"
+    if not path.is_file():
+        return False
+    try:
+        recorded = path.read_text(encoding="utf-8-sig").strip()
+    except OSError:
+        return False
+    prefix, sep, recorded_fp = recorded.partition("|")
+    if sep == "" or recorded_fp != fingerprint:
+        return False
+    if turn is not None and prefix != str(int(turn)):
+        return False
+    try:
+        recorded_turn = int(prefix)
+    except ValueError:
+        return False
+    return not _batch_has_logged_result(player_dir, recorded_turn, fingerprint)
+
+
+def _clear_saved_commands(player_dir: Path) -> None:
+    """Drop the on-disk batch so a file read cannot replay it."""
+    apply_path = player_dir / "apply_commands.json"
+    try:
+        apply_path.write_text('{"commands":[]}\n', encoding="utf-8")
+    except OSError as error:
+        log.warning("could not clear %s: %s", apply_path, error)
+    decision_path = player_dir / "decision.json"
+    decision = _read_json(decision_path) if decision_path.is_file() else None
+    if isinstance(decision, dict) and decision.get("commands"):
+        decision["commands"] = []
+        try:
+            decision_path.write_text(json.dumps(decision) + "\n", encoding="utf-8")
+        except OSError as error:
+            log.warning("could not clear commands in %s: %s", decision_path, error)
+
+
 def load_apply_payload(player_dir: Path, *, expected_turn: int | None = None, allow_empty: bool = False) -> str | None:
     """Turn apply payload for player_dir.
 
@@ -174,11 +245,21 @@ def load_apply_payload(player_dir: Path, *, expected_turn: int | None = None, al
         commands = []
         if decision is None and not allow_empty:
             return None
+    discarded = False
+    if commands and unlogged_replay(player_dir, commands, expected_turn):
+        log.warning(
+            "discarding pending apply with no logged result dir=%s turn=%s",
+            player_dir,
+            expected_turn,
+        )
+        commands = []
+        discarded = True
+        _clear_saved_commands(player_dir)
     chat_messages: list[Any] = []
     validated = decision.get("validated") if isinstance(decision, dict) else None
     if isinstance(validated, dict) and isinstance(validated.get("chat_messages"), list):
         chat_messages = validated["chat_messages"]
-    if not commands and not chat_messages and not allow_empty:
+    if not commands and not chat_messages and not allow_empty and not discarded:
         return None
     payload = {"commands": commands, "chat_messages": chat_messages}
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
