@@ -158,11 +158,50 @@ def _claim_stale_seconds() -> float:
         return 720.0
 
 
+def _pid_alive(pid: int) -> bool:
+    """True when pid is a running process. Never signals it (os.kill kills on Windows)."""
+    if pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    if os.name == "nt":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return True
+            return code.value == 259  # STILL_ACTIVE
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
+
+
+def _claim_owner_dead(claim: Path) -> bool:
+    """A claim written by a helper that has since died (sidecar restart)."""
+    try:
+        pid = int(claim.read_text(encoding="utf-8").split()[0])
+    except (OSError, ValueError, IndexError):
+        return False
+    return not _pid_alive(pid)
+
+
 def _try_claim(player_dir: Path) -> Path | None:
     """Cross-process claim so the poller and the Lua bridge never run one job twice."""
     claim = player_dir / CLAIM_NAME
     try:
-        if claim.is_file() and time.time() - claim.stat().st_mtime > _claim_stale_seconds():
+        if claim.is_file() and (
+            time.time() - claim.stat().st_mtime > _claim_stale_seconds() or _claim_owner_dead(claim)
+        ):
             claim.unlink(missing_ok=True)
     except OSError:
         pass
