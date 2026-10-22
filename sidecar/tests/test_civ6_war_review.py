@@ -53,6 +53,10 @@ class WarReviewTests(unittest.TestCase):
         }]
         text = "\n".join(combat.war_section_lines(ctx))
         self.assertIn("capture with a melee unit adjacent at (31,17)", text)
+        self.assertTrue(any(
+            line.startswith("war.capture") and "capture with a melee unit adjacent at (31,17)" in line
+            for line in text.splitlines()
+        ), text)
         attention = "\n".join(combat.attention_items(ctx))
         self.assertIn("capture with a melee unit adjacent at (31,17)", attention)
         ctx["your_cities"][0]["defense"] = {

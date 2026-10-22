@@ -1,6 +1,7 @@
 """Offline checks for the synced order channel (Gameplay/Civ6Ai_Orders.lua,
 InGame/Civ6Ai_OrderChannel.lua): per-turn order queue, sender rules, combat."""
 import pathlib
+import re
 import unittest
 
 try:
@@ -337,10 +338,10 @@ class OrdersGameplayTests(unittest.TestCase):
         self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,4,13,10,0))")
         self.order(0, K=7, P=2, U=9, X=13, Y=10, S=11)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertTrue(self.last()["reason"].startswith("engine:ranged:unit"), self.last()["reason"])
+        self.assertTrue(self.last()["reason"].startswith("ranged:def_dmg=0>30:att_dmg=0>0"), self.last()["reason"])
         self.assertEqual(self.rt.eval("Players[2].units[3].moves"), 0)
-        self.assertEqual(self.rt.eval("Players[1].units[#Players[1].units].dmg"), 0)
-        self.assertEqual(self.rt.eval("attackOps[#attackOps].op"), 2)
+        self.assertEqual(self.rt.eval("Players[1].units[#Players[1].units].dmg"), 30)
+        self.assertEqual(self.rt.eval("#attackOps"), 0)
 
     def test_ranged_attack_respects_range(self):
         self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,4,15,10,0))")
@@ -356,10 +357,10 @@ class OrdersGameplayTests(unittest.TestCase):
         self.rt.execute("Players[2].war = {[1]=true}")
         self.order(0, K=7, P=2, U=7, X=10, Y=11, S=14)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertTrue(self.last()["reason"].startswith("engine:melee:unit"), self.last()["reason"])
-        self.assertEqual(self.rt.eval("Players[2].units[1].dmg"), 0)
-        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 0)
-        self.assertEqual(self.rt.eval("attackOps[#attackOps].op"), 1)
+        self.assertTrue(self.last()["reason"].startswith("melee:"), self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[2].units[1].dmg"), 20)
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
+        self.assertEqual(self.rt.eval("#attackOps"), 0)
 
     def test_attack_and_city_strike_run_before_a_move(self):
         # The move is listed first and would spend the unit (moves left = 0).
@@ -373,11 +374,11 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertEqual([r["kind"] for r in res[:3]], [31, 7, 1])
         attack = next(r for r in res if r["kind"] == 7)
         self.assertTrue(attack["ok"], attack["reason"])
-        self.assertTrue(str(attack["reason"]).startswith("engine:melee:unit"), attack["reason"])
-        # The melee order and the idle archer's auto shot both go through the engine.
-        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 0)
+        self.assertTrue(str(attack["reason"]).startswith("melee:"), attack["reason"])
+        # Melee (35) plus the idle archer's auto shot (30).
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 65)
         self.assertEqual(self.rt.eval("Players[2].units[2].dmg"), 0)
-        self.assertGreaterEqual(self.rt.eval("#attackOps"), 2)
+        self.assertEqual(self.rt.eval("#attackOps"), 0)
         logs = list(self.rt.eval("logs").values())
         self.assertTrue(any(
             "CIV6AI|attacks|player=2|turn=6|executed=1|failed=1|unit=1|city=0" in line
@@ -390,11 +391,11 @@ class OrdersGameplayTests(unittest.TestCase):
         self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,3,10,11,0))")
         self.order(0, K=1, P=2, U=7, X=10, Y=11, S=40)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertTrue(str(self.last()["reason"]).startswith("attack_instead:engine:melee"), self.last()["reason"])
-        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 0)
+        self.assertTrue(str(self.last()["reason"]).startswith("attack_instead:melee"), self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 35)
         self.order(0, K=1, P=2, U=9, X=10, Y=11, S=41)
-        self.assertTrue(str(self.last()["reason"]).startswith("attack_instead:engine:ranged"), self.last()["reason"])
-        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 0)
+        self.assertTrue(str(self.last()["reason"]).startswith("attack_instead:ranged"), self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 65)
         self.rt.execute(
             "Map.GetPlot(10,11):SetOwner(2); "
             "GameInfo.Units[2] = {BuildCharges=3, Combat=0}; "
@@ -422,11 +423,10 @@ class OrdersGameplayTests(unittest.TestCase):
         )
         self.order(0, K=1, P=2, U=8, X=15, Y=15, S=44)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertIn("attack_instead:engine:melee", str(self.last()["reason"]))
+        self.assertIn("attack_instead:melee:def_dmg=0>35", str(self.last()["reason"]))
         self.assertTrue(str(self.last()["reason"]).startswith("approached:"), self.last()["reason"])
-        self.assertEqual(self.rt.eval("attackOps[#attackOps].x"), 15)
-        self.assertEqual(self.rt.eval("attackOps[#attackOps].y"), 15)
-        self.assertEqual(self.rt.eval("Players[1].units[#Players[1].units].dmg"), 0)
+        self.assertEqual(self.rt.eval("#attackOps"), 0)
+        self.assertEqual(self.rt.eval("Players[1].units[#Players[1].units].dmg"), 35)
 
     def test_zero_hp_city_is_an_engine_attack_not_a_refused_capture(self):
         self.rt.execute(r"""
@@ -439,7 +439,11 @@ class OrdersGameplayTests(unittest.TestCase):
           function district:GetMaxDamage(t) if t == 1 then return 0 end return 200 end
           function district:GetDamage(t) if t == 1 then return self.wdmg end return self.gdmg end
           function district:ChangeDamage(t, n)
-            if t == 1 then self.wdmg = self.wdmg + n else self.gdmg = self.gdmg + n end
+            local cap = t == 1 and 0 or 200
+            local cur = t == 1 and self.wdmg or self.gdmg
+            local nxt = cur + n
+            if nxt > cap then nxt = cap end
+            if t == 1 then self.wdmg = nxt else self.gdmg = nxt end
           end
           local city = {id=7, owner=1, x=20, y=20}
           function city:GetID() return self.id end
@@ -453,19 +457,100 @@ class OrdersGameplayTests(unittest.TestCase):
             end}
           end
           Cities = {GetCityInPlot=function(x, y) if x == 20 and y == 20 then return city end end}
+          CityManager = { TransferCity = function(c, owner) c.owner = owner end }
           Players[1].war = {[2]=true}
           Players[2].war = {[1]=true}
           table.insert(Players[2].units, MkUnit(2, 30, 20, 21, 0))
           zeroCity = district
+          zeroCityObj = city
         """)
         self.order(0, K=7, P=2, U=30, X=20, Y=20, S=72)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertTrue(str(self.last()["reason"]).startswith("engine:melee:city"), self.last()["reason"])
+        self.assertIn("captured=true", str(self.last()["reason"]))
         self.assertNotIn("damage_not_applied", str(self.last()["reason"]))
         self.assertNotIn("zero_damage", str(self.last()["reason"]))
         self.assertEqual(self.rt.eval("zeroCity.gdmg"), 200)
-        self.assertEqual(self.rt.eval("attackOps[#attackOps].op"), 1)
-        self.assertEqual(self.rt.eval("attackOps[#attackOps].x"), 20)
+        self.assertEqual(self.rt.eval("zeroCityObj.owner"), 2)
+        self.assertEqual(self.rt.eval("Players[2].units[#Players[2].units].x"), 20)
+        self.assertEqual(self.rt.eval("Players[2].units[#Players[2].units].y"), 20)
+        self.assertEqual(self.rt.eval("#attackOps"), 0)
+        # A hit that reduces the city to 0 captures through AcquireCity when
+        # TransferCity is absent. Damage that does not stick on a living city
+        # is still refused. Ranged fire does not take the city. A forecast
+        # that throws still captures a city that is already at 0 HP.
+        self.rt.execute(r"""
+          CityManager.TransferCity = nil
+          Players[2].AcquireCity = function(self, city)
+            city.owner = 2
+          end
+          local function mk(id, x, y, gdmg, gmax, wmax, clamp)
+            local d = {id=id, x=x, y=y, wdmg=0, gdmg=gdmg, gmax=gmax, wmax=wmax}
+            function d:GetID() return self.id end
+            function d:GetX() return self.x end
+            function d:GetY() return self.y end
+            function d:GetType() return 0 end
+            function d:GetComponentID() return self end
+            function d:GetMaxDamage(t) if t == 1 then return self.wmax end return self.gmax end
+            function d:GetDamage(t) if t == 1 then return self.wdmg end return self.gdmg end
+            function d:ChangeDamage(t, n)
+              if not clamp then return end
+              if t == 1 then self.wdmg = math.min(self.wmax, self.wdmg + n)
+              else self.gdmg = math.min(self.gmax, self.gdmg + n) end
+            end
+            local c = {id=id, owner=1, x=x, y=y, district=d}
+            function c:GetID() return self.id end
+            function c:GetOwner() return self.owner end
+            function c:GetX() return self.x end
+            function c:GetY() return self.y end
+            function c:GetDistricts()
+              local me = self
+              return {Members=function()
+                local i = 0
+                return function() i = i + 1; if i == 1 then return i, me.district end end
+              end}
+            end
+            return c
+          end
+          lowCity = mk(11, 22, 22, 180, 200, 0, true)
+          stuckCity = mk(12, 24, 24, 0, 200, 100, false)
+          rangedCity = mk(13, 26, 26, 200, 200, 0, true)
+          deadThrow = mk(14, 28, 28, 200, 200, 0, true)
+          deadThrow.district.GetComponentID = nil
+          setmetatable(deadThrow.district, {__index = function(_, key)
+            if key == "GetComponentID" then error("function expected instead of nil") end
+          end})
+          local prev = Cities.GetCityInPlot
+          function Cities.GetCityInPlot(x, y)
+            if x == 22 and y == 22 then return lowCity end
+            if x == 24 and y == 24 then return stuckCity end
+            if x == 26 and y == 26 then return rangedCity end
+            if x == 28 and y == 28 then return deadThrow end
+            return prev(x, y)
+          end
+          table.insert(Players[2].units, MkUnit(2, 31, 22, 23, 0))
+          table.insert(Players[2].units, MkUnit(2, 32, 24, 25, 0))
+          table.insert(Players[2].units, MkUnit(2, 33, 26, 28, 1))
+          table.insert(Players[2].units, MkUnit(2, 34, 28, 29, 0))
+        """)
+        self.order(0, K=7, P=2, U=31, X=22, Y=22, S=73)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertIn("captured=true", str(self.last()["reason"]))
+        self.assertEqual(self.rt.eval("lowCity.owner"), 2)
+        self.assertEqual(self.rt.eval("Players[2]:GetUnits():FindID(31).x"), 22)
+        self.assertEqual(self.rt.eval("Players[2]:GetUnits():FindID(31).y"), 22)
+        self.order(0, K=7, P=2, U=32, X=24, Y=24, S=74)
+        self.assertFalse(self.last()["ok"])
+        self.assertIn("damage_not_applied", str(self.last()["reason"]))
+        self.assertEqual(self.rt.eval("stuckCity.owner"), 1)
+        self.order(0, K=7, P=2, U=33, X=26, Y=26, S=75)
+        self.assertFalse(self.last()["ok"], self.last()["reason"])
+        self.assertIn("damage_not_applied", str(self.last()["reason"]))
+        self.assertEqual(self.rt.eval("rangedCity.owner"), 1)
+        self.order(0, K=7, P=2, U=34, X=28, Y=28, S=76)
+        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertIn("captured=true", str(self.last()["reason"]))
+        self.assertNotIn("forecast_failed", str(self.last()["reason"]))
+        self.assertEqual(self.rt.eval("deadThrow.owner"), 2)
 
     def test_ranged_auto_fires_after_a_failed_move(self):
         self.rt.execute(r"""
@@ -641,9 +726,8 @@ class OrdersGameplayTests(unittest.TestCase):
         self.turn_start(2, turn=6)
         by_seq = {r["seq"]: r for r in self.results()}
         self.assertTrue(by_seq[70]["ok"], by_seq[70]["reason"])
-        self.assertTrue(str(by_seq[70]["reason"]).startswith("engine:melee:city"), by_seq[70]["reason"])
-        self.assertEqual(self.rt.eval("centerA.wdmg"), 0)
-        self.assertEqual(self.rt.eval("centerA.gdmg"), 0)
+        self.assertIn("city_hp", str(by_seq[70]["reason"]))
+        self.assertGreater(self.rt.eval("centerA.wdmg"), 0)
         self.assertTrue(by_seq[71]["ok"], by_seq[71]["reason"])
         self.assertEqual(by_seq[71]["reason"], "city_strike")
         self.assertEqual(self.rt.eval("Players[1].units[#Players[1].units].dmg"), 0)
@@ -771,8 +855,8 @@ class OrdersGameplayTests(unittest.TestCase):
         self.order(0, K=7, P=2, U=30, X=20, Y=20, S=80, B=4, J=1, N=1, T=6)
         self.turn_start(2, turn=6)
         row = {r["seq"]: r for r in self.results()}[80]
-        self.assertTrue(row["ok"], row["reason"])
-        self.assertTrue(str(row["reason"]).startswith("engine:melee:city"), row["reason"])
+        self.assertFalse(row["ok"], row["reason"])
+        self.assertIn("forecast_failed", str(row["reason"]))
         self.assertNotIn("function expected instead of nil", str(row["reason"]))
         self.assertEqual(self.rt.eval("centerThrow.wdmg"), 0)
         logs = [str(s) for s in _vals(self.rt.eval("logs"))]
@@ -820,17 +904,16 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertEqual(forecast_a, 4)
         self.order(0, K=7, P=2, U=7, X=10, Y=11, S=15)
         self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertTrue(self.last()["reason"].startswith("engine:melee:unit"), self.last()["reason"])
-        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 0)
+        self.assertIn("def_dmg=0>12", self.last()["reason"])
+        self.assertEqual(self.rt.eval("Players[1].units[2].dmg"), 12)
 
     def test_melee_kill_advances_into_plot(self):
         self.rt.execute("Players[2].war = {[1]=true}; local e = MkUnit(1,3,10,11,0); e.dmg = 80;"
                         " table.insert(Players[1].units, e)")
         self.order(0, K=7, P=2, U=7, X=10, Y=11, S=13)
-        self.assertTrue(self.last()["reason"].startswith("engine:melee:unit"), self.last()["reason"])
-        self.assertNotIn("killed=", self.last()["reason"])
-        self.assertEqual(self.rt.eval("#Players[1].units"), 2)
-        self.assertEqual(self.rt.eval("Players[2].units[1].y"), 10)
+        self.assertIn("killed=true", self.last()["reason"])
+        self.assertEqual(self.rt.eval("#Players[1].units"), 1)
+        self.assertEqual(self.rt.eval("Players[2].units[1].y"), 11)
 
     def test_far_move_uses_path_route(self):
         self.rt.execute("ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = function(p,u,x,y) path_called = {p,u,x,y}; return true, 'path' end")
@@ -1010,9 +1093,9 @@ class OrdersGameplayTests(unittest.TestCase):
         self.rt.execute("Players[0].war = {[1] = true}")
         ok, reason = self.rt.eval("function() return Civ6Ai_Orders.Gov.AttackUnit(0, 1, 6, 6) end")()
         self.assertTrue(ok, reason)
-        self.assertIn("engine:melee", str(reason))
-        self.assertEqual(int(self.rt.eval("Players[1].units[1].dmg")), 0)
-        self.assertEqual(self.rt.eval("attackOps[#attackOps].op"), 1)
+        self.assertIn("melee", str(reason))
+        self.assertGreater(int(self.rt.eval("Players[1].units[1].dmg")), 0)
+        self.assertEqual(self.rt.eval("#attackOps"), 0)
 
 
 CHANNEL_ENV = r"""
@@ -1757,6 +1840,127 @@ class OrderChannelDealTests(OrderChannelTests):
         self.assertEqual((sent[2]["U"], sent[2]["V"]), (0, 40))
         self.assertEqual((sent[3]["I"], sent[3]["X"], sent[3]["Y"]), (3, 6, 7))
         self.assertEqual((sent[4]["U"], sent[4]["I"], sent[4]["X"], sent[4]["Y"]), (7, 0, 6, 7))
+
+
+# Methods that exist on these objects inside a Gameplay script. UI-only calls
+# such as RequestOperation and CanStartOperation are absent there, so a hit
+# that is not in this set fails the check below.
+_GAMEPLAY_ENGINE = {
+    "UnitManager": {
+        "MoveUnit", "FinishMoves", "Kill", "InitUnit", "RestoreMovement",
+        "ChangeMovesRemaining", "GetMoveToPath", "PlaceUnit",
+    },
+    "CityManager": {"CanStartCommand", "RequestCommand", "TransferCity"},
+    "CombatManager": {
+        "SimulateAttackVersus", "SimulateAttackInto", "CanAttackTarget",
+        "GenerateCombatResults",
+    },
+    "UI": set(),
+}
+_ENGINE_CALL = re.compile(
+    r"\b(UnitManager|CityManager|CombatManager|UI)\.([A-Za-z_][A-Za-z0-9_]*)"
+)
+
+
+def _strip_lua_comments(source: str) -> str:
+    """Drop Lua comments, keeping newlines so reported lines match the file."""
+    out: list[str] = []
+    i, n = 0, len(source)
+    while i < n:
+        if source.startswith("--", i):
+            long = re.match(r"--\[(=*)\[", source[i:])
+            if long:
+                close = "]" + long.group(1) + "]"
+                end = source.find(close, i + len(long.group(0)))
+                if end < 0:
+                    break
+                out.append("\n" * source.count("\n", i, end))
+                i = end + len(close)
+                continue
+            end = source.find("\n", i)
+            if end < 0:
+                break
+            i = end
+            continue
+        ch = source[i]
+        if ch in ("'", '"'):
+            out.append(ch)
+            i += 1
+            while i < n:
+                out.append(source[i])
+                if source[i] == "\\":
+                    i += 1
+                    if i < n:
+                        out.append(source[i])
+                    i += 1
+                    continue
+                if source[i] == ch:
+                    i += 1
+                    break
+                i += 1
+            continue
+        long = re.match(r"\[(=*)\[", source[i:])
+        if long:
+            close = "]" + long.group(1) + "]"
+            end = source.find(close, i + len(long.group(0)))
+            if end < 0:
+                break
+            out.append("\n" * source.count("\n", i, end))
+            i = end + len(close)
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _unknown_engine_calls(path: str, source: str) -> list[str]:
+    found: list[str] = []
+    for lineno, line in enumerate(_strip_lua_comments(source).splitlines(), 1):
+        for manager, method in _ENGINE_CALL.findall(line):
+            if method not in _GAMEPLAY_ENGINE[manager]:
+                found.append(f"{path}:{lineno} {manager}.{method}")
+    return found
+
+
+class GameplayApiTests(unittest.TestCase):
+    def test_gameplay_scripts_call_only_gameplay_engine_functions(self):
+        unknown: list[str] = []
+        stripped: list[str] = []
+        for path in sorted((MOD / "Gameplay").glob("*.lua")):
+            text = path.read_text()
+            unknown.extend(_unknown_engine_calls(path.name, text))
+            stripped.append(_strip_lua_comments(text))
+        self.assertEqual(unknown, [])
+        body = "\n".join(stripped)
+        for required in (
+            "UnitManager.MoveUnit",
+            "UnitManager.Kill",
+            "UnitManager.PlaceUnit",
+            "CityManager.RequestCommand",
+            "CityManager.CanStartCommand",
+            "CityManager.TransferCity",
+            "CombatManager.SimulateAttackVersus",
+        ):
+            self.assertIn(required, body)
+        for banned in (
+            "UnitManager.RequestOperation",
+            "UnitManager.CanStartOperation",
+            "CityManager.RequestOperation",
+            "CityManager.CanStartOperation",
+            "UI.RequestPlayerOperation",
+        ):
+            self.assertNotIn(banned, body)
+
+    def test_ui_only_operation_is_rejected_and_comments_are_not(self):
+        sample = (
+            "UnitManager.RequestOperation(unit, op, params)\n"
+            "-- UnitManager.CanStartOperation is UI-only\n"
+            "CityManager.RequestCommand(city, cmd, params)\n"
+        )
+        self.assertEqual(
+            _unknown_engine_calls("sample.lua", sample),
+            ["sample.lua:1 UnitManager.RequestOperation"],
+        )
 
 
 if __name__ == "__main__":
