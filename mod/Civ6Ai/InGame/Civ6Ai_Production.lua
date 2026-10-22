@@ -942,7 +942,11 @@ function Civ6Ai_Production._QueueLocalBuild(city, buildId)
   end
   local params = {}
   params[paramKey] = item.Hash
-  params[CityOperationTypes.PARAM_INSERT_MODE] = CityOperationTypes.VALUE_EXCLUSIVE
+  -- Same form ProductionPanel uses with the panel closed: replace queue slot 0.
+  params[CityOperationTypes.PARAM_INSERT_MODE] = CityOperationTypes.VALUE_REPLACE_AT or CityOperationTypes.VALUE_EXCLUSIVE
+  if CityOperationTypes.VALUE_REPLACE_AT ~= nil and CityOperationTypes.PARAM_QUEUE_DESTINATION_LOCATION ~= nil then
+    params[CityOperationTypes.PARAM_QUEUE_DESTINATION_LOCATION] = 0
+  end
   local okField, canStart = pcall(function() return CityManager.CanStartOperation end)
   if okField and type(canStart) == "function" then
     local okCan, can = pcall(canStart, city, CityOperationTypes.BUILD, params)
@@ -1022,6 +1026,13 @@ function Civ6Ai_Production._AutoqueuePass(playerID)
     return 0
   end
   local player = Players[playerID]
+  -- Requests sent before the seat's turn is active (turn processing, load) are dropped.
+  if player ~= nil and player.IsTurnActive ~= nil then
+    local okActive, active = pcall(function() return player:IsTurnActive() end)
+    if okActive and active == false then
+      return 0
+    end
+  end
   local cities = player ~= nil and player.GetCities ~= nil and player:GetCities() or nil
   if cities == nil or cities.Members == nil then
     return 0
