@@ -2722,6 +2722,56 @@ def lan_test_setup() -> tuple[tuple[tuple[str, ...], str], ...]:
     return LAN_TEST_SETUP
 
 
+def lan_required_setup_keys() -> tuple[str, ...]:
+    return tuple(labels[0].replace(" ", "_") for labels, _option in LAN_TEST_SETUP)
+
+
+def lan_setup_step_key(labels: tuple[str, ...]) -> str:
+    return labels[0].replace(" ", "_")
+
+
+def lan_step_verified(steps: list[str], key: str) -> bool:
+    token = f"{key}:verified"
+    return any(item == token or item.startswith(token + "=") for item in steps)
+
+
+def lan_missing_setup(steps: list[str]) -> list[str]:
+    return [key for key in lan_required_setup_keys() if not lan_step_verified(steps, key)]
+
+
+def lan_setup_verified(
+    rows: list[tuple[str, int, int]],
+    labels: tuple[str, ...],
+    option: str,
+) -> bool:
+    """True when OCR shows the chosen option on the same setup row."""
+    want_opt = _normalize(option)
+    if not want_opt:
+        return False
+    for label in labels:
+        want_lab = _normalize(label)
+        if len(want_lab) < 5:
+            continue
+        for cluster in _ocr_clusters(rows):
+            phrase, _ordered = _cluster_phrase(cluster)
+            if want_lab in phrase and want_opt in phrase:
+                return True
+        hit = lan_row_button(rows, label)
+        if hit is None:
+            continue
+        _phrase, _rx, ry = hit
+        if want_opt in _normalize(_phrase):
+            return True
+        for cluster in _ocr_clusters(rows):
+            phrase, ordered = _cluster_phrase(cluster)
+            if phrase != want_opt and want_opt not in phrase:
+                continue
+            mid = ordered[len(ordered) // 2]
+            if abs(mid[2] - ry) <= 24:
+                return True
+    return False
+
+
 def lan_host_screen(blob: str) -> str:
     """Create-game screen: staging, file_picker, setup, lan, load_game, or other.
 
@@ -2893,10 +2943,10 @@ def lan_create_button(rows: list[tuple[str, int, int]]) -> tuple[str, int, int] 
 
 
 def lan_start_failed(steps: list[str]) -> bool:
-    """True when Create Game never opened multiplayer setup.
+    """True unless Create Game reached setup and every required row is verified.
 
     An early create_game_not_found is fine when a later attempt reaches setup.
-    never_reached_mp_setup is always a failure.
+    already_staging without verified player/timer rows is a failure.
     """
     if "never_reached_mp_setup" in steps:
         return True
@@ -2905,7 +2955,9 @@ def lan_start_failed(steps: list[str]) -> bool:
         or "already_mp_setup" in steps
         or "already_staging" in steps
     )
-    return "create_game_not_found" in steps and not reached
+    if "create_game_not_found" in steps and not reached:
+        return True
+    return bool(lan_missing_setup(steps))
 
 
 def lan_option_button(rows: list[tuple[str, int, int]], option: str) -> tuple[str, int, int] | None:
@@ -2979,14 +3031,18 @@ def _select_lan_setup_row(win: WindowInfo, labels: tuple[str, ...], option: str)
 
 
 def _configure_lan_test_setup(win: WindowInfo, steps: list[str]) -> None:
-    """4 players, No Turn Timer, Smart Timer Off. No slot-coordinate clicks."""
+    """4 players, No Turn Timer, Smart Timer Off. Each row is OCR-verified."""
     for labels, option in lan_test_setup():
-        key = labels[0].replace(" ", "_")
-        if _select_lan_setup_row(win, labels, option):
-            steps.append(f"{key}={option}")
+        key = lan_setup_step_key(labels)
+        if lan_setup_verified(ocr_window(win), labels, option):
+            steps.append(f"{key}:verified")
+            continue
+        clicked = _select_lan_setup_row(win, labels, option)
+        if clicked and lan_setup_verified(ocr_window(win), labels, option):
+            steps.append(f"{key}:verified")
         else:
-            steps.append(f"{key}_missed")
-            log.warning("lan setup missed %s = %s", labels[0], option)
+            steps.append(f"{key}:failed")
+            log.warning("lan setup failed %s = %s clicked=%s", labels[0], option, clicked)
 
 
 def _back_out_of_load(win: WindowInfo, steps: list[str]) -> None:

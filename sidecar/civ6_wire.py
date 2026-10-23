@@ -1834,24 +1834,51 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
             if value.strip():
                 lines.append(pipeline._wire_line(key, value.strip()))
     history = context.get("history", {})
-    # Live prompts were 20–29k tokens. Keep the shared journal budget for other
-    # games; this section uses a shorter cap and fewer remembered notes.
-    budget = min(pipeline.JOURNAL_WIRE_CHAR_BUDGET, 1400)
+    from sidecar import civ6_turn_importance as importance
+
+    cfg = importance.load_config()
+    budget = int(cfg.get("journal_char_budget") or 48000)
     used = 0
+    current = 0
+    try:
+        current = int((context.get("decision") or {}).get("turn") or 0)
+    except (TypeError, ValueError):
+        current = 0
+    recent_n = int(cfg.get("recent_full_turns") or 3)
     if isinstance(history, dict):
         memory = history.get("memory_summary")
         if isinstance(memory, str) and memory.strip():
             lines.append(pipeline._wire_line("history.memory", _clip_sentence(memory.strip(), 180)))
+        scored = context.get("_importance") if isinstance(context.get("_importance"), dict) else {}
+        if scored:
+            top = ", ".join(
+                f"{row.get('trigger')} {row.get('score')}"
+                for row in (scored.get("breakdown") or [])[:3]
+                if isinstance(row, dict)
+            )
+            lines.append(pipeline._wire_line(
+                "importance",
+                f"{scored.get('adjusted')} ({scored.get('intelligence_tier')})"
+                + (f"; {top}" if top else ""),
+            ))
+            lines.extend(importance.journal_rules_lines(float(scored.get("adjusted") or 0)))
         thought_rows = [entry for entry in history.get("thought_memory", []) if isinstance(entry, dict)]
-        thought_rows = list(reversed(thought_rows))
+        thought_rows.sort(key=lambda entry: int(entry.get("turn") or 0))
         kept_thoughts: list[str] = []
         for entry in thought_rows:
             turn = int(entry.get("turn", 0))
+            older = turn <= current - recent_n
+            adj = entry.get("importance_adjusted", entry.get("importance_score"))
+            tag = f" (importance {adj})" if older and adj not in (None, "") else ""
             chunk: list[str] = []
-            for field in ("situation", "strategy"):
+            for field in ("situation", "strategy", "decision"):
                 text = entry.get(field)
                 if isinstance(text, str) and text.strip():
-                    chunk.append(pipeline._wire_line(f"T{turn}.{field}", pipeline._clip_thought(text)))
+                    chunk.append(pipeline._wire_line(f"T{turn}.{field}", pipeline._clip_thought(text) + tag))
+                    tag = ""
+            remember = entry.get("remember")
+            if isinstance(remember, str) and remember.strip():
+                chunk.append(pipeline._wire_line(f"T{turn}.remember.i", remember.strip()))
             note = entry.get("orders_note")
             if isinstance(note, str) and note.strip():
                 chunk.append(pipeline._wire_line(f"T{turn}.strategy.vs.orders", note.strip()))
@@ -1860,9 +1887,10 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
                 break
             kept_thoughts.extend(chunk)
             used += extra
-        lines.extend(reversed(kept_thoughts))
+        lines.extend(kept_thoughts)
         remembered = [note for note in history.get("remembered", []) if isinstance(note, dict)]
-        for note in remembered[-4:]:
+        remember_n = int(cfg.get("remember_prompt") or 12)
+        for note in remembered[-remember_n:]:
             if not str(note.get("text", "")).strip():
                 continue
             expires = note.get("expires_turn")
@@ -1878,37 +1906,65 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
 
 
 def _memory_section(context: dict[str, Any]) -> list[str]:
-    """Long-term turn-importance memory. Empty until the Civ V port lands.
+    """Long-term journal: older thought turns, situation log, remembered notes."""
+    from sidecar import civ6_turn_importance as importance
 
-    Rows come from long_term_memory on the snapshot or _seat_memory. The prompt
-    budget trims this section before protected plan and situation lines.
-    """
-    block = context.get("long_term_memory") if isinstance(context.get("long_term_memory"), dict) else None
-    if block is None:
-        seat = context.get("_seat_memory")
-        if isinstance(seat, dict) and isinstance(seat.get("long_term_memory"), dict):
-            block = seat["long_term_memory"]
-    if not isinstance(block, dict):
-        return []
     lines: list[str] = []
-    rows = block.get("rows") if isinstance(block.get("rows"), list) else []
-    for row in rows:
+    history = context.get("history") if isinstance(context.get("history"), dict) else {}
+    current = 0
+    try:
+        current = int((context.get("decision") or {}).get("turn") or 0)
+    except (TypeError, ValueError):
+        current = 0
+    recent_n = int(importance.load_config().get("recent_full_turns") or 3)
+    for entry in history.get("thought_memory") or []:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            turn = int(entry.get("turn") or 0)
+        except (TypeError, ValueError):
+            continue
+        if turn > current - recent_n:
+            continue
+        text = str(entry.get("situation") or entry.get("decision") or "").strip()
+        if not text:
+            continue
+        key = f"memory.T{turn}"
+        lines.append(pipeline._wire_line(key, text[:400]))
+        adj = entry.get("importance_adjusted", entry.get("importance_score"))
+        if adj not in (None, ""):
+            lines.append(pipeline._wire_line(f"{key}.adjusted", adj))
+        if entry.get("pinned") or entry.get("pin"):
+            lines.append(pipeline._wire_line(f"{key}.pin", True))
+        tier = entry.get("intelligence_tier") or entry.get("tier")
+        if isinstance(tier, str) and tier.strip():
+            lines.append(pipeline._wire_line(f"{key}.tier", tier.strip()))
+    seat = context.get("_seat_memory") if isinstance(context.get("_seat_memory"), dict) else {}
+    hist_log = history.get("situation_log") if isinstance(history.get("situation_log"), list) else None
+    log_rows = hist_log if hist_log is not None else importance.situation_log_rows(seat, current)
+    prompt_n = int(importance.load_config().get("situation_log_prompt") or 12)
+    for row in log_rows[-prompt_n:]:
+        turn = int(row.get("turn") or 0)
+        text = str(row.get("text") or "").strip()
+        if text:
+            ended = row.get("ended_turn")
+            suffix = f" ended T{ended}" if ended not in (None, "") else ""
+            lines.append(pipeline._wire_line(f"memory.log.T{turn}", text[:240] + suffix))
+    block = context.get("long_term_memory") if isinstance(context.get("long_term_memory"), dict) else None
+    if block is None and isinstance(seat.get("long_term_memory"), dict):
+        block = seat["long_term_memory"]
+    for row in (block or {}).get("rows") or []:
         if not isinstance(row, dict):
             continue
         text = str(row.get("text") or "").strip()
         if not text:
             continue
         turn = int(row.get("turn") or 0)
-        key = f"memory.T{turn}"
-        if isinstance(row.get("id"), str) and row["id"].strip():
-            key = f"memory.{row['id'].strip()}"
+        key = f"memory.T{turn}" if not row.get("id") else f"memory.{row.get('id')}"
         lines.append(pipeline._wire_line(key, text[:400]))
         if row.get("pin") is True or row.get("pinned") is True:
             lines.append(pipeline._wire_line(f"{key}.pin", True))
-        tier = row.get("tier")
-        if isinstance(tier, str) and tier.strip():
-            lines.append(pipeline._wire_line(f"{key}.tier", tier.strip()))
-    return lines[:24]
+    return lines
 
 
 def _war_going_badly(context: dict[str, Any]) -> bool:

@@ -135,6 +135,18 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual([c["command_id"] for c in kept], ["CMD_UNIT_5_moveto_43_14"])
         self.assertTrue(any("outside" in d for d in dropped))
 
+    def test_improve_substitute_nearest(self):
+        snap = {"legal_commands": [_improve_cmd(3, 4, "IMPROVEMENT_FARM"), _improve_cmd(9, 9, "IMPROVEMENT_FARM")],
+                "your_units": [{"unit_id": "UNIT_7", "unit_type_id": "UNIT_BUILDER"}],
+                "decision": {"player_id": "PLAYER_0"},
+                "known_map": {"plots": [{"x": 10, "y": 9, "revealed_owner_id": "PLAYER_1"}]}}
+        move = {"command_id": "x", "kind": "move_unit",
+                "arguments": {"unit_id": "UNIT_7", "target_x": 10, "target_y": 9}}
+        kept, dropped = ar.filter_repeat_failures(snap, [move])
+        self.assertEqual(kept, [])
+        self.assertTrue(any("outside your borders" in note for note in dropped))
+        self.assertFalse(any("instead" in note for note in dropped))
+
 
 if __name__ == "__main__":
     unittest.main()

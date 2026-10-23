@@ -348,11 +348,23 @@ def _persist_thought_memory(
         if api_thought.get("strategy"):
             strategy = api_thought["strategy"]
     if isinstance(situation, str) and situation.strip() and isinstance(strategy, str) and strategy.strip():
-        thought_memory = pipeline.append_thought(
+        from sidecar import civ6_turn_importance as importance
+
+        scored = snapshot.get("_importance") if isinstance(snapshot.get("_importance"), dict) else {}
+        decision = thought.get("decision", "")
+        thought_memory = importance.attach_thought_row(
             thought_memory,
             int(snapshot["decision"]["turn"]),
             situation,
             strategy,
+            decision if isinstance(decision, str) else "",
+            scored if isinstance(scored, dict) else {},
+        )
+        thought_memory = importance.prune_thought_memory(thought_memory)
+        importance.write_importance_file(
+            thought_path,
+            str(snapshot["decision"]["player_id"]),
+            {**(scored if isinstance(scored, dict) else {}), "turn": int(snapshot["decision"]["turn"])},
         )
     opinions = normalized_response.get("player_opinions", {})
     if isinstance(opinions, dict) and opinions:
@@ -723,6 +735,12 @@ def main() -> None:
         snapshot["_seat_memory"] = civ6_seat_memory.compact(thought_memory)
     except Exception as error:
         print(f"seat memory skipped: {error}", file=sys.stderr)
+    try:
+        from sidecar import civ6_turn_importance as importance
+
+        importance.apply_score_to_snapshot(snapshot, thought_memory, thought_path)
+    except Exception as error:
+        print(f"turn importance skipped: {error}", file=sys.stderr)
     pipeline.inject_thought_history(snapshot, thought_memory)
     snapshot["_policy_review"] = isinstance(thought_memory, dict) and thought_memory.get("policy_review_turn") == int(snapshot["decision"]["turn"]) - 1
     _pol = ((snapshot.get("civ6") or {}).get("governance") or {}).get("policies") or {}
@@ -991,6 +1009,12 @@ def main() -> None:
     from sidecar import civ6_prompt_budget as prompt_budget
 
     metrics.update(prompt_budget.metrics_fields(snapshot))
+    scored = snapshot.get("_importance") if isinstance(snapshot.get("_importance"), dict) else {}
+    if scored:
+        metrics["importance_raw"] = scored.get("raw")
+        metrics["importance_adjusted"] = scored.get("adjusted")
+        metrics["importance_breakdown"] = scored.get("breakdown")
+        metrics["intelligence_tier"] = scored.get("intelligence_tier")
     metrics.update(civ6_apply_results.order_source_fields([]))
     pipeline.append_turn_metrics(metrics_dir, metrics)
     if args.session_dir is not None:

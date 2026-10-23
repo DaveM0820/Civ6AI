@@ -384,6 +384,22 @@ def pact_problem(snapshot: dict[str, Any], pid: str, kinds: set, require_unlock:
     return None
 
 
+REASON_TEXT = {
+    "impassable": "impassable",
+    "occupied": "occupied",
+    "no_path": "no_path",
+    "outside_borders": "builders can only move onto your own tiles; that destination is outside your borders",
+    "peace_not_at_war": "peace needs a war",
+    "illegal_dof": "no open friendship offer",
+    "government_locked": "a government can only be changed on a turn when a civic completed",
+    "city_strike_unavailable": "city_strike_unavailable",
+}
+
+
+def reason_text(code: str) -> str:
+    return REASON_TEXT.get(str(code or ""), str(code or "rejected"))
+
+
 def order_label(command: dict[str, Any]) -> str:
     kind = str(command.get("kind") or "")
     args = _dct(command.get("arguments") or command.get("fixed_arguments"))
@@ -437,7 +453,7 @@ def filter_orders(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> t
             continue
         problem = order_problem(snapshot, command)
         if problem:
-            line = f"Rejected last turn: {order_label(command)} - {problem}"
+            line = f"Rejected last turn: {order_label(command)} - {reason_text(problem)}"
             rejected.append(line)
             rows.append({"order": order_label(command), "reason": problem, "turn": _turn(snapshot)})
             continue

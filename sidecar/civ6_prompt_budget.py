@@ -105,10 +105,21 @@ def metrics_fields(snapshot: dict[str, Any] | None) -> dict[str, Any]:
         "prompt_section_chars": report.get("section_chars") or {},
         "prompt_section_chars_before": report.get("section_chars_before") or {},
         "prompt_compactions": list(report.get("compactions") or []),
+        "memory_turns_shown": list(report.get("memory_turns_shown") or []),
+        "dropped_turns": list(report.get("dropped_turns") or []),
     }
 
 
+_SHOWN_TURN = re.compile(r"(?:^|\n)(?:T|memory\.T)(\d+)\.", re.M)
+
+
+def shown_memory_turns(text: str) -> list[int]:
+    return sorted({int(match.group(1)) for match in _SHOWN_TURN.finditer(text or "")})
+
+
 def make_report(before: str, after: str, limit: int, compactions: list[str]) -> dict[str, Any]:
+    shown = shown_memory_turns(after)
+    prior = shown_memory_turns(before)
     return {
         "max_chars": limit,
         "before_chars": len(before),
@@ -119,6 +130,8 @@ def make_report(before: str, after: str, limit: int, compactions: list[str]) -> 
         "section_chars_before": section_sizes(before),
         "compactions": list(compactions),
         "map_image_kept": True,
+        "memory_turns_shown": shown,
+        "dropped_turns": [turn for turn in prior if turn not in shown],
     }
 
 
@@ -247,8 +260,8 @@ def _trim_memory(lines: list[str]) -> list[str]:
 
 
 def _trim_thoughts(lines: list[str]) -> list[str]:
-    turns = [int(match.group(1)) for line in lines if (match := _THOUGHT_TURN.match(line.strip()))]
-    latest = max(turns) if turns else None
+    turns = sorted({int(match.group(1)) for line in lines if (match := _THOUGHT_TURN.match(line.strip()))})
+    recent = set(turns[-3:])
     kept: list[str] = []
     for line in lines:
         key = _key(line)
@@ -257,7 +270,8 @@ def _trim_thoughts(lines: list[str]) -> list[str]:
             continue
         match = _THOUGHT_TURN.match(line.strip())
         if match:
-            if latest is not None and int(match.group(1)) == latest:
+            turn = int(match.group(1))
+            if turn in recent:
                 kept.append(_clip_value(line, 480))
             continue
         if key.startswith(("history.", "remembered.", "milestone.")):

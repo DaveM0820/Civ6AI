@@ -14,7 +14,9 @@ from civ6_ui_automation import (  # noqa: E402
     lan_create_button,
     lan_host_screen,
     lan_load_phase,
+    lan_missing_setup,
     lan_option_button,
+    lan_setup_verified,
     lan_start_failed,
     lan_test_setup,
     menu_blob_has,
@@ -178,16 +180,68 @@ class LanCreateGameTests(unittest.TestCase):
             "already_lan_browser", "create_game_not_found", "never_reached_mp_setup",
         ]))
         self.assertTrue(lan_start_failed(["create_game_not_found"]))
-        self.assertFalse(lan_start_failed([
+        self.assertTrue(lan_start_failed([
             "create_game_not_found", "reached_mp_setup",
         ]))
-        self.assertFalse(lan_start_failed(["already_mp_setup"]))
-        self.assertFalse(lan_start_failed(["already_staging"]))
+        self.assertTrue(lan_start_failed(["already_mp_setup"]))
+        self.assertTrue(lan_start_failed(["already_staging"]))
         failed = ["create_game_not_found", "never_reached_mp_setup"]
         with mock.patch.object(start_lan_game, "run", return_value=failed):
             self.assertEqual(1, start_lan_game.main(["--no-kill"]))
         with mock.patch.object(start_lan_game, "run", return_value=["reached_mp_setup"]):
+            self.assertEqual(1, start_lan_game.main(["--no-kill"]))
+
+    def test_lan_ok_only_when_every_setup_row_is_verified(self):
+        verified = [
+            "reached_mp_setup",
+            "choose_number_of_players:verified",
+            "turn_timer:verified",
+            "smart_timer:verified",
+        ]
+        self.assertFalse(lan_start_failed(verified))
+        self.assertEqual([], lan_missing_setup(verified))
+        skipped = ["already_staging", "clicked_ready"]
+        self.assertEqual(
+            ["choose_number_of_players", "turn_timer", "smart_timer"],
+            lan_missing_setup(skipped),
+        )
+        self.assertTrue(lan_start_failed(skipped))
+        partial = [
+            "reached_mp_setup",
+            "choose_number_of_players:verified",
+            "turn_timer:failed",
+            "smart_timer:verified",
+        ]
+        self.assertEqual(["turn_timer"], lan_missing_setup(partial))
+        with mock.patch.object(start_lan_game, "run", return_value=verified):
             self.assertEqual(0, start_lan_game.main(["--no-kill"]))
+        with mock.patch.object(start_lan_game, "run", return_value=skipped):
+            with mock.patch("builtins.print") as printed:
+                self.assertEqual(1, start_lan_game.main(["--no-kill"]))
+            text = " ".join(str(arg) for arg in printed.call_args[0])
+            self.assertIn("LAN_START_FAIL", text)
+            self.assertIn("choose_number_of_players", text)
+            self.assertIn("turn_timer", text)
+            self.assertIn("smart_timer", text)
+
+    def test_setup_row_verify_needs_option_on_the_same_line(self):
+        rows = [
+            ("Choose Number of Players", 120, 200),
+            ("4", 520, 200),
+            ("Turn Timer", 120, 260),
+            ("No Turn Timer", 480, 260),
+            ("Smart Timer", 120, 320),
+            ("Off", 480, 320),
+        ]
+        self.assertTrue(lan_setup_verified(rows, ("choose number of players",), "4"))
+        self.assertTrue(lan_setup_verified(rows, ("turn timer",), "No Turn Timer"))
+        self.assertTrue(lan_setup_verified(rows, ("smart timer",), "Off"))
+        self.assertFalse(lan_setup_verified(rows, ("turn timer",), "Off"))
+        self.assertFalse(lan_setup_verified(
+            [("Choose Number of Players", 120, 200), ("6", 520, 200)],
+            ("choose number of players",),
+            "4",
+        ))
 
     def test_no_turn_timer_assembles_and_off_is_exact(self):
         rows = [

@@ -296,17 +296,20 @@ class PromptBoundAndSettleTests(unittest.TestCase):
         snap = _snap(decision={"turn": 40, "player_id": "PLAYER_1"})
         pipeline.inject_thought_history(snap, memory)
         turns = [int(e["turn"]) for e in snap["history"]["thought_memory"]]
-        self.assertNotIn(10, turns)
-        self.assertNotIn(20, turns)
-        self.assertEqual(turns, [35, 36, 37, 38, 39])
+        self.assertIn(1, turns)
+        self.assertEqual(turns[-3:], [37, 38, 39])
+        self.assertLessEqual(len(turns), 20)
 
     def test_thoughts_section_char_budget(self):
+        from sidecar import civ6_turn_importance as importance
+
         snap = _snap()
         snap["history"]["thought_memory"] = [
             {"turn": t, "situation": "A" * 400, "strategy": "B" * 400} for t in range(30, 40)
         ]
         blob = "\n".join(civ6_wire._thoughts_section(snap))
-        self.assertLessEqual(len(blob), pipeline.JOURNAL_WIRE_CHAR_BUDGET + 800)
+        cap = int(importance.load_config().get("journal_char_budget") or 48000)
+        self.assertLessEqual(len(blob), cap + 800)
 
     def test_remember_near_dupe_and_cap(self):
         memory = {}

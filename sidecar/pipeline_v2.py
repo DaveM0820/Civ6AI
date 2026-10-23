@@ -42,7 +42,7 @@ THOUGHT_MEMORY_MILESTONE_INTERVAL = 10
 THOUGHT_MAX_CHARS_DEFAULT = 8000
 JOURNAL_WIRE_CHAR_BUDGET = 2500
 CHAT_TEXT_MAX_LENGTH = 800
-CIV6_REMEMBER_MAX_NOTES = 4
+CIV6_REMEMBER_MAX_NOTES = 12
 WIRE_COMPACT_UNITS_THRESHOLD = 6
 WIRE_COMPACT_CITIES_THRESHOLD = 10
 ADVCIV_FALLBACK_POLICY = (
@@ -2486,13 +2486,20 @@ def inject_thought_history(snapshot: dict[str, Any], memory: dict[str, Any]) -> 
         history = snapshot["history"]
     current_turn = int(snapshot["decision"]["turn"])
     civ6 = str(snapshot.get("schema_version", "")).startswith("civ6ai-input/")
-    turns = thought_turns_for_prompt(current_turn, include_milestones=not civ6)
+    if civ6:
+        from sidecar import civ6_turn_importance as importance
+
+        turns = importance.select_thought_turns_for_wire(memory, current_turn)
+    else:
+        turns = thought_turns_for_prompt(current_turn, include_milestones=True)
     by_turn: dict[int, dict[str, Any]] = {}
     for item in memory.get("thoughts", []):
         if not isinstance(item, dict) or "turn" not in item:
             continue
         by_turn[int(item["turn"])] = item
     history["thought_memory"] = [by_turn[turn] for turn in turns if turn in by_turn]
+    if civ6:
+        history["situation_log"] = importance.situation_log_rows(memory, current_turn)
     opinions = memory.get("player_opinions", {})
     if isinstance(opinions, dict):
         history["player_opinions"] = copy.deepcopy(opinions)

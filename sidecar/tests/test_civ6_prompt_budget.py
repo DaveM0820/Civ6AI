@@ -257,6 +257,8 @@ class PromptBudgetTests(unittest.TestCase):
             "=== THOUGHTS ===",
             "plan.goal = science",
             "T1.situation = ancient note",
+            "T7.situation = three back",
+            "T8.situation = two back",
             "T9.situation = this turn",
             "history.memory = a long memory",
             "=== MEMORY ===",
@@ -280,6 +282,8 @@ class PromptBudgetTests(unittest.TestCase):
         self.assertIn("Athens.population = 7", compact)
         self.assertNotIn("opinion.Cleopatra", compact)
         self.assertNotIn("T1.situation", compact)
+        self.assertIn("T7.situation = three back", compact)
+        self.assertIn("T8.situation = two back", compact)
         self.assertIn("T9.situation = this turn", compact)
         self.assertNotIn("memory.T12", compact)
         self.assertIn("memory.T40 = Border war is the long-term threat", compact)
