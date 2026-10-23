@@ -329,27 +329,6 @@ function Civ6Ai_MpTest._UiProbe(seat, unit)
   return r
 end
 
-function Civ6Ai_MpTest._UiProbeReadBack(r)
-  local player = Players[r.seat]
-  if r.city ~= nil and r.build ~= nil then
-    local city = CityManager.GetCity(r.seat, r.city:GetID())
-    local now = city and Civ6Ai_Production._GetCityProduction(city)
-    log("ui_probe_result|city|want=" .. r.build .. "|before=" .. tostring(r.buildBefore) .. "|now=" .. tostring(now)
-      .. "|took_effect=" .. tostring(now == r.build))
-  end
-  if r.unit ~= nil and r.tx ~= nil then
-    local u = player:GetUnits():FindID(r.unit:GetID())
-    local x, y = u and u:GetX(), u and u:GetY()
-    log("ui_probe_result|unit|from=" .. r.ux .. "," .. r.uy .. "|to=" .. r.tx .. "," .. r.ty
-      .. "|now=" .. tostring(x) .. "," .. tostring(y) .. "|took_effect=" .. tostring(x ~= r.ux or y ~= r.uy))
-  end
-  if r.tech ~= nil then
-    local now = player:GetTechs():GetResearchingTech()
-    log("ui_probe_result|research|want=" .. r.tech.Index .. "|before=" .. tostring(r.techBefore) .. "|now=" .. tostring(now)
-      .. "|took_effect=" .. tostring(now == r.tech.Index))
-  end
-end
-
 -- The old step 7 (plain interface requests for an AI seat) showed on
 -- 2026-09-26 that they have no effect in multiplayer; _UiProbe stays for reference.
 --

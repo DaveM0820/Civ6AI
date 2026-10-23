@@ -108,6 +108,9 @@ def _seat_number(player_id: str | None) -> int:
 
 
 def _thought_memory_path(civ5ai_root: Path | None, game_uuid: str, player_id: str) -> Path:
+    override = os.environ.get("CIV6AI_MEMORY_DIR") or os.environ.get("CIV5AI_MEMORY_DIR")
+    if override:
+        return Path(override) / f"{game_uuid}_{player_id}.json"
     if civ5ai_root is not None:
         return civ5ai_root / "memory" / f"{game_uuid}_{player_id}.json"
     return Path("memory") / f"{game_uuid}_{player_id}.json"

@@ -99,35 +99,6 @@ function Civ6Ai_SeatExperiment.BeginPulse(playerID)
   })
 end
 
-function Civ6Ai_SeatExperiment.AfterApply(playerID)
-  if not Civ6Ai_Config.IsSeatExperiment() then
-    return
-  end
-  local state = Civ6Ai_SeatExperiment._pulseState[playerID]
-  if state == nil then
-    return
-  end
-  state.post_apply = Civ6Ai_Production.CollectProductionMap(playerID)
-  state.units_with_moves_post_apply = Civ6Ai_Production.CountUnitsWithMoves(playerID)
-  local cityId = state.experiment_city_id
-  local observed = nil
-  if cityId ~= nil and state.post_apply ~= nil then
-    observed = state.post_apply[cityId]
-  end
-  local apply_ok = false
-  if state.experiment_target ~= nil and observed == state.experiment_target then
-    apply_ok = true
-  end
-  Civ6Ai_SeatExperiment._LogEvent(playerID, "post_llm_apply", {
-    production = state.post_apply,
-    units_with_moves = state.units_with_moves_post_apply,
-    experiment_city_id = cityId,
-    experiment_target = state.experiment_target,
-    observed_production = observed,
-    llm_apply_ok = apply_ok,
-  })
-end
-
 function Civ6Ai_SeatExperiment.OnPlayerTurnActivated(playerID)
   if not Civ6Ai_Config.IsSeatExperiment() then
     return

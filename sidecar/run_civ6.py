@@ -182,10 +182,18 @@ def _session_key(game_uuid: str, player_id: str) -> str:
     return f"{game_uuid}:player:{active}"
 
 
-def _thought_memory_path(civ6ai_root: Path | None, game_uuid: str, player_id: str) -> Path:
+def memory_dir(civ6ai_root: Path | None) -> Path:
+    """Seat memory folder. Tests set CIV6AI_MEMORY_DIR so nothing lands in the repo."""
+    override = os.environ.get("CIV6AI_MEMORY_DIR")
+    if override:
+        return Path(override)
     if civ6ai_root is not None:
-        return civ6ai_root / "memory" / f"{game_uuid}_{player_id}.json"
-    return Path("memory") / f"{game_uuid}_{player_id}.json"
+        return civ6ai_root / "memory"
+    return Path("memory")
+
+
+def _thought_memory_path(civ6ai_root: Path | None, game_uuid: str, player_id: str) -> Path:
+    return memory_dir(civ6ai_root) / f"{game_uuid}_{player_id}.json"
 
 
 def _apply_personality(snapshot: dict, path: Path | None) -> None:

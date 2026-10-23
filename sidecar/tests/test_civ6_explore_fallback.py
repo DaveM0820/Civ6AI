@@ -186,18 +186,6 @@ def test_improve_substitute_nearest():
     assert not any("instead" in note for note in dropped)
 
 
-def test_one_site_per_builder():
-    from sidecar import civ6_apply_results as ar
-    a = _improve_cmd(3, 4, "IMPROVEMENT_FARM", "UNIT_1")
-    b = _improve_cmd(3, 4, "IMPROVEMENT_FARM", "UNIT_2")
-    b2 = _improve_cmd(5, 5, "IMPROVEMENT_MINE", "UNIT_2")
-    snap = {"legal_commands": [a, b, b2]}
-    cmds = [{"command_id": x["command_id"], "kind": "move_unit", "arguments": dict(x["fixed_arguments"])} for x in (a, b)]
-    notes: list[str] = []
-    out = ar._one_site_per_builder(snap, cmds, notes)
-    assert [c["arguments"]["target_x"] for c in out] == [3, 3] and notes == []
-
-
 def test_clip_sentence_and_usable_deal():
     from sidecar import civ6_wire, civ6_diplomacy
     t = "First sentence here. Second one is long " + "x" * 400

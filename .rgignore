@@ -1,0 +1,4 @@
+# Port-source Civ V tree. Not part of the active Civ6 runtime.
+reference/Civ5Ai/
+artifacts/cache/
+_backup_*/

@@ -1345,7 +1345,7 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
                 continue
             seen_orders.add(signature)
         out.append(command)
-    return _one_site_per_builder(snapshot, out, dropped, failed_tiles), dropped
+    return out, dropped
 
 
 def suppress_failed_offers(snapshot: dict[str, Any]) -> None:
@@ -1399,13 +1399,6 @@ def suppress_failed_offers(snapshot: dict[str, Any]) -> None:
         if not drop:
             kept.append(command)
     snapshot["legal_commands"] = kept
-
-
-def _one_site_per_builder(snapshot: dict[str, Any], commands: list[dict[str, Any]],
-                          dropped: list[str], failed: set | None = None) -> list[dict[str, Any]]:
-    """Builders keep the Improve tile the model named. Two builders on one tile is a model miss."""
-    del snapshot, dropped, failed
-    return commands
 
 
 def infer_order_source(row: dict[str, Any]) -> str:

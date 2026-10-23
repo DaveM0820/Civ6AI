@@ -8,9 +8,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CAPABILITIES = ROOT / "config" / "civ5-command-capabilities.json"
-COMMANDS_LUA = ROOT / "artifacts" / "Civ5Ai" / "Lua" / "Civ5Ai_Commands.lua"
-APPLY_LUA = ROOT / "artifacts" / "Civ5Ai" / "Lua" / "Civ5Ai_Apply.lua"
-SNAPSHOT_LUA = ROOT / "artifacts" / "Civ5Ai" / "Lua" / "Civ5Ai_Snapshot.lua"
+COMMANDS_LUA = ROOT / "reference" / "Civ5Ai" / "Lua" / "Civ5Ai_Commands.lua"
+APPLY_LUA = ROOT / "reference" / "Civ5Ai" / "Lua" / "Civ5Ai_Apply.lua"
+SNAPSHOT_LUA = ROOT / "reference" / "Civ5Ai" / "Lua" / "Civ5Ai_Snapshot.lua"
 
 
 def _parse_catalog_kinds(text: str) -> set[str]:

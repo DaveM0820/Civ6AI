@@ -3405,22 +3405,6 @@ function Civ6Ai_Snapshot._AddPillageCommand(commands, unit, unitId)
   }))
 end
 
-function Civ6Ai_Snapshot._TradeRouteCanStart(tm, owner, fromPlot, destPlot)
-  -- Gov.MakeTradeRoute: CanCreateTradeRoute(owner, fromPlotIndex, toPlotIndex)
-  -- must be true, and CreateTradeRoute must exist. CanStartRoute(city ids) is
-  -- not that check and was offering routes the game then refused.
-  if tm == nil or tm.CanCreateTradeRoute == nil or tm.CreateTradeRoute == nil then
-    return false
-  end
-  local fromIdx = fromPlot ~= nil and fromPlot.GetIndex ~= nil and fromPlot:GetIndex() or nil
-  local toIdx = destPlot ~= nil and destPlot.GetIndex ~= nil and destPlot:GetIndex() or nil
-  if type(fromIdx) ~= "number" or type(toIdx) ~= "number" then
-    return false
-  end
-  local ok, can = pcall(tm.CanCreateTradeRoute, tm, owner, fromIdx, toIdx)
-  return ok and can == true
-end
-
 function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId)
   -- Creating a route is a UI operation, and a host UI request does not sync
   -- for an AI seat (Gov.MakeTradeRoute). Offering it failed on every send.
@@ -3935,36 +3919,6 @@ Civ6Ai_Snapshot.GP_DISTRICT = {
   GREAT_PERSON_CLASS_ENGINEER = { "DISTRICT_INDUSTRIAL_ZONE" },
   GREAT_PERSON_CLASS_PROPHET = { "DISTRICT_HOLY_SITE" },
 }
-
-function Civ6Ai_Snapshot._DistrictWithin(playerID, unit, names, maxDist)
-  local want = {}
-  for _, name in ipairs(names or {}) do want[name] = true end
-  local ux, uy = unit:GetX(), unit:GetY()
-  local player = Players[playerID]
-  local cities = player ~= nil and player.GetCities ~= nil and player:GetCities() or nil
-  if cities == nil or cities.Members == nil then
-    return false
-  end
-  local found = false
-  pcall(function()
-    for _, city in cities:Members() do
-      local districts = city.GetDistricts ~= nil and city:GetDistricts() or nil
-      if districts ~= nil and districts.Members ~= nil then
-        for _, district in districts:Members() do
-          local dRow = GameInfo.Districts[district:GetType()]
-          if dRow ~= nil and want[dRow.DistrictType] and district.GetX ~= nil then
-            local dist = Map.GetPlotDistance(ux, uy, district:GetX(), district:GetY())
-            if dist <= maxDist then
-              found = true
-              return
-            end
-          end
-        end
-      end
-    end
-  end)
-  return found
-end
 
 function Civ6Ai_Snapshot._AddActivateCommand(commands, playerID, unit, unitId)
   -- Activation and retire are not offered. The action is UI-only, a host UI
@@ -5501,44 +5455,6 @@ function Civ6Ai_Snapshot.Build(playerID, options)
     civ6 = civ6Block,
   }
   return Civ6Ai_Util.EncodeJsonObject(payload), legal
-end
-
-function Civ6Ai_Snapshot.EmpireTelemetry(playerID)
-  local player = Players[playerID]
-  if player == nil then
-    return {}
-  end
-  local gold = 0
-  local gpt = 0
-  local science = 0
-  local cities = 0
-  local unitsWithMoves = 0
-  if player:GetTreasury() ~= nil then
-    gold = player:GetTreasury():GetGoldBalance()
-    gpt = player:GetTreasury():GetGoldYield()
-  end
-  if player:GetTechs() ~= nil then
-    science = Civ6Ai_Snapshot._YieldOrCities(player, player:GetTechs():GetScienceYield(), YieldTypes ~= nil and YieldTypes.SCIENCE or nil)
-  end
-  local citiesTable = player:GetCities()
-  if citiesTable ~= nil then
-    cities = citiesTable:GetCount()
-  end
-  local units = player:GetUnits()
-  if units ~= nil then
-    for _, unit in ipairs(Civ6Ai_Snapshot._IterateUnits(units)) do
-      if Civ6Ai_Snapshot._UnitNeedsOrders(unit) then
-        unitsWithMoves = unitsWithMoves + 1
-      end
-    end
-  end
-  return {
-    gold = gold,
-    gold_per_turn = gpt,
-    science = science,
-    cities = cities,
-    units_with_moves = unitsWithMoves,
-  }
 end
 
 -- ---------------------------------------------------------------------------

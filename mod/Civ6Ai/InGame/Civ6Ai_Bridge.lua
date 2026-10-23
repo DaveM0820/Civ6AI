@@ -1173,29 +1173,6 @@ function Civ6Ai_Bridge._BeginHostEndTurnWait(playerID, pending)
   end)
 end
 
-function Civ6Ai_Bridge._WaitForInboxApply(playerID)
-  Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
-end
-
-function Civ6Ai_Bridge.ResumeAutotestTurnIfStalled()
-  if not Civ6Ai_Config.IsAutotest() then
-    return
-  end
-  for _, playerID in ipairs(Civ6Ai_Config.ManagedSeatsList()) do
-    local key = Civ6Ai_Bridge._PulseKey(playerID)
-    if Civ6Ai_Bridge._pulseKeys[key] and not Civ6Ai_Bridge._WasPulseFinished(playerID) then
-      Civ6Ai_Util.Log("bridge|resume_stalled_pulse|player=" .. tostring(playerID))
-      if Civ6Ai_Bridge._WasAppliedThisPulse(playerID) then
-        Civ6Ai_Bridge._FinishTurnPulse(playerID)
-      else
-        Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
-      end
-    elseif not Civ6Ai_Bridge._AlreadyPulsed(playerID) and Civ6Ai_Bridge._IsGameplayReady(playerID) then
-      Civ6Ai_Bridge._SchedulePulseRetry(playerID)
-    end
-  end
-end
-
 function Civ6Ai_Bridge._CompleteTurnAfterApply(playerID, chatOnly)
   if chatOnly then
     return
@@ -1558,15 +1535,6 @@ function Civ6Ai_Bridge._SpawnSidecar(playerDir, args)
   return true, "job_queued"
 end
 
-function Civ6Ai_Bridge.ApplyJson(playerID, jsonText)
-  if jsonText == nil or jsonText == "" then
-    return "empty"
-  end
-  Civ6Ai_Bridge.ApplyPayload(playerID, jsonText)
-  Civ6Ai_Util.Log("bridge|apply_json|player=" .. tostring(playerID))
-  return "ok"
-end
-
 -- Identity of a saved command batch: command ids in file order. Lua and the
 -- sidecar use the same string, so a reload can tell this batch from the next.
 function Civ6Ai_Bridge._CommandFingerprint(jsonText)
@@ -1699,10 +1667,6 @@ function Civ6Ai_Bridge.ApplyPayload(playerID, jsonText, options)
   end
   Civ6Ai_Util.Log("bridge|apply_deferred|player=" .. tostring(playerID))
   return false
-end
-
-function Civ6Ai_Bridge._WaitForFile(path, timeoutSec)
-  return Civ6Ai_Bridge._WaitForApprovedDecision(path, timeoutSec, nil, "chat")
 end
 
 function Civ6Ai_Bridge._WaitForApprovedDecision(path, timeoutSec, turn, mode)

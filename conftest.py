@@ -7,6 +7,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _civ6_test_memory_dir(tmp_path, monkeypatch):
+    """Seat memory JSON stays in the test tmp dir, never the repo `memory/`."""
+    monkeypatch.setenv("CIV6AI_MEMORY_DIR", str(tmp_path / "memory"))
+
 
 def _backup_dir(candidate) -> bool:
     if candidate is None:

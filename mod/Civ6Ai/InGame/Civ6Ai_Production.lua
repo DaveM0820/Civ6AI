@@ -32,16 +32,6 @@ function Civ6Ai_Production._WireCityId(city)
   return "CITY_" .. tostring(city:GetID())
 end
 
-function Civ6Ai_Production._GetCity(playerID, cityWireId)
-  local numericId = tonumber((cityWireId or ""):match("CITY_(%d+)"))
-  if numericId == nil then
-    return nil
-  end
-  -- CityManager.GetCity takes the per-player city index (low 16 bits of GetID).
-  -- Gameplay cityById compares full GetID(); do not modulo on that path.
-  return CityManager.GetCity(playerID, numericId % 65536)
-end
-
 function Civ6Ai_Production._ResolveBuildItem(buildId)
   for row in GameInfo.Units() do
     if row.UnitType == buildId then
@@ -1259,12 +1249,4 @@ function Civ6Ai_Production._AutoqueuePass(playerID)
     end
   end
   return queued
-end
-
-function Civ6Ai_Production.QueueProduction(playerID, args)
-  return false, "production_requires_local_player"
-end
-
-function Civ6Ai_Production.QueueBuild(playerID, cityWireId, buildId, x, y)
-  return false, "production_requires_local_player"
 end
