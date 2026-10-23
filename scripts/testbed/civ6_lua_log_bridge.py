@@ -186,7 +186,7 @@ def parse_blob_lines(text: str) -> list[dict[str, Any]]:
 
 _JSONL_MARK = "CIV6AI|jsonl|"
 APPLY_RESULTS_NAME = "apply-results.jsonl"
-_APPLY_RESULT_KEEP = ("ok", "event", "kind", "reason", "turn", "fixed_arguments", "command_id", "player_id")
+_APPLY_RESULT_KEEP = ("ok", "event", "kind", "reason", "turn", "fixed_arguments", "command_id", "player_id", "source")
 
 
 def parse_apply_result_lines(text: str) -> list[dict[str, Any]]:
@@ -375,10 +375,24 @@ def record_apply_results(civ6ai_root: Path, chunk: str, blobs: list[dict[str, An
         _log_once("apply_results_no_session", "apply_result rows seen but no active session; not recorded")
         return 0
     try:
-        return append_apply_results(civ6ai_root, session_id, rows)
+        written = append_apply_results(civ6ai_root, session_id, rows)
     except OSError as error:
         log.warning("apply-results append failed: %s", error)
         return 0
+    if written:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+            from sidecar.civ6_apply_results import merge_apply_sources_into_metrics
+
+            by_player: dict[str, list[dict[str, Any]]] = {}
+            for row in rows:
+                by_player.setdefault(str(row.get("player_id") or ""), []).append(row)
+            for player, player_rows in by_player.items():
+                merge_apply_sources_into_metrics(
+                    civ6ai_root / "sessions" / session_id / player, player_rows)
+        except Exception as error:
+            log.warning("turn_metrics source merge failed: %s", error)
+    return written
 
 
 # A blob whose begin line was read but whose end line was not yet in Lua.log.

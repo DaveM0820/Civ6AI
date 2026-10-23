@@ -47,7 +47,7 @@ function Civ6Ai_Apply._ApplyResultsPath(playerID)
   return Civ6Ai_Util.JoinPath(root, "sessions", sessionId, playerLabel, "apply-results.jsonl")
 end
 
-function Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs)
+function Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs, source)
   local turn = Game.GetCurrentGameTurn()
   local payload = {
     event = "apply_result",
@@ -57,9 +57,59 @@ function Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs)
     kind = command and command.kind or "",
     ok = ok,
     reason = reason or "",
+    source = source or "model",
     fixed_arguments = fixedArgs or {},
   }
   Civ6Ai_Util.AppendJsonLine(Civ6Ai_Apply._ApplyResultsPath(playerID), payload)
+end
+
+function Civ6Ai_Apply._NewHandled()
+  return { unit = {}, city = {}, strike = {} }
+end
+
+function Civ6Ai_Apply._CommandEntity(command, fixedArgs)
+  if command == nil then
+    return nil
+  end
+  local kind = command.kind
+  local args = command.arguments or {}
+  local cityId = args.city_id or (fixedArgs and fixedArgs.city_id)
+  local unitId = args.unit_id or (fixedArgs and fixedArgs.unit_id)
+  if kind == "city_attack" then
+    local n = Civ6Ai_Apply._CityNum(cityId)
+    if n ~= nil then
+      return "strike", n
+    end
+  end
+  if kind == "queue_production" or kind == "purchase_item" or kind == "purchase_tile"
+      or kind == "assign_governor" then
+    local n = Civ6Ai_Apply._CityNum(cityId)
+    if n ~= nil then
+      return "city", n
+    end
+  end
+  local n = Civ6Ai_Apply._ParseUnitNumericId(unitId)
+  if n ~= nil then
+    return "unit", n
+  end
+  return nil
+end
+
+function Civ6Ai_Apply._MarkHandled(playerID, handled, class, id)
+  if handled == nil or class == nil or id == nil then
+    return
+  end
+  handled[class] = handled[class] or {}
+  handled[class][id] = true
+  local shared = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+  if shared ~= nil and shared.MarkHandled ~= nil then
+    pcall(shared.MarkHandled, playerID, class, id)
+  elseif Game ~= nil and Game.SetProperty ~= nil then
+    pcall(function()
+      Game:SetProperty("CIV6AI_H_" .. tostring(playerID) .. "_" .. tostring(class) .. "_" .. tostring(id),
+        Game.GetCurrentGameTurn())
+    end)
+  end
 end
 
 -- snapshotTurn: the turn of the snapshot the decision answers (default: now).
@@ -144,6 +194,8 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   end
   Civ6Ai_Apply._orderedUnits = Civ6Ai_Apply._orderedUnits or {}
   Civ6Ai_Apply._orderedUnits[playerID] = {}
+  Civ6Ai_Apply._handled = Civ6Ai_Apply._handled or {}
+  Civ6Ai_Apply._handled[playerID] = Civ6Ai_Apply._NewHandled()
   local commands = decision.commands
   Civ6Ai_Apply._LogAttacks(playerID, forTurn or snapshotTurn or Game.GetCurrentGameTurn(), "ordered", orderedUnit, orderedCity)
   local maxPasses = 4
@@ -188,7 +240,7 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
         cityStrikeFailed = true
       end
       if not deferred then
-        Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs)
+        Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs, "model")
       end
       if deferred then
         progress = true
@@ -205,6 +257,10 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
               autoAttackOk[numeric] = true
             end
           end
+        end
+        local class, hid = Civ6Ai_Apply._CommandEntity(command, fixedArgs)
+        if class ~= nil then
+          Civ6Ai_Apply._MarkHandled(playerID, Civ6Ai_Apply._handled[playerID], class, hid)
         end
         Civ6Ai_Util.Log("apply|ok|" .. tostring(command.kind) .. "|" .. tostring(command.command_id))
       else
@@ -248,9 +304,12 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   -- city strikes. A real human game stays on mode 1 (AI seats only).
   if Civ6Ai_Config ~= nil and Civ6Ai_Config.IsAutotest ~= nil and Civ6Ai_Config.IsAutotest()
       and Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID then
-    local fn = ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil and ExposedMembers.Civ6Ai.AutoRanged or nil
-    if fn ~= nil then
-      pcall(fn, playerID, playerID, Civ6Ai_Apply._orderedUnits[playerID] or {}, autoAttackOk, {}, 2, {}, {})
+    local shared = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+    local handled = Civ6Ai_Apply._handled[playerID]
+    if shared ~= nil and shared.RunHostFallbacks ~= nil then
+      pcall(shared.RunHostFallbacks, playerID, playerID, handled, 2)
+    elseif shared ~= nil and shared.AutoRanged ~= nil then
+      pcall(shared.AutoRanged, playerID, playerID, handled, autoAttackOk, {}, 2, {}, {})
     end
   end
 end

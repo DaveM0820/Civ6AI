@@ -985,7 +985,10 @@ def main() -> None:
     from sidecar import civ6_prompt_budget as prompt_budget
 
     metrics.update(prompt_budget.metrics_fields(snapshot))
+    metrics.update(civ6_apply_results.order_source_fields([]))
     pipeline.append_turn_metrics(metrics_dir, metrics)
+    if args.session_dir is not None:
+        civ6_apply_results.merge_apply_sources_into_metrics(args.session_dir)
     record["metrics"] = metrics
     report = civ6_turn_report.build_turn_report(
         snapshot=snapshot,

@@ -457,6 +457,20 @@ class ProductionLuaScoreTests(unittest.TestCase):
         self.assertEqual(1, queued)
         self.assertEqual("UNIT_SETTLER", build)
         self.assertEqual(0, self.lua.eval("Civ6Ai_Production.AutoqueueEmptyCities(1)"))
+        skipped, skip_log = self.lua.execute(
+            """
+            local logs = {}
+            Civ6Ai_Util = { Log = function(line) logs[#logs + 1] = line end }
+            Game.GetProperty = function(key)
+              if key == "CIV6AI_H_0_city_7" then return 10 end
+              return nil
+            end
+            local n = Civ6Ai_Production.AutoqueueEmptyCities(0)
+            return n, table.concat(logs, "\\n")
+            """
+        )
+        self.assertEqual(0, skipped)
+        self.assertIn("production|autoqueue|skip_handled|player=0|city=7|turn=10", skip_log)
 
     def test_nil_request_waits_for_the_next_pass_before_not_stuck(self):
         first, second, missed, later, counts, log = self.lua.execute(

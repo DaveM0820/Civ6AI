@@ -1123,8 +1123,30 @@ function Civ6Ai_Production._AutoqueuePass(playerID)
       .. "|city=" .. tostring(cityId) .. "|build=" .. buildId
       .. "|turn=" .. tostring(turn))
   end
+  local function cityHandled(cityId)
+    local shared = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+    if shared ~= nil and shared.WasHandled ~= nil then
+      local okH, yes = pcall(shared.WasHandled, playerID, "city", cityId)
+      if okH and yes then
+        return true
+      end
+    end
+    if Game == nil or Game.GetProperty == nil then
+      return false
+    end
+    local prop = "CIV6AI_H_" .. tostring(playerID) .. "_city_" .. tostring(cityId)
+    local okP, value = pcall(Game.GetProperty, prop)
+    if (not okP or value == nil) and Game.GetProperty ~= nil then
+      okP, value = pcall(Game.GetProperty, Game, prop)
+    end
+    return okP and tonumber(value) == turn
+  end
   for _, city in ipairs(list) do
     local cityId = call(city, "GetID")
+    if cityHandled(cityId) then
+      _logProduction("production|autoqueue|skip_handled|player=" .. tostring(playerID)
+        .. "|city=" .. tostring(cityId) .. "|turn=" .. tostring(turn))
+    else
     local key = tostring(playerID) .. ":" .. tostring(cityId) .. ":" .. tostring(turn)
     local current = Civ6Ai_Production._GetCityProduction(city)
     local pending = Civ6Ai_Production._pendingQueue[key]
@@ -1233,6 +1255,7 @@ function Civ6Ai_Production._AutoqueuePass(playerID)
           end
         end
       end
+    end
     end
   end
   return queued

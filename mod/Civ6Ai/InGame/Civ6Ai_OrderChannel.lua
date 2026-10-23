@@ -510,7 +510,8 @@ function Civ6Ai_OrderChannel.DrainResults()
     if entry ~= nil then
       r._taken = true
       Civ6Ai_OrderChannel._pending[r.seq] = nil
-      Civ6Ai_Apply._RecordResult(entry.playerID, entry.command, r.ok == true, r.reason, entry.command.arguments or {})
+      Civ6Ai_Apply._RecordResult(
+        entry.playerID, entry.command, r.ok == true, r.reason, entry.command.arguments or {}, r.source or "model")
     elseif r.sender == me and Civ6Ai_OrderChannel._pending[r.seq] == nil then
       -- Already consumed, or never ours. Do not let it crowd out unread rows.
       r._taken = true

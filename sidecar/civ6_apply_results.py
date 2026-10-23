@@ -694,6 +694,8 @@ def inject_command_results(snapshot: dict[str, Any], session_dir: Path | None) -
         return (0 if failed and tile else 1 if failed else 2, -int(item.get("turn") or 0))
     items = sorted(items, key=_keep_rank)
     history["command_results"] = items[:PRIOR_APPLY_WIRE_CAP]
+    if session_dir is not None:
+        merge_apply_sources_into_metrics(session_dir, all_rows)
     return len(items)
 
 
@@ -1415,4 +1417,116 @@ def _one_site_per_builder(snapshot: dict[str, Any], commands: list[dict[str, Any
     """Builders keep the Improve tile the model named. Two builders on one tile is a model miss."""
     del snapshot, dropped, failed
     return commands
+
+
+def infer_order_source(row: dict[str, Any]) -> str:
+    src = row.get("source")
+    if src in ("model", "fallback"):
+        return src
+    cid = str(row.get("command_id") or "")
+    if cid.startswith("AUTO_"):
+        return "fallback"
+    return "model"
+
+
+def order_source_fields(rows: list[dict[str, Any]] | None) -> dict[str, Any]:
+    """turn_metrics fields: how often the model acted vs a host fallback."""
+    model = 0
+    fallback = 0
+    sources: list[dict[str, Any]] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        src = infer_order_source(row)
+        if src == "fallback":
+            fallback += 1
+        else:
+            model += 1
+        entry: dict[str, Any] = {
+            "source": src,
+            "kind": row.get("kind"),
+            "ok": row.get("ok"),
+        }
+        if row.get("command_id"):
+            entry["command_id"] = row.get("command_id")
+        sources.append(entry)
+    return {
+        "order_source_model": model,
+        "order_source_fallback": fallback,
+        "order_sources": sources,
+    }
+
+
+def merge_order_sources_into_metrics(
+    metrics_dir: Path | None,
+    player_id: str,
+    turn: int,
+    rows: list[dict[str, Any]] | None,
+) -> bool:
+    """Stamp source=model|fallback counts onto the matching turn_metrics row."""
+    if metrics_dir is None:
+        return False
+    path = Path(metrics_dir) / "turn_metrics.jsonl"
+    if not path.is_file():
+        return False
+    fields = order_source_fields(rows)
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    updated = False
+    out: list[str] = []
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            out.append(line)
+            continue
+        if not isinstance(event, dict):
+            out.append(line)
+            continue
+        same_player = str(event.get("player_id") or "") == str(player_id)
+        try:
+            same_turn = int(event.get("turn")) == int(turn)
+        except (TypeError, ValueError):
+            same_turn = False
+        if same_player and same_turn:
+            event.update(fields)
+            out.append(pipeline.canonical_json(event))
+            updated = True
+        else:
+            out.append(line)
+    if not updated:
+        return False
+    try:
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    except OSError:
+        return False
+    return True
+
+
+def merge_apply_sources_into_metrics(session_dir: Path | None, rows: list[dict[str, Any]] | None = None) -> int:
+    """Update turn_metrics from apply-results (player folder or explicit rows)."""
+    if session_dir is None:
+        return 0
+    player_dir = Path(session_dir)
+    metrics_dir = player_dir.parent
+    if not metrics_dir.is_dir():
+        return 0
+    if rows is None:
+        rows = load_apply_results(player_dir)
+    by_key: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        pid = str(row.get("player_id") or player_dir.name)
+        turn = _row_decision_turn(row)
+        if turn is None:
+            continue
+        by_key.setdefault((pid, turn), []).append(row)
+    n = 0
+    for (pid, turn), group in by_key.items():
+        if merge_order_sources_into_metrics(metrics_dir, pid, turn, group):
+            n += 1
+    return n
 

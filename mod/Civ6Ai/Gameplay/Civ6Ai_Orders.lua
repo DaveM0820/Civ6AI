@@ -1437,7 +1437,173 @@ function Civ6Ai_Orders._AutoRangedEnabled(owner, mode)
   return true
 end
 
-function Civ6Ai_Orders._AutoJson(owner, kind, reason, commandId, fixed)
+-- After apply, one handled set: units, cities, city-strike opportunities.
+-- A fallback may act only when that entity is not in the set. Failed
+-- validation or dispatch leaves the entity unhandled.
+function Civ6Ai_Orders._NewHandled()
+  return { unit = {}, city = {}, strike = {} }
+end
+
+function Civ6Ai_Orders._AsHandled(arg)
+  if type(arg) ~= "table" then
+    return nil
+  end
+  if arg.unit ~= nil or arg.city ~= nil or arg.strike ~= nil then
+    return {
+      unit = arg.unit or {},
+      city = arg.city or {},
+      strike = arg.strike or {},
+    }
+  end
+  return nil
+end
+
+function Civ6Ai_Orders._MarkHandled(handled, class, id)
+  if handled == nil or class == nil or id == nil then
+    return
+  end
+  handled[class] = handled[class] or {}
+  handled[class][id] = true
+end
+
+function Civ6Ai_Orders._WasHandled(handled, class, id)
+  return handled ~= nil and handled[class] ~= nil and handled[class][id] == true
+end
+
+function Civ6Ai_Orders._HandledProp(owner, class, id)
+  return "CIV6AI_H_" .. tostring(owner) .. "_" .. tostring(class) .. "_" .. tostring(id)
+end
+
+function Civ6Ai_Orders._PersistHandled(owner, handled)
+  if Game == nil or Game.SetProperty == nil or handled == nil then
+    return
+  end
+  local turn = Game.GetCurrentGameTurn()
+  for _, class in ipairs({ "unit", "city", "strike" }) do
+    for id, yes in pairs(handled[class] or {}) do
+      if yes then
+        pcall(function()
+          Game:SetProperty(Civ6Ai_Orders._HandledProp(owner, class, id), turn)
+        end)
+      end
+    end
+  end
+end
+
+function Civ6Ai_Orders.WasHandled(owner, class, id)
+  if Game == nil or Game.GetProperty == nil then
+    return false
+  end
+  local turn = Game.GetCurrentGameTurn()
+  local ok, value = pcall(function()
+    return Game:GetProperty(Civ6Ai_Orders._HandledProp(owner, class, id))
+  end)
+  return ok and num(value) == turn
+end
+
+function Civ6Ai_Orders.MarkHandled(owner, class, id)
+  if class == nil or id == nil then
+    return
+  end
+  if Game == nil or Game.SetProperty == nil then
+    return
+  end
+  pcall(function()
+    Game:SetProperty(Civ6Ai_Orders._HandledProp(owner, class, id), Game.GetCurrentGameTurn())
+  end)
+end
+
+function Civ6Ai_Orders._OrderEntity(o)
+  if o == nil then
+    return nil
+  end
+  local k = o.K
+  if k == Civ6Ai_Orders.K.CITY_STRIKE and o.I ~= nil then
+    return "strike", o.I
+  end
+  if (k == Civ6Ai_Orders.K.BUY or k == Civ6Ai_Orders.K.BUY_TILE) and o.I ~= nil then
+    return "city", o.I
+  end
+  if o.U ~= nil and o.U >= 0 then
+    return "unit", o.U
+  end
+  return nil
+end
+
+function Civ6Ai_Orders._LogOrderSource(owner, source, kind, class, id, reason)
+  log("orders|source=" .. tostring(source)
+    .. "|player=" .. tostring(owner)
+    .. "|turn=" .. tostring(Game.GetCurrentGameTurn())
+    .. "|kind=" .. tostring(kind)
+    .. "|entity=" .. tostring(class) .. ":" .. tostring(id)
+    .. "|reason=" .. tostring(reason or ""))
+end
+
+function Civ6Ai_Orders._IsExplorer(unit)
+  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[call(unit, "GetType")] or nil
+  if row == nil then
+    return false
+  end
+  local typ = tostring(row.UnitType or "")
+  if string.find(typ, "SETTLER", 1, true) or string.find(typ, "BUILDER", 1, true) then
+    return false
+  end
+  if string.find(typ, "SCOUT", 1, true) or string.find(typ, "RANGER", 1, true)
+      or string.find(typ, "RECON", 1, true) then
+    return true
+  end
+  if row.MakeTradeRoute == true then
+    return false
+  end
+  if (num(row.BuildCharges) or 0) > 0 then
+    return false
+  end
+  -- A civilian with no combat, or a ship, can take the explore fallback.
+  if (num(row.Combat) or 0) == 0 and (num(row.RangedCombat) or 0) == 0 then
+    return true
+  end
+  return row.Domain == "DOMAIN_SEA"
+end
+
+function Civ6Ai_Orders._RunHostFallbacks(sender, owner, handled, mode)
+  Civ6Ai_Orders._PersistHandled(owner, handled)
+  if not Civ6Ai_Orders._AutoRangedEnabled(owner, mode) then
+    return
+  end
+  Civ6Ai_Orders._AutoRanged(sender, owner, handled, nil, nil, mode)
+  Civ6Ai_Orders._AutoExplore(sender, owner, handled)
+end
+
+function Civ6Ai_Orders._AutoExplore(sender, owner, handled)
+  local p = Players[owner]
+  if p == nil then
+    return
+  end
+  local turn = Game.GetCurrentGameTurn()
+  local n = 0
+  for _, unit in ipairs(sortedMembers(call(p, "GetUnits"))) do
+    local uid = unit:GetID()
+    if not Civ6Ai_Orders._WasHandled(handled, "unit", uid)
+        and Civ6Ai_Orders._IsExplorer(unit)
+        and (call(unit, "GetMovesRemaining") or 0) > 0 then
+      local ok, why = Gov.Explore(owner, uid)
+      if ok then
+        n = n + 1
+        Civ6Ai_Orders._Record(sender, {
+          S = -1, K = Civ6Ai_Orders.K.EXPLORE, P = owner, U = uid, D = turn,
+        }, true, "auto:" .. tostring(why or "explore"), "fallback")
+        Civ6Ai_Orders._AutoJson(owner, "explore", "auto:" .. tostring(why or "explore"),
+          "AUTO_E_" .. tostring(uid), { unit = uid })
+        Civ6Ai_Orders._LogOrderSource(owner, "fallback", "explore", "unit", uid, why)
+      end
+    end
+  end
+  if n > 0 then
+    log("explore|auto|player=" .. tostring(owner) .. "|turn=" .. tostring(turn) .. "|units=" .. tostring(n))
+  end
+end
+
+function Civ6Ai_Orders._AutoJson(owner, kind, reason, commandId, fixed, source)
   local function esc(text)
     text = tostring(text or "")
     text = string.gsub(text, "\\", "\\\\")
@@ -1467,7 +1633,8 @@ function Civ6Ai_Orders._AutoJson(owner, kind, reason, commandId, fixed)
     .. ",\"player_id\":\"PLAYER_" .. tostring(owner)
     .. "\",\"command_id\":\"" .. esc(commandId)
     .. "\",\"kind\":\"" .. esc(kind)
-    .. "\",\"ok\":true,\"reason\":\"" .. esc(reason) .. "\"" .. extra .. "}")
+    .. "\",\"ok\":true,\"reason\":\"" .. esc(reason)
+    .. "\",\"source\":\"" .. esc(source or "fallback") .. "\"" .. extra .. "}")
 end
 
 function Civ6Ai_Orders._AutoRank(kind, killable)
@@ -1561,24 +1728,38 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
     return
   end
   Civ6Ai_Orders._autoDone[doneKey] = true
+  local handled = Civ6Ai_Orders._AsHandled(ordered)
   local unitOk, cityOk, skipped = 0, 0, 0
   local function note(kind, reason, commandId, order, fixed)
-    Civ6Ai_Orders._Record(sender, order, true, reason)
-    Civ6Ai_Orders._AutoJson(owner, kind, reason, commandId, fixed)
+    Civ6Ai_Orders._Record(sender, order, true, reason, "fallback")
+    Civ6Ai_Orders._AutoJson(owner, kind, reason, commandId, fixed, "fallback")
+    local class, id = "unit", order.U
+    if kind == "city_attack" then
+      class, id = "strike", order.I
+    end
+    Civ6Ai_Orders._LogOrderSource(owner, "fallback", kind, class, id, reason)
   end
   moveOk = moveOk or {}
   moveFailed = moveFailed or {}
+  attackOk = attackOk or {}
+  attackFailed = attackFailed or {}
   local p = Players[owner]
   for _, unit in ipairs(sortedMembers(call(p, "GetUnits"))) do
     local uid = unit:GetID()
-    -- A successful attack already spent the shot. A move that failed, or one
-    -- that left the unit in range with moves still on it, still gets the shot.
-    local attacked = attackOk[uid] == true
-    local untouched = ordered[uid] ~= true
-    local failedAttack = attackFailed[uid] == true and not attacked
-    local failedMove = moveFailed[uid] == true and moveOk[uid] ~= true
-    local moved = moveOk[uid] == true
-    if Civ6Ai_Orders._IsRanged(unit) and not attacked and (untouched or failedAttack or failedMove or moved)
+    -- A successful model order (any kind) owns this unit. Failed validation
+    -- or dispatch leaves it unhandled, so the fallback may still shoot.
+    local eligible
+    if handled ~= nil then
+      eligible = not Civ6Ai_Orders._WasHandled(handled, "unit", uid)
+    else
+      local attacked = attackOk[uid] == true
+      local untouched = ordered[uid] ~= true
+      local failedAttack = attackFailed[uid] == true and not attacked
+      local failedMove = moveFailed[uid] == true and moveOk[uid] ~= true
+      local moved = moveOk[uid] == true
+      eligible = not attacked and (untouched or failedAttack or failedMove or moved)
+    end
+    if Civ6Ai_Orders._IsRanged(unit) and eligible
         and (call(unit, "GetMovesRemaining") or 0) > 0
         and (call(unit, "GetAttacksRemaining") == nil or (call(unit, "GetAttacksRemaining") or 0) > 0) then
       local row = GameInfo.Units[unit:GetType()]
@@ -1665,6 +1846,9 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
       return
     end
     local cityId = city:GetID()
+    if handled ~= nil and Civ6Ai_Orders._WasHandled(handled, "strike", cityId) then
+      return
+    end
     local key = "CIV6AI_STRIKE_" .. tostring(owner) .. "_" .. tostring(cityId)
     if num(Game:GetProperty(key)) == turn then
       return
@@ -1739,6 +1923,15 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
   end
   orders = Civ6Ai_Orders._SetupMovesFirst(Civ6Ai_Orders._AttacksBeforeMoves(orders))
   local ordered = {}
+  local handled = Civ6Ai_Orders._NewHandled()
+  local function markModel(o, reason)
+    local class, id = Civ6Ai_Orders._OrderEntity(o)
+    if class == nil then
+      return
+    end
+    Civ6Ai_Orders._MarkHandled(handled, class, id)
+    Civ6Ai_Orders._LogOrderSource(owner, "model", o.K, class, id, reason)
+  end
   for _, o in ipairs(orders) do
     if o.U ~= nil and o.U >= 0 then
       ordered[o.U] = true
@@ -1807,7 +2000,8 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
         okUnits[o.U or -1] = o.K ~= Civ6Ai_Orders.K.SKIP or nil
         markMove(o, true)
         markAttack(o, true, reason)
-        Civ6Ai_Orders._Record(sender, o, true, reason)
+        markModel(o, reason)
+        Civ6Ai_Orders._Record(sender, o, true, reason, "model")
         noteAttack(counts, o, true)
       elseif retryable(o.K, reason) and pass < Civ6Ai_Orders.MAX_PASSES then
         nextPending[#nextPending + 1] = o
@@ -1835,9 +2029,10 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
             elseif rok == true then
               moveSucceeded = true
               recorded = true
+              markModel(o, rreason)
               Civ6Ai_Orders._Record(sender, o, true, "retargeted:"
                 .. tostring(o.X) .. "," .. tostring(o.Y) .. ">" .. tostring(nx) .. "," .. tostring(ny)
-                .. ":" .. tostring(rreason))
+                .. ":" .. tostring(rreason), "model")
             else
               lastWhy = rreason
             end
@@ -1854,8 +2049,9 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
               elseif rok == true then
                 moveSucceeded = true
                 recorded = true
+                markModel(o, rreason)
                 Civ6Ai_Orders._Record(sender, o, true, "step_toward:" .. tostring(o.X) .. "," .. tostring(o.Y)
-                  .. ">" .. tostring(sx) .. "," .. tostring(sy) .. ":" .. tostring(rreason))
+                  .. ">" .. tostring(sx) .. "," .. tostring(sy) .. ":" .. tostring(rreason), "model")
               else
                 lastWhy = rreason
               end
@@ -1887,7 +2083,7 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
   -- After the model's orders, before goals and finish-moves. Empty queues never
   -- reach here, so a seat the model did not answer stays with the game's AI.
   local ranAuto, autoErr = pcall(
-    Civ6Ai_Orders._AutoRanged, sender, owner, ordered, attackOk, attackFailed, autoMode, moveOk, moveFailed)
+    Civ6Ai_Orders._RunHostFallbacks, sender, owner, handled, autoMode)
   if not ranAuto then
     log("auto_error|player=" .. tostring(owner) .. "|" .. trimErr(autoErr))
   end
@@ -2279,7 +2475,8 @@ function Civ6Ai_Orders._TrimResults(shared)
   shared.OrderResults = kept
 end
 
-function Civ6Ai_Orders._Record(sender, o, ok, reason)
+function Civ6Ai_Orders._Record(sender, o, ok, reason, source)
+  source = source or "model"
   local shared = Civ6Ai_Orders._Shared()
   local turn = Game.GetCurrentGameTurn()
   shared.OrderHash = mixString(shared.OrderHash or 7, table.concat({
@@ -2289,13 +2486,14 @@ function Civ6Ai_Orders._Record(sender, o, ok, reason)
   table.insert(shared.OrderResults, {
     sender = sender, seq = o.S, kind = o.K, player = o.P, unit = o.U, turn = turn,
     apply_turn = turn, decision_turn = o.D ~= nil and o.D >= 0 and o.D or turn,
-    ok = ok, reason = tostring(reason or ""),
+    ok = ok, reason = tostring(reason or ""), source = source,
   })
   -- Moves are recorded before later attacks. Dropping the oldest unread row
   -- made those moves time out as no_result_from_gameplay. Taken rows go first.
   Civ6Ai_Orders._TrimResults(shared)
   log("result|turn=" .. turn .. "|from=" .. tostring(sender) .. "|seq=" .. tostring(o.S) .. "|kind=" .. tostring(o.K)
     .. "|player=" .. tostring(o.P) .. "|unit=" .. tostring(o.U) .. "|ok=" .. tostring(ok)
+    .. "|source=" .. tostring(source)
     .. "|reason=" .. tostring(reason or "") .. "|hash=" .. tostring(shared.OrderHash))
 end
 
@@ -5090,6 +5288,9 @@ function Civ6Ai_Orders.Init()
   shared.PriorityLevels = Civ6Ai_Orders.PriorityLevels
   shared.Gov = Civ6Ai_Orders.Gov
   shared.AutoRanged = Civ6Ai_Orders._AutoRanged
+  shared.RunHostFallbacks = Civ6Ai_Orders._RunHostFallbacks
+  shared.WasHandled = Civ6Ai_Orders.WasHandled
+  shared.MarkHandled = Civ6Ai_Orders.MarkHandled
   shared.ReadUnitGoal = Civ6Ai_Orders._ReadGoal
   pcall(Civ6Ai_Orders.Gov.Probe)
   log("load|version=" .. Civ6Ai_Orders.VERSION .. "|prio_conditions=" .. tostring(nPrio) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))
