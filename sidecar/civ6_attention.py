@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterable
 
 SECTION = "ATTENTION"
+# Texts the prompt budget dropped. collect() skips them so their Event rows go too.
+TRIMMED_KEY = "_attention_trimmed"
 
 
 @dataclass(frozen=True)
@@ -150,6 +152,9 @@ def _key(text: str) -> str:
 def collect(context: Any) -> list[Item]:
     """Every provider's items in registry order, first copy of each line kept."""
     seen: set[str] = set()
+    trimmed = context.get(TRIMMED_KEY) if isinstance(context, dict) else None
+    if trimmed:
+        seen.update(_key(text) for text in trimmed)
     out: list[Item] = []
     for provide in PROVIDERS:
         for item in provide(context):

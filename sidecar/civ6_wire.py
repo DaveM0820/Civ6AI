@@ -2385,6 +2385,36 @@ def _assemble_model_wire(
     )
 
 
+def _compact_with_attention(snapshot, context, map_stats, text, limit, unit_compact, city_compact):
+    """Budget pass. When ATTENTION items are trimmed, rebuild without them so their
+    Event.<name>.log rows leave REQUIRED COMMANDS and the rows renumber."""
+    from sidecar import civ6_attention
+    from sidecar import civ6_prompt_budget as prompt_budget
+
+    trimmed: list[str] = []
+    key = civ6_attention.TRIMMED_KEY
+    fired: list[str] = []
+    try:
+        for _ in range(4):
+            dropped: list[str] = []
+            text, fired = prompt_budget.compact_to_budget(text, limit, civ6_attention.collect(context), dropped)
+            if not dropped:
+                break
+            trimmed.extend(dropped)
+            context[key] = snapshot[key] = list(trimmed)
+            text = _assemble_model_wire(
+                snapshot, context, map_stats, unit_compact=unit_compact, city_compact=city_compact,
+            )
+        else:
+            text, fired = prompt_budget.compact_to_budget(text, limit, civ6_attention.collect(context))
+        if trimmed and "attention" not in fired:
+            fired = [*fired, "attention"]
+        return text, fired
+    finally:
+        snapshot.pop(key, None)
+        context.pop(key, None)
+
+
 def build_civ6_model_wire_text(snapshot: dict[str, Any], *, max_prompt_chars: int | None = None) -> str:
     from sidecar import civ6_prompt_budget as prompt_budget
 
@@ -2410,9 +2440,7 @@ def build_civ6_model_wire_text(snapshot: dict[str, Any], *, max_prompt_chars: in
         text = full
     limit = prompt_budget.resolve_max_prompt_chars(snapshot, max_prompt_chars)
     if limit > 0 and len(text) > limit:
-        from sidecar import civ6_attention
-
-        text, fired = prompt_budget.compact_to_budget(text, limit, civ6_attention.collect(context))
+        text, fired = _compact_with_attention(snapshot, context, map_stats, text, limit, unit_compact, city_compact)
         compactions.extend(fired)
     prompt_budget.store_report(snapshot, prompt_budget.make_report(full, text, limit, compactions))
     return text

@@ -138,7 +138,9 @@ def make_report(before: str, after: str, limit: int, compactions: list[str]) -> 
     }
 
 
-def compact_to_budget(text: str, limit: int, attention: list[Any] | None = None) -> tuple[str, list[str]]:
+def compact_to_budget(
+    text: str, limit: int, attention: list[Any] | None = None, dropped: list[str] | None = None,
+) -> tuple[str, list[str]]:
     """Shorten lower-priority sections until ``text`` fits, or the ladder ends.
 
     Order is least necessary first: verbose history, repeated legend, distant
@@ -156,7 +158,7 @@ def compact_to_budget(text: str, limit: int, attention: list[Any] | None = None)
             fired.append(name)
             text = updated
     if len(text) > limit and attention:
-        updated = _trim_attention(text, limit, attention)
+        updated = _trim_attention(text, limit, attention, dropped)
         if updated != text:
             fired.append("attention")
             text = updated
@@ -165,7 +167,7 @@ def compact_to_budget(text: str, limit: int, attention: list[Any] | None = None)
     return text, fired
 
 
-def _trim_attention(text: str, limit: int, items: list[Any]) -> str:
+def _trim_attention(text: str, limit: int, items: list[Any], dropped: list[str] | None = None) -> str:
     """Drop ATTENTION items, highest priority number first, until the text fits."""
     order = sorted(
         (item for item in items if getattr(item, "priority", 0) > 0),
@@ -179,7 +181,10 @@ def _trim_attention(text: str, limit: int, items: list[Any]) -> str:
             if title == ATTENTION_SECTION:
                 chunk = chunk.replace("\n" + item.text, "", 1)
             parts.append(chunk)
-        text = "".join(parts)
+        updated = "".join(parts)
+        if updated != text and dropped is not None:
+            dropped.append(item.text)
+        text = updated
     return text
 
 

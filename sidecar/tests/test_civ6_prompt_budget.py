@@ -220,6 +220,24 @@ class PromptBudgetTests(unittest.TestCase):
         self.assertIn("memory.T40 = Declared war", tight)
         self.assertIn("memory.T40.pin = true", tight)
 
+    def test_trimmed_attention_item_drops_its_event_row(self):
+        import re
+
+        snap = _late_snapshot()
+        full = civ6_wire.build_civ6_model_wire_text(copy.deepcopy(snap), max_prompt_chars=0)
+        self.assertIn("Event.Lethargy.log", full)
+        work = copy.deepcopy(snap)
+        text = civ6_wire.build_civ6_model_wire_text(work, max_prompt_chars=800)
+        self.assertIn("attention", work["advciv"]["prompt_budget"]["compactions"])
+        self.assertNotIn("LETHARGY:", text)
+        self.assertNotIn("Event.Lethargy.log", text)
+        self.assertNotIn("_attention_trimmed", work)
+        required = text.split("=== REQUIRED COMMANDS ===", 1)[1].split("Required JSON keys:", 1)[1]
+        numbers = [int(n) for n in re.findall(r'^  "(\d+)\.', required, re.M)]
+        self.assertEqual(list(range(1, len(numbers) + 1)), numbers)
+        count = int(re.search(r'"commands.required.count": (\d+)', required).group(1))
+        self.assertEqual(count, len(numbers))
+
     def test_tiny_budget_never_drops_protected_sections(self):
         snap = _late_snapshot()
         full = civ6_wire.build_civ6_model_wire_text(snap, max_prompt_chars=0)
@@ -229,10 +247,12 @@ class PromptBudgetTests(unittest.TestCase):
         text = civ6_wire.build_civ6_model_wire_text(snap, max_prompt_chars=800)
         self.assertIn("still_over_budget", snap["advciv"]["prompt_budget"]["compactions"])
         self.assertIn(war.strip(), text)
-        self.assertIn("=== ATTENTION ===", text)
         self.assertIn("attention", snap["advciv"]["prompt_budget"]["compactions"])
         self.assertTrue(attention.strip())
-        self.assertIn(required.strip(), text)
+        # Trimmed ATTENTION items take their Event rows along; every order row stays.
+        for line in required.split("--- UNIT / CITY ORDERS ---", 1)[1].splitlines():
+            if '.command"' in line or '.production"' in line:
+                self.assertIn(line.split(".", 1)[1].strip(), text)
         self.assertIn("plan.goal = domination", text)
         self.assertTrue("map.images" in text or "minimap attached" in text)
         self.assertNotIn("omit_overview", " ".join(snap["advciv"]["prompt_budget"]["compactions"]))
