@@ -255,7 +255,7 @@ def _civ6_post_bind(snapshot: dict, validated: dict, commands: list) -> tuple[di
     commands, repeat_notes = civ6_apply_results.filter_repeat_failures(snapshot, commands)
     commands, buy_notes = civ6_apply_results.drop_unaffordable_purchases(snapshot, commands)
     chats = validated.get("chat_messages") if isinstance(validated.get("chat_messages"), list) else []
-    chats, chat_notes = civ6_apply_results.filter_repeat_public_chat(snapshot, chats)
+    chats, chat_notes = civ6_apply_results.filter_repeat_public_chat(snapshot, chats, commands)
     from sidecar import civ6_seat_memory
 
     new_promises = civ6_seat_memory.extract_promises(chats)

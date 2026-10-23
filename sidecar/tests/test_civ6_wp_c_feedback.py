@@ -223,7 +223,9 @@ class ChatRobustnessTests(unittest.TestCase):
         self.assertEqual(kept, [])
         self.assertTrue(dropped)
 
+    @mock.patch.dict("os.environ", {"CIV6AI_CHAT_PUBLIC_COOLDOWN_TURNS": "0"})
     def test_distinct_reply_is_not_treated_as_repeat_intro(self):
+        # Novelty only; the cadence gate has its own tests (test_civ6_chat_cadence).
         snap = _snap(decision={"turn": 2, "player_id": "PLAYER_1"})
         snap["personality"] = {
             "leader_name": "Robert the Bruce",

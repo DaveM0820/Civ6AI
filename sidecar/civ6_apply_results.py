@@ -1078,11 +1078,188 @@ def _recent_other_lines(snapshot: dict[str, Any]) -> list[str]:
     return texts[-12:]
 
 
+# Words that mark a diplomatic event or order (war, deal, denouncement, pact, ...).
+# Matched against event kinds, legal command kinds and command ids, upper-cased.
+CHAT_EVENT_WORDS = (
+    "WAR", "PEACE", "DEAL", "TRADE", "DENOUNC", "FRIEND", "ALLIANCE", "ALLY",
+    "EMBASSY", "DELEGATION", "BORDERS", "PROPOS", "ACCEPT", "REJECT", "COUNTER",
+    "DIPLO", "SURPRISE", "BETRAY", "ULTIMATUM",
+)
+_CHAT_EVENT_PREFIXES = frozenset({"DENOUNC", "PROPOS", "DIPLO", "FRIEND", "BETRAY", "ACCEPT", "REJECT", "DEAL"})
+_PLAYER_ID_RE = re.compile(r"PLAYER_(\d+)")
+
+
+def _is_diplo_word(text: Any) -> bool:
+    """True when a token of ``text`` starts with an event word (WAR matches WAR, not WARRIOR)."""
+    up = str(text or "").upper()
+    if not up or up.startswith("CHAT_"):
+        return False
+    for token in re.split(r"[^A-Z]+", up):
+        if not token:
+            continue
+        for word in CHAT_EVENT_WORDS:
+            if token == word or (word in _CHAT_EVENT_PREFIXES and token.startswith(word)):
+                return True
+    return False
+
+
+def _decision_turn(snapshot: dict[str, Any]) -> tuple[str, int]:
+    decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
+    try:
+        turn = int(decision.get("turn") or 0)
+    except (TypeError, ValueError):
+        turn = 0
+    return str(decision.get("player_id") or ""), turn
+
+
+def chat_event_players(snapshot: dict[str, Any], commands: list[dict[str, Any]] | None = None) -> set[str]:
+    """Players this seat has a real diplomatic event with right now.
+
+    Sources (all per seat, from this seat's own snapshot and orders):
+    a DM from them this turn, a recent non-chat diplomatic event naming both
+    sides (war, deal, denouncement, pact), an open deal offer from them, and a
+    diplomatic order this seat issues at them this turn.
+    """
+    from sidecar import settings
+
+    me, turn = _decision_turn(snapshot)
+    window = settings.get_int("CIV6AI_CHAT_EVENT_WINDOW_TURNS")
+    players: set[str] = set()
+    diplomacy = snapshot.get("diplomacy") if isinstance(snapshot.get("diplomacy"), dict) else {}
+    for message in diplomacy.get("private_inbox") or []:
+        if not isinstance(message, dict):
+            continue
+        sender = str(message.get("from_player_id") or "")
+        try:
+            sent = int(message.get("turn") or -1)
+        except (TypeError, ValueError):
+            continue
+        if sender and sender != me and sent >= turn - window:
+            players.add(sender)
+    history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
+    for bucket in ("public_events", "diplomacy_events"):
+        for event in history.get(bucket) or []:
+            if not isinstance(event, dict) or not _is_diplo_word(event.get("kind")):
+                continue
+            try:
+                when = int(event.get("turn") or -1)
+            except (TypeError, ValueError):
+                continue
+            ids = [str(x) for x in event.get("affected_ids") or [] if x]
+            if when >= turn - window and me in ids:
+                players.update(x for x in ids if x != me)
+    try:
+        from sidecar import civ6_diplomacy
+
+        players.update(str(d.get("from")) for d in civ6_diplomacy._open_offers_to_me(snapshot) if d.get("from"))
+    except Exception:  # no memory dir / no deals file: no offers
+        pass
+    legal = {
+        str(c.get("command_id")): c for c in snapshot.get("legal_commands") or [] if isinstance(c, dict)
+    }
+    for command in commands or []:
+        if not isinstance(command, dict):
+            continue
+        cid = str(command.get("command_id") or "")
+        offer = legal.get(cid, {})
+        kind = str(command.get("kind") or offer.get("kind") or "")
+        if not (_is_diplo_word(kind) or _is_diplo_word(cid)):
+            continue
+        args: dict[str, Any] = {}
+        for source in (offer, command):
+            for field in ("fixed_arguments", "arguments"):
+                if isinstance(source.get(field), dict):
+                    args.update(source[field])
+        target = str(args.get("target_player_id") or args.get("player_id") or "")
+        if not target:
+            match = _PLAYER_ID_RE.search(cid)
+            target = f"PLAYER_{match.group(1)}" if match else ""
+        if target and target != me:
+            players.add(target)
+    return players
+
+
+def last_self_chat_turns(snapshot: dict[str, Any]) -> dict[str, int]:
+    """Latest turn this seat spoke to each chat target key (``all`` or ``player:ID``)."""
+    me, _turn_now = _decision_turn(snapshot)
+    last: dict[str, int] = {}
+    history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
+    for event in history.get("public_events") or []:
+        if not isinstance(event, dict):
+            continue
+        kind = str(event.get("kind") or "").upper()
+        if kind and kind not in ("CHAT_PUBLIC", "CHAT_PRIVATE"):
+            continue
+        affected = event.get("affected_ids") or []
+        if not isinstance(affected, list) or not affected or str(affected[0]) != me:
+            continue
+        if kind == "CHAT_PRIVATE":
+            key = f"player:{affected[1] if len(affected) > 1 else ''}"
+        else:
+            key = "all"
+        try:
+            when = int(event.get("turn") or 0)
+        except (TypeError, ValueError):
+            continue
+        last[key] = max(last.get(key, when), when)
+    return last
+
+
+def chat_cooldown_turns(key: str) -> int:
+    from sidecar import settings
+
+    name = "CIV6AI_CHAT_PUBLIC_COOLDOWN_TURNS" if key in ("all", "team") else "CIV6AI_CHAT_RECIPIENT_COOLDOWN_TURNS"
+    return settings.get_int(name)
+
+
+def chat_cadence_problem(
+    snapshot: dict[str, Any], key: str, events: set[str], last: dict[str, int]
+) -> str | None:
+    """Why a line to ``key`` is too soon, or None. A real event always lets it through."""
+    gap = chat_cooldown_turns(key)
+    if gap <= 0:
+        return None
+    if key in ("all", "team"):
+        if events:
+            return None
+    elif key.split(":", 1)[-1] in events:
+        return None
+    _me_id, turn = _decision_turn(snapshot)
+    prior = last.get(key)
+    if turn <= 0 or prior is None or prior > turn or turn - prior >= gap:
+        return None
+    return f"next free line on turn {prior + gap}"
+
+
+def chat_cadence_lines(snapshot: dict[str, Any], name_of=None) -> list[str]:
+    """Prompt side of the same gate, so the model can skip the line instead of losing it."""
+    events = chat_event_players(snapshot)
+    last = last_self_chat_turns(snapshot)
+    waits: list[str] = []
+    for key, prior in sorted(last.items(), key=lambda kv: kv[0]):
+        if chat_cadence_problem(snapshot, key, events, last) is None:
+            continue
+        who = "chat.all" if key == "all" else (name_of(key.split(":", 1)[-1]) if name_of else key.split(":", 1)[-1])
+        waits.append(f"{who} (last turn {prior}, free again turn {prior + chat_cooldown_turns(key)})")
+    if not waits:
+        return []
+    return [
+        "Chat cadence: only talk when you have something new. Resting now: " + "; ".join(waits)
+        + ". A line there is dropped unless something real just happened with them "
+        "(war, deal, denouncement, pact, or a DM to answer)."
+    ]
+
+
 def filter_repeat_public_chat(
     snapshot: dict[str, Any],
     chat_messages: list[dict[str, Any]],
+    commands: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
+    """The one chat gate: novelty (no repeats or re-intros) and per-recipient cadence."""
     recent_map = recent_self_chats_by_target(snapshot)
+    events = chat_event_players(snapshot, commands)
+    last_turns = last_self_chat_turns(snapshot)
+    spoken_to: set[str] = set()
     kept: list[dict[str, Any]] = []
     dropped: list[str] = []
     batch: list[str] = []
@@ -1116,6 +1293,14 @@ def filter_repeat_public_chat(
         if others and is_near_duplicate_chat(text, others):
             dropped.append("dropped: chat repeated another player's recent line and was not sent")
             continue
+        too_soon = chat_cadence_problem(snapshot, key, events, last_turns)
+        if too_soon is None and key in spoken_to and chat_cooldown_turns(key) > 0 and not (
+                key.split(":", 1)[-1] in events or (key in ("all", "team") and events)):
+            too_soon = "one line per recipient per turn"
+        if too_soon:
+            dropped.append(f"dropped: chat to {key.replace('player:', '')} came too soon ({too_soon}) and was not sent")
+            continue
+        spoken_to.add(key)
         kept.append(message)
         if needle:
             batch.append(needle)

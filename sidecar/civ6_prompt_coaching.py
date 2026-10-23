@@ -33,6 +33,23 @@ CIV6_CHAT_VARIETY_COACHING = (
     "thought.strategy is planning prose — do not paste it into chat."
 )
 
+# Shared by every seat: how chat sounds. Personality comes from the role clause.
+CIV6_LOBBY_CHAT_TONE = (
+    "Chat tone: a multiplayer game lobby, not a UN session. Talk like a player at the table who is also "
+    "this leader: light humor, playful taunts and friendly trash talk drawn from your leader's personality "
+    "and the board (a rival's slow start, a sniped wonder, a nervous border). Keep it good-natured — never "
+    "hostile, crude, or personal. One punchy line beats a formal speech."
+)
+
+# Shared by every seat: relations are part of how you win.
+CIV6_DIPLOMACY_PSYCHOLOGY = (
+    "Diplomacy and psychology are core gameplay, as important as the map: make deals, build friendships, "
+    "choose whom you trust, and keep a ledger of who kept or broke their word — remember broken promises "
+    "and let them shape your next offer. Reward reliable partners; make betrayers pay. A well-timed backstab "
+    "(dropping a friend, surprising a trusting neighbor) is a legitimate play when it clearly wins more than "
+    "the trust it burns — plan it in thought.strategy, and expect rivals to try the same on you. "
+)
+
 CIV6_MOVE_THEN_ATTACK_GUIDANCE = (
     "When an attack is offered, prefer it over a move: AttackTo on a unit row "
     "(melee, ranged, or bombard) and rangeStrike on a city row (a city attack or city strike). "

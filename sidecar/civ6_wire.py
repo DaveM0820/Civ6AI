@@ -768,6 +768,8 @@ def _civ6_chat_rules(snapshot: dict[str, Any]) -> list[str]:
         if line not in keep:
             keep.append(line)
     keep.append(coaching.CIV6_CHAT_VARIETY_COACHING)
+    keep.extend(civ6_apply_results.chat_cadence_lines(
+        snapshot, lambda pid: pipeline._player_chat_name(snapshot, pid)))
     intro_turn, intro_who = pipeline.first_self_intro_context(snapshot)
     if intro_turn is not None:
         keep.append(
@@ -880,12 +882,12 @@ def build_civ6_role_instruction(snapshot: dict[str, Any]) -> str:
         "thought.strategy holds your victory path and this turn's command plan in prose; "
         f"{_orders_execute_clause(snapshot)}"
         "Event.*.log should sound like you thinking aloud. "
-        "Diplomacy and rival psychology are part of the game — actively cultivate relationships, trades, and "
-        "alliances (or rivalries) aligned with your path to victory; every player is trying to win. "
+        f"{coaching.CIV6_DIPLOMACY_PSYCHOLOGY}"
+        "Every player is trying to win. "
         "Play to win using Civilization VI mechanics (districts, adjacency, amenities, housing, loyalty, "
         "civics and policy cards, one military unit per tile); personality colors prose, not the build queue. "
         "Speak in the game: send chat.all and "
-        f"{chat_dm_examples(snapshot)} whenever it fits (opening, first contact, deals, "
+        f"{chat_dm_examples(snapshot)} when you have something new to say (opening, first contact, deals, "
         "war, taunts, replies) — private DMs are expected on first meetings, war declarations, major deals, "
         f"and inbox replies. Use only facts from the prompt.{map_clause}"
         "After your response the host applies only your explicit orders; "
@@ -1203,9 +1205,9 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
         f"Use private DMs ({chat_dm_examples(context)}) on relationship milestones: first meeting, declaring war, deal talks, "
         "ultimatums, and replies to fresh inbox messages.",
         "Never reveal military plans, weak cities, or hidden ambitions in chat.all (those go in private DMs).",
-        "Be original and occasionally funny — in-character wit beats generic filler.",
-        "chat.all is public. Send it when you have something original to say (opening, taunt, deal, war). "
-        f"If many turns pass with no chat.all, send one. Prefer {chat_dm_examples(context)} for targeted talk.",
+        coaching.CIV6_LOBBY_CHAT_TONE,
+        "chat.all is public. Send it only when you have something new to say (opening, taunt, deal, war); "
+        f"silence is fine. Prefer {chat_dm_examples(context)} for targeted talk.",
     ]
     roster = _player_roster_line(context)
     if roster:
