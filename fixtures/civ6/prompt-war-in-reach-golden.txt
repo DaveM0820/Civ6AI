@@ -212,7 +212,7 @@ Required JSON keys:
 
   "1.strategicmap.read": "one short paragraph on the attached strategic map (land vs water, chokes, your borders, one takeaway)",
   "2.tacticalmap.read": "one short paragraph on the attached tactical map (key (x,y) for units, cities, resources)",
-  "3.thought.situation": "one paragraph board read this turn (economy, science, amenities, military, geography; new observations only)",
+  "3.thought.situation": "one paragraph on what is new or different this turn (start from CHANGED SINCE LAST TURN; economy, science, amenities, military, geography). Do not rewrite last turn's situation: if nothing changed, say so in one sentence and why this turn's plan differs",
   "4.thought.strategy": "one paragraph: long-term path to victory, then this turn's plan for each required and optional command you will issue",
   "5.Event.Idle.log": "3 units idle: scout_1, settler_1, spearman_1",
   "6.Event.Settle.log": "(write this turn's thought on this item)",

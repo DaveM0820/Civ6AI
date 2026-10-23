@@ -107,8 +107,10 @@ def civ6_required_thought_rows(snapshot: dict[str, Any] | None) -> list[str]:
                 "(key (x,y) for units, cities, resources)"
             )
     rows.append(
-        "thought.situation = one paragraph board read this turn "
-        "(economy, science, amenities, military, geography; new observations only)"
+        "thought.situation = one paragraph on what is new or different this turn "
+        "(start from CHANGED SINCE LAST TURN; economy, science, amenities, military, geography). "
+        "Do not rewrite last turn's situation: if nothing changed, say so in one sentence and why "
+        "this turn's plan differs"
     )
     rows.append(
         "thought.strategy = one paragraph: long-term path to victory, then this turn's plan "

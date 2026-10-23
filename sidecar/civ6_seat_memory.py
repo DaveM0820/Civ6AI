@@ -25,7 +25,7 @@ EVENT_KEY_CAP = 200
 # A seat at war, a city, or a military unit with nothing happening for this many turns.
 LETHARGY_TURNS = 3
 _ATTACK_KINDS = frozenset({"attack_target", "city_attack", "range_attack", "melee_attack"})
-KEPT_KEYS = ("plan", "situation_log", "milestones", "promises", "alerts", "tracked", "dropped", "event_tracking", "last_importance")
+KEPT_KEYS = ("plan", "situation_log", "milestones", "promises", "alerts", "tracked", "dropped", "event_tracking", "last_importance", "turn_delta", "escalation")
 
 OBJECTIVE_ORDERS = {
     "attack": frozenset({"attack_target", "city_attack"}),

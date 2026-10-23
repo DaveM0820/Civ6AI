@@ -55,6 +55,10 @@ class Civ6AiLocalConfig:
     # How many seat jobs may call the model at once. 0 = auto (1 for LM Studio,
     # OPENROUTER_PARALLEL_DEFAULT for OpenRouter, where seats run side by side).
     parallel_seats: int = 0
+    # Model escalation ladder (sidecar/civ6_escalation.py). {"profile": "test"|"real"|"off",
+    # "profiles": {name: [rung, ...]}}; a rung is {"model": ..., "reasoning_effort": ...} and
+    # a missing field keeps the seat's tier-0 value. Env CIV6AI_ESCALATION_PROFILE wins.
+    escalation: dict[str, Any] | None = None
 
     @property
     def is_openrouter(self) -> bool:
@@ -239,6 +243,12 @@ def apply_seat_runtime(cfg: Civ6AiLocalConfig, snapshot: dict[str, Any] | None) 
         if isinstance(decision, dict):
             player_id = decision.get("player_id")
     model, effort = resolve_seat_runtime(cfg, player_id)
+    # Escalated turn: civ6_escalation put this turn's rung on the snapshot. Tier 0 is above.
+    rung = snapshot.get("_escalation") if isinstance(snapshot, dict) else None
+    if isinstance(rung, dict) and int(rung.get("rung") or 0) > 0:
+        model = str(rung.get("model") or model).strip() or model
+        if str(rung.get("reasoning_effort") or "").strip():
+            effort = normalize_reasoning_effort(rung.get("reasoning_effort"))
     reasoning = "off" if effort == "off" else "on"
     return replace(
         cfg,

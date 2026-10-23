@@ -16,6 +16,7 @@ from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
 from sidecar import civ6_legality as legality
+from sidecar import settings
 
 APPLY_RESULTS_NAME = "apply-results.jsonl"
 KIND_OK = "APPLY_OK"
@@ -717,6 +718,15 @@ def command_result_items(context: dict[str, Any]) -> list[dict[str, Any]]:
     return [i for i in (items or []) if isinstance(i, dict) and str(i.get("summary") or "").strip()]
 
 
+def _unit_legal_moves_hint(context: dict[str, Any], item: dict[str, Any]) -> str:
+    from sidecar.civ6_legality import legal_moves_text
+
+    for ident in item.get("affected_ids") or []:
+        if str(ident).startswith("UNIT_"):
+            return legal_moves_text(context, str(ident))
+    return ""
+
+
 def thoughts_lines(context: dict[str, Any]) -> list[str]:
     items = [
         i for i in command_result_items(context)
@@ -757,6 +767,10 @@ def thoughts_lines(context: dict[str, Any]) -> list[str]:
             if isinstance(repeats, int) and repeats > 1 and item.get("kind") == KIND_FAILED:
                 text += (f" — this same order failed {repeats} times for this reason; "
                          "do not send it again until that changes")
+                if repeats >= settings.get_int("CIV6AI_REPEAT_LEGAL_MOVES_AFTER"):
+                    hint = _unit_legal_moves_hint(context, item)
+                    if hint:
+                        text += f"; {hint}"
             lines.append(pipeline._wire_line(f"apply.last.{index}", text))
     for index, note in enumerate(dropped):
         lines.append(pipeline._wire_line(f"dropped.{index}", note))
@@ -856,6 +870,42 @@ def dropped_lines(context: dict[str, Any]) -> list[str]:
     return out[:12]
 
 
+# Said vs did: a plan phrase that promises a concrete order kind this turn. Checked on
+# every turn, with or without a stored plan. (pattern, order kinds, what the plan said)
+SAID_DID: tuple[tuple[str, frozenset[str], str], ...] = (
+    (r"\b(set|change|switch|adjust)\b[^.;]{0,40}\bpriorit", frozenset({"set_build_priority"}),
+     "set build priorities"),
+    (r"\bfound ?city\b|\bfound (a|the|our) (new |second |next )?city\b", frozenset({"found_city"}),
+     "found a city"),
+    (r"\b(buy|purchase)\b", frozenset({"purchase_item", "purchase_tile"}), "buy something"),
+    (r"\bpromot(e|ion)\b", frozenset({"promote_unit"}), "promote a unit"),
+    (r"\b(slot|equip|swap|set)\b[^.;]{0,30}\bpolic(y|ies)\b", frozenset({"set_policies"}), "set policies"),
+    (r"\bsend\b[^.;]{0,20}\benvoys?\b", frozenset({"send_envoy"}), "send an envoy"),
+    (r"\bimprove\(|\bbuild (a |an )?(farm|mine|quarry|pasture|plantation|camp)\b",
+     frozenset({"worker_improve", "move_unit"}), "improve a tile"),
+)
+
+
+def said_vs_did(strategy: str, commands: list[dict[str, Any]]) -> list[str]:
+    """Plan phrases from SAID_DID with no order of a matching kind."""
+    text = (strategy or "").lower()
+    if not text.strip() or not isinstance(commands, list):
+        return []
+    kinds = {str(c.get("kind") or "") for c in commands if isinstance(c, dict)}
+    intents = {str((c.get("arguments") or c.get("fixed_arguments") or {}).get("intent") or "")
+               for c in commands if isinstance(c, dict)}
+    out: list[str] = []
+    for pattern, wanted, label in SAID_DID:
+        if not re.search(pattern, text):
+            continue
+        hit = wanted & kinds
+        if label == "improve a tile":  # a builder move only counts when it carries the improve intent
+            hit = (hit - {"move_unit"}) or ({"move_unit"} if "improve" in intents else set())
+        if not hit:
+            out.append(f"your plan said you would {label} but no such order was sent")
+    return out
+
+
 def strategy_orders_note(
     strategy: str,
     commands: list[dict[str, Any]],
@@ -865,11 +915,13 @@ def strategy_orders_note(
 
     A stored plan with active objectives is checked against those objectives.
     With no plan, the strategy text is checked for peace / attack / defend words.
+    Either way the SAID_DID phrases are checked too.
     """
     if not isinstance(commands, list):
         return None
     from sidecar.civ6_seat_memory import OBJECTIVE_ORDERS, active_objectives
 
+    promised = said_vs_did(strategy, commands)
     active = active_objectives({"plan": plan} if isinstance(plan, dict) else None)
     if active:
         kinds = {str(c.get("kind") or "") for c in commands if isinstance(c, dict)}
@@ -878,7 +930,7 @@ def strategy_orders_note(
             if not (OBJECTIVE_ORDERS[str(obj.get("kind"))] & kinds):
                 label = str(obj.get("text") or obj.get("kind") or "objective")
                 notes.append(f"objective {obj.get('kind')} ({label}) has no matching order")
-        return "; ".join(notes) or None
+        return "; ".join(notes + promised) or None
     text = (strategy or "").lower()
     if not text.strip():
         return None
@@ -898,6 +950,7 @@ def strategy_orders_note(
         {"unit_posture_fortify", "attack_target", "city_attack", "queue_production"} & kinds
     ):
         notes.append("strategy mentioned defense but no fortify, attack, city strike, or production order was issued")
+    notes.extend(promised)
     if not notes:
         return None
     return "; ".join(notes)

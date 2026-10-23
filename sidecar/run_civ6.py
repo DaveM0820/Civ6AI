@@ -710,6 +710,12 @@ def main() -> None:
     except Exception as error:
         print(f"seat memory skipped: {error}", file=sys.stderr)
     try:
+        from sidecar import civ6_turn_delta
+
+        thought_memory = civ6_turn_delta.observe(snapshot, thought_memory)
+    except Exception as error:  # never block a seat-turn on the change list
+        print(f"turn delta skipped: {error}", file=sys.stderr)
+    try:
         from sidecar import civ6_turn_importance as importance
 
         importance.apply_score_to_snapshot(snapshot, thought_memory, thought_path)
@@ -736,6 +742,18 @@ def main() -> None:
     except Exception as error:
         print(f"lethargy note skipped: {error}", file=sys.stderr)
 
+    try:  # struggle signals -> this turn's model rung (applied in civ6_config.apply_seat_runtime)
+        from sidecar import civ6_escalation
+        from sidecar.civ6_config import load_local_config as _load_cfg
+
+        esc = civ6_escalation.decide(snapshot, thought_memory, _load_cfg(), prior_dropped
+                                     if isinstance(prior_dropped, list) else [])
+        if esc.get("rung") or esc.get("reason") != "steady":
+            print(f"escalation {player_id}: rung {esc.get('rung')}/{esc.get('rungs')} {esc.get('reason')} "
+                  f"hits={esc['signals'].get('hits')} model={esc.get('model')} effort={esc.get('reasoning_effort')}",
+                  file=sys.stderr)
+    except Exception as error:  # never block a seat-turn on escalation
+        print(f"escalation skipped: {error}", file=sys.stderr)
     attach_maps = pipeline.map_image_attach_turn(snapshot)
     limit_info = context_budget.resolve_model_context_limit()
     _max_out = getattr(pipeline, "chat_max_output_tokens", lambda _effort=None: None)(None)
@@ -851,6 +869,7 @@ def main() -> None:
         "map_image_archive_path": str(archive_path) if archive_path else None,
         "map_image_attached": bool(image_attachments),
         "previous_response_id": previous_response_id,
+        "escalation": snapshot.get("_escalation"),
         "snapshot": snapshot,
     })
     wire_path = Path(input_log.parent / (args.journal.stem + "_wire.txt"))
@@ -896,6 +915,12 @@ def main() -> None:
     dropped = record.get("dropped") if isinstance(record.get("dropped"), list) else []
     if isinstance(thought_memory, dict):
         thought_memory["dropped"] = dropped
+        try:
+            from sidecar import civ6_escalation
+
+            civ6_escalation.record_cost(thought_memory, snapshot, accounted.get("cost"))
+        except Exception as error:
+            print(f"escalation cost skipped: {error}", file=sys.stderr)
         try:
             pipeline.save_thought_memory(thought_path, thought_memory)
             from sidecar import civ6_seat_memory
@@ -950,6 +975,9 @@ def main() -> None:
         metrics["importance_adjusted"] = scored.get("adjusted")
         metrics["importance_breakdown"] = scored.get("breakdown")
         metrics["intelligence_tier"] = scored.get("intelligence_tier")
+    from sidecar import civ6_escalation
+
+    metrics.update(civ6_escalation.metrics_fields(snapshot))
     metrics.update(civ6_apply_results.order_source_fields([]))
     pipeline.append_turn_metrics(metrics_dir, metrics)
     if args.session_dir is not None:

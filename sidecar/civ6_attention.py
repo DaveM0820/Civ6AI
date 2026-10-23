@@ -125,6 +125,7 @@ def _coaching(name: str):
 
 
 PROVIDERS: tuple[Callable[[Any], list[Item]], ...] = (
+    _module_items("civ6_turn_delta", "changes", 0),
     _one("explore", _coaching("civ6_exploration_attention"), "Explore", 3),
     _one("explore", _coaching("civ6_naval_explore_attention"), "Explore", 3),
     _one("lethargy", _coaching("civ6_lethargy_attention"), "Lethargy", 2),

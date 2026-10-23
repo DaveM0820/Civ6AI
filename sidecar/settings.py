@@ -84,6 +84,25 @@ INT_DEFAULTS: dict[str, tuple[int, int, int]] = {
     "CIV6AI_CHAT_PUBLIC_COOLDOWN_TURNS": (4, 0, 50),
     # How many turns back a non-chat diplomatic event still counts as "new" for the gate.
     "CIV6AI_CHAT_EVENT_WINDOW_TURNS": (1, 0, 10),
+    # Per-seat model escalation (civ6_escalation). A struggle signal fires when at least
+    # this percent of last turn's orders were rejected, failed or dropped.
+    "CIV6AI_ESCALATION_FAIL_PERCENT": (40, 1, 100),
+    # Orders last turn below this count never fire the fail-share signal (too few to judge).
+    "CIV6AI_ESCALATION_MIN_ORDERS": (3, 1, 100),
+    # Units idle on the same tile for this many turns or more ...
+    "CIV6AI_ESCALATION_IDLE_TURNS": (3, 1, 50),
+    # ... and at least this many of them fire the idle signal.
+    "CIV6AI_ESCALATION_IDLE_UNITS": (3, 1, 100),
+    # Signals (fail share, repeat rejections, idle units, stale situation) needed to step up one rung.
+    "CIV6AI_ESCALATION_SIGNALS": (2, 1, 4),
+    # Turns with fewer signals than that before stepping back down one rung.
+    "CIV6AI_ESCALATION_CLEAN_TURNS": (3, 1, 50),
+    # Spend cap per seat per session on escalated turns, in US cents. Over it the seat stays on tier 0.
+    "CIV6AI_ESCALATION_COST_CAP_CENTS": (200, 0, 100000),
+    # thought.situation token overlap (percent) with the previous turn that counts as a rewrite.
+    "CIV6AI_STALE_SITUATION_PERCENT": (60, 1, 100),
+    # Same-reason rejections of one order before the prompt lists that unit's legal moves.
+    "CIV6AI_REPEAT_LEGAL_MOVES_AFTER": (3, 1, 20),
 }
 
 

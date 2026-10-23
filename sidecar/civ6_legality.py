@@ -20,6 +20,7 @@ from sidecar.civ6_common import me as _me
 from sidecar.civ6_common import plot_xy
 from sidecar.civ6_common import turn as _turn
 from sidecar.civ6_common import unit_by_id as _unit_by_id
+from sidecar import settings
 
 BLACKLIST_TURNS = 10
 REJECTION_PROMPT_CAP = 5
@@ -470,7 +471,11 @@ def _legality_rule(snapshot: dict[str, Any], ctx: dict[str, Any]):
         if not problem:
             return None
         line = f"Rejected last turn: {order_label(command)} - {reason_text(problem)}"
-        return line, {"order": order_label(command), "reason": problem, "turn": _turn(snapshot)}
+        args = _dct(command.get("arguments") or command.get("fixed_arguments"))
+        row = {"order": order_label(command), "reason": problem, "turn": _turn(snapshot)}
+        if args.get("unit_id"):
+            row["unit_id"] = str(args.get("unit_id"))
+        return line, row
     return check
 
 
@@ -596,6 +601,62 @@ def _rejection_turns(rows: list[dict[str, Any]]) -> dict[tuple[str, str], set[in
     return seen
 
 
+def legal_moves(snapshot: dict[str, Any], unit_id: str, limit: int = 6) -> list[tuple[int, int]]:
+    """Tiles this unit may move to now: offered move targets first, then passable
+    tiles within its remaining moves (one step per move point, at least one)."""
+    unit = _unit_by_id(snapshot, str(unit_id))
+    if unit is None:
+        return []
+    start = plot_xy(unit)
+    out: list[tuple[int, int]] = []
+    for cmd in _lst(snapshot.get("legal_commands")):
+        if not isinstance(cmd, dict) or cmd.get("kind") != "move_unit":
+            continue
+        args = _dct(cmd.get("fixed_arguments"))
+        if str(args.get("unit_id") or "") != str(unit_id):
+            continue
+        try:
+            xy = int(args.get("target_x")), int(args.get("target_y"))
+        except (TypeError, ValueError):
+            continue
+        if xy != start and xy not in out:
+            out.append(xy)
+    if start is None:
+        return out[:limit]
+    try:
+        steps = int(_dct(unit.get("movement")).get("current") or 0)
+    except (TypeError, ValueError):
+        steps = 0
+    steps = max(1, min(3, steps))
+    plots = known_plots(snapshot)
+    frontier, seen = [start], {start}
+    for _ in range(steps):
+        nxt: list[tuple[int, int]] = []
+        for x, y in frontier:
+            for xy in hex_neighbors(x, y):
+                if xy in seen or xy not in plots:
+                    continue
+                seen.add(xy)
+                if tile_passable(snapshot, unit, xy[0], xy[1]) is None:
+                    nxt.append(xy)
+                    if xy not in out:
+                        out.append(xy)
+        frontier = nxt
+    return out[:limit]
+
+
+def legal_moves_text(snapshot: dict[str, Any], unit_id: str) -> str:
+    """'legal moves for warrior_1 now: (17,23), (16,24)' or '' when none are known."""
+    moves = legal_moves(snapshot, unit_id)
+    if not moves:
+        return ""
+    from sidecar import pipeline_v2 as pipeline
+
+    units = [u for u in _lst(snapshot.get("your_units")) if isinstance(u, dict)]
+    name = pipeline._build_unit_wire_id_map(units).get(str(unit_id), str(unit_id))
+    return f"legal moves for {name} now: " + ", ".join(f"({x},{y})" for x, y in moves)
+
+
 def rejection_lines(snapshot: dict[str, Any]) -> list[str]:
     turn = _turn(snapshot)
     lines: list[str] = []
@@ -615,6 +676,10 @@ def rejection_lines(snapshot: dict[str, Any]) -> list[str]:
         if repeats >= 2:
             line += (f" (rejected on {repeats} turns for the same reason; stop ordering it: "
                      f"{REPEAT_ADVICE.get(code, REPEAT_ADVICE_DEFAULT)})")
+        if repeats >= settings.get_int("CIV6AI_REPEAT_LEGAL_MOVES_AFTER") and row.get("unit_id"):
+            hint = legal_moves_text(snapshot, str(row.get("unit_id")))
+            if hint:
+                line += f"; {hint}"
         if line in lines:
             continue
         lines.append(line)
