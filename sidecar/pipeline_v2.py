@@ -2676,14 +2676,22 @@ def _thought_from_flat(flat: dict[str, Any]) -> dict[str, str]:
         situation = nested.get("situation")
         strategy = nested.get("strategy")
         if isinstance(situation, str) and situation.strip() and isinstance(strategy, str) and strategy.strip():
-            return {"situation": _clip_thought(situation), "strategy": _clip_thought(strategy)}
+            out = {"situation": _clip_thought(situation), "strategy": _clip_thought(strategy)}
+            plan = nested.get("plan")
+            if isinstance(plan, str) and plan.strip():
+                out["plan"] = _clip_thought(plan)
+            return out
     situation = flat.get("thought.situation")
     strategy = flat.get("thought.strategy")
     if not isinstance(situation, str) or not situation.strip():
         return {}
     if not isinstance(strategy, str) or not strategy.strip():
         return {}
-    return {"situation": _clip_thought(situation), "strategy": _clip_thought(strategy)}
+    out = {"situation": _clip_thought(situation), "strategy": _clip_thought(strategy)}
+    plan = flat.get("thought.plan")  # the turn plan (optional on the schema)
+    if isinstance(plan, str) and plan.strip():
+        out["plan"] = _clip_thought(plan)
+    return out
 
 
 def synthesize_decision_summary(thought: dict[str, str]) -> str:
@@ -5247,6 +5255,9 @@ def normalize_model_response(snapshot: dict[str, Any], response: dict[str, Any])
             situation = derived.get("situation", "")
             strategy = derived.get("strategy", "")
     normalized["thought"] = {"situation": _clip_thought(situation), "strategy": _clip_thought(strategy)}
+    plan = thought.get("plan") if isinstance(thought, dict) else None
+    if isinstance(plan, str) and plan.strip():
+        normalized["thought"]["plan"] = _clip_thought(plan)
     if not normalized["decision_summary"].strip():
         normalized["decision_summary"] = synthesize_decision_summary(normalized["thought"])
 

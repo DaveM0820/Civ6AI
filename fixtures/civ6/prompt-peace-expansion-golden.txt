@@ -120,7 +120,8 @@ strategicmap.read = one paragraph — landmasses, coasts, fog, rivals, expansion
 tacticalmap.read = one short paragraph on image 2, the tactical close-up — exact (x,y) of your units, threats, terrain and the tiles you will move to.
 thought.situation = what matters on the board this turn.
 thought.freethinking = optional extended inner monologue.
-thought.strategy = long-term path to victory, then this turn's plan: for each REQUIRED COMMANDS row (and each optional command you will issue), state what you will command and why — prose only, no wire keys here.
+thought.strategy = long-term path to victory and why — prose only, no wire keys here.
+thought.plan = the turn plan: every command you issue this turn and its intention (see REQUIRED COMMANDS). Keep last turn's plan going unless something changed, and say what changed when you alter it.
 Event.<Name>.log = required attention notes (see REQUIRED COMMANDS).
 remember = text plus duration; store deals, rival impressions, war aims, and multi-turn plans. opinion.* / history.* as needed.
 Required Event.* logs this turn: 2 (numbered under REQUIRED COMMANDS).
@@ -132,7 +133,7 @@ legal.research.tech, legal.research.civic, chat.all, chat.Cleopatra — see OPTI
 Do not use Skip when another option is listed.
 
 GOOD JSON (entire reply — row numbers on keys; host strips the prefix):
-  {"commands.required.count":9, "1.strategicmap.read":"...", "2.tacticalmap.read":"...", "3.thought.situation":"...", "4.thought.strategy":"...", "5.Event.Idle.log":"...", "6.Event.Settle.log":"...", "7.scout_1.command":"MoveTo(x,y)", "8.settler_1.command":"MoveTo(x,y)", "9.spearman_1.command":"MoveTo(x,y)", "10.chat.all":"Hello rivals."}
+  {"commands.required.count":10, "1.strategicmap.read":"...", "2.tacticalmap.read":"...", "3.thought.situation":"...", "4.thought.strategy":"...", "5.thought.plan":"...", "6.Event.Idle.log":"...", "7.Event.Settle.log":"...", "8.scout_1.command":"MoveTo(x,y)", "9.settler_1.command":"MoveTo(x,y)", "10.spearman_1.command":"MoveTo(x,y)", "11.chat.all":"Hello rivals."}
 
 Command rules:
 - Movement: unitId.command = MoveTo(x,y) with any destination. One MoveTo spends the unit's remaining moves (unitId.moves of unitId.maxMovement) along the game's route; pick a destination at least that far on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, except that a unit that has not moved this turn can always enter one adjacent tile, however rough (that uses all its movement).
@@ -158,11 +159,11 @@ Use only shapes listed here or on unit/city rows.
 
 Optional JSON keys:
 
-  "10.legal.research.tech": "TECH_POTTERY",
-  "11.chat": "chat.all | chat.Cleopatra",
-  "12.map.viewport": "(x,y) to center image 2 next turn, or auto",
-  "13.remember": "text (duration N turns | forever)",
-  "14.Athens.production": "bare ID from Athens.production.catalog",
+  "11.legal.research.tech": "TECH_POTTERY",
+  "12.chat": "chat.all | chat.Cleopatra",
+  "13.map.viewport": "(x,y) to center image 2 next turn, or auto",
+  "14.remember": "text (duration N turns | forever)",
+  "15.Athens.production": "bare ID from Athens.production.catalog",
 
 Reference catalogs (not numbered JSON keys):
 legal.validUnits = scout_1 | settler_1 | spearman_1
@@ -170,24 +171,25 @@ legal.validCities = Athens | Corinth
 thought.freethinking = optional free-form reflection (not counted as required).
 
 === REQUIRED COMMANDS ===
-There are 9 required commands. You must respond with every required command, enumerated from 1 to 9.
+There are 10 required commands. You must respond with every required command, enumerated from 1 to 10.
 In JSON, prefix each key with its row number (e.g. "2.settler_1.command"); the host strips the numeric prefix when applying orders.
-Required rows are the minimum, not the whole turn. After row 9, add as many optional commands as useful (chat, diplomacy, research, civics, extra unit/city orders) starting at 10. There is no cap on optional commands this turn.
+Required rows are the minimum, not the whole turn. After row 10, add as many optional commands as useful (chat, diplomacy, research, civics, extra unit/city orders) starting at 11. There is no cap on optional commands this turn.
 Return one JSON object containing every required key below (host strips the numeric prefix on each key).
 Event.* / thought.* / map reads = prose strings; unitId.command / cityName.production = game orders — copy exactly one option from the row.
 
 Required JSON keys:
 
-  "commands.required.count": 9,
-  (echo the count above, then every numbered row 1..9)
+  "commands.required.count": 10,
+  (echo the count above, then every numbered row 1..10)
 
   "1.strategicmap.read": "one short paragraph on the attached strategic map (land vs water, chokes, your borders, one takeaway)",
   "2.tacticalmap.read": "one short paragraph on the attached tactical map (key (x,y) for units, cities, resources)",
   "3.thought.situation": "one paragraph on what is new or different this turn (start from CHANGED SINCE LAST TURN; economy, science, amenities, military, geography). Do not rewrite last turn's situation: if nothing changed, say so in one sentence and why this turn's plan differs",
-  "4.thought.strategy": "one paragraph: long-term path to victory, then this turn's plan for each required and optional command you will issue",
-  "5.Event.Idle.log": "3 units idle: scout_1, settler_1, spearman_1",
-  "6.Event.Settle.log": "(write this turn's thought on this item)",
+  "4.thought.strategy": "one paragraph: long-term path to victory and why; this turn's orders go in thought.plan",
+  "5.thought.plan": "one paragraph, the turn plan: every action you take this turn and its intention, unit by unit (e.g. 'Move warrior_1 east toward (20,14) to scout the coast; move settler_1 to (17,24) and found next turn; scout_2 keeps exploring the NE coast.'). Continue your last turn plan (T<n>.plan under THOUGHTS) unless something changed; rewrite it in full each turn, and say why when a unit changes its goal or direction",
+  "6.Event.Idle.log": "3 units idle: scout_1, settler_1, spearman_1",
+  "7.Event.Settle.log": "(write this turn's thought on this item)",
   # --- UNIT / CITY ORDERS ---
-  "7.scout_1.command": "MoveTo(x,y)",
-  "8.settler_1.command": "MoveTo(x,y)",
-  "9.spearman_1.command": "MoveTo(x,y) | Fortify",
+  "8.scout_1.command": "MoveTo(x,y)",
+  "9.settler_1.command": "MoveTo(x,y)",
+  "10.spearman_1.command": "MoveTo(x,y) | Fortify",

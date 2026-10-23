@@ -93,6 +93,9 @@ def _civ6_attach_map_images(snapshot: dict[str, Any] | None) -> bool:
     return pipeline.map_image_attach_turn(snapshot)
 
 
+THOUGHT_PLAN_ROW = "thought.plan = one paragraph, the turn plan: every action you take this turn and its intention, unit by unit (e.g. 'Move warrior_1 east toward (20,14) to scout the coast; move settler_1 to (17,24) and found next turn; scout_2 keeps exploring the NE coast.'). Continue your last turn plan (T<n>.plan under THOUGHTS) unless something changed; rewrite it in full each turn, and say why when a unit changes its goal or direction"
+
+
 def civ6_required_thought_rows(snapshot: dict[str, Any] | None) -> list[str]:
     """Map-read + thought keys that belong in REQUIRED COMMANDS and the required count."""
     rows: list[str] = []
@@ -113,9 +116,9 @@ def civ6_required_thought_rows(snapshot: dict[str, Any] | None) -> list[str]:
         "this turn's plan differs"
     )
     rows.append(
-        "thought.strategy = one paragraph: long-term path to victory, then this turn's plan "
-        "for each required and optional command you will issue"
+        "thought.strategy = one paragraph: long-term path to victory and why; this turn's orders go in thought.plan"
     )
+    rows.append(THOUGHT_PLAN_ROW)
     return rows
 
 

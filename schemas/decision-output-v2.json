@@ -10,7 +10,8 @@
       "required": ["situation", "strategy"],
       "properties": {
         "situation": {"type": "string", "minLength": 0, "maxLength": 8000},
-        "strategy": {"type": "string", "minLength": 0, "maxLength": 8000}
+        "strategy": {"type": "string", "minLength": 0, "maxLength": 8000},
+        "plan": {"type": "string", "minLength": 0, "maxLength": 8000}
       }
     },
     "decision_summary": {"type": "string", "minLength": 1, "maxLength": 1200},

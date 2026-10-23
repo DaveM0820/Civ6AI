@@ -1665,7 +1665,9 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
             ))
             lines.extend(importance.journal_rules_lines(float(scored.get("adjusted") or 0)))
         thought_rows = [entry for entry in history.get("thought_memory", []) if isinstance(entry, dict)]
-        thought_rows.sort(key=lambda entry: int(entry.get("turn") or 0))
+        # Newest first under the budget, so the latest plans survive; printed oldest first.
+        thought_rows.sort(key=lambda entry: int(entry.get("turn") or 0), reverse=True)
+        kept_chunks: list[list[str]] = []
         kept_thoughts: list[str] = []
         for entry in thought_rows:
             turn = int(entry.get("turn", 0))
@@ -1673,10 +1675,10 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
             adj = entry.get("importance_adjusted", entry.get("importance_score"))
             tag = f" (importance {adj})" if older and adj not in (None, "") else ""
             chunk: list[str] = []
-            for field in ("situation", "strategy", "decision"):
+            for field, label in (("situation", "situation"), ("strategy", "strategy"), ("decision", "plan")):
                 text = entry.get(field)
                 if isinstance(text, str) and text.strip():
-                    chunk.append(pipeline._wire_line(f"T{turn}.{field}", pipeline._clip_thought(text) + tag))
+                    chunk.append(pipeline._wire_line(f"T{turn}.{label}", pipeline._clip_thought(text) + tag))
                     tag = ""
             remember = entry.get("remember")
             if isinstance(remember, str) and remember.strip():
@@ -1685,10 +1687,12 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
             if isinstance(note, str) and note.strip():
                 chunk.append(pipeline._wire_line(f"T{turn}.strategy.vs.orders", note.strip()))
             extra = sum(len(row) + 1 for row in chunk)
-            if used + extra > budget and kept_thoughts:
+            if used + extra > budget and kept_chunks:
                 break
-            kept_thoughts.extend(chunk)
+            kept_chunks.append(chunk)
             used += extra
+        for chunk in reversed(kept_chunks):
+            kept_thoughts.extend(chunk)
         lines.extend(kept_thoughts)
         remembered = [note for note in history.get("remembered", []) if isinstance(note, dict)]
         remember_n = int(cfg.get("remember_prompt") or 12)
@@ -1889,8 +1893,9 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
            if "tacticalmap.read" in {k for k, _ in required} else []),
         "thought.situation = what matters on the board this turn.",
         "thought.freethinking = optional extended inner monologue.",
-        "thought.strategy = long-term path to victory, then this turn's plan: for each REQUIRED COMMANDS row (and each "
-        "optional command you will issue), state what you will command and why — prose only, no wire keys here.",
+        "thought.strategy = long-term path to victory and why — prose only, no wire keys here.",
+        "thought.plan = the turn plan: every command you issue this turn and its intention (see REQUIRED COMMANDS). "
+        "Keep last turn's plan going unless something changed, and say what changed when you alter it.",
         "Event.<Name>.log = required attention notes (see REQUIRED COMMANDS).",
         "remember = text plus duration; store deals, rival impressions, war aims, and multi-turn plans. opinion.* / history.* as needed.",
         *(

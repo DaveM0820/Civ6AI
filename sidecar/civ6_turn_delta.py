@@ -126,6 +126,46 @@ def diff(prev: dict[str, Any], now: dict[str, Any]) -> list[str]:
     return bits
 
 
+TRAIL_LEN = 3
+REVERSE_MIN_STEP = 2  # tiles moved in each leg before a turn-back counts
+
+
+def _plot_xy(plot: Any) -> tuple[int, int] | None:
+    parts = str(plot or "").split("_")
+    try:
+        return int(parts[1]), int(parts[2])
+    except (IndexError, ValueError):
+        return None
+
+
+def update_trails(prev_trails: dict[str, Any], now: dict[str, Any]) -> dict[str, list]:
+    """Last TRAIL_LEN turn-start tiles per living unit (dead units drop out)."""
+    out: dict[str, list] = {}
+    for uid, unit in _dct(now.get("units")).items():
+        xy = _plot_xy(unit.get("plot"))
+        trail = [list(p) for p in _lst(_dct(prev_trails).get(uid)) if isinstance(p, list) and len(p) == 2]
+        if xy is not None and (not trail or tuple(trail[-1]) != xy):
+            trail.append(list(xy))
+        out[uid] = trail[-TRAIL_LEN:]
+    return out
+
+
+def reversals(trails: dict[str, list], now: dict[str, Any]) -> list[str]:
+    """Units whose last move ran back against the move before it."""
+    out: list[str] = []
+    for uid, trail in trails.items():
+        if len(trail) < 3:
+            continue
+        (x0, y0), (x1, y1), (x2, y2) = trail[-3:]
+        ax, ay, bx, by = x1 - x0, y1 - y0, x2 - x1, y2 - y1
+        if max(abs(ax), abs(ay)) < REVERSE_MIN_STEP or max(abs(bx), abs(by)) < REVERSE_MIN_STEP:
+            continue
+        if ax * bx + ay * by < 0:
+            label = _dct(_dct(now.get("units")).get(uid)).get("label") or uid
+            out.append(f"{label} ({x0},{y0})->({x1},{y1})->({x2},{y2})")
+    return out
+
+
 def _token_overlap(a: str, b: str) -> float:
     from sidecar.civ6_apply_results import token_jaccard
 
@@ -170,7 +210,15 @@ def observe(snapshot: dict[str, Any], memory: dict[str, Any] | None) -> dict[str
                 if "your plan said" in part]
         if said:
             delta["said_vs_did"] = {"turn": int(rows[-1].get("turn") or 0), "notes": said}
-    memory[STATE_KEY] = {"turn": turn, "board": now, "prev": prev}
+    if int(state.get("turn") or -1) == turn and isinstance(state.get("prev_trails"), dict):
+        prev_trails = state["prev_trails"]
+    else:
+        prev_trails = _dct(state.get("trails"))
+    trails = update_trails(prev_trails, now)
+    reversing = reversals(trails, now)
+    if reversing:
+        delta["reversing"] = reversing
+    memory[STATE_KEY] = {"turn": turn, "board": now, "prev": prev, "trails": trails, "prev_trails": prev_trails}
     snapshot[SNAPSHOT_KEY] = delta
     return memory
 
@@ -193,6 +241,10 @@ def attention_items(context: Any) -> list[str]:
         out.append(f"REPEATING: your T{stale.get('turn')} situation was {stale.get('overlap')}% the same words as "
                    "the turn before. Do not rewrite it; say what is different this turn and what you will "
                    "do differently.")
+    reversing = _lst(delta.get("reversing"))
+    if reversing:
+        out.append("REVERSING: " + "; ".join(reversing[:LIST_CAP]) + ". Each turned back on its own path. "
+                   "Keep one direction per your thought.plan unless something changed, and say what.")
     said = _dct(delta.get("said_vs_did"))
     if said.get("notes"):
         out.append(f"SAID vs DID (T{said.get('turn')}): " + "; ".join(said["notes"])

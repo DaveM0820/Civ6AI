@@ -324,7 +324,8 @@ def _persist_thought_memory(
         from sidecar import civ6_turn_importance as importance
 
         scored = snapshot.get("_importance") if isinstance(snapshot.get("_importance"), dict) else {}
-        decision = thought.get("decision", "")
+        # The turn plan rides in the thought row's decision slot (shown as T<n>.plan).
+        decision = thought.get("plan") or thought.get("decision", "")
         thought_memory = importance.attach_thought_row(
             thought_memory,
             int(snapshot["decision"]["turn"]),

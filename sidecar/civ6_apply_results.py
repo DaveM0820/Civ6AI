@@ -964,7 +964,8 @@ def attach_strategy_orders_note(thought_memory: dict[str, Any], turn: int, comma
     if not isinstance(entry, dict):
         return
     plan = thought_memory.get("plan") if isinstance(thought_memory.get("plan"), dict) else None
-    note = strategy_orders_note(str(entry.get("strategy") or ""), commands, plan)
+    said = " ".join(str(entry.get(k) or "") for k in ("strategy", "decision")).strip()
+    note = strategy_orders_note(said, commands, plan)
     if note:
         entry["orders_note"] = note
     else:

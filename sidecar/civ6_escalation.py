@@ -7,6 +7,7 @@ Last turn's signals, one point each:
   idle         CIV6AI_ESCALATION_IDLE_UNITS units idle on one tile for
                CIV6AI_ESCALATION_IDLE_TURNS turns or more
   stale        thought.situation repeated the turn before (civ6_turn_delta)
+  oscillation  a unit turned back on its own path (civ6_turn_delta REVERSING)
 
 At CIV6AI_ESCALATION_SIGNALS points the seat steps up one rung of the ladder
 for the next call; after CIV6AI_ESCALATION_CLEAN_TURNS turns under that it
@@ -101,8 +102,11 @@ def signals(snapshot: dict[str, Any], dropped: list[Any] | None = None) -> dict[
     out["idle_units"] = long_idle
     if long_idle >= settings.get_int("CIV6AI_ESCALATION_IDLE_UNITS"):
         out["hits"].append("idle")
-    if _dct(_dct(snapshot.get("_turn_delta")).get("stale")):
+    delta = _dct(snapshot.get("_turn_delta"))
+    if _dct(delta.get("stale")):
         out["hits"].append("stale")
+    if _lst(delta.get("reversing")):
+        out["hits"].append("oscillation")
     out["score"] = len(out["hits"])
     return out
 

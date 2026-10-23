@@ -93,8 +93,8 @@ INT_DEFAULTS: dict[str, tuple[int, int, int]] = {
     "CIV6AI_ESCALATION_IDLE_TURNS": (3, 1, 50),
     # ... and at least this many of them fire the idle signal.
     "CIV6AI_ESCALATION_IDLE_UNITS": (3, 1, 100),
-    # Signals (fail share, repeat rejections, idle units, stale situation) needed to step up one rung.
-    "CIV6AI_ESCALATION_SIGNALS": (2, 1, 4),
+    # Signals (fail share, repeat rejections, idle units, stale situation, oscillation) needed to step up one rung.
+    "CIV6AI_ESCALATION_SIGNALS": (2, 1, 5),
     # Turns with fewer signals than that before stepping back down one rung.
     "CIV6AI_ESCALATION_CLEAN_TURNS": (3, 1, 50),
     # Spend cap per seat per session on escalated turns, in US cents. Over it the seat stays on tier 0.
