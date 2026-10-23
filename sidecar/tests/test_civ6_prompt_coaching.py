@@ -132,8 +132,6 @@ class Civ6PromptCoachingTests(unittest.TestCase):
 
 
     def test_expansion_and_chat_coaching_constants(self):
-        self.assertIn("FoundCity", coaching.CIV6_EXPANSION_COACHING)
-        self.assertIn("Settler", coaching.CIV6_EXPANSION_COACHING)
         self.assertIn("do not repeat", coaching.CIV6_CHAT_VARIETY_COACHING.lower())
 
     def test_explored_percent_is_the_whole_map_not_the_picture(self):
@@ -237,9 +235,13 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         }
         # _advice_section is private-ish; use build path that includes advice
         from sidecar import civ6_wire
-        blob = "\n".join(civ6_wire._advice_section(snap)).lower()
-        self.assertIn("expansion", blob)
-        self.assertIn("foundcity", blob.replace(" ", ""))
+        from sidecar import civ6_attention
+
+        settle = [i for i in civ6_attention.collect(snap) if i.topic == "settle"]
+        self.assertEqual(1, sum(i.text.startswith("SETTLE:") for i in settle))
+        self.assertEqual(("settler_1.command = FoundCity",), settle[0].commands)
+        self.assertIn("Found a city this turn: settler_1.command = FoundCity", settle[0].text)
+        self.assertNotIn("Settler", "\n".join(civ6_wire._advice_section(snap)))
 
 
 if __name__ == "__main__":

@@ -5,7 +5,8 @@ then shortens lower-priority sections until the text is under the seat's
 max_prompt_chars. The attached map image is never removed to save characters.
 
 Protected, in every pass: ATTENTION, WAR, REQUIRED COMMANDS, offered command
-rows, and the plan / latest situation lines.
+rows, and the plan / latest situation lines. ATTENTION has its own last pass
+that drops registry items by priority, least urgent first; priority 0 stays.
 """
 from __future__ import annotations
 
@@ -137,7 +138,7 @@ def make_report(before: str, after: str, limit: int, compactions: list[str]) -> 
     }
 
 
-def compact_to_budget(text: str, limit: int) -> tuple[str, list[str]]:
+def compact_to_budget(text: str, limit: int, attention: list[Any] | None = None) -> tuple[str, list[str]]:
     """Shorten lower-priority sections until ``text`` fits, or the ladder ends.
 
     Order is least necessary first: verbose history, repeated legend, distant
@@ -154,9 +155,32 @@ def compact_to_budget(text: str, limit: int) -> tuple[str, list[str]]:
         if updated != text:
             fired.append(name)
             text = updated
+    if len(text) > limit and attention:
+        updated = _trim_attention(text, limit, attention)
+        if updated != text:
+            fired.append("attention")
+            text = updated
     if len(text) > limit:
         fired.append("still_over_budget")
     return text, fired
+
+
+def _trim_attention(text: str, limit: int, items: list[Any]) -> str:
+    """Drop ATTENTION items, highest priority number first, until the text fits."""
+    order = sorted(
+        (item for item in items if getattr(item, "priority", 0) > 0),
+        key=lambda item: -item.priority,
+    )
+    for item in order:
+        if len(text) <= limit:
+            break
+        parts = []
+        for title, chunk in _split_sections(text):
+            if title == ATTENTION_SECTION:
+                chunk = chunk.replace("\n" + item.text, "", 1)
+            parts.append(chunk)
+        text = "".join(parts)
+    return text
 
 
 def _split_sections(text: str) -> list[tuple[str, str]]:

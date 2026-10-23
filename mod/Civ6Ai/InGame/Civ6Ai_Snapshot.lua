@@ -5448,7 +5448,7 @@ function Civ6Ai_Snapshot.Build(playerID, options)
     },
     advciv = {
       default_unit_controller = "native",
-      fallback_policy = "Firaxis native AI handles unmoved units after LLM apply.",
+      fallback_policy = "The host fallback (Civ6Ai_Orders) handles units the model did not order; it never overrides a model order.",
       recommendations = Civ6Ai_Util.JsonArrayList(),
     },
     legal_commands = legal,

@@ -26,6 +26,24 @@ class AttentionRegistryTests(unittest.TestCase):
 
         self.assertIn(attention.SECTION, civ6_prompt_budget.PROTECTED_SECTIONS)
 
+    def test_budget_drops_least_urgent_attention_first(self):
+        from sidecar import civ6_prompt_budget as budget
+
+        items = [attention.Item("settle", "keep me", None, 0), attention.Item("x", "drop me first", None, 3),
+                 attention.Item("y", "drop me second", None, 1)]
+        text = "=== ATTENTION ===\nkeep me\ndrop me first\ndrop me second\n\n=== OTHER ===\nok"
+        out = budget._trim_attention(text, len(text) - 10, items)
+        self.assertIn("keep me", out)
+        self.assertNotIn("drop me first", out)
+        self.assertIn("drop me second", out)
+
+    def test_rejected_and_lethargy_have_events(self):
+        with mock.patch.object(coaching, "civ6_rejected_last_turn_attention", return_value="Rejected: x"), \
+             mock.patch.object(coaching, "civ6_lethargy_attention", return_value="LETHARGY: y"):
+            names = attention.event_names({})
+        self.assertIn("Blocked", names)
+        self.assertIn("Lethargy", names)
+
 
 if __name__ == "__main__":
     unittest.main()

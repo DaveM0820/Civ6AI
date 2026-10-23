@@ -1219,7 +1219,7 @@ def build_classical_golden_snapshot() -> dict[str, Any]:
         },
         "advciv": {
             "default_unit_controller": "native",
-            "fallback_policy": "Firaxis native AI handles unmoved units after LLM apply.",
+            "fallback_policy": "The host fallback (Civ6Ai_Orders) handles units the model did not order; it never overrides a model order.",
             "recommendations": [],
         },
         "legal_commands": legal_commands,

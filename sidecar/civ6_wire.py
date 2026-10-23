@@ -894,13 +894,14 @@ def _event_log_rows(snapshot: dict[str, Any]) -> list[tuple[str, str]]:
         names = [wire_ids.get(str(u.get("unit_id")), str(u.get("unit_id"))) for u in idle[:8]]
         extra = f" (+{len(idle) - 8} more)" if len(idle) > 8 else ""
         rows.append(("Idle", f"{len(idle)} units idle: {', '.join(names)}{extra}"))
+    blocked_hint = "(last turn's failed order: what went wrong and what you do differently)"
     if civ6_apply_results.blocked_attention_lines(snapshot):
-        rows.append(("Blocked", "(last turn's failed order: what went wrong and what you do differently)"))
+        rows.append(("Blocked", blocked_hint))
     from sidecar import civ6_attention
 
     for name in civ6_attention.event_names(snapshot):
         if all(existing != name for existing, _ in rows):
-            rows.append((name, "(write this turn's thought on this item)"))
+            rows.append((name, blocked_hint if name == "Blocked" else "(write this turn's thought on this item)"))
     return rows
 
 
@@ -2003,8 +2004,6 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
         )
     lines = [
         opening,
-        "- Settlers should found or walk toward a settle tile; do not sleep on your own city.",
-        f"- {coaching.CIV6_EXPANSION_COACHING}",
         "- Before you finish: issue one command for each entry under REQUIRED COMMANDS.",
     ]
     if _war_going_badly(context):
@@ -2012,20 +2011,6 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
             "- This war is going badly: a city is under half health or loyalty is collapsing. "
             "Offer peace to the civ you are actually fighting if they will take it."
         )
-    capital = coaching.capital_founding_coaching(context)
-    if capital:
-        lines.append(f"- {capital}")
-    if coaching.settler_present(context):
-        lines.append(
-            "- Settlers are priority targets: when you have one, keep a military escort or nearby defender every "
-            "turn until it founds or reaches safety."
-        )
-        lines.append(f"- Settler: {coaching.CIV6_SETTLER_MAP_ADVICE}")
-        if any(isinstance(c, dict) and c.get("kind") == "found_city" for c in context.get("legal_commands", []) or []):
-            lines.append(
-                "- FoundCity is legal this turn for at least one Settler — strongly consider founding now unless "
-                "a clearly better tile is within about three moves."
-            )
     lines.extend(combat_wire.tactics_advice_lines(context))
     explored = coaching._civ6_explored_percent(context)
     if isinstance(explored, int) and explored < 100 and not combat_wire.war_active(context):
@@ -2172,18 +2157,6 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
             "- A unit with a goal line is already walking. If its row lists AttackTo, that attack is required. "
             "Order MoveTo only to redirect a unit that has no attack."
         )
-    if any(isinstance(c, dict) and c.get("kind") == "found_city" for c in snapshot.get("legal_commands", [])):
-        resp.append("- FoundCity is optional: prefer founding this turn on a decent tile (fresh water/coast, not "
-                    "cramped). Walking up to ~3 tiles for a clearly better site is fine; long treks are not.")
-        if not snapshot.get("your_cities"):
-            # Seats 1-4 read the line above as licence for 25-tile treks toward a far
-            # landmass while cityless for 10+ turns.
-            resp.append("- You have no city yet: every turn without a capital costs all your science, culture and "
-                        "production. Settle the capital here or within about 3 tiles; do not march toward a distant "
-                        "landmass first.")
-        else:
-            resp.append("- You already have a capital: still expand — FoundCity with idle Settlers rather than "
-                        "guarding them in the capital forever.")
     resp.extend(f"- {line}" for line in _civ6_chat_rules(snapshot))
 
     # OPTIONAL COMMANDS
@@ -2437,7 +2410,9 @@ def build_civ6_model_wire_text(snapshot: dict[str, Any], *, max_prompt_chars: in
         text = full
     limit = prompt_budget.resolve_max_prompt_chars(snapshot, max_prompt_chars)
     if limit > 0 and len(text) > limit:
-        text, fired = prompt_budget.compact_to_budget(text, limit)
+        from sidecar import civ6_attention
+
+        text, fired = prompt_budget.compact_to_budget(text, limit, civ6_attention.collect(context))
         compactions.extend(fired)
     prompt_budget.store_report(snapshot, prompt_budget.make_report(full, text, limit, compactions))
     return text

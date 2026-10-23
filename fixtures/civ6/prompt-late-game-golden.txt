@@ -246,8 +246,6 @@ memory.T40.pin = true
 
 === ADVICE ===
 - You are at war, but no enemy unit is within move range of your army or cities. Do not strike or mass units for an assault this turn. Garrison and build as usual.
-- Settlers should found or walk toward a settle tile; do not sleep on your own city.
-- Expansion: a Settler that sits idle wastes growth. Prefer FoundCity this turn when the tile is legal and decent (fresh water or coast, not cramped by another city). If the best site is a few tiles away, MoveTo that tile and FoundCity as soon as FoundCity is legal — do not park the Settler on your capital or wander the map for ten-plus turns.
 - Before you finish: issue one command for each entry under REQUIRED COMMANDS.
 - This war is going badly: a city is under half health or loyalty is collapsing. Offer peace to the civ you are actually fighting if they will take it.
 - War tactics: no enemy is within move range of your army or cities, so do not mass units or plan a strike this turn.
@@ -270,7 +268,7 @@ thought.strategy = long-term path to victory, then this turn's plan: for each RE
 Event.<Name>.log = required attention notes (see REQUIRED COMMANDS).
 remember = text plus duration; store deals, rival impressions, war aims, and multi-turn plans. opinion.* / history.* as needed.
 plan.goal = victory type (science, culture, domination, diplomacy, religion, or score). plan.objective = attack|peace|improve|settle|research|defend, the aim, and by T<turn>. plan.objective.done = that kind when the objective is finished. Update the plan every turn.
-Required Event.* logs this turn: 1 (numbered under REQUIRED COMMANDS).
+Required Event.* logs this turn: 2 (numbered under REQUIRED COMMANDS).
 
 Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):
 unitId.command = MoveTo(x,y) | AttackTo(x,y) | FoundCity | Improve(x,y,IMPROVEMENT_X) (builders) | Fortify | Skip (one option per unit from its row; MoveTo(x,y) = any destination tile, the unit walks toward it).
@@ -279,7 +277,7 @@ legal.research.tech, legal.research.civic, chat.all, chat.Cleopatra — see OPTI
 Do not use Skip when another option is listed.
 
 GOOD JSON (entire reply — row numbers on keys; host strips the prefix):
-  {"commands.required.count":19, "1.strategicmap.read":"...", "2.tacticalmap.read":"...", "3.thought.situation":"...", "4.thought.strategy":"...", "5.Event.Idle.log":"...", "6.warrior_2.command":"MoveTo(x,y)", "7.warrior_3.command":"MoveTo(x,y)", "8.warrior_4.command":"MoveTo(x,y)", "9.warrior_5.command":"MoveTo(x,y)", "10.warrior_6.command":"MoveTo(x,y)", "11.warrior_7.command":"MoveTo(x,y)", "12.warrior_8.command":"MoveTo(x,y)", "13.warrior_9.command":"MoveTo(x,y)", "14.warrior_10.command":"MoveTo(x,y)", "15.warrior_11.command":"MoveTo(x,y)", "16.warrior_12.command":"MoveTo(x,y)", "17.warrior_13.command":"MoveTo(x,y)", "18.warrior_14.command":"MoveTo(x,y)", "19.Polis3.production":"bare ID from Polis3.production.catalog", "20.chat.all":"Hello rivals."}
+  {"commands.required.count":20, "1.strategicmap.read":"...", "2.tacticalmap.read":"...", "3.thought.situation":"...", "4.thought.strategy":"...", "5.Event.Idle.log":"...", "6.Event.Lethargy.log":"...", "7.warrior_2.command":"MoveTo(x,y)", "8.warrior_3.command":"MoveTo(x,y)", "9.warrior_4.command":"MoveTo(x,y)", "10.warrior_5.command":"MoveTo(x,y)", "11.warrior_6.command":"MoveTo(x,y)", "12.warrior_7.command":"MoveTo(x,y)", "13.warrior_8.command":"MoveTo(x,y)", "14.warrior_9.command":"MoveTo(x,y)", "15.warrior_10.command":"MoveTo(x,y)", "16.warrior_11.command":"MoveTo(x,y)", "17.warrior_12.command":"MoveTo(x,y)", "18.warrior_13.command":"MoveTo(x,y)", "19.warrior_14.command":"MoveTo(x,y)", "20.Polis3.production":"bare ID from Polis3.production.catalog", "21.chat.all":"Hello rivals."}
 
 Command rules:
 - Movement: unitId.command = MoveTo(x,y) with any destination. One MoveTo spends the unit's remaining moves (unitId.moves of unitId.maxMovement) along the game's route; pick a destination at least that far on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, except that a unit that has not moved this turn can always enter one adjacent tile, however rough (that uses all its movement).
@@ -305,17 +303,17 @@ Use only shapes listed here or on unit/city rows.
 
 Optional JSON keys:
 
-  "20.legal.research.tech": "TECH_POTTERY",
-  "21.chat": "chat.all | chat.Cleopatra",
-  "22.map.viewport": "(x,y) to center image 2 next turn, or auto",
-  "23.remember": "text (duration N turns | forever)",
-  "24.Polis0.production": "bare ID from Polis0.production.catalog",
-  "25.Polis1.production": "bare ID from Polis1.production.catalog",
-  "26.Polis2.production": "bare ID from Polis2.production.catalog",
-  "27.Polis4.production": "bare ID from Polis4.production.catalog",
-  "28.Polis5.production": "bare ID from Polis5.production.catalog",
-  "29.Polis6.production": "bare ID from Polis6.production.catalog",
-  "30.Polis7.production": "bare ID from Polis7.production.catalog",
+  "21.legal.research.tech": "TECH_POTTERY",
+  "22.chat": "chat.all | chat.Cleopatra",
+  "23.map.viewport": "(x,y) to center image 2 next turn, or auto",
+  "24.remember": "text (duration N turns | forever)",
+  "25.Polis0.production": "bare ID from Polis0.production.catalog",
+  "26.Polis1.production": "bare ID from Polis1.production.catalog",
+  "27.Polis2.production": "bare ID from Polis2.production.catalog",
+  "28.Polis4.production": "bare ID from Polis4.production.catalog",
+  "29.Polis5.production": "bare ID from Polis5.production.catalog",
+  "30.Polis6.production": "bare ID from Polis6.production.catalog",
+  "31.Polis7.production": "bare ID from Polis7.production.catalog",
 
 Reference catalogs (not numbered JSON keys):
 legal.validUnits = warrior_1 | warrior_2 | warrior_3 | warrior_4 | warrior_5 | warrior_6 | warrior_7 | warrior_8 | warrior_9 | warrior_10 | warrior_11 | warrior_12 | warrior_13 | warrior_14
@@ -332,34 +330,35 @@ Polis7.production.catalog = UNIT_LATE_0 (4t, 80p) | UNIT_LATE_1 (4t, 81p) | UNIT
 thought.freethinking = optional free-form reflection (not counted as required).
 
 === REQUIRED COMMANDS ===
-There are 19 required commands. You must respond with every required command, enumerated from 1 to 19.
+There are 20 required commands. You must respond with every required command, enumerated from 1 to 20.
 In JSON, prefix each key with its row number (e.g. "2.settler_1.command"); the host strips the numeric prefix when applying orders.
-Required rows are the minimum, not the whole turn. After row 19, add as many optional commands as useful (chat, diplomacy, research, civics, extra unit/city orders) starting at 20. There is no cap on optional commands this turn.
+Required rows are the minimum, not the whole turn. After row 20, add as many optional commands as useful (chat, diplomacy, research, civics, extra unit/city orders) starting at 21. There is no cap on optional commands this turn.
 Return one JSON object containing every required key below (host strips the numeric prefix on each key).
 Event.* / thought.* / map reads = prose strings; unitId.command / cityName.production = game orders — copy exactly one option from the row.
 
 Required JSON keys:
 
-  "commands.required.count": 19,
-  (echo the count above, then every numbered row 1..19)
+  "commands.required.count": 20,
+  (echo the count above, then every numbered row 1..20)
 
   "1.strategicmap.read": "one short paragraph on the attached strategic map (land vs water, chokes, your borders, one takeaway)",
   "2.tacticalmap.read": "one short paragraph on the attached tactical map (key (x,y) for units, cities, resources)",
   "3.thought.situation": "one paragraph board read this turn (economy, science, amenities, military, geography; new observations only)",
   "4.thought.strategy": "one paragraph: long-term path to victory, then this turn's plan for each required and optional command you will issue",
   "5.Event.Idle.log": "14 units idle: warrior_1, warrior_2, warrior_3, warrior_4, warrior_5, warrior_6, warrior_7, warrior_8 (+6 more)",
+  "6.Event.Lethargy.log": "(write this turn's thought on this item)",
   # --- UNIT / CITY ORDERS ---
-  "6.warrior_2.command": "MoveTo(x,y)",
-  "7.warrior_3.command": "MoveTo(x,y)",
-  "8.warrior_4.command": "MoveTo(x,y)",
-  "9.warrior_5.command": "MoveTo(x,y)",
-  "10.warrior_6.command": "MoveTo(x,y)",
-  "11.warrior_7.command": "MoveTo(x,y)",
-  "12.warrior_8.command": "MoveTo(x,y)",
-  "13.warrior_9.command": "MoveTo(x,y)",
-  "14.warrior_10.command": "MoveTo(x,y)",
-  "15.warrior_11.command": "MoveTo(x,y)",
-  "16.warrior_12.command": "MoveTo(x,y)",
-  "17.warrior_13.command": "MoveTo(x,y)",
-  "18.warrior_14.command": "MoveTo(x,y)",
-  "19.Polis3.production": "bare ID from Polis3.production.catalog",
+  "7.warrior_2.command": "MoveTo(x,y)",
+  "8.warrior_3.command": "MoveTo(x,y)",
+  "9.warrior_4.command": "MoveTo(x,y)",
+  "10.warrior_5.command": "MoveTo(x,y)",
+  "11.warrior_6.command": "MoveTo(x,y)",
+  "12.warrior_7.command": "MoveTo(x,y)",
+  "13.warrior_8.command": "MoveTo(x,y)",
+  "14.warrior_9.command": "MoveTo(x,y)",
+  "15.warrior_10.command": "MoveTo(x,y)",
+  "16.warrior_11.command": "MoveTo(x,y)",
+  "17.warrior_12.command": "MoveTo(x,y)",
+  "18.warrior_13.command": "MoveTo(x,y)",
+  "19.warrior_14.command": "MoveTo(x,y)",
+  "20.Polis3.production": "bare ID from Polis3.production.catalog",

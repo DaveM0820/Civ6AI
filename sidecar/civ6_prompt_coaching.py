@@ -24,13 +24,6 @@ CIV6_SETTLER_MAP_ADVICE = (
     "fresh water and coast access, and tile yields (food/production/gold)."
 )
 
-CIV6_EXPANSION_COACHING = (
-    "Expansion: a Settler that sits idle wastes growth. Prefer FoundCity this turn when the "
-    "tile is legal and decent (fresh water or coast, not cramped by another city). If the "
-    "best site is a few tiles away, MoveTo that tile and FoundCity as soon as FoundCity is "
-    "legal — do not park the Settler on your capital or wander the map for ten-plus turns."
-)
-
 CIV6_CHAT_VARIETY_COACHING = (
     "Chat: do not repeat your opening introduction every turn. After first contact, send a "
     "fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or "
@@ -38,12 +31,6 @@ CIV6_CHAT_VARIETY_COACHING = (
     "use chat.all sparingly. "
     "A near-copy or re-introduction after your first public line is dropped, not sent. "
     "thought.strategy is planning prose — do not paste it into chat."
-)
-
-CIV6_CAPITAL_T1_COACHING = (
-    "Founding: unless this start tile is clearly bad (no fresh water or coast, or FoundCity is "
-    "illegal here), found the capital this turn. Walking inland for a 'high-yield' tile delays "
-    "science, culture and production. Prefer coast and fresh water when they are legal."
 )
 
 CIV6_MOVE_THEN_ATTACK_GUIDANCE = (
@@ -826,25 +813,10 @@ def civ6_host_default_attention(snapshot: dict[str, Any]) -> str | None:
 
 
 def collect_civ6_attention_items(snapshot: dict[str, Any]) -> list[str]:
-    items: list[str] = []
-    for fn in (
-        civ6_exploration_attention,
-        civ6_naval_explore_attention,
-        civ6_lethargy_attention,
-        civ6_low_hp_retreat_attention,
-        civ6_focus_fire_attention,
-        civ6_expansion_attention,
-        civ6_military_cap_attention,
-        civ6_rejected_last_turn_attention,
-        civ6_host_default_attention,
-        civ6_idle_resources_attention,
-    ):
-        note = fn(snapshot)
-        if note:
-            items.append(note)
-    items.extend(civ6_loyalty_attention(snapshot))
-    items.extend(civ6_economy_attention(snapshot))
-    return items
+    """Every ATTENTION line, from the one registry in civ6_attention."""
+    from sidecar import civ6_attention
+
+    return civ6_attention.lines(snapshot)
 
 
 def append_attack_options_to_unit_line(options: list[str], attack_tokens: list[str]) -> list[str]:
@@ -1130,11 +1102,3 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
     return lines
 
 
-def capital_founding_coaching(snapshot: dict[str, Any]) -> str | None:
-    if not settler_present(snapshot):
-        return None
-    cities = snapshot.get("your_cities") or []
-    has_city = any(isinstance(c, dict) for c in cities)
-    if has_city:
-        return None
-    return CIV6_CAPITAL_T1_COACHING
