@@ -350,17 +350,17 @@ def inject_legal_commands(snapshot: dict) -> int:
     """Add one legal command per category and level (0 switches it off)."""
     if not priorities_supported(snapshot):
         return 0
+    from sidecar import civ6_legality as legality
     from sidecar.civ6_adapter import _enrich_runtime_legal_command
 
-    legal = snapshot.setdefault("legal_commands", [])
-    have = {c.get("command_id") for c in legal if isinstance(c, dict)}
+    have = {c.get("command_id") for c in snapshot.get("legal_commands") or [] if isinstance(c, dict)}
     added = 0
     for cat in CATEGORIES:
         for level in (0, 1, 2, 3):
             cid = command_id(cat["id"], level)
             if cid in have:
                 continue
-            legal.append(_enrich_runtime_legal_command({
+            legality.add_offer(snapshot, _enrich_runtime_legal_command({
                 "command_id": cid,
                 "kind": COMMAND_KIND,
                 "description": f"build priority {cat['key']}:{level}",

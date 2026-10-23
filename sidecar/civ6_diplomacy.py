@@ -210,15 +210,10 @@ def _usable_problem(snapshot: dict, items: list[dict[str, Any]]) -> str | None:
 
 
 def _pact_problem(snapshot: dict, pid: str, kinds: set, require_unlock: bool = True) -> str | None:
-    from sidecar.civ6_legality import pact_problem
+    from sidecar.civ6_legality import pact_problem, reason_text
 
     problem = pact_problem(snapshot, pid, kinds, require_unlock=require_unlock)
-    if problem == "peace_not_at_war":
-        return "peace needs a war"
-    if problem and problem.startswith("no_") and problem.endswith("_at_war"):
-        kind = problem[3:-7]
-        return f"no {kind} while at war"
-    return problem
+    return reason_text(problem) if problem else problem
 
 
 def _items_text(items: list[dict[str, Any]]) -> str:
@@ -328,16 +323,16 @@ def _match_target(snapshot: dict, key: str) -> dict[str, Any] | None:
 
 
 def _add_command(snapshot: dict, kind: str, fixed: dict, description: str) -> str:
+    from sidecar import civ6_legality as legality
     from sidecar.civ6_adapter import _enrich_runtime_legal_command
 
-    legal = snapshot.setdefault("legal_commands", [])
     base = "CMD_DIPLO_" + kind.upper()
-    have = {c.get("command_id") for c in legal if isinstance(c, dict)}
+    have = {c.get("command_id") for c in snapshot.get("legal_commands") or [] if isinstance(c, dict)}
     n = 1
     while f"{base}_{n}" in have:
         n += 1
     cid = f"{base}_{n}"
-    legal.append(_enrich_runtime_legal_command({
+    legality.add_offer(snapshot, _enrich_runtime_legal_command({
         "command_id": cid, "kind": kind, "description": description[:240], "fixed_arguments": fixed,
     }))
     return cid

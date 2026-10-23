@@ -175,15 +175,23 @@ def validate_civ6_snapshot(snapshot: dict[str, Any]) -> None:
     errors = _schema_errors(snapshot)
     if errors:
         raise pipeline.BoundaryError("civ6_snapshot_schema", "; ".join(errors[:8]))
+    from sidecar import civ6_legality as legality
+
+    snapshot.setdefault("legal_commands", [])
+    legality.apply_offer_filter(snapshot, "adapter_dedupe")
+
+
+def dedupe_offers(snapshot: dict[str, Any], legal: list[Any]) -> list[Any]:
+    """Offer filter: keep the first offer per command_id."""
     ids: set[str] = set()
     kept = []
-    for command in snapshot.get("legal_commands", []):
+    for command in legal:
         command_id = command.get("command_id")
         if command_id not in ids:
             kept.append(command)
         if isinstance(command_id, str):
             ids.add(command_id)
-    snapshot["legal_commands"] = kept
+    return kept
 
 
 _LUA_ARRAY_KEYS = frozenset({

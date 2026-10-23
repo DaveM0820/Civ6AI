@@ -46,15 +46,20 @@ def prune_settlers_without_sites(snapshot: dict[str, Any]) -> int:
             sites.add(("here", u.get("unit_id")))
     if not settlers or len(sites) >= len(settlers):
         return 0
-    legal = snapshot.get("legal_commands") if isinstance(snapshot.get("legal_commands"), list) else []
-    keep = [c for c in legal if not (isinstance(c, dict) and c.get("kind") == "queue_production"
-                                     and (c.get("fixed_arguments") or {}).get("build_id") == "UNIT_SETTLER")]
-    snapshot["legal_commands"] = keep
+    from sidecar import civ6_legality as legality
+
+    dropped = legality.apply_offer_filter(snapshot, "no_city_sites")
     if len(sites) == 0:
         snapshot["_settlers_no_walkable_site"] = len(settlers)
     else:
         snapshot["_no_city_sites"] = len(settlers)
-    return len(legal) - len(keep)
+    return dropped
+
+
+def settler_offers_without_sites(snapshot: dict[str, Any], legal: list[Any]) -> list[Any]:
+    """Offer filter: drop settler production offers."""
+    return [c for c in legal if not (isinstance(c, dict) and c.get("kind") == "queue_production"
+                                     and (c.get("fixed_arguments") or {}).get("build_id") == "UNIT_SETTLER")]
 
 
 def no_city_sites_lines(context: dict[str, Any]) -> list[str]:

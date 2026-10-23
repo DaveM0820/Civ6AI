@@ -1280,20 +1280,45 @@ def _land_units_cannot_embark(snapshot: dict[str, Any]) -> bool:
     return not can_embark(snapshot)
 
 
-def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-    """Drop illegal orders via the legality layer, then drop duplicate tile orders."""
-    from sidecar import civ6_legality as legality
+def _failure_matcher(snapshot: dict[str, Any], located: bool = False):
+    """One repeat-failure fingerprint check shared by offers and orders.
 
-    kept, dropped = legality.filter_orders(snapshot, commands)
+    Returns (failures, match). match(order, unit, x, y) gives the first failure
+    (fingerprint, turn, reason) with the same order kind, unit (either id form)
+    and tile, or None. located=True ignores failures with no coordinates.
+    """
     fails: list[tuple[tuple[str, str, Any, Any], int, str]] = []
     for item in command_result_items(snapshot):
         fp = _result_fingerprint(item)
-        if fp is None:
+        if fp is None or (located and (fp[2] is None or fp[3] is None)):
             continue
         fails.append((fp, int(item.get("turn") or 0), str(item.get("reason") or "failure")))
     units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
     wire_ids = pipeline._build_unit_wire_id_map(units)
     reverse = {v: k for k, v in wire_ids.items()}
+
+    def match(order: str, unit: str, x: Any, y: Any):
+        for fail in fails:
+            fail_unit = fail[0][1]
+            unit_ok = (
+                fail_unit == unit
+                or wire_ids.get(unit) == fail_unit
+                or reverse.get(fail_unit) == unit
+                or wire_ids.get(fail_unit) == unit
+            )
+            if fail[0][0] == order and unit_ok and fail[0][2] == x and fail[0][3] == y:
+                return fail
+        return None
+
+    return fails, match
+
+
+def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Drop illegal orders via the legality layer, then drop duplicate tile orders."""
+    from sidecar import civ6_legality as legality
+
+    kept, dropped = legality.filter_orders(snapshot, commands)
+    fails, match = _failure_matcher(snapshot)
     combat = (snapshot.get("civ6") or {}).get("combat") or {}
     enemy_plots = {(h.get("x"), h.get("y")) for key in ("hostiles", "hostile_cities") for h in combat.get(key) or [] if isinstance(h, dict)}
     failed_tiles: set[tuple[Any, Any]] = {(f[0][2], f[0][3]) for f in fails if f[0][0] == "move_unit"}
@@ -1304,16 +1329,10 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
         if fp[0] == "attack_target" and (fp[2], fp[3]) not in enemy_plots:
             dropped.append(f"dropped: AttackTo({fp[2]},{fp[3]}) has no visible enemy unit or city to hit")
             continue
-        matched = None
-        for fail_fp, fail_turn, fail_reason in fails:
-            unit_a, unit_b = fail_fp[1], fp[1]
-            unit_ok = unit_a == unit_b or wire_ids.get(unit_b) == unit_a or reverse.get(unit_a) == unit_b
-            if fail_fp[0] == fp[0] and unit_ok and fail_fp[2] == fp[2] and fail_fp[3] == fp[3]:
-                matched = (fail_turn, fail_reason)
-                break
+        matched = match(fp[0], fp[1], fp[2], fp[3])
         if matched is not None:
             dropped.append(
-                f"dropped: repeat of T{matched[0]} failure ({matched[1].split(':')[0] or 'non-transient'}). "
+                f"dropped: repeat of T{matched[1]} failure ({matched[2].split(':')[0] or 'non-transient'}). "
                 "Do not order that destination again."
             )
             if fp[0] == "move_unit":
@@ -1332,24 +1351,19 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
 
 
 def suppress_failed_offers(snapshot: dict[str, Any]) -> None:
-    """Drop legal moves and attacks that repeat a located non-transient failure.
+    from sidecar import civ6_legality as legality
+
+    legality.apply_offer_filter(snapshot, "repeat_failures")
+
+
+def repeat_failure_offers(snapshot: dict[str, Any], legal: list[Any]) -> list[Any]:
+    """Offer filter: drop moves and attacks that repeat a located non-transient failure.
 
     A failure with no coordinates is ignored: it must not hide every attack by that unit.
     """
-    legal = snapshot.get("legal_commands")
-    if not isinstance(legal, list):
-        return
-    units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
-    wire_ids = pipeline._build_unit_wire_id_map(units)
-    reverse = {v: k for k, v in wire_ids.items()}
-    blocked: list[tuple[str, str, Any, Any]] = []
-    for item in command_result_items(snapshot):
-        fp = _result_fingerprint(item)
-        if fp is None or fp[2] is None or fp[3] is None:
-            continue
-        blocked.append(fp)
-    if not blocked:
-        return
+    fails, match = _failure_matcher(snapshot, located=True)
+    if not fails:
+        return legal
     attack_kinds = {"attack_target", "range_attack", "melee_attack", "city_attack"}
     kept: list[Any] = []
     for command in legal:
@@ -1368,20 +1382,9 @@ def suppress_failed_offers(snapshot: dict[str, Any]) -> None:
         except (KeyError, TypeError, ValueError):
             kept.append(command)
             continue
-        drop = False
-        for fail in blocked:
-            unit_ok = (
-                fail[1] == unit
-                or wire_ids.get(unit) == fail[1]
-                or reverse.get(fail[1]) == unit
-                or wire_ids.get(fail[1]) == unit
-            )
-            if fail[0] == order and unit_ok and fail[2] == x and fail[3] == y:
-                drop = True
-                break
-        if not drop:
+        if match(order, unit, x, y) is None:
             kept.append(command)
-    snapshot["legal_commands"] = kept
+    return kept
 
 
 def infer_order_source(row: dict[str, Any]) -> str:

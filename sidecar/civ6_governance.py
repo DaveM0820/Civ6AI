@@ -415,16 +415,16 @@ def _canon_key(key: str) -> str:
 
 
 def _add_command(snapshot: dict, kind: str, fixed: dict, description: str) -> str:
+    from sidecar import civ6_legality as legality
     from sidecar.civ6_adapter import _enrich_runtime_legal_command
 
-    legal = snapshot.setdefault("legal_commands", [])
     base = "CMD_GOV_" + kind.upper()
-    have = {c.get("command_id") for c in legal if isinstance(c, dict)}
+    have = {c.get("command_id") for c in snapshot.get("legal_commands") or [] if isinstance(c, dict)}
     n = 1
     while f"{base}_{n}" in have:
         n += 1
     cid = f"{base}_{n}"
-    legal.append(_enrich_runtime_legal_command({
+    legality.add_offer(snapshot, _enrich_runtime_legal_command({
         "command_id": cid, "kind": kind, "description": description[:240], "fixed_arguments": fixed,
     }))
     return cid

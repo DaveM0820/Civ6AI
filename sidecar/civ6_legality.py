@@ -12,7 +12,7 @@ import json
 import re
 from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from sidecar.civ6_common import dct as _dct
 from sidecar.civ6_common import lst as _lst
@@ -360,8 +360,59 @@ REASON_TEXT = {
 }
 
 
+# --- Offer pipeline -------------------------------------------------------
+# legality is the only writer of snapshot["legal_commands"]. Other modules
+# provide pure offer filters (snapshot, offers) -> offers, registered here by
+# name, or add offers through add_offer(). Paths resolve lazily to avoid
+# import cycles.
+OfferFilter = Callable[[dict[str, Any], list[Any]], list[Any]]
+
+OFFER_FILTERS: dict[str, str] = {
+    "adapter_dedupe": "sidecar.civ6_adapter:dedupe_offers",
+    "combat_runnable": "sidecar.civ6_combat_wire:runnable_attack_offers",
+    "repeat_failures": "sidecar.civ6_apply_results:repeat_failure_offers",
+    "no_city_sites": "sidecar.civ6_wire:settler_offers_without_sites",
+}
+
+
+def offer_filter(name: str) -> OfferFilter:
+    import importlib
+
+    module, _, attr = OFFER_FILTERS[name].partition(":")
+    return getattr(importlib.import_module(module), attr)
+
+
+def offers(snapshot: dict[str, Any]) -> list[Any] | None:
+    legal = snapshot.get("legal_commands")
+    return legal if isinstance(legal, list) else None
+
+
+def apply_offer_filter(snapshot: dict[str, Any], name: str) -> int:
+    """Run one registered filter over the offer list. Returns offers dropped."""
+    legal = offers(snapshot)
+    if legal is None:
+        return 0
+    kept = offer_filter(name)(snapshot, legal)
+    snapshot["legal_commands"] = kept
+    return len(legal) - len(kept)
+
+
+def add_offer(snapshot: dict[str, Any], command: dict[str, Any]) -> str | None:
+    """Append one offer unless its command_id is already offered."""
+    legal = snapshot.setdefault("legal_commands", [])
+    if not isinstance(legal, list):
+        return None
+    cmd_id = command["command_id"]
+    if not any(isinstance(c, dict) and c.get("command_id") == cmd_id for c in legal):
+        legal.append(command)
+    return str(cmd_id)
+
+
 def reason_text(code: str) -> str:
-    return REASON_TEXT.get(str(code or ""), str(code or "rejected"))
+    text = str(code or "")
+    if text.startswith("no_") and text.endswith("_at_war"):
+        return f"no {text[3:-7]} while at war"
+    return REASON_TEXT.get(text, text or "rejected")
 
 
 def order_label(command: dict[str, Any]) -> str:

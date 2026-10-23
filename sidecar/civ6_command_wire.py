@@ -597,14 +597,9 @@ def _on_map(snapshot: dict[str, Any], x: int, y: int) -> bool:
 
 
 def _append_legal(snapshot: dict[str, Any], command: dict[str, Any]) -> str | None:
-    legal = snapshot.setdefault("legal_commands", [])
-    if not isinstance(legal, list):
-        return None
-    cmd_id = command["command_id"]
-    if any(isinstance(c, dict) and c.get("command_id") == cmd_id for c in legal):
-        return str(cmd_id)
-    legal.append(command)
-    return str(cmd_id)
+    from sidecar import civ6_legality as legality
+
+    return legality.add_offer(snapshot, command)
 
 
 def _self_tile_command(snapshot: dict[str, Any], unit_id: str) -> str | None:

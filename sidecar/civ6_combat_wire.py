@@ -690,9 +690,16 @@ def retain_runnable_attacks(snapshot: dict[str, Any]) -> None:
     previews = combat.get("previews") if isinstance(combat, dict) else None
     if not isinstance(previews, list):
         return
-    legal = snapshot.get("legal_commands")
-    if not isinstance(legal, list):
-        return
+    from sidecar import civ6_legality as legality
+
+    legality.apply_offer_filter(snapshot, "combat_runnable")
+
+
+def runnable_attack_offers(snapshot: dict[str, Any], legal: list[Any]) -> list[Any]:
+    """Offer filter: keep attack offers with a usable simulated preview."""
+    previews = (((snapshot.get("civ6") or {}).get("combat") or {}).get("previews"))
+    if not isinstance(previews, list):
+        return legal
     good: set[tuple[str, str, int, int]] = set()
     for row in previews:
         if not isinstance(row, dict) or row.get("needs_move") or row.get("simulated") is False:
@@ -725,7 +732,7 @@ def retain_runnable_attacks(snapshot: dict[str, Any]) -> None:
             key = ("unit", str(fixed.get("unit_id") or ""), x, y)
         if key in good:
             kept.append(command)
-    snapshot["legal_commands"] = kept
+    return kept
 
 
 def _distance(context: dict[str, Any], a: tuple[int, int], b: tuple[int, int]) -> int:
