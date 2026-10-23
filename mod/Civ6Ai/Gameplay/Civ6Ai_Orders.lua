@@ -1790,19 +1790,7 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
   -- nil means the gameplay command API is missing (the strike itself reports that).
   -- false means CanStartCommand refused this plot, so another target can be tried.
   local function strikeReady(city, x, y)
-    if CityManager == nil or CityManager.CanStartCommand == nil
-        or CityCommandTypes == nil or CityCommandTypes.RANGE_ATTACK == nil
-        or CityCommandTypes.PARAM_X == nil or CityCommandTypes.PARAM_Y == nil then
-      return nil
-    end
-    local params = {}
-    params[CityCommandTypes.PARAM_X] = x
-    params[CityCommandTypes.PARAM_Y] = y
-    local okCan, can = pcall(CityManager.CanStartCommand, city, CityCommandTypes.RANGE_ATTACK, params)
-    if okCan and can == true then
-      return true
-    end
-    return false
+    return Civ6Ai_Orders._CityStrikeCan(city, x, y)
   end
   local function bestStrike(city, x, y)
     local best = nil
@@ -4086,22 +4074,100 @@ function Civ6Ai_Orders._LiveStrikeTarget(owner, x, y)
   return nil
 end
 
+-- Gameplay often has CityManager but no CityCommandTypes.PARAM_*. The strike
+-- hash and plot keys then come from GameInfo / UnitOperationTypes.
+function Civ6Ai_Orders._CityStrikeCommand()
+  if CityCommandTypes ~= nil and CityCommandTypes.RANGE_ATTACK ~= nil then
+    return CityCommandTypes.RANGE_ATTACK
+  end
+  local row = GameInfo ~= nil and GameInfo.CityCommands ~= nil
+    and (GameInfo.CityCommands["CITYCOMMAND_RANGE_ATTACK"] or GameInfo.CityCommands.CITYCOMMAND_RANGE_ATTACK)
+    or nil
+  if row ~= nil then
+    return row.Hash or row.Index
+  end
+  return nil
+end
+
+function Civ6Ai_Orders._CityStrikeParams(x, y)
+  local params = {}
+  local function put(axis, value)
+    local keys = {}
+    if CityCommandTypes ~= nil then
+      keys[#keys + 1] = axis == "x" and CityCommandTypes.PARAM_X or CityCommandTypes.PARAM_Y
+    end
+    if UnitOperationTypes ~= nil then
+      keys[#keys + 1] = axis == "x" and UnitOperationTypes.PARAM_X or UnitOperationTypes.PARAM_Y
+    end
+    keys[#keys + 1] = axis == "x" and "PARAM_X" or "PARAM_Y"
+    keys[#keys + 1] = string.upper(axis)
+    for _, key in ipairs(keys) do
+      if key ~= nil then
+        params[key] = value
+      end
+    end
+  end
+  put("x", x)
+  put("y", y)
+  return params
+end
+
+function Civ6Ai_Orders.CityStrikeAvailable()
+  return CityManager ~= nil and CityManager.CanStartCommand ~= nil
+    and CityManager.RequestCommand ~= nil and Civ6Ai_Orders._CityStrikeCommand() ~= nil
+end
+
+-- true: this plot is a legal strike. false: the engine refused this plot.
+-- nil: the command API is missing.
+function Civ6Ai_Orders._CityStrikeCan(city, x, y)
+  local cmd = Civ6Ai_Orders._CityStrikeCommand()
+  if CityManager == nil or CityManager.CanStartCommand == nil or cmd == nil then
+    return nil
+  end
+  local params = Civ6Ai_Orders._CityStrikeParams(x, y)
+  local tries = {
+    function() return CityManager.CanStartCommand(city, cmd, params) end,
+    function() return CityManager.CanStartCommand(city, cmd, true, params, false) end,
+  }
+  local blocked = false
+  for _, fn in ipairs(tries) do
+    local ok, can = pcall(fn)
+    if ok and can == true then
+      return true
+    end
+    if ok and can == false then
+      blocked = true
+    end
+  end
+  if blocked then
+    return false
+  end
+  local okBare, canBare = pcall(CityManager.CanStartCommand, city, cmd)
+  if okBare and canBare == true then
+    return true
+  end
+  if okBare and canBare == false then
+    return false
+  end
+  return nil
+end
+
 -- The engine's city ranged attack. CanStartCommand is the gate; a district is
 -- never passed to forecast, ChangeDamage, or Kill (that read 0xffffffff).
 function Civ6Ai_Orders._CityRangeAttack(city, x, y)
-  if CityManager == nil or CityManager.CanStartCommand == nil or CityManager.RequestCommand == nil
-      or CityCommandTypes == nil or CityCommandTypes.RANGE_ATTACK == nil
-      or CityCommandTypes.PARAM_X == nil or CityCommandTypes.PARAM_Y == nil then
+  if not Civ6Ai_Orders.CityStrikeAvailable() then
     return false, "city_strike_unavailable"
   end
-  local params = {}
-  params[CityCommandTypes.PARAM_X] = x
-  params[CityCommandTypes.PARAM_Y] = y
-  local okCan, can = pcall(CityManager.CanStartCommand, city, CityCommandTypes.RANGE_ATTACK, params)
-  if not okCan or can ~= true then
+  local cmd = Civ6Ai_Orders._CityStrikeCommand()
+  local params = Civ6Ai_Orders._CityStrikeParams(x, y)
+  local can = Civ6Ai_Orders._CityStrikeCan(city, x, y)
+  if can == false then
     return false, "city_strike_refused"
   end
-  local okReq, err = pcall(CityManager.RequestCommand, city, CityCommandTypes.RANGE_ATTACK, params)
+  local okReq, err = pcall(CityManager.RequestCommand, city, cmd, params)
+  if not okReq then
+    okReq, err = pcall(CityManager.RequestCommand, city, cmd, true, params)
+  end
   if not okReq then
     return false, "city_strike_refused:" .. trimErr(err)
   end
@@ -5291,7 +5357,14 @@ function Civ6Ai_Orders.Init()
   shared.RunHostFallbacks = Civ6Ai_Orders._RunHostFallbacks
   shared.WasHandled = Civ6Ai_Orders.WasHandled
   shared.MarkHandled = Civ6Ai_Orders.MarkHandled
+  shared.CityStrikeAvailable = Civ6Ai_Orders.CityStrikeAvailable
+  shared.CityStrikeCan = Civ6Ai_Orders._CityStrikeCan
   shared.ReadUnitGoal = Civ6Ai_Orders._ReadGoal
+  if Game ~= nil and Game.SetProperty ~= nil then
+    pcall(function()
+      Game:SetProperty("CIV6AI_CITY_STRIKE", Civ6Ai_Orders.CityStrikeAvailable() and 1 or 0)
+    end)
+  end
   pcall(Civ6Ai_Orders.Gov.Probe)
   log("load|version=" .. Civ6Ai_Orders.VERSION .. "|prio_conditions=" .. tostring(nPrio) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))
 end

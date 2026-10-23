@@ -547,7 +547,7 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
             notes.append(f"{key}: you are in anarchy; wait until it ends before changing government")
         elif current and _match_id(value, [current], ("GOVERNMENT_",)):
             notes.append(f"{key}={value}: you already have { _short(current, 'GOVERNMENT_') }; switching to it is blocked")
-        elif g.get("change_allowed") is False:
+        elif g.get("change_allowed") is not True:
             notes.append(f"{key}: a government can only be changed on a turn when a civic completed")
         else:
             gid = _match_id(value, avail, ("GOVERNMENT_",))

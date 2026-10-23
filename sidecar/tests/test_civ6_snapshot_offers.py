@@ -405,6 +405,12 @@ class SnapshotLuaOffersTests(unittest.TestCase):
         targets = [(cmds[i].fixed_arguments.target_x, cmds[i].fixed_arguments.target_y) for i in range(1, len(cmds) + 1)]
         self.assertEqual([(12, 10)], targets)
         self.assertTrue(all(cmds[i].kind == "city_attack" for i in range(1, len(cmds) + 1)))
+        self.lua.execute(
+            "CityCommandTypes = { RANGE_ATTACK = 7 }; CMDS2 = {}; "
+            "function Civ6Ai_Snapshot._CityStrikeCan() return true end"
+        )
+        snap._AddCityStrikeCommands(self.lua.globals().CMDS2, 1)
+        self.assertGreaterEqual(int(self.lua.eval("#CMDS2")), 1)
 
         self.lua.execute(
             r"""

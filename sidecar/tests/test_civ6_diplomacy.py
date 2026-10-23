@@ -33,6 +33,26 @@ class DiplomacyWireTests(unittest.TestCase):
         keys = dict(diplo.optional_key_hints(_snap()))
         self.assertEqual(keys["legal.diplomacy.Cleopatra"], "DECLARE_WAR")
         self.assertIn("Cleopatra", keys["deal.<Leader>"])
+        self.assertNotIn("peace,", keys["deal.<Leader>"])
+
+    def test_peace_is_not_offered_when_not_at_war(self):
+        snap = _snap()
+        snap["civ6"]["diplomacy"]["majors"][0]["can_make_peace"] = True
+        keys = dict(diplo.optional_key_hints(snap))
+        self.assertEqual(keys["legal.diplomacy.Cleopatra"], "DECLARE_WAR")
+        notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "PEACE_TREATY")[1]
+        self.assertTrue(notes)
+        self.assertIn("peace needs a war", notes[0])
+
+    def test_illegal_dof_accept_is_refused(self):
+        snap = _snap()
+        ids, notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "ACCEPT_DOF")
+        self.assertEqual(ids, [])
+        self.assertTrue(notes)
+        self.assertIn("friendship", notes[0].lower())
+        snap["civ6"]["diplomacy"]["majors"][0]["at_war"] = True
+        ids, notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "ACCEPT_DOF")
+        self.assertEqual(ids, [])
 
     def test_envoys_stay_refused(self):
         # Live sends failed from T80: the gameplay script has no token setter.

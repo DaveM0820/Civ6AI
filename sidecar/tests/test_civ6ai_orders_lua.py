@@ -774,6 +774,44 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertTrue(any("city_strike|city=8|x=31|y=30|defender=40" in s for s in logs), logs)
         self.assertFalse(any("turn_start_error" in s for s in logs))
 
+    def test_city_strike_does_not_need_param_x_on_city_command_types(self):
+        # Gameplay has CityManager but often no CityCommandTypes.PARAM_X.
+        # That used to return city_strike_unavailable for every auto strike.
+        self.rt.execute(r"""
+          CityCommandTypes = { RANGE_ATTACK = 9 }
+          UnitOperationTypes.PARAM_X = "x"
+          UnitOperationTypes.PARAM_Y = "y"
+          cityStrikeCalls = {}
+          CityManager = {
+            CanStartCommand = function(city, cmd, params)
+              return type(params) == "table" and (params.x == 31 or params.X == 31)
+            end,
+            RequestCommand = function(city, cmd, params)
+              cityStrikeCalls[#cityStrikeCalls + 1] = params.x or params.X
+            end,
+          }
+          local city = {id=8, owner=2, x=30, y=30}
+          function city:GetID() return self.id end
+          function city:GetOwner() return self.owner end
+          function city:GetX() return self.x end
+          function city:GetY() return self.y end
+          Players[2].GetCities = function()
+            return {Members=function()
+              local i=0
+              return function() i=i+1; if i==1 then return i, city end end
+            end}
+          end
+          Players[1].war = {[2]=true}
+          Players[2].war = {[1]=true}
+          table.insert(Players[1].units, MkUnit(1, 77, 31, 30, 0))
+        """)
+        self.assertTrue(self.rt.eval("Civ6Ai_Orders.CityStrikeAvailable()"))
+        self.order(0, K=31, P=2, I=8, X=31, Y=30, S=80)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertEqual(self.last()["reason"], "city_strike")
+        self.assertNotEqual(self.last()["reason"], "city_strike_unavailable")
+        self.assertEqual(self.rt.eval("#cityStrikeCalls"), 1)
+
     def test_city_strike_stops_after_the_first_failure(self):
         # A dead unit is not a target. A district is. After one refusal the
         # next strike in the batch is not sent to the engine.

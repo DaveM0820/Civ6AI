@@ -150,6 +150,9 @@ class T71AttentionTests(unittest.TestCase):
         text = "\n".join(coaching.collect_civ6_attention_items(snap))
         self.assertIn("revealed nothing for 2 turns", text)
         self.assertIn("MoveTo a frontier tile", text)
+        snap["known_map"] = {"explored_percent": 4}
+        self.assertTrue(civ6_wire._explore_offered(snap))
+        self.assertIn("Automate(explore)", civ6_wire._civ6_unit_tokens(snap)["UNIT_9"])
 
     def test_step_toward_reason_names_impassable(self):
         text = results.describe_reason("step_toward:12,11>12,10:moved:12,10")
@@ -180,6 +183,26 @@ class T71AttentionTests(unittest.TestCase):
         self.assertTrue(any("25 faith" in note for note in notes))
         self.assertFalse(any(cmd.get("kind") == "change_government" for cmd in snap.get("legal_commands") or []))
         self.assertFalse(any(cmd.get("kind") == "found_pantheon" for cmd in snap.get("legal_commands") or []))
+        missing = {"civ6": {"governance": {
+            "government": {
+                "current": "GOVERNMENT_CHIEFDOM",
+                "available": [{"id": "GOVERNMENT_AUTOCRACY"}],
+            },
+        }}}
+        ids, notes = governance.bind_reply(missing, "government", "AUTOCRACY")
+        self.assertEqual(ids, [])
+        self.assertTrue(any("civic" in note for note in notes))
+
+    def test_occupied_tiles_are_named_in_attention(self):
+        snap = _snap()
+        snap["your_units"] = [
+            {"unit_id": "UNIT_1", "unit_type_id": "UNIT_BUILDER", "plot_id": "PLOT_4_4"},
+            {"unit_id": "UNIT_2", "unit_type_id": "UNIT_BATTERING_RAM", "plot_id": "PLOT_5_5"},
+        ]
+        text = "\n".join(coaching.collect_civ6_attention_items(snap))
+        self.assertIn("OCCUPIED:", text)
+        self.assertIn("(4,4)", text)
+        self.assertIn("(5,5)", text)
 
     def test_water_and_mountains_are_named_on_the_legend(self):
         entries = _civ6_marker_legend_entries(

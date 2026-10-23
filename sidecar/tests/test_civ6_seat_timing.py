@@ -792,6 +792,20 @@ class LocalSeatLegalityTests(unittest.TestCase):
         lua.execute("UNIT = { GetOwner = function() return 0 end, GetID = function() return 262146 end }")
         return lua
 
+    def test_local_zero_moves_still_offered_when_move_to_is_legal(self):
+        lua = LuaRuntime()
+        lua.execute("Civ6Ai_Util = { Log = function() end }")
+        lua.execute((ROOT / "mod/Civ6Ai/InGame/Civ6Ai_Snapshot.lua").read_text(encoding="utf-8"))
+        lua.execute(
+            "Game = { GetLocalPlayer = function() return 0 end }; "
+            "UnitOperationTypes = { MOVE_TO = 1 }; "
+            "UnitManager = { CanStartOperation = function() return true end }; "
+            "UNIT = { GetOwner = function() return 0 end, GetID = function() return 1 end, "
+            "GetMovesRemaining = function() return 0 end, GetMaxMoves = function() return 2 end, "
+            "GetType = function() return 0 end }"
+        )
+        self.assertEqual(2, lua.eval("Civ6Ai_Snapshot._UnitMoves(UNIT)"))
+
     def test_local_seat_move_consults_gamecore(self):
         self.assertFalse(self._lua(False, True).eval("Civ6Ai_Snapshot._GameCoreCanMove(UNIT, 20, 24)"))
         self.assertTrue(self._lua(True, True).eval("Civ6Ai_Snapshot._GameCoreCanMove(UNIT, 19, 25)"))

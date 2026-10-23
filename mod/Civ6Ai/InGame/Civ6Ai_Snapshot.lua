@@ -1814,12 +1814,12 @@ function Civ6Ai_Snapshot._RelationFacts(playerID, otherID)
       and (meTeam == nil or themTeam == nil or meTeam ~= themTeam)
   end
   local canPeace = Civ6Ai_Snapshot._Method(myDiplo, "CanMakePeaceWith", otherID)
-  if canPeace == true then
+  -- Peace is only a legal order while at war. CanMakePeaceWith can return
+  -- true in peacetime; offering it then produced a drop every turn.
+  if facts.at_war == true and canPeace ~= false then
     facts.can_make_peace = true
-  elseif canPeace == false then
-    facts.can_make_peace = false
   else
-    facts.can_make_peace = facts.at_war == true
+    facts.can_make_peace = false
   end
   if facts.at_war then
     facts.relationship = "war"
@@ -2346,21 +2346,32 @@ function Civ6Ai_Snapshot._UnitMoves(unit)
   local routes = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
   if routes ~= nil and routes.UnitMovesForPlayer ~= nil then
     local ok, moves = pcall(routes.UnitMovesForPlayer, owner, unit:GetID(), planning and 1 or 0)
-    if ok and type(moves) == "number" and (moves > 0 or not planning) then
+    if ok and type(moves) == "number" and moves > 0 then
       return moves
     end
   end
-  if planning then
-    local maxMoves = tonumber(Civ6Ai_Snapshot._Method(unit, "GetMaxMoves")) or 0
-    if maxMoves <= 0 and GameInfo ~= nil and GameInfo.Units ~= nil then
-      local row = GameInfo.Units[unit:GetType()]
-      maxMoves = row ~= nil and (tonumber(row.BaseMoves) or tonumber(row.Moves) or 0) or 0
-    end
-    if maxMoves > 0 then
+  local remaining = tonumber(Civ6Ai_Snapshot._Method(unit, "GetMovesRemaining")) or 0
+  if remaining > 0 then
+    return remaining
+  end
+  local maxMoves = tonumber(Civ6Ai_Snapshot._Method(unit, "GetMaxMoves")) or 0
+  if maxMoves <= 0 and GameInfo ~= nil and GameInfo.Units ~= nil then
+    local row = GameInfo.Units[unit:GetType()]
+    maxMoves = row ~= nil and (tonumber(row.BaseMoves) or tonumber(row.Moves) or 0) or 0
+  end
+  if planning and maxMoves > 0 then
+    return maxMoves
+  end
+  -- Local seat at turn start: GetMovesRemaining is still 0 while MOVE_TO is
+  -- already legal. Using 0 hid almost every unit from the prompt.
+  if maxMoves > 0 and UnitManager ~= nil and UnitOperationTypes ~= nil
+      and UnitOperationTypes.MOVE_TO ~= nil then
+    local okCan, can = pcall(UnitManager.CanStartOperation, unit, UnitOperationTypes.MOVE_TO, nil, true)
+    if okCan and can == true then
       return maxMoves
     end
   end
-  return tonumber(Civ6Ai_Snapshot._Method(unit, "GetMovesRemaining")) or 0
+  return remaining
 end
 
 -- found_city legality. The UI test (nil plot, test only) does not check the site:
@@ -3674,6 +3685,65 @@ function Civ6Ai_Snapshot._AddBuilderImproveCommands(commands, playerID, unit, un
     .. "|dropped_area=" .. tostring(droppedArea))
 end
 
+function Civ6Ai_Snapshot._CityStrikeCommand()
+  if CityCommandTypes ~= nil and CityCommandTypes.RANGE_ATTACK ~= nil then
+    return CityCommandTypes.RANGE_ATTACK
+  end
+  local row = GameInfo ~= nil and GameInfo.CityCommands ~= nil
+    and (GameInfo.CityCommands["CITYCOMMAND_RANGE_ATTACK"] or GameInfo.CityCommands.CITYCOMMAND_RANGE_ATTACK)
+    or nil
+  if row ~= nil then
+    return row.Hash or row.Index
+  end
+  return nil
+end
+
+function Civ6Ai_Snapshot._CityStrikeParams(x, y)
+  local params = {}
+  local function put(axis, value)
+    if CityCommandTypes ~= nil then
+      local key = axis == "x" and CityCommandTypes.PARAM_X or CityCommandTypes.PARAM_Y
+      if key ~= nil then params[key] = value end
+    end
+    if UnitOperationTypes ~= nil then
+      local key = axis == "x" and UnitOperationTypes.PARAM_X or UnitOperationTypes.PARAM_Y
+      if key ~= nil then params[key] = value end
+    end
+    params[axis == "x" and "PARAM_X" or "PARAM_Y"] = value
+    params[string.upper(axis)] = value
+  end
+  put("x", x)
+  put("y", y)
+  return params
+end
+
+function Civ6Ai_Snapshot._CityStrikeCan(city, x, y)
+  local cmd = Civ6Ai_Snapshot._CityStrikeCommand()
+  if CityManager == nil or CityManager.CanStartCommand == nil or cmd == nil then
+    return nil
+  end
+  local params = Civ6Ai_Snapshot._CityStrikeParams(x, y)
+  local ok, can = pcall(CityManager.CanStartCommand, city, cmd, params)
+  if ok and can == true then
+    return true
+  end
+  ok, can = pcall(CityManager.CanStartCommand, city, cmd, true, params, false)
+  if ok and can == true then
+    return true
+  end
+  if ok and can == false then
+    return false
+  end
+  ok, can = pcall(CityManager.CanStartCommand, city, cmd)
+  if ok and can == true then
+    return true
+  end
+  if ok and can == false then
+    return false
+  end
+  return nil
+end
+
 -- City ranged strike: an enemy unit within 2 tiles. Walls are not required to
 -- offer the order; the strike is the city's own ranged attack.
 function Civ6Ai_Snapshot._AddCityStrikeCommands(commands, playerID)
@@ -3687,18 +3757,33 @@ function Civ6Ai_Snapshot._AddCityStrikeCommands(commands, playerID)
     if seen[key] then
       return
     end
-    -- Same 3-arg check the strike uses. A missing command API offers nothing,
-    -- so the order is not sent only to come back city_strike_unavailable.
-    if CityManager == nil or CityManager.CanStartCommand == nil
-        or CityCommandTypes == nil or CityCommandTypes.RANGE_ATTACK == nil
-        or CityCommandTypes.PARAM_X == nil or CityCommandTypes.PARAM_Y == nil then
+    -- Same availability the gameplay strike uses. PARAM_X is often missing
+    -- there; a Gameplay property of 0 means do not offer (it would come back
+    -- city_strike_unavailable).
+    local shared = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+    if shared ~= nil and shared.CityStrikeAvailable ~= nil then
+      local okAvail, avail = pcall(shared.CityStrikeAvailable)
+      if okAvail and avail == false then
+        return
+      end
+    elseif Game ~= nil and Game.GetProperty ~= nil
+        and tonumber((function()
+          local ok, value = pcall(function() return Game:GetProperty("CIV6AI_CITY_STRIKE") end)
+          return ok and value or nil
+        end)()) == 0 then
       return
     end
-    local params = {}
-    params[CityCommandTypes.PARAM_X] = tx
-    params[CityCommandTypes.PARAM_Y] = ty
-    local okCan, can = pcall(CityManager.CanStartCommand, city, CityCommandTypes.RANGE_ATTACK, params)
-    if not okCan or can ~= true then
+    local can = nil
+    if shared ~= nil and shared.CityStrikeCan ~= nil then
+      local okCan, result = pcall(shared.CityStrikeCan, city, tx, ty)
+      if okCan then
+        can = result
+      end
+    end
+    if can == nil then
+      can = Civ6Ai_Snapshot._CityStrikeCan(city, tx, ty)
+    end
+    if can ~= true then
       return
     end
     seen[key] = true

@@ -51,6 +51,27 @@ class ExploreFallbackTests(unittest.TestCase):
         kept, _ = ar.filter_repeat_failures(_snapshot(), [_move(44, 12)])
         self.assertEqual([c["command_id"] for c in kept], ["CMD_UNIT_262146_moveto_44_12"])
 
+    def test_occupied_own_tile_is_dropped(self):
+        snap = _snapshot()
+        snap["your_units"].append({
+            "unit_id": "UNIT_RAM", "unit_type_id": "UNIT_BATTERING_RAM",
+            "plot_id": "PLOT_44_12",
+        })
+        kept, dropped = ar.filter_repeat_failures(snap, [_move(44, 12)])
+        self.assertTrue(all(
+            c.get("kind") != "move_unit" or c["arguments"].get("target_x") != 44
+            for c in kept
+        ))
+        self.assertTrue(any("occupied" in note for note in dropped))
+
+    def test_water_before_shipbuilding_is_dropped(self):
+        snap = _snapshot()
+        snap["your_empire"] = {"research": {"known_tech_ids": ["TECH_MINING", "TECH_SAILING"]}}
+        snap["known_map"]["plots"].append({"x": 10, "y": 10, "water": True, "peak": False})
+        kept, dropped = ar.filter_repeat_failures(snap, [_move(10, 10)])
+        self.assertTrue(any("Shipbuilding" in note or "water" in note for note in dropped))
+        self.assertTrue(all(c.get("kind") != "move_unit" or c["arguments"].get("target_x") != 10 for c in kept))
+
     def test_foundcity_with_coords_is_settle(self):
         snap = _snapshot()
         self.assertEqual(wire.resolve_unit_token(snap, "UNIT_262146", "FoundCity(44,12)"),

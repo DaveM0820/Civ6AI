@@ -101,7 +101,7 @@ def _targets(snapshot: dict) -> list[dict[str, Any]]:
             "name": name,
             "at_war": row.get("at_war") is True,
             "can_declare_war": row.get("can_declare_war") is True,
-            "can_make_peace": row.get("can_make_peace") is True,
+            "can_make_peace": row.get("at_war") is True and row.get("can_make_peace") is True,
         })
     return out
 
@@ -224,8 +224,13 @@ def _usable_problem(snapshot: dict, items: list[dict[str, Any]]) -> str | None:
     return None
 
 
-def _pact_problem(snapshot: dict, pid: str, kinds: set) -> str | None:
-    """None when this seat may offer every pact in kinds to pid (the other side is checked in Gov.Deal)."""
+def _pact_problem(snapshot: dict, pid: str, kinds: set, require_unlock: bool = True) -> str | None:
+    """None when this seat may offer (or accept) every pact in kinds to pid.
+
+    Civic/tech unlocks are offer-side only; Gov.Deal checks the other seat.
+    Accept uses require_unlock=False so a legal incoming open-borders or
+    embassy deal is not rejected because the receiver has not unlocked it.
+    """
     major = next((m for m in _lst(diplomacy(snapshot).get("majors")) if isinstance(m, dict)
                   and str(m.get("player_id")) == pid), {})
     empire = _dct(snapshot.get("your_empire"))
@@ -237,7 +242,7 @@ def _pact_problem(snapshot: dict, pid: str, kinds: set) -> str | None:
         if (kind == "peace") != bool(major.get("at_war")):
             return "peace needs a war" if kind == "peace" else f"no {kind} while at war"
         need = PACTS[kind][1]
-        if need and need not in known:
+        if require_unlock and need and need not in known:
             return f"{kind} needs {need}"
         if kind == "alliance" and not major.get("declared_friendship"):
             return "alliance needs declared friendship first"
@@ -282,16 +287,20 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     names = []
     for target in _targets(snapshot):
-        if target["at_war"] or target["can_make_peace"]:
+        if target["at_war"]:
             out.append((f"legal.diplomacy.{target['name']}", "PEACE_TREATY"))
         elif target["can_declare_war"]:
             out.append((f"legal.diplomacy.{target['name']}", "DECLARE_WAR"))
         if target["player_id"].startswith("PLAYER_") and target in _majors(snapshot):
             names.append(target["name"])
     if names:
+        pacts = "friendship, alliance, open_borders, embassy, delegation"
+        if any(t["at_war"] for t in _targets(snapshot) if t["name"] in names):
+            pacts = "peace, " + pacts
         out.append(("deal.<Leader>", "give <items> for <items>  (any number of items: <n> gold, <n> gpt, "
-                    "<n> RESOURCE_X, or a pact that binds both sides: peace, friendship, alliance, "
-                    "open_borders, embassy, delegation; a peace proposal must also include gold, gpt, "
+                    "<n> RESOURCE_X, or a pact that binds both sides: "
+                    + pacts
+                    + "; a peace proposal must also include gold, gpt, "
                     "or a resource; answered next turn with ACCEPT, REJECT, or COUNTER; "
                     f"Leader = {' | '.join(names)})"))
         out.append(("cmd", "CMD_propose_* or CMD_accept_* copied from a DIPLOMACY deal-status line"))
@@ -773,6 +782,14 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         offer["done_turn"] = _turn(snapshot)
         ids: list[str] = []
         if answer in ("ACCEPT", "YES"):
+            kinds = {i.get("kind") for i in (offer.get("give") or []) + (offer.get("want") or []) if isinstance(i, dict)}
+            problem = _pact_problem(snapshot, pid, kinds - {None}, require_unlock=False)
+            if problem:
+                offer["status"] = "rejected"
+                offer["reason"] = problem
+                offer["done_turn"] = _turn(snapshot)
+                _save(snapshot, deals)
+                return [], [f"{key}: cannot accept, {problem}; offer rejected"]
             problem = _stock_problem(snapshot, offer.get("want", []))
             ids = [] if problem else _deal_commands(snapshot, pid, offer.get("want", []), offer.get("give", []), name)
             if not ids:
@@ -822,6 +839,15 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         # Same offer as deal.<Leader> = peace. The other seat accepts it next turn.
         return bind_reply(snapshot, f"deal.{name}", "peace")
     raw = str(text).strip().upper().replace(" ", "_")
+    if raw in {"ACCEPT_DOF", "ACCEPT_FRIENDSHIP", "ACCEPT_DECLARED_FRIENDSHIP"}:
+        kinds = {i.get("kind") for d in _open_offers_to_me(snapshot) if d.get("from") == pid
+                 for i in (d.get("give") or []) + (d.get("want") or []) if isinstance(i, dict)}
+        if "friendship" not in kinds:
+            return [], [f"{key}: no open friendship offer from {name} to accept"]
+        problem = _pact_problem(snapshot, pid, {"friendship"}, require_unlock=False)
+        if problem:
+            return [], [f"{key}: {problem}"]
+        return bind_reply(snapshot, f"deal.{name}.respond", "ACCEPT")
     if raw in {"REJECT", "ACCEPT_EMBASSY", "EMBASSY", "ACCEPT_DELEGATION", "DELEGATION"} or raw.startswith("ACCEPT_"):
         return [], [
             f"{key}={value}: {raw} is not a diplomacy order on legal.diplomacy.{name}. "

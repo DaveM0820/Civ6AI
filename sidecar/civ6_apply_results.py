@@ -515,8 +515,11 @@ def _plot_facts(snapshot: dict[str, Any], x: int, y: int, player_id: str) -> lis
     facts = []
     if plot.get("water"):
         facts.append("water")
-    if plot.get("peak"):
+    if plot.get("peak") or _plot_is_mountain(plot):
         facts.append("mountain")
+    occupied = _own_occupied_plots(snapshot)
+    if (x, y) in occupied:
+        facts.append(f"occupied by {occupied[(x, y)][0]}")
     owner = plot.get("revealed_owner_id")
     if owner and owner != player_id:
         facts.append(f"owned by {owner}")
@@ -1259,13 +1262,59 @@ def _explore_substitute(snapshot: dict[str, Any], dropped_move: dict[str, Any],
     return sub
 
 
+_PLOT_ID_RE = re.compile(r"PLOT_(-?\d+)_(-?\d+)$")
+
+
+def _plot_xy(row: dict[str, Any] | None) -> tuple[int, int] | None:
+    if not isinstance(row, dict):
+        return None
+    try:
+        if row.get("x") is not None and row.get("y") is not None:
+            return int(row["x"]), int(row["y"])
+    except (TypeError, ValueError):
+        pass
+    match = _PLOT_ID_RE.search(str(row.get("plot_id") or ""))
+    if match:
+        return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def _own_occupied_plots(snapshot: dict[str, Any]) -> dict[tuple[int, int], list[str]]:
+    held: dict[tuple[int, int], list[str]] = {}
+    for unit in snapshot.get("your_units") or []:
+        if not isinstance(unit, dict):
+            continue
+        xy = _plot_xy(unit)
+        if xy is None:
+            continue
+        uid = str(unit.get("unit_id") or "")
+        if uid:
+            held.setdefault(xy, []).append(uid)
+    return held
+
+
+def _plot_is_mountain(plot: dict[str, Any]) -> bool:
+    if plot.get("peak"):
+        return True
+    terrain = str(plot.get("terrain_id") or plot.get("terrain") or "")
+    return "MOUNTAIN" in terrain.upper()
+
+
 def _land_units_cannot_embark(snapshot: dict[str, Any]) -> bool:
-    """Shipbuilding not researched yet: Sailing or Shipbuilding is still current or offered."""
+    """True until Shipbuilding is known. Water MoveTo before that is illegal."""
+    research = ((snapshot.get("your_empire") or {}).get("research") or {})
+    known = {str(t) for t in (research.get("known_tech_ids") or []) if t}
+    if "TECH_SHIPBUILDING" in known:
+        return False
+    if known:
+        return True
     techs = ((snapshot.get("civ6") or {}).get("governance") or {}).get("techs") or {}
     if not isinstance(techs, dict):
-        return False
+        return True
     ids = {techs.get("current")} | {o.get("id") for o in techs.get("options") or [] if isinstance(o, dict)}
-    return bool(ids & {"TECH_SAILING", "TECH_SHIPBUILDING"})
+    if "TECH_SHIPBUILDING" in ids:
+        return True
+    return "TECH_SHIPBUILDING" not in ids
 
 
 def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -1288,7 +1337,11 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
     water_plots = {(p.get("x"), p.get("y")) for p in known.get("plots") or [] if isinstance(p, dict) and p.get("water")}
     land_units = {u.get("unit_id") for u in units if u.get("domain_id") == "DOMAIN_LAND"}
     land_units |= {wire_ids.get(uid) for uid in list(land_units) if wire_ids.get(uid)}
-    peak_plots = {(p.get("x"), p.get("y")) for p in known.get("plots") or [] if isinstance(p, dict) and p.get("peak")}
+    peak_plots = {
+        (p.get("x"), p.get("y")) for p in known.get("plots") or []
+        if isinstance(p, dict) and _plot_is_mountain(p)
+    }
+    occupied = _own_occupied_plots(snapshot)
     substitutes: list[dict[str, Any]] = []
     failed_tiles: set[tuple[Any, Any]] = {(f[0][2], f[0][3]) for f in fails if f[0][0] == "move_unit"}
     me = str((snapshot.get("decision") or {}).get("player_id") or "")
@@ -1324,6 +1377,16 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
             dropped.append(f"dropped: MoveTo({fp[2]},{fp[3]}) is a mountain; no unit can enter it")
             _explore_instead(command)
             continue
+        if fp[0] == "move_unit" and (fp[2], fp[3]) in occupied:
+            holders = occupied[(fp[2], fp[3])]
+            mover = str(fp[1] or "")
+            same = mover in holders or reverse.get(mover) in holders or wire_ids.get(mover) in holders
+            if not same or len(holders) > 1:
+                dropped.append(
+                    f"dropped: MoveTo({fp[2]},{fp[3]}) is already held by your unit "
+                    f"{holders[0]}; that tile is occupied"
+                )
+                continue
         if fp[0] == "attack_target" and (fp[2], fp[3]) not in enemy_plots:
             dropped.append(f"dropped: AttackTo({fp[2]},{fp[3]}) has no visible enemy unit or city to hit")
             continue

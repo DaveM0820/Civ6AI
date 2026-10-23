@@ -536,7 +536,14 @@ def _unit_id_from(value: Any) -> str | None:
 
 
 def explore_quiet_units(snapshot: dict[str, Any], turns_needed: int = 2) -> list[str]:
-    """Units whose explore orders revealed nothing on this many distinct turns."""
+    """Units whose explore orders revealed nothing on this many distinct turns.
+
+    While most of the map is still fog, keep Automate(explore) visible: hiding
+    it is what left explorers walking into the same mountain and water tiles.
+    """
+    explored = _civ6_explored_percent(snapshot)
+    if isinstance(explored, int) and explored < CIV6_EXPLORE_NUDGE_BELOW_PCT:
+        return []
     history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
     rows = history.get("command_results") if isinstance(history.get("command_results"), list) else []
     by_unit: dict[str, set[int]] = {}
@@ -818,6 +825,21 @@ def civ6_idle_resources_attention(snapshot: dict[str, Any]) -> str | None:
     return "IDLE: " + ". ".join(bits) + "."
 
 
+def civ6_occupied_tile_attention(snapshot: dict[str, Any]) -> str | None:
+    """Tiles one of our units already holds — MoveTo there fails occupied."""
+    from sidecar.civ6_apply_results import _own_occupied_plots
+
+    held = _own_occupied_plots(snapshot)
+    if not held:
+        return None
+    bits = [f"({x},{y})" for x, y in sorted(held)[:12]]
+    extra = "" if len(held) <= 12 else f" and {len(held) - 12} more"
+    return (
+        "OCCUPIED: your units already stand on " + ", ".join(bits) + extra
+        + ". Do not MoveTo those tiles (builders and rams included)."
+    )
+
+
 def civ6_explore_quiet_attention(snapshot: dict[str, Any]) -> str | None:
     quiet = explore_quiet_units(snapshot)
     if not quiet:
@@ -840,6 +862,7 @@ def collect_civ6_attention_items(snapshot: dict[str, Any]) -> list[str]:
         civ6_expansion_attention,
         civ6_military_cap_attention,
         civ6_explore_quiet_attention,
+        civ6_occupied_tile_attention,
         civ6_idle_resources_attention,
     ):
         note = fn(snapshot)
