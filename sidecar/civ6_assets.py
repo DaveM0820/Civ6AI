@@ -410,10 +410,6 @@ def icon_name_for_district(district_id: str) -> str:
     return _icon_name_for_typed_id(district_id, "DISTRICT_")
 
 
-def icon_slug(icon_name: str) -> str:
-    return str(icon_name or "").strip()
-
-
 def _crop_alpha_bbox(image: Any, alpha_threshold: int = 8) -> Any:
     alpha = image.split()[3]
     bbox = alpha.point(lambda value: 255 if value > alpha_threshold else 0).getbbox()

@@ -563,25 +563,6 @@ def enemies_within_their_reach(context: dict[str, Any]) -> bool:
     return False
 
 
-def threatened_city_ids(context: dict[str, Any]) -> set[str]:
-    ids: set[str] = set()
-    hostiles = [(h, (_int(h.get("x")), _int(h.get("y")))) for h in _rows(_combat(context), "hostiles")]
-    for city in context.get("your_cities", []) or []:
-        if not isinstance(city, dict):
-            continue
-        xy = _city_plot(city)
-        if xy is None:
-            continue
-        for hostile, hxy in hostiles:
-            if hxy[0] is None:
-                continue
-            dist = _distance(context, xy, hxy)
-            if 1 <= dist <= enemy_reach(hostile):
-                ids.add(str(city.get("city_id")))
-                break
-    return ids
-
-
 def city_threat_lines(context: dict[str, Any]) -> list[str]:
     """One line per city: garrison, walls, adjacent enemies, enemies inside their move range."""
     cities = [c for c in context.get("your_cities", []) or [] if isinstance(c, dict)]

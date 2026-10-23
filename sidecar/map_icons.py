@@ -155,13 +155,6 @@ def city_icon_data_url(is_capital: bool = False) -> str | None:
     return _load_data_url(city_icon_slug(is_capital))
 
 
-def resource_icon_data_url(resource_id: str) -> str | None:
-    slug = resource_icon_slug(resource_id)
-    if not slug:
-        return None
-    return _load_data_url(slug)
-
-
 def stack_icon_data_url() -> str | None:
     return _load_data_url("stack")
 

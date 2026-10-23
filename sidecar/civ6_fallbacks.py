@@ -13,6 +13,7 @@ keeps only its own rows (combat, goals, explore).
 from __future__ import annotations
 
 import os
+from collections import deque
 from typing import Any
 
 from sidecar import civ6_legality as legality
@@ -33,6 +34,85 @@ def _hint(uid: str, role: str, target: tuple[int, int] | None) -> dict[str, Any]
     if target is not None:
         args["target_x"], args["target_y"] = int(target[0]), int(target[1])
     return {"command_id": f"HINT_{role}_{uid}", "kind": KIND, "arguments": args, "source": "fallback"}
+
+
+def frontier_target(snapshot: dict[str, Any], unit: dict[str, Any]) -> tuple[int, int] | None:
+    """Nearest reachable known tile that touches an unrevealed hex."""
+    start = legality.plot_xy(unit)
+    if start is None:
+        return None
+    plots = legality.known_plots(snapshot)
+    seen = {start}
+    q: deque[tuple[tuple[int, int], tuple[int, int] | None]] = deque([(start, None)])
+    while q:
+        cur, first_step = q.popleft()
+        for nx, ny in legality.hex_neighbors(*cur):
+            if (nx, ny) in seen:
+                continue
+            seen.add((nx, ny))
+            if (nx, ny) not in plots:
+                if cur != start and not legality.is_blacklisted(snapshot, *cur):
+                    if legality.tile_passable(snapshot, unit, *cur) is None:
+                        return cur
+                continue
+            if legality.tile_passable(snapshot, unit, nx, ny) is not None:
+                continue
+            if legality.is_blacklisted(snapshot, nx, ny):
+                continue
+            step = first_step or (nx, ny)
+            if any(n not in plots for n in legality.hex_neighbors(nx, ny)) and (nx, ny) != start:
+                return (nx, ny)
+            q.append(((nx, ny), step))
+    return None
+
+
+def threatened_cities(snapshot: dict[str, Any]) -> list[tuple[int, int]]:
+    cities = []
+    for city in _lst(snapshot.get("your_cities")):
+        if not isinstance(city, dict):
+            continue
+        xy = legality.plot_xy(city)
+        if xy:
+            cities.append(xy)
+    combat = _dct(_dct(snapshot.get("civ6")).get("combat"))
+    hostiles = []
+    for row in _lst(combat.get("hostiles")) + _lst(combat.get("hostile_cities")):
+        if isinstance(row, dict):
+            try:
+                hostiles.append((int(row["x"]), int(row["y"])))
+            except (KeyError, TypeError, ValueError):
+                continue
+    threatened = []
+    for cx, cy in cities:
+        if any(max(abs(cx - hx), abs(cy - hy)) <= 3 for hx, hy in hostiles):
+            threatened.append((cx, cy))
+    return threatened
+
+
+def improve_tile(snapshot: dict[str, Any], unit: dict[str, Any]) -> tuple[int, int] | None:
+    here = legality.plot_xy(unit)
+    if here is None:
+        return None
+    me = legality._me(snapshot)
+    occupied = legality.own_occupied_plots(snapshot)
+    uid = str(unit.get("unit_id") or "")
+    rows: list[tuple[int, int, int, bool]] = []
+    for xy, plot in legality.known_plots(snapshot).items():
+        if plot.get("water") or legality.is_mountain(plot) or plot.get("city_id") or plot.get("improvement_id"):
+            continue
+        if me and plot.get("revealed_owner_id") != me:
+            continue
+        holders = [h for h in occupied.get(xy, []) if h != uid]
+        if holders:
+            continue
+        if legality.move_problem(snapshot, uid, xy[0], xy[1]):
+            continue
+        dist = max(abs(here[0] - xy[0]), abs(here[1] - xy[1]))
+        rows.append((dist, xy[0], xy[1], bool(plot.get("resource_id"))))
+    rows.sort(key=lambda r: (not r[3], r[0], r[1], r[2]))
+    if not rows:
+        return None
+    return rows[0][1], rows[0][2]
 
 
 def _settle_target(snapshot: dict[str, Any], unit: dict[str, Any]) -> tuple[int, int] | None:
@@ -61,7 +141,7 @@ def _settle_target(snapshot: dict[str, Any], unit: dict[str, Any]) -> tuple[int,
 
 def unit_hints(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    threatened = legality._threatened_cities(snapshot)
+    threatened = threatened_cities(snapshot)
     for unit in _lst(snapshot.get("your_units")):
         if not isinstance(unit, dict) or not unit.get("unit_id"):
             continue
@@ -73,9 +153,9 @@ def unit_hints(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         action = legality.ROLE_DEFAULTS.get(legality.unit_role(unit) or "")
         if action == "explore":
-            out.append(_hint(uid, "explore", legality.frontier_target(snapshot, unit)))
+            out.append(_hint(uid, "explore", frontier_target(snapshot, unit)))
         elif action == "improve":
-            target = legality._improve_tile(snapshot, unit)
+            target = improve_tile(snapshot, unit)
             if target is not None:
                 out.append(_hint(uid, "improve", target))
         elif action == "defend":

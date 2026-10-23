@@ -37,11 +37,6 @@ def _schema_errors(snapshot: dict[str, Any]) -> list[str]:
     return [f"{'.'.join(str(part) for part in error.path)}: {error.message}" for error in _civ6_validator().iter_errors(snapshot)]
 
 
-def is_civ6_snapshot(snapshot: dict[str, Any]) -> bool:
-    version = snapshot.get("schema_version")
-    return isinstance(version, str) and version.startswith("civ6ai-input/")
-
-
 # Engine "missing" readings. Civ6 returns -1 for a defense layer that does not
 # exist (no walls) and for several other counters. The schema minimum is 0.
 _DEFENSE_SENTINEL_KEYS = frozenset({

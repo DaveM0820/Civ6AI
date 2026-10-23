@@ -457,24 +457,6 @@ def civ6_economy_attention(snapshot: dict[str, Any]) -> list[str]:
     return out
 
 
-def civ6_diplomacy_guidance(snapshot: dict[str, Any]) -> list[str]:
-    lines = [
-        "Diplomacy: when legal.trade / deal rows list a rival, prefer a clear propose line "
-        "(legal.trade.offer.Leader = ...) and answer pending deals with accept/reject/counter shapes.",
-        "Soft advice: haggle in private DMs (chat.<rival leader>) before or with a formal deal — "
-        "explain what you want and what you offer.",
-        "chat.all is broadcast posture — funny/original tone is welcome; skip spam when the lobby "
-        "is already noisy every turn; keep military secrets in DMs.",
-    ]
-    inventories = snapshot.get("legal_trade_inventory")
-    if isinstance(inventories, list) and inventories:
-        lines.append(
-            "Per-civ tradeable inventories appear under legal trade / inventory rows when known — "
-            "offer only items you can actually give."
-        )
-    return lines
-
-
 def civ6_loyalty_attention(snapshot: dict[str, Any]) -> list[str]:
     """Cities near a loyalty flip, with the levers that stop it."""
     civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
@@ -506,26 +488,6 @@ def _as_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _unit_id_from(value: Any) -> str | None:
-    text = str(value or "")
-    start = text.find("UNIT_")
-    while start >= 0:
-        cursor = start + len("UNIT_")
-        if cursor < len(text) and text[cursor].isdigit():
-            while cursor < len(text) and (text[cursor].isdigit() or text[cursor] == "_"):
-                cursor += 1
-            token = text[start:cursor].rstrip("_")
-            if any(ch.isdigit() for ch in token):
-                return token
-        start = text.find("UNIT_", start + len("UNIT_"))
-    return None
-
-
-def explore_quiet_units(snapshot: dict[str, Any], turns_needed: int = 2) -> list[str]:
-    """Retired: no-reveal tiles go on the legality blacklist instead of hiding explore."""
-    return []
 
 
 def civ6_expansion_attention(snapshot: dict[str, Any]) -> str | None:
@@ -738,11 +700,6 @@ def _best_purchase_labels(snapshot: dict[str, Any], limit: int = 3) -> list[str]
     return labels
 
 
-def civ6_idle_resources_attention(snapshot: dict[str, Any]) -> str | None:
-    """Unspent gold, faith, and envoys, with the concrete buys the snapshot already priced."""
-    return civ6_idle_resources(snapshot)[0]
-
-
 def civ6_idle_resources(snapshot: dict[str, Any]) -> tuple[str | None, bool]:
     """(note, spends_gold). spends_gold is True when the note asks for a gold decision."""
     from sidecar.civ6_diplomacy import diplomacy
@@ -826,66 +783,6 @@ def append_attack_options_to_unit_line(options: list[str], attack_tokens: list[s
         if token and token not in out and token != "none":
             out.append(token)
     return out
-
-
-def civ6_attack_option_tokens_for_unit(unit_id: str, snapshot: dict[str, Any]) -> list[str]:
-    """Build attackTo/(x,y)[+preview] tokens from legal attack_target commands for one unit."""
-    from sidecar import civ6_combat_wire as combat_wire
-
-    tokens: list[str] = []
-    previews = snapshot.get("strategic_summary", {})
-    preview_rows = []
-    if isinstance(previews, dict):
-        raw = previews.get("combat_previews")
-        if isinstance(raw, list):
-            preview_rows = [row for row in raw if isinstance(row, dict)]
-    for command in snapshot.get("legal_commands", []) or []:
-        if not isinstance(command, dict) or command.get("kind") != "attack_target":
-            continue
-        fixed = command.get("fixed_arguments") or {}
-        if not isinstance(fixed, dict) or fixed.get("unit_id") != unit_id:
-            continue
-        x, y = fixed.get("target_x"), fixed.get("target_y")
-        if x is None or y is None:
-            continue
-        try:
-            xi, yi = int(x), int(y)
-        except (TypeError, ValueError):
-            continue
-        label = f"attackTo/({xi},{yi})"
-        suffix = combat_wire.forecast_suffix_for(snapshot, xi, yi, unit_id=unit_id)
-        if suffix:
-            label = f"{label}{suffix}"
-        else:
-            for row in preview_rows:
-                if row.get("attacker_unit_id") != unit_id:
-                    continue
-                if int(row.get("target_x", -1)) != xi or int(row.get("target_y", -1)) != yi:
-                    continue
-                dmg_e = row.get("damage_to_enemy")
-                dmg_s = row.get("damage_to_self")
-                pred = row.get("prediction")
-                bits = []
-                if pred:
-                    bits.append(str(pred))
-                if isinstance(dmg_e, int) and isinstance(dmg_s, int):
-                    bits.append(f"~{dmg_e}toThem/~{dmg_s}toUs")
-                if bits:
-                    label = f"{label}[{','.join(bits)}]"
-                break
-        if label not in tokens:
-            tokens.append(label)
-    return tokens
-
-
-def settler_present(snapshot: dict[str, Any]) -> bool:
-    for unit in snapshot.get("your_units", []) or []:
-        if not isinstance(unit, dict):
-            continue
-        type_id = str(unit.get("unit_type_id") or "")
-        if "SETTLER" in type_id:
-            return True
-    return False
 
 
 def _plot_fresh_coast(snapshot: dict[str, Any], plot_id: str) -> tuple[bool | None, bool | None]:

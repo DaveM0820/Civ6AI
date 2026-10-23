@@ -97,11 +97,6 @@ def _schema_errors(snapshot: dict[str, Any]) -> list[str]:
     ]
 
 
-def is_civ5_snapshot(snapshot: dict[str, Any]) -> bool:
-    version = snapshot.get("schema_version")
-    return isinstance(version, str) and version.startswith("civ5ai-input/")
-
-
 def validate_civ5_snapshot(snapshot: dict[str, Any]) -> None:
     errors = _schema_errors(snapshot)
     if errors:
@@ -296,24 +291,6 @@ def normalize_civ5_wire_flat(flat: dict[str, Any]) -> dict[str, Any]:
 
 def load_capabilities() -> dict[str, Any]:
     return json.loads(CAPABILITIES_PATH.read_text(encoding="utf-8"))
-
-
-def load_v1_capability_kinds() -> set[str]:
-    doc = load_capabilities()
-    return {
-        str(row["kind"])
-        for row in doc.get("capabilities", [])
-        if isinstance(row, dict) and row.get("tier") == "v1" and row.get("kind")
-    }
-
-
-def load_deferred_capability_kinds() -> set[str]:
-    doc = load_capabilities()
-    return {
-        str(row["kind"])
-        for row in doc.get("deferred_capabilities", [])
-        if isinstance(row, dict) and row.get("kind")
-    }
 
 
 def load_golden_snapshot(path: Path | None = None) -> dict[str, Any]:

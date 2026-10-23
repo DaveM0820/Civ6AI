@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from sidecar import map_icons
+from sidecar import settings
 
 DEFAULT_TILE_PX = 32
 DEFAULT_VIEWPORT_PAD = 3
@@ -91,8 +92,8 @@ PLAYER_SLOT_COLORS: dict[str, str] = {
 
 
 def resolve_map_tile_px() -> int:
-    """Pixels per map tile in minimap SVG; override with CIV4AI_MAP_TILE_PX (12–48)."""
-    raw = os.environ.get("CIV4AI_MAP_TILE_PX", str(DEFAULT_TILE_PX)).strip()
+    """Pixels per map tile in minimap SVG; override with CIV6AI_MAP_TILE_PX (12–48)."""
+    raw = settings.get("CIV6AI_MAP_TILE_PX", str(DEFAULT_TILE_PX)).strip()
     try:
         value = int(raw)
     except ValueError:
@@ -101,7 +102,7 @@ def resolve_map_tile_px() -> int:
 
 
 def _resolve_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
-    raw = os.environ.get(name, str(default)).strip()
+    raw = settings.get(name, str(default)).strip()
     try:
         value = int(raw)
     except ValueError:
@@ -110,17 +111,17 @@ def _resolve_int_env(name: str, default: int, minimum: int, maximum: int) -> int
 
 
 def resolve_max_canvas_px() -> int:
-    return _resolve_int_env("CIV4AI_MAP_MAX_CANVAS_PX", MAX_CANVAS_PX, 240, 2400)
+    return _resolve_int_env("CIV6AI_MAP_MAX_CANVAS_PX", MAX_CANVAS_PX, 240, 2400)
 
 
 def resolve_max_coord_label_cells() -> int:
-    return _resolve_int_env("CIV4AI_MAP_MAX_COORD_CELLS", MAX_COORD_LABEL_CELLS, 16, 512)
+    return _resolve_int_env("CIV6AI_MAP_MAX_COORD_CELLS", MAX_COORD_LABEL_CELLS, 16, 512)
 
 
 def resolve_civ5_overview_model_image_size(override: int | None = None) -> int:
     if isinstance(override, int) and override > 0:
         return max(256, min(2048, int(override)))
-    raw = os.environ.get("CIV5AI_OVERVIEW_MODEL_IMAGE_SIZE") or os.environ.get("CIV5_OVERVIEW_MODEL_IMAGE_SIZE")
+    raw = settings.get("CIV6AI_OVERVIEW_MODEL_IMAGE_SIZE", skip_empty=True)
     if raw and str(raw).strip():
         try:
             return max(256, min(2048, int(str(raw).strip())))
@@ -132,7 +133,7 @@ def resolve_civ5_overview_model_image_size(override: int | None = None) -> int:
 def resolve_civ5_tactical_model_image_size(override: int | None = None) -> int:
     if isinstance(override, int) and override > 0:
         return max(256, min(2048, int(override)))
-    raw = os.environ.get("CIV5AI_TACTICAL_MODEL_IMAGE_SIZE") or os.environ.get("CIV5_TACTICAL_MODEL_IMAGE_SIZE")
+    raw = settings.get("CIV6AI_TACTICAL_MODEL_IMAGE_SIZE", skip_empty=True)
     if raw and str(raw).strip():
         try:
             return max(256, min(2048, int(str(raw).strip())))
@@ -145,7 +146,7 @@ def resolve_civ5_focus_model_image_size(override: int | None = None) -> int:
     """Low-res focus tactical (~6x6). Clamped to 256-512 to keep vision cost small."""
     if isinstance(override, int) and override > 0:
         return max(256, min(512, int(override)))
-    raw = os.environ.get("CIV5AI_FOCUS_MODEL_IMAGE_SIZE") or os.environ.get("CIV5_FOCUS_MODEL_IMAGE_SIZE")
+    raw = settings.get("CIV6AI_FOCUS_MODEL_IMAGE_SIZE", skip_empty=True)
     if raw and str(raw).strip():
         try:
             return max(256, min(512, int(str(raw).strip())))
@@ -156,10 +157,10 @@ def resolve_civ5_focus_model_image_size(override: int | None = None) -> int:
 
 def resolve_max_viewport_tiles() -> int | None:
     """Optional viewport crop on large revealed areas; unset = no tile cap."""
-    raw = os.environ.get("CIV4AI_MAP_MAX_VIEWPORT_TILES", "").strip()
+    raw = settings.get("CIV6AI_MAP_MAX_VIEWPORT_TILES", "").strip()
     if not raw:
         return None
-    return _resolve_int_env("CIV4AI_MAP_MAX_VIEWPORT_TILES", MAX_VIEWPORT_TILES, MIN_VIEWPORT_TILES, 512)
+    return _resolve_int_env("CIV6AI_MAP_MAX_VIEWPORT_TILES", MAX_VIEWPORT_TILES, MIN_VIEWPORT_TILES, 512)
 
 
 def _cap_viewport_to_max_tiles(
@@ -365,16 +366,6 @@ def _normalize_visibility_grid(grid: list[Any], width: int, height: int) -> list
     if not any(cell != "?" for row in rows for cell in row):
         return None
     return rows
-
-
-def _revealed_grid_count(grid: list[str], width: int, height: int) -> int:
-    count = 0
-    for y in range(min(height, len(grid))):
-        row = grid[y]
-        for x in range(min(width, len(row))):
-            if row[x] != "?":
-                count += 1
-    return count
 
 
 def _merge_grid_into_index(
@@ -1297,10 +1288,6 @@ def _grid_char_at(
 
 def model_image_suffix() -> str:
     return ".map.png"
-
-
-def model_image_mime() -> str:
-    return MODEL_IMAGE_MIME
 
 
 def _rgb_tuple(hex_color: str) -> tuple[int, int, int]:

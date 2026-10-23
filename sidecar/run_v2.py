@@ -12,6 +12,7 @@ import time
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sidecar import map_render
+from sidecar import settings
 from sidecar import pipeline_v2 as pipeline
 from sidecar import runner_core
 
@@ -172,8 +173,8 @@ def _fake_public_chat(snapshot: dict, command: dict | None) -> dict:
 
 
 def _proof_command(snapshot: dict) -> dict | None:
-	proof_id = os.environ.get("CIV4AI_PROOF_COMMAND_ID", "").strip()
-	proof_kind = os.environ.get("CIV4AI_PROOF_COMMAND_KIND", "").strip()
+	proof_id = settings.get("CIV6AI_PROOF_COMMAND_ID", "").strip()
+	proof_kind = settings.get("CIV6AI_PROOF_COMMAND_KIND", "").strip()
 	if not proof_id and not proof_kind:
 		return None
 	commands = snapshot["legal_commands"]
@@ -191,7 +192,7 @@ def _command_payload_item(selected: dict) -> dict:
 def fake_response(snapshot: dict) -> dict:
 	commands = snapshot["legal_commands"]
 	proof = _proof_command(snapshot)
-	proof_target = os.environ.get("CIV4AI_PROOF_COMMAND_ID", "").strip() or os.environ.get("CIV4AI_PROOF_COMMAND_KIND", "").strip()
+	proof_target = settings.get("CIV6AI_PROOF_COMMAND_ID", "").strip() or settings.get("CIV6AI_PROOF_COMMAND_KIND", "").strip()
 	in_proof = bool(proof_target)
 	if in_proof and proof is None:
 		raise pipeline.BoundaryError("proof_command", "Proof command is not legal in this snapshot: " + proof_target)

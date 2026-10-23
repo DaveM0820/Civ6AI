@@ -8,7 +8,6 @@
   "remember_disk": 128,
   "situation_log_prompt": 12,
   "situation_log_max": 24,
-  "memory_char_floor": 16000,
   "field_cap": 16000,
   "micro_cap": 6,
   "recent_full_turns": 3,

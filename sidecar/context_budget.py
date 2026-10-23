@@ -32,6 +32,8 @@ import json
 import logging
 import math
 import os
+
+from sidecar import settings
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable
@@ -137,7 +139,7 @@ def _env_float(*names: str, default: float | None = None) -> float | None:
 
 
 def model_provider() -> str:
-    raw = _env_first("CIV6AI_MODEL_PROVIDER", "CIV4AI_MODEL_PROVIDER", default="gemini").lower()
+    raw = _env_first(*settings.names("CIV6AI_MODEL_PROVIDER"), default="gemini").lower()
     return raw
 
 
@@ -165,13 +167,11 @@ def openrouter_api_key() -> str:
 def paragraph_output_reserve_tokens() -> int:
     """Tokens reserved for 4 thinking paragraphs + 1 content commands block."""
     para = _env_int(
-        "CIV5AI_THINKING_PARAGRAPH_TOKENS",
-        "CIV4AI_THINKING_PARAGRAPH_TOKENS",
+        *settings.names("CIV6AI_THINKING_PARAGRAPH_TOKENS"),
         default=DEFAULT_THINKING_PARAGRAPH_TOKENS,
     ) or DEFAULT_THINKING_PARAGRAPH_TOKENS
     content = _env_int(
-        "CIV5AI_CONTENT_BLOCK_TOKENS",
-        "CIV4AI_CONTENT_BLOCK_TOKENS",
+        *settings.names("CIV6AI_CONTENT_BLOCK_TOKENS"),
         default=DEFAULT_CONTENT_BLOCK_TOKENS,
     ) or DEFAULT_CONTENT_BLOCK_TOKENS
     para = max(200, min(4000, int(para)))
@@ -185,7 +185,7 @@ def compute_reserve_tokens(context_limit: int) -> int:
     Shrink ladder must fire before this reserve is eaten. Prompt budget is
     context_limit - reserve.
     """
-    absolute = _env_int("CIV5AI_CONTEXT_RESERVE_TOKENS", "CIV4AI_CONTEXT_RESERVE_TOKENS")
+    absolute = _env_int(*settings.names("CIV6AI_CONTEXT_RESERVE_TOKENS"))
     if absolute is not None and absolute >= 0:
         cap = max(0, int(context_limit) - 1024)
         return min(cap, absolute) if context_limit > 1024 else absolute
@@ -194,7 +194,7 @@ def compute_reserve_tokens(context_limit: int) -> int:
     reserve = max(MIN_RESERVE_TOKENS, paragraph_reserve)
 
     # Optional ratio floor (off by default). When set > 0, take max(paragraph, ratio*limit).
-    ratio = _env_float("CIV5AI_CONTEXT_RESERVE_RATIO", "CIV4AI_CONTEXT_RESERVE_RATIO", default=DEFAULT_RESERVE_RATIO)
+    ratio = _env_float(*settings.names("CIV6AI_CONTEXT_RESERVE_RATIO"), default=DEFAULT_RESERVE_RATIO)
     if ratio is not None and float(ratio) > 0:
         ratio = max(0.05, min(0.50, float(ratio)))
         reserve = max(reserve, int(round(int(context_limit) * ratio)))
@@ -432,12 +432,7 @@ def resolve_model_context_limit(
     active = (provider or model_provider()).strip().lower()
     resolved_model = (model or active_model_name(active)).strip()
 
-    env_limit = _env_int(
-        "CIV5AI_MODEL_CONTEXT",
-        "CIV4AI_MODEL_CONTEXT",
-        "CIV5AI_CONTEXT_LIMIT",
-        "CIV4AI_CONTEXT_LIMIT",
-    )
+    env_limit = _env_int(*settings.names("CIV6AI_MODEL_CONTEXT"))
     if env_limit is not None and env_limit >= 2048:
         reserve = compute_reserve_tokens(env_limit)
         return ContextLimitInfo(active, resolved_model, env_limit, "env", reserve)
@@ -475,8 +470,8 @@ def clear_context_limit_cache() -> None:
 
 
 def default_image_sizes() -> tuple[int, int, int]:
-    overview = _env_int("CIV5_OVERVIEW_MODEL_IMAGE_SIZE", "CIV5AI_OVERVIEW_MODEL_IMAGE_SIZE", default=1536) or 1536
-    tactical = _env_int("CIV5_TACTICAL_MODEL_IMAGE_SIZE", "CIV5AI_TACTICAL_MODEL_IMAGE_SIZE", default=2048) or 2048
+    overview = _env_int(*settings.names("CIV6AI_OVERVIEW_MODEL_IMAGE_SIZE"), default=1536) or 1536
+    tactical = _env_int(*settings.names("CIV6AI_TACTICAL_MODEL_IMAGE_SIZE"), default=2048) or 2048
     overview = max(256, min(2048, overview))
     tactical = max(256, min(2048, tactical))
     return overview, tactical, 0

@@ -76,29 +76,6 @@ function Civ6Ai_SeatExperiment._LogEvent(playerID, phase, extra)
   Civ6Ai_SeatExperiment._AppendJsonLine(path, payload)
 end
 
-function Civ6Ai_SeatExperiment.BeginPulse(playerID)
-  if not Civ6Ai_Config.IsSeatExperiment() then
-    return
-  end
-  local cityId, buildId = Civ6Ai_Production.FindExperimentTarget(playerID)
-  local state = {
-    turn = Game.GetCurrentGameTurn(),
-    experiment_city_id = cityId,
-    experiment_target = buildId,
-    pre_apply = Civ6Ai_Production.CollectProductionMap(playerID),
-    units_with_moves_pre = Civ6Ai_Production.CountUnitsWithMoves(playerID),
-    post_apply = nil,
-    units_with_moves_post_apply = nil,
-  }
-  Civ6Ai_SeatExperiment._pulseState[playerID] = state
-  Civ6Ai_SeatExperiment._LogEvent(playerID, "turn_start", {
-    production = state.pre_apply,
-    units_with_moves = state.units_with_moves_pre,
-    experiment_city_id = cityId,
-    experiment_target = buildId,
-  })
-end
-
 function Civ6Ai_SeatExperiment.OnPlayerTurnActivated(playerID)
   if not Civ6Ai_Config.IsSeatExperiment() then
     return

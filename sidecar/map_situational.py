@@ -73,26 +73,6 @@ def should_omit_tactical_map(
     return False, ""
 
 
-def tactical_map_attached(snapshot: dict[str, Any]) -> bool:
-    advciv = snapshot.get("advciv", {})
-    if not isinstance(advciv, dict):
-        return True
-    manifest = advciv.get("map_images", [])
-    if not isinstance(manifest, list) or not manifest:
-        return True
-    return any(isinstance(item, dict) and item.get("role") == "viewport" for item in manifest)
-
-
-def focus_map_attached(snapshot: dict[str, Any]) -> bool:
-    advciv = snapshot.get("advciv", {})
-    if not isinstance(advciv, dict):
-        return False
-    manifest = advciv.get("map_images", [])
-    if not isinstance(manifest, list):
-        return False
-    return any(isinstance(item, dict) and item.get("role") == "focus" for item in manifest)
-
-
 def format_strategic_window(viewport: dict[str, Any], map_width: int, map_height: int) -> str:
     """Crop vs full map. The percent is the picture's window, not tiles explored."""
     x0 = int(viewport.get("x0") or 0)
@@ -107,93 +87,6 @@ def format_strategic_window(viewport: dict[str, Any], map_width: int, map_height
         f"({x0},{y0})-({x1},{y1}) of {int(map_width)}x{int(map_height)} "
         f"(window {pct}% of the map)"
     )
-
-
-def map_images_manifest(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    """Manifest of attached situational map images (overview / viewport / focus)."""
-    advciv = snapshot.get("advciv")
-    if isinstance(advciv, dict):
-        manifest = advciv.get("map_images")
-        if isinstance(manifest, list) and manifest:
-            return [item for item in manifest if isinstance(item, dict)]
-    known = snapshot.get("known_map")
-    if isinstance(known, dict):
-        images = known.get("images")
-        if isinstance(images, list) and images:
-            return [item for item in images if isinstance(item, dict)]
-    return []
-
-
-def overview_viewport_from_snapshot(snapshot: dict[str, Any]) -> dict[str, int] | None:
-    known = snapshot.get("known_map")
-    if isinstance(known, dict):
-        image = known.get("image")
-        if isinstance(image, dict) and isinstance(image.get("viewport"), dict):
-            return image["viewport"]
-        images = known.get("images")
-        if isinstance(images, list):
-            for item in images:
-                if isinstance(item, dict) and item.get("role") == "overview" and isinstance(item.get("viewport"), dict):
-                    return item["viewport"]
-    advciv = snapshot.get("advciv")
-    if isinstance(advciv, dict):
-        for item in advciv.get("map_images") or []:
-            if isinstance(item, dict) and item.get("role") == "overview" and isinstance(item.get("viewport"), dict):
-                return item["viewport"]
-    return None
-
-
-def strategic_scale_wire_lines(snapshot: dict[str, Any]) -> list[str]:
-    map_width, map_height = _map_dimensions(snapshot)
-    lines = [
-        f"map.world.width = {map_width}",
-        f"map.world.height = {map_height}",
-    ]
-    manifest = map_images_manifest(snapshot)
-    role_wire_prefix = {
-        "overview": "map.strategic",
-        "viewport": "map.tactical",
-        "focus": "map.focus",
-    }
-    if manifest:
-        overview_meta: dict[str, Any] | None = None
-        for item in manifest:
-            role = str(item.get("role") or "")
-            if role == "overview":
-                overview_meta = item
-            prefix = role_wire_prefix.get(role)
-            if not prefix:
-                continue
-            viewport = item.get("viewport")
-            if isinstance(viewport, dict):
-                lines.append(
-                    f"{prefix}.window = " + format_strategic_window(viewport, map_width, map_height)
-                )
-            detail = item.get("detail")
-            if isinstance(detail, str) and detail.strip():
-                lines.append(f"{prefix}.detail = {detail}")
-            image_size = item.get("image_size")
-            if isinstance(image_size, int) and image_size > 0:
-                lines.append(f"{prefix}.image_size = {image_size}px")
-            if role == "viewport" and "auto" in item:
-                lines.append(f"{prefix}.auto = {str(bool(item.get('auto'))).lower()}")
-        if isinstance(overview_meta, dict):
-            if overview_meta.get("tactical_omitted"):
-                reason = str(overview_meta.get("tactical_omit_reason") or "true")
-                lines.append(f"map.tactical.omitted = {reason}")
-            if overview_meta.get("focus_omitted"):
-                reason = str(overview_meta.get("focus_omit_reason") or "true")
-                lines.append(f"map.focus.omitted = {reason}")
-        return lines
-    viewport = overview_viewport_from_snapshot(snapshot)
-    if viewport is None:
-        try:
-            viewport = compute_overview_viewport(snapshot)
-        except Exception:
-            viewport = None
-    if isinstance(viewport, dict):
-        lines.append("map.strategic.window = " + format_strategic_window(viewport, map_width, map_height))
-    return lines
 
 
 def _stamp_map_banner(path: Path, title: str) -> None:
@@ -412,32 +305,6 @@ def viewport_rect_from_stored(
         map_width,
         map_height,
     )
-
-
-def normalize_stored_viewport(
-    stored: dict[str, Any],
-    snapshot: dict[str, Any],
-) -> dict[str, Any] | None:
-    map_width, map_height = _map_dimensions(snapshot)
-    focus = parse_map_focus_tile(stored)
-    if focus is not None:
-        x, y = focus
-        return {"focus_x": x, "focus_y": y}
-    rect = parse_map_viewport_value(stored)
-    if rect is None:
-        return None
-    clamped = clamp_map_viewport(
-        rect["x0"],
-        rect["y0"],
-        rect["width"],
-        rect["height"],
-        map_width,
-        map_height,
-    )
-    return {
-        "focus_x": clamped["x0"] + clamped["width"] // 2,
-        "focus_y": clamped["y0"] + clamped["height"] // 2,
-    }
 
 
 def _unit_plot_coords(unit: dict[str, Any]) -> tuple[int, int] | None:
@@ -1152,36 +1019,3 @@ TACTICAL_CONTACT_DISTANCE = 5
 TACTICAL_CLUSTER_DISTANCE = 8
 MAX_TACTICAL_IMAGES = 2  # main tactical + low-res focus
 
-
-def apply_auto_damage_viewport(
-    thought_memory: dict[str, Any],
-    snapshot: dict[str, Any],
-) -> dict[str, Any]:
-    return resolve_tactical_viewport(thought_memory, snapshot)
-
-
-def pick_auto_war_viewport(snapshot: dict[str, Any]) -> dict[str, int] | None:
-    focus = pick_auto_war_focus_tile(snapshot)
-    if focus is None:
-        return None
-    map_width, map_height = _map_dimensions(snapshot)
-    return viewport_focused_on_tile(focus[0], focus[1], map_width, map_height)
-
-
-def detect_tactical_hotspots(
-    snapshot: dict[str, Any],
-    *,
-    contact_distance: int = TACTICAL_CONTACT_DISTANCE,
-    max_images: int = MAX_TACTICAL_IMAGES,
-) -> list[dict[str, Any]]:
-    focus = pick_auto_war_focus_tile(snapshot)
-    if focus is None:
-        return []
-    map_width, map_height = _map_dimensions(snapshot)
-    viewport = viewport_focused_on_tile(focus[0], focus[1], map_width, map_height)
-    return [{
-        "role": "viewport",
-        "label": f"Tactical contact near ({focus[0]},{focus[1]})",
-        "viewport": viewport,
-        "center": focus,
-    }][:max_images]

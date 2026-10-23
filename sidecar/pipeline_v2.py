@@ -10,6 +10,8 @@ import copy
 import hashlib
 import json
 import os
+
+from sidecar import settings as env_settings
 import re
 import sys
 import base64
@@ -77,12 +79,12 @@ EXPANSION_WIRE_NAMES = {
 
 
 def compact_legal_wire_enabled() -> bool:
-    raw = os.environ.get("CIV4AI_COMPACT_LEGAL_WIRE", "1").strip().lower()
+    raw = env_settings.get("CIV6AI_COMPACT_LEGAL_WIRE", "1").strip().lower()
     return raw not in {"0", "false", "no", "off"}
 
 
 def compact_situation_wire_enabled() -> bool:
-    raw = os.environ.get("CIV4AI_COMPACT_SITUATION_WIRE", "1").strip().lower()
+    raw = env_settings.get("CIV6AI_COMPACT_SITUATION_WIRE", "1").strip().lower()
     return raw not in {"0", "false", "no", "off"}
 
 
@@ -165,7 +167,7 @@ def _empty_thought_memory(session_key: str) -> dict[str, Any]:
 
 
 def chat_max_messages() -> int:
-    raw = os.environ.get("CIV4AI_CHAT_MAX_MESSAGES", "").strip()
+    raw = env_settings.get("CIV6AI_CHAT_MAX_MESSAGES", "").strip()
     if not raw:
         return CHAT_MAX_MESSAGES_DEFAULT
     try:
@@ -175,7 +177,7 @@ def chat_max_messages() -> int:
 
 
 def chat_history_max_messages() -> int:
-    raw = os.environ.get("CIV4AI_CHAT_HISTORY_MAX", "").strip()
+    raw = env_settings.get("CIV6AI_CHAT_HISTORY_MAX", "").strip()
     if not raw:
         return CHAT_HISTORY_MAX_DEFAULT
     try:
@@ -185,7 +187,7 @@ def chat_history_max_messages() -> int:
 
 
 def player_history_max_chars() -> int:
-    raw = os.environ.get("CIV4AI_PLAYER_HISTORY_MAX_CHARS", "").strip()
+    raw = env_settings.get("CIV6AI_PLAYER_HISTORY_MAX_CHARS", "").strip()
     if not raw:
         return PLAYER_HISTORY_MAX_CHARS_DEFAULT
     try:
@@ -195,7 +197,7 @@ def player_history_max_chars() -> int:
 
 
 def player_opinion_max_chars() -> int:
-    raw = os.environ.get("CIV4AI_PLAYER_OPINION_MAX_CHARS", "").strip()
+    raw = env_settings.get("CIV6AI_PLAYER_OPINION_MAX_CHARS", "").strip()
     if not raw:
         return PLAYER_OPINION_MAX_CHARS_DEFAULT
     try:
@@ -329,17 +331,6 @@ def _opinion_wire_value(entry: dict[str, Any]) -> str:
     if updated is not None:
         return f"(updated turn {updated}) {text}"
     return text
-
-
-def chat_min_messages() -> int:
-    raw = os.environ.get("CIV4AI_CHAT_MIN_MESSAGES", "").strip()
-    if not raw:
-        return min(CHAT_MIN_MESSAGES_DEFAULT, chat_max_messages())
-    try:
-        return max(0, min(chat_max_messages(), int(raw)))
-    except ValueError:
-        return min(CHAT_MIN_MESSAGES_DEFAULT, chat_max_messages())
-
 
 
 def early_turn_intro_chat_lines(snapshot: dict[str, Any]) -> list[str]:
@@ -599,17 +590,6 @@ def parse_model_text_with_repair(
     return parse_model_text(repaired), True
 
 
-def _normalize_trade_inventory(rows: list[Any]) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if "trade_item_id" not in row or "kind" not in row:
-            continue
-        items.append(row)
-    return items
-
-
 def _normalize_trade_items(rows: list[Any]) -> list[dict[str, Any]]:
     """Typed trade rows from DLL diplomacy_requests / counteroffer_proposals."""
     normalized: list[dict[str, Any]] = []
@@ -801,22 +781,19 @@ def build_model_input(extracted: dict[str, Any]) -> dict[str, Any]:
 
 
 def model_provider() -> str:
-    raw = os.environ.get(
-        "CIV6AI_MODEL_PROVIDER",
-        os.environ.get("CIV4AI_MODEL_PROVIDER", "gemini"),
-    ).strip().lower()
+    raw = env_settings.get("CIV6AI_MODEL_PROVIDER", "gemini").strip().lower()
     if raw in {"gemini", "openai", "lmstudio", "openrouter"}:
         return raw
     return "gemini"
 
 
 def openai_reasoning_effort() -> str:
-    raw = os.environ.get("CIV4AI_OPENAI_REASONING_EFFORT", "low").strip().lower()
+    raw = env_settings.get("CIV6AI_OPENAI_REASONING_EFFORT", "low").strip().lower()
     return raw if raw in {"low", "medium", "high"} else "low"
 
 
 def map_image_cadence_turns() -> int:
-    raw = os.environ.get("CIV4AI_MAP_IMAGE_CADENCE", str(MAP_IMAGE_CADENCE_TURNS)).strip()
+    raw = env_settings.get("CIV6AI_MAP_IMAGE_CADENCE", str(MAP_IMAGE_CADENCE_TURNS)).strip()
     try:
         cadence = int(raw)
     except ValueError:
@@ -1183,7 +1160,7 @@ MISSION_WIRE_LABELS: dict[str, str] = {
 
 
 def _wire_max_unit_detail_lines() -> int:
-    raw = os.environ.get("CIV4AI_WIRE_MAX_UNIT_DETAIL", str(WIRE_MAX_UNIT_DETAIL_DEFAULT)).strip()
+    raw = env_settings.get("CIV6AI_WIRE_MAX_UNIT_DETAIL", str(WIRE_MAX_UNIT_DETAIL_DEFAULT)).strip()
     try:
         return max(0, min(512, int(raw)))
     except ValueError:
@@ -2319,11 +2296,6 @@ def resolve_property_wire(snapshot: dict[str, Any], flat: dict[str, Any]) -> dic
     return merged
 
 
-def resolve_city_property_wire(snapshot: dict[str, Any], flat: dict[str, Any]) -> dict[str, Any]:
-    """Backward-compatible alias."""
-    return resolve_property_wire(snapshot, flat)
-
-
 def trim_chat_text(text: str, limit: int = CHAT_TEXT_MAX_LENGTH) -> str:
     cleaned = "".join(character for character in str(text or "") if ord(character) >= 32).strip()
     if len(cleaned) <= limit:
@@ -2343,7 +2315,7 @@ def thought_turns_for_prompt(current_turn: int, include_milestones: bool | None 
     recent_start = max(1, current_turn - THOUGHT_MEMORY_RECENT_TURNS)
     recent = list(range(recent_start, current_turn))
     if include_milestones is None:
-        raw = os.environ.get("CIV4AI_THOUGHT_MILESTONES", "1").strip().lower()
+        raw = env_settings.get("CIV6AI_THOUGHT_MILESTONES", "1").strip().lower()
         include_milestones = raw not in {"0", "false", "no", "off"}
     if not include_milestones:
         return recent
@@ -2453,7 +2425,7 @@ def save_thought_memory(path: Path, memory: dict[str, Any]) -> None:
 
 
 def thought_max_chars() -> int:
-    raw = os.environ.get("CIV4AI_THOUGHT_MAX_CHARS", str(THOUGHT_MAX_CHARS_DEFAULT)).strip()
+    raw = env_settings.get("CIV6AI_THOUGHT_MAX_CHARS", str(THOUGHT_MAX_CHARS_DEFAULT)).strip()
     try:
         return max(800, min(32000, int(raw)))
     except ValueError:
@@ -4430,41 +4402,6 @@ def _model_role_instruction(snapshot: dict[str, Any]) -> str:
     )
 
 
-def _unit_legal_command_count(snapshot: dict[str, Any]) -> int:
-    count = 0
-    unit_ids = {
-        unit.get("unit_id")
-        for unit in snapshot.get("your_units", [])
-        if isinstance(unit, dict) and unit.get("unit_id")
-    }
-    for command in snapshot.get("legal_commands", []):
-        if not isinstance(command, dict):
-            continue
-        fixed = command.get("fixed_arguments", {})
-        if isinstance(fixed, dict) and fixed.get("unit_id") in unit_ids:
-            if command.get("kind") not in HOST_AUTOMATIC_KINDS:
-                count += 1
-    return count
-
-
-def _unit_move_legal_available(snapshot: dict[str, Any]) -> bool:
-    unit_ids = {
-        unit.get("unit_id")
-        for unit in snapshot.get("your_units", [])
-        if isinstance(unit, dict) and unit.get("unit_id")
-    }
-    for command in snapshot.get("legal_commands", []):
-        if not isinstance(command, dict):
-            continue
-        fixed = command.get("fixed_arguments", {})
-        if not isinstance(fixed, dict) or fixed.get("unit_id") not in unit_ids:
-            continue
-        prop_name, _ = _unit_command_property_parts(command)
-        if prop_name == "moveTo":
-            return True
-    return False
-
-
 def _is_trade_diplomacy_request(request: dict[str, Any]) -> bool:
     request_id = str(request.get("request_id", ""))
     if request_id.startswith("DIPLO_TRADE_"):
@@ -4527,7 +4464,7 @@ def _diplomatic_strategy_guidance(snapshot: dict[str, Any]) -> list[str]:
 
 def _diplomacy_prompt_bias_lines(snapshot: dict[str, Any]) -> list[str]:
     """Temporary harness hook: set CIV4AI_PROMPT_DIPLOMACY_BIAS=1 to nudge diplomacy tests."""
-    raw = os.environ.get("CIV4AI_PROMPT_DIPLOMACY_BIAS", "").strip().lower()
+    raw = env_settings.get("CIV6AI_PROMPT_DIPLOMACY_BIAS", "").strip().lower()
     if raw not in {"1", "true", "yes", "on"}:
         return []
     diplomacy = snapshot.get("diplomacy", {})
@@ -4643,7 +4580,7 @@ def gemini_model_name() -> str:
 
 
 def gemini_api_mode() -> str:
-    raw = os.environ.get("CIV4AI_GEMINI_API", "interactions").strip().lower()
+    raw = env_settings.get("CIV6AI_GEMINI_API", "interactions").strip().lower()
     if raw in {"interactions", "generatecontent", "generate_content"}:
         return "interactions" if raw == "interactions" else "generateContent"
     return "interactions"
@@ -4762,7 +4699,7 @@ def _gemini_interaction_id(payload: dict[str, Any]) -> str | None:
 
 
 def model_fallback_enabled() -> bool:
-    return os.environ.get("CIV4AI_DISABLE_MODEL_FALLBACK", "").strip() not in {"1", "true", "yes"}
+    return env_settings.get("CIV6AI_DISABLE_MODEL_FALLBACK", "").strip() not in {"1", "true", "yes"}
 
 
 SUPPORTED_MODEL_IMAGE_MIMES = frozenset({
@@ -4811,10 +4748,6 @@ def _gemini_generate_content_parts(payload: dict[str, Any]) -> tuple[str, str]:
     if len(output_texts) != 1:
         raise BoundaryError("api_output", "Gemini returned other than one output text part")
     return output_texts[0], "\n\n".join(thought_texts)
-
-
-def _gemini_response_text(payload: dict[str, Any]) -> str:
-    return _gemini_generate_content_parts(payload)[0]
 
 
 def _response_text(payload: dict[str, Any]) -> str:

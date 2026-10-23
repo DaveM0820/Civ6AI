@@ -400,30 +400,6 @@ def _river_edge_for_item(
     return _edge_index_for_neighbor(wx, wy, dx_i, dy_i)
 
 
-def _iter_river_neighbor_deltas(
-    plot: dict[str, Any] | None,
-    wy: int,
-) -> list[tuple[int, int, int | None]]:
-    """Return (dx, dy, legacy_edge). legacy_edge is set for Civ6 string labels."""
-    if plot is None:
-        return []
-    raw = plot.get("river_edges")
-    if not isinstance(raw, list):
-        return []
-    deltas: list[tuple[int, int, int | None]] = []
-    for item in raw:
-        if isinstance(item, dict):
-            dx = item.get("dx")
-            dy = item.get("dy")
-            if dx is not None and dy is not None:
-                deltas.append((int(dx), int(dy), None))
-        elif isinstance(item, str):
-            legacy = _legacy_river_edge(item, wy)
-            if legacy is not None:
-                deltas.append((0, 0, legacy))
-    return deltas
-
-
 def _snap_point(point: tuple[float, float]) -> tuple[int, int]:
     return (int(round(point[0])), int(round(point[1])))
 

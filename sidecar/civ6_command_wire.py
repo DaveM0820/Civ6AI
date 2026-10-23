@@ -695,18 +695,6 @@ def _synthesize_settle(snapshot: dict[str, Any], unit_id: str, x: int, y: int) -
     return _synthesize_far_move(snapshot, unit_id, x, y, intent=INTENT_FOUND)
 
 
-def _improve_id_from_value(value: Any) -> str | None:
-    text = str(value or "")
-    match = re.search(r"(IMPROVEMENT_[A-Z0-9_]+)", text, re.I)
-    if match:
-        return match.group(1).upper()
-    after = re.search(r":\s*([A-Za-z0-9_]+)", text)
-    if after:
-        token = after.group(1)
-        return token if token.upper().startswith("IMPROVEMENT_") else f"IMPROVEMENT_{token.upper()}"
-    return None
-
-
 def _synthesize_trade_route(snapshot: dict[str, Any], unit_id: str, value: Any) -> str | None:
     text = str(value or "")
     wanted = _norm(text)

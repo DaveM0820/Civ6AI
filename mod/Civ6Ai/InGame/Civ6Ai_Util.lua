@@ -48,14 +48,6 @@ function Civ6Ai_Util.EscapeJson(value)
   return '"' .. text .. '"'
 end
 
-function Civ6Ai_Util.JsonArray(items)
-  local parts = {}
-  for _, item in ipairs(items) do
-    table.insert(parts, Civ6Ai_Util.EscapeJson(item))
-  end
-  return "[" .. table.concat(parts, ",") .. "]"
-end
-
 function Civ6Ai_Util.HasIo()
   return io ~= nil and io.open ~= nil
 end
@@ -205,11 +197,6 @@ function Civ6Ai_Util.ReadTextFile(path)
     end
   end
   return nil
-end
-
-function Civ6Ai_Util.FileExists(path)
-  local text = Civ6Ai_Util.ReadTextFile(path)
-  return text ~= nil
 end
 
 function Civ6Ai_Util._IsApplyResults(path)

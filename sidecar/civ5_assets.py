@@ -253,75 +253,6 @@ def strategic_png_path(plot: dict[str, Any] | None) -> Path | None:
 
 
 @lru_cache(maxsize=1)
-def _parse_icon_atlases() -> dict[tuple[str, int], tuple[str, int, int]]:
-    game = resolve_game_root()
-    if game is None:
-        return {}
-    atlases: dict[tuple[str, int], tuple[str, int, int]] = {}
-    xml_paths = list(game.rglob("CIV5IconTextureAtlases.xml"))
-    for xml_path in xml_paths:
-        text = xml_path.read_text(encoding="utf-8", errors="replace")
-        for match in re.finditer(
-            r"<Atlas>([^<]+)</Atlas>\s*<IconSize>(\d+)</IconSize>\s*<Filename>([^<]+)</Filename>\s*"
-            r"<IconsPerRow>(\d+)</IconsPerRow>\s*<IconsPerColumn>(\d+)</IconsPerColumn>",
-            text,
-            flags=re.DOTALL,
-        ):
-            atlas, size, filename, per_row, _per_col = match.groups()
-            atlases[(atlas.strip(), int(size))] = (filename.strip(), int(per_row), int(_per_col))
-    return atlases
-
-
-@lru_cache(maxsize=1)
-def _parse_resource_icons() -> dict[str, tuple[str, int, int]]:
-    game = resolve_game_root()
-    if game is None:
-        return {}
-    mapping: dict[str, tuple[str, int, int]] = {}
-    for xml_path in game.rglob("CIV5Resources.xml"):
-        text = xml_path.read_text(encoding="utf-8", errors="replace")
-        for block in re.finditer(r"<Row>(.*?)</Row>", text, flags=re.DOTALL):
-            chunk = block.group(1)
-            type_match = re.search(r"<Type>(RESOURCE_[^<]+)</Type>", chunk)
-            if not type_match:
-                continue
-            resource_id = type_match.group(1).strip()
-            atlas_match = re.search(r"<IconAtlas>([^<]+)</IconAtlas>", chunk)
-            index_match = re.search(r"<PortraitIndex>(-?\d+)</PortraitIndex>", chunk)
-            if not atlas_match or not index_match:
-                continue
-            index = int(index_match.group(1))
-            if index < 0:
-                continue
-            mapping[resource_id] = (atlas_match.group(1).strip(), index)
-    return mapping
-
-
-@lru_cache(maxsize=1)
-def _parse_unit_flag_icons() -> dict[str, tuple[str, int, str]]:
-    game = resolve_game_root()
-    if game is None:
-        return {}
-    mapping: dict[str, tuple[str, int, str]] = {}
-    for xml_path in game.rglob("CIV5Units.xml"):
-        text = xml_path.read_text(encoding="utf-8", errors="replace")
-        for block in re.finditer(r"<Row>(.*?)</Row>", text, flags=re.DOTALL):
-            chunk = block.group(1)
-            type_match = re.search(r"<Type>(UNIT_[^<]+)</Type>", chunk)
-            if not type_match:
-                continue
-            unit_id = type_match.group(1).strip()
-            offset_match = re.search(r"<UnitFlagIconOffset>(\d+)</UnitFlagIconOffset>", chunk)
-            atlas_match = re.search(r"<UnitFlagAtlas>([^<]+)</UnitFlagAtlas>", chunk)
-            if not offset_match:
-                continue
-            offset = int(offset_match.group(1))
-            atlas = atlas_match.group(1).strip() if atlas_match else "UNIT_FLAG_ATLAS"
-            mapping[unit_id] = (atlas, offset)
-    return mapping
-
-
-@lru_cache(maxsize=1)
 def _parse_strategic_view_assets() -> dict[str, str]:
     game = resolve_game_root()
     if game is None:
@@ -450,36 +381,6 @@ def unit_sv_dds_name(unit_type_id: str) -> str | None:
         if _extract_dds_to_cache(name) is not None:
             return name
     return None
-
-
-def _crop_atlas_icon(atlas: str, icon_size: int, index: int, out_path: Path) -> Path | None:
-    atlases = _parse_icon_atlases()
-    entry = atlases.get((atlas, icon_size))
-    if entry is None:
-        for (name, size), value in atlases.items():
-            if name == atlas:
-                entry = value
-                icon_size = size
-                break
-    if entry is None:
-        return None
-    filename, per_row, _per_col = entry
-    dds_path = _extract_dds_to_cache(filename)
-    if dds_path is None:
-        return None
-    image = civ6_assets.load_rgba_image(dds_path)
-    if image is None:
-        return None
-    column = index % per_row
-    row = index // per_row
-    tile = image.crop((
-        column * icon_size,
-        row * icon_size,
-        (column + 1) * icon_size,
-        (row + 1) * icon_size,
-    ))
-    civ6_assets._save_png(tile, out_path)
-    return out_path
 
 
 def resource_png_path(resource_id: str) -> Path | None:

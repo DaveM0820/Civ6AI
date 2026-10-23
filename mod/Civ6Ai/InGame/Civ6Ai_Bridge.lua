@@ -513,12 +513,6 @@ function Civ6Ai_Bridge._WasPulseFinished(playerID)
   return Civ6Ai_Bridge._finishedKeys ~= nil and Civ6Ai_Bridge._finishedKeys[key] == true
 end
 
-function Civ6Ai_Bridge._ClearPendingApplyMod()
-  Civ6Ai_PendingApplyJson = ""
-  Civ6Ai_PendingApplyMeta = nil
-  Civ6Ai_PendingApplyQueue = nil
-end
-
 -- Re-run the host-written Civ6Ai_PendingApply.lua (the only host->game channel
 -- retail InGame can read). Every waiting seat calls this every frame, so the disk
 -- reload is throttled to once per wall-clock second (or every 30th call without os).

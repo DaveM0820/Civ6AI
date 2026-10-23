@@ -1034,10 +1034,6 @@ def recent_self_chats_by_target(
     return by_target
 
 
-def recent_self_public_chats(snapshot: dict[str, Any], lookback: int = CHAT_NEAR_DUPE_LOOKBACK_TURNS) -> list[str]:
-    return [text for _turn, text in recent_self_chats_by_target(snapshot, lookback).get("all", [])]
-
-
 def is_near_duplicate_chat(text: str, recent: list[str], threshold: float = CHAT_NEAR_DUPE_THRESHOLD) -> bool:
     from difflib import SequenceMatcher
 

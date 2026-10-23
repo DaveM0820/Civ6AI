@@ -121,7 +121,9 @@ class LegalityLayerTests(unittest.TestCase):
             snap = _snap()
             snap["_session_dir"] = str(seat)
             snap["decision"]["turn"] = 50
-            dest = legal.frontier_target(snap, snap["your_units"][0])
+            from sidecar import civ6_fallbacks
+
+            dest = civ6_fallbacks.frontier_target(snap, snap["your_units"][0])
             self.assertIsNotNone(dest)
             self.assertNotEqual(dest, (4, 2))
             legal.add_blacklist(snap, dest[0], dest[1], 50)

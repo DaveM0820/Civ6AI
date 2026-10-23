@@ -118,30 +118,6 @@ def unit_role(unit: dict[str, Any]) -> str | None:
     return None
 
 
-def _ops_from_commands(snapshot: dict[str, Any]) -> dict[str, set[str]]:
-    ops: dict[str, set[str]] = {}
-    for command in _lst(snapshot.get("legal_commands")):
-        if not isinstance(command, dict):
-            continue
-        fixed = _dct(command.get("fixed_arguments"))
-        uid = str(fixed.get("unit_id") or "")
-        kind = str(command.get("kind") or "")
-        if uid:
-            ops.setdefault(uid, set()).add(kind)
-    for unit in _lst(snapshot.get("your_units")):
-        if not isinstance(unit, dict):
-            continue
-        uid = str(unit.get("unit_id") or "")
-        moves = _dct(unit.get("movement")).get("current")
-        if uid and (isinstance(moves, (int, float)) and moves > 0 or unit.get("needs_orders")):
-            ops.setdefault(uid, set()).add("move_unit")
-    return ops
-
-
-def unit_ops(snapshot: dict[str, Any], unit_id: str) -> set[str]:
-    return set(_ops_from_commands(snapshot).get(unit_id) or ())
-
-
 def tile_passable(snapshot: dict[str, Any], unit: dict[str, Any], x: int, y: int) -> str | None:
     """None if this unit may stand on (x,y). Otherwise a reason code."""
     plots = known_plots(snapshot)
@@ -639,85 +615,6 @@ def ingest_results(snapshot: dict[str, Any]) -> None:
         except (TypeError, ValueError):
             when = _turn(snapshot)
         add_blacklist(snapshot, xy[0], xy[1], when)
-
-
-def frontier_target(snapshot: dict[str, Any], unit: dict[str, Any]) -> tuple[int, int] | None:
-    """Nearest reachable known tile that touches an unrevealed hex."""
-    start = plot_xy(unit)
-    if start is None:
-        return None
-    plots = known_plots(snapshot)
-    seen = {start}
-    q: deque[tuple[tuple[int, int], tuple[int, int] | None]] = deque([(start, None)])
-    while q:
-        cur, first_step = q.popleft()
-        for nx, ny in hex_neighbors(*cur):
-            if (nx, ny) in seen:
-                continue
-            seen.add((nx, ny))
-            if (nx, ny) not in plots:
-                if cur != start and not is_blacklisted(snapshot, *cur):
-                    if tile_passable(snapshot, unit, *cur) is None:
-                        return cur
-                continue
-            if tile_passable(snapshot, unit, nx, ny) is not None:
-                continue
-            if is_blacklisted(snapshot, nx, ny):
-                continue
-            step = first_step or (nx, ny)
-            if any(n not in plots for n in hex_neighbors(nx, ny)) and (nx, ny) != start:
-                return (nx, ny)
-            q.append(((nx, ny), step))
-    return None
-
-
-def _threatened_cities(snapshot: dict[str, Any]) -> list[tuple[int, int]]:
-    cities = []
-    for city in _lst(snapshot.get("your_cities")):
-        if not isinstance(city, dict):
-            continue
-        xy = plot_xy(city)
-        if xy:
-            cities.append(xy)
-    combat = _dct(_dct(snapshot.get("civ6")).get("combat"))
-    hostiles = []
-    for row in _lst(combat.get("hostiles")) + _lst(combat.get("hostile_cities")):
-        if isinstance(row, dict):
-            try:
-                hostiles.append((int(row["x"]), int(row["y"])))
-            except (KeyError, TypeError, ValueError):
-                continue
-    threatened = []
-    for cx, cy in cities:
-        if any(max(abs(cx - hx), abs(cy - hy)) <= 3 for hx, hy in hostiles):
-            threatened.append((cx, cy))
-    return threatened
-
-
-def _improve_tile(snapshot: dict[str, Any], unit: dict[str, Any]) -> tuple[int, int] | None:
-    here = plot_xy(unit)
-    if here is None:
-        return None
-    me = _me(snapshot)
-    occupied = own_occupied_plots(snapshot)
-    uid = str(unit.get("unit_id") or "")
-    rows: list[tuple[int, int, int, bool]] = []
-    for xy, plot in known_plots(snapshot).items():
-        if plot.get("water") or is_mountain(plot) or plot.get("city_id") or plot.get("improvement_id"):
-            continue
-        if me and plot.get("revealed_owner_id") != me:
-            continue
-        holders = [h for h in occupied.get(xy, []) if h != uid]
-        if holders:
-            continue
-        if move_problem(snapshot, uid, xy[0], xy[1]):
-            continue
-        dist = max(abs(here[0] - xy[0]), abs(here[1] - xy[1]))
-        rows.append((dist, xy[0], xy[1], bool(plot.get("resource_id"))))
-    rows.sort(key=lambda r: (not r[3], r[0], r[1], r[2]))
-    if not rows:
-        return None
-    return rows[0][1], rows[0][2]
 
 
 def handled_unit_ids(commands: list[dict[str, Any]]) -> set[str]:

@@ -39,7 +39,6 @@ Civ6Ai_OrderChannel.REPORT_DELAY_SECONDS = 5
 Civ6Ai_OrderChannel._counter = Civ6Ai_OrderChannel._counter or 0
 Civ6Ai_OrderChannel._batch = Civ6Ai_OrderChannel._batch or 0
 Civ6Ai_OrderChannel._pending = Civ6Ai_OrderChannel._pending or {}
-Civ6Ai_OrderChannel._resultCursor = Civ6Ai_OrderChannel._resultCursor or 0
 
 local function log(s)
   if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then

@@ -75,10 +75,6 @@ function Civ6Ai_Autotest.StopTurn()
   return Civ6Ai_Config.AutotestStopTurn()
 end
 
-function Civ6Ai_Autotest.IsStopped()
-  return Civ6Ai_Autotest._stopped
-end
-
 function Civ6Ai_Autotest.AfterPulse(playerID)
   if not Civ6Ai_Config.IsAutotest() then
     return

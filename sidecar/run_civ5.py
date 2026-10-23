@@ -15,6 +15,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sidecar import civ5_adapter
+from sidecar import settings
 from sidecar import civ5_wire
 from sidecar.map_render_civ5 import render_civ5_map_for_model
 from sidecar import pipeline_v2 as pipeline
@@ -105,7 +106,7 @@ def _seat_number(player_id: str | None) -> int:
 
 
 def _thought_memory_path(civ5ai_root: Path | None, game_uuid: str, player_id: str) -> Path:
-    override = os.environ.get("CIV6AI_MEMORY_DIR") or os.environ.get("CIV5AI_MEMORY_DIR")
+    override = settings.get("CIV6AI_MEMORY_DIR", skip_empty=True)
     if override:
         return Path(override) / f"{game_uuid}_{player_id}.json"
     if civ5ai_root is not None:
