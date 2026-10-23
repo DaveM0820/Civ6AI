@@ -18,7 +18,7 @@ from sidecar import civ5_adapter
 from sidecar import civ5_wire
 from sidecar.map_render_civ5 import render_civ5_map_for_model
 from sidecar import pipeline_v2 as pipeline
-from sidecar.pipeline_v2 import CircuitBreaker
+from sidecar import runner_core
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SNAPSHOT = ROOT / "fixtures" / "civ5" / "snapshot-turn-classical-golden.json"
@@ -84,10 +84,7 @@ def _civ5ai_root_from_session(session_dir: Path | None) -> Path | None:
     return None
 
 
-def _session_key(game_uuid: str, player_id: str) -> str:
-    active = int(player_id.split("_", 1)[1]) if player_id.startswith("PLAYER_") else 0
-    return f"{game_uuid}:player:{active}"
-
+_session_key = runner_core.session_key
 
 def apply_mailbox_filename(game_id: str, seat: int, turn: int) -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "_", str(game_id or "game")).strip("._") or "game"
@@ -184,19 +181,9 @@ def _write_step_io(
     return path
 
 
-def _load_circuit_breaker(path: Path) -> CircuitBreaker:
-    if path.is_file():
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(payload, dict):
-            failures = {str(key): int(value) for key, value in payload.items()}
-            return CircuitBreaker(failures=failures)
-    return CircuitBreaker(failures={})
+_load_circuit_breaker = runner_core.load_circuit_breaker
 
-
-def _save_circuit_breaker(path: Path, breaker: CircuitBreaker) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(pipeline.canonical_json(breaker.failures) + "\n", encoding="utf-8")
-
+_save_circuit_breaker = runner_core.save_circuit_breaker
 
 def _normalize_civ5_model_response(snapshot: dict, response: dict) -> dict:
     wire = copy.deepcopy(response)
@@ -213,20 +200,7 @@ def _build_approved_record(
     model: dict | None,
     input_log: Path,
 ) -> dict:
-    validated = pipeline.validate_model_response(snapshot, normalized_response)
-    private_copy = copy.deepcopy(private)
-    private_copy["legal_commands"] = {item["command_id"]: item for item in snapshot["legal_commands"]}
-    commands = pipeline.bind_approved_commands(private_copy, validated)
-    return {
-        "status": "approved",
-        "private": private_copy,
-        "snapshot_hash": pipeline.canonical_hash(snapshot),
-        "response": normalized_response,
-        "validated": validated,
-        "commands": commands,
-        "model": model,
-        "io": {"input_path": str(input_log)},
-    }
+    return runner_core.build_approved_record(snapshot, private, normalized_response, model, input_log)
 
 
 def _salvage_approved_record(

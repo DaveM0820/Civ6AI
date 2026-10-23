@@ -13,7 +13,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sidecar import map_render
 from sidecar import pipeline_v2 as pipeline
-from sidecar.pipeline_v2 import CircuitBreaker
+from sidecar import runner_core
 
 
 def _read(path: Path | None) -> dict:
@@ -75,10 +75,7 @@ def _apply_personality(snapshot: dict, path: Path | None) -> None:
     path.write_text(pipeline.canonical_json(snapshot["personality"]) + "\n", encoding="utf-8")
 
 
-def _session_key(game_uuid: str, player_id: str) -> str:
-    active = int(player_id.split("_", 1)[1]) if player_id.startswith("PLAYER_") else 0
-    return f"{game_uuid}:player:{active}"
-
+_session_key = runner_core.session_key
 
 def _apply_previous_turn(snapshot: dict, record: dict | None) -> str | None:
     if not record:
@@ -217,19 +214,9 @@ def fake_response(snapshot: dict) -> dict:
 		"chat_messages": [_fake_public_chat(snapshot, selected)] if selected is not None else []}
 
 
-def _load_circuit_breaker(path: Path) -> CircuitBreaker:
-    if path.is_file():
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(payload, dict):
-            failures = {str(key): int(value) for key, value in payload.items()}
-            return CircuitBreaker(failures=failures)
-    return CircuitBreaker(failures={})
+_load_circuit_breaker = runner_core.load_circuit_breaker
 
-
-def _save_circuit_breaker(path: Path, breaker: CircuitBreaker) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(pipeline.canonical_json(breaker.failures) + "\n", encoding="utf-8")
-
+_save_circuit_breaker = runner_core.save_circuit_breaker
 
 def _write_io_log(journal: Path, suffix: str, payload: dict) -> Path:
     """Persist model input/output beside journals for post-run inspection."""
@@ -247,38 +234,9 @@ def _build_approved_record(
     model: dict | None,
     input_log: Path,
 ) -> dict:
-    validated = pipeline.validate_model_response(snapshot, normalized_response)
-    private_copy = copy.deepcopy(private)
-    private_copy["legal_commands"] = {item["command_id"]: item for item in snapshot["legal_commands"]}
-    resolution = pipeline.resolve_recommendations(snapshot, validated, lambda _rec: None)
-    validated["recommendation_results"] = resolution["results"]
-    validated["commands"] = resolution["commands"] + resolution["ordinary_commands"]
-    commands = pipeline.bind_approved_commands(private_copy, validated)
-    return {
-        "status": "approved",
-        "private": private_copy,
-        "snapshot_hash": pipeline.canonical_hash(snapshot),
-        "response": normalized_response,
-        "validated": validated,
-        "commands": commands,
-        "model": model,
-        "io": {"input_path": str(input_log)},
-    }
-
-
-def _salvage_approved_record(
-    snapshot: dict,
-    private: dict,
-    raw_model_response: dict,
-    model: dict | None,
-    input_log: Path,
-) -> dict | None:
-    """If the main path failed after a parseable model payload, approve parsed commands."""
-    try:
-        normalized = pipeline.normalize_model_response(snapshot, raw_model_response)
-        return _build_approved_record(snapshot, private, normalized, model, input_log)
-    except Exception:
-        return None
+    return runner_core.build_approved_record(
+        snapshot, private, normalized_response, model, input_log, resolve_recommendations=True,
+    )
 
 
 def _persist_thought_memory(
@@ -380,54 +338,23 @@ def main() -> None:
         "previous_response_id": args.previous_response_id or previous_response_id,
         "snapshot": snapshot,
     })
-    raw_model_response = None
-    model = None
-    normalized_response = None
-    try:
+    def _call() -> tuple[dict, dict]:
         if args.live:
-            response, model = pipeline.call_model(snapshot, os.environ.get("OPENAI_API_KEY", ""), image_url,
+            return pipeline.call_model(snapshot, os.environ.get("OPENAI_API_KEY", ""), image_url,
                 args.previous_response_id or previous_response_id)
-        else:
-            response, model = fake_response(snapshot), {"model": "fake", "response_id": None, "usage": {}}
-        raw_model_response = copy.deepcopy(response)
-        normalized_response = pipeline.normalize_model_response(snapshot, response)
-        record = _build_approved_record(snapshot, private, normalized_response, model, input_log)
-        thought_memory = _persist_thought_memory(
-            snapshot, normalized_response, model, thought_memory, thought_path,
-        )
-        breaker.record(player_id, True)
-    except Exception as error:
-        breaker.record_failure(player_id, getattr(error, "category", "pipeline_failure"), str(error))
-        salvaged = _salvage_approved_record(
-            snapshot, private, raw_model_response, model, input_log,
-        ) if isinstance(raw_model_response, dict) else None
-        if salvaged is not None:
-            record = salvaged
-            salvaged["salvaged_from"] = getattr(error, "category", "pipeline_failure")
-            thought_memory = _persist_thought_memory(
-                snapshot, salvaged.get("response", {}), model, thought_memory, thought_path,
-            )
-            breaker.record(player_id, True)
-        else:
-            record = {
-                "status": "fallback",
-                "private": copy.deepcopy(private),
-                "snapshot_hash": pipeline.canonical_hash(snapshot),
-                "category": getattr(error, "category", "pipeline_failure"),
-                "message": str(error),
-                "commands": [],
-                "model": model,
-                "response": normalized_response,
-                "io": {"input_path": str(input_log)},
-            }
-    if raw_model_response is not None:
-        output_log = _write_io_log(args.journal, "_raw_output.json", {
-            "status": record.get("status"),
-            "raw_model_response": raw_model_response,
-            "normalized_response": record.get("response"),
-            "model": record.get("model"),
-        })
-        record["io"]["raw_output_path"] = str(output_log)
+        return fake_response(snapshot), {"model": "fake", "response_id": None, "usage": {}}
+
+    def _persist(response: dict, approved: dict) -> None:
+        nonlocal thought_memory
+        thought_memory = _persist_thought_memory(snapshot, response, approved.get("model"), thought_memory, thought_path)
+
+    turn = runner_core.run_model_turn(
+        snapshot, private, input_log, args.journal, breaker, player_id,
+        call=_call,
+        build=lambda normalized, model: _build_approved_record(snapshot, private, normalized, model, input_log),
+        persist=_persist, write_io_log=_write_io_log,
+    )
+    record = turn.record
     wall_ms = int((time.monotonic() - sidecar_started) * 1000)
     model_meta = record.get("model") if isinstance(record.get("model"), dict) else {}
     wire_text = pipeline.build_model_wire_text(snapshot)

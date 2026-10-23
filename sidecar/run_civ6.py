@@ -25,6 +25,7 @@ from sidecar.map_render_civ6 import render_civ6_map_for_model, vision_maps_enabl
 from sidecar.map_situational import prepare_civ6_situational_maps
 from sidecar import pipeline_v2 as pipeline
 from sidecar.pipeline_v2 import CircuitBreaker
+from sidecar import runner_core
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SNAPSHOT = ROOT / "fixtures" / "civ6" / "snapshot-turn-classical-golden.json"
@@ -177,10 +178,7 @@ def _civ6ai_root_from_session(session_dir: Path | None) -> Path | None:
     return None
 
 
-def _session_key(game_uuid: str, player_id: str) -> str:
-    active = int(player_id.split("_", 1)[1]) if player_id.startswith("PLAYER_") else 0
-    return f"{game_uuid}:player:{active}"
-
+_session_key = runner_core.session_key
 
 def memory_dir(civ6ai_root: Path | None) -> Path:
     """Seat memory folder. Tests set CIV6AI_MEMORY_DIR so nothing lands in the repo."""
@@ -248,31 +246,12 @@ def _write_io_log(journal: Path, suffix: str, payload: dict) -> Path:
     return path
 
 
-def _load_circuit_breaker(path: Path) -> CircuitBreaker:
-    if path.is_file():
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(payload, dict):
-            failures = {str(key): int(value) for key, value in payload.items()}
-            return CircuitBreaker(failures=failures)
-    return CircuitBreaker(failures={})
+_load_circuit_breaker = runner_core.load_circuit_breaker
 
+_save_circuit_breaker = runner_core.save_circuit_breaker
 
-def _save_circuit_breaker(path: Path, breaker: CircuitBreaker) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(pipeline.canonical_json(breaker.failures) + "\n", encoding="utf-8")
-
-
-def _build_approved_record(
-    snapshot: dict,
-    private: dict,
-    normalized_response: dict,
-    model: dict | None,
-    input_log: Path,
-) -> dict:
-    validated = pipeline.validate_model_response(snapshot, normalized_response)
-    private_copy = copy.deepcopy(private)
-    private_copy["legal_commands"] = {item["command_id"]: item for item in snapshot["legal_commands"]}
-    commands = pipeline.bind_approved_commands(private_copy, validated)
+def _civ6_post_bind(snapshot: dict, validated: dict, commands: list) -> tuple[dict, list, list[str]]:
+    """Civ VI filters, fallback hints and packing after the shared bind."""
     commands, repeat_notes = civ6_apply_results.filter_repeat_failures(snapshot, commands)
     commands, buy_notes = civ6_apply_results.drop_unaffordable_purchases(snapshot, commands)
     chats = validated.get("chat_messages") if isinstance(validated.get("chat_messages"), list) else []
@@ -307,31 +286,19 @@ def _build_approved_record(
         else:
             dropped.append(f"dropped: unresolved token {token}")
     civ6_apply_results.record_dropped(snapshot, dropped)
-    return {
-        "status": "approved",
-        "private": private_copy,
-        "snapshot_hash": pipeline.canonical_hash(snapshot),
-        "response": normalized_response,
-        "validated": validated,
-        "commands": commands,
-        "model": model,
-        "io": {"input_path": str(input_log)},
-        "dropped": dropped,
-    }
+    return validated, commands, dropped
 
 
-def _salvage_approved_record(
+def _build_approved_record(
     snapshot: dict,
     private: dict,
-    raw_model_response: dict,
+    normalized_response: dict,
     model: dict | None,
     input_log: Path,
-) -> dict | None:
-    try:
-        normalized = pipeline.normalize_model_response(snapshot, raw_model_response)
-        return _build_approved_record(snapshot, private, normalized, model, input_log)
-    except Exception:
-        return None
+) -> dict:
+    return runner_core.build_approved_record(
+        snapshot, private, normalized_response, model, input_log, post_bind=_civ6_post_bind,
+    )
 
 
 def _persist_thought_memory(
@@ -889,75 +856,36 @@ def main() -> None:
     wire_path = Path(input_log.parent / (args.journal.stem + "_wire.txt"))
     wire_path.write_text(wire_text + "\n", encoding="utf-8")
 
-    raw_model_response = None
-    model = None
-    normalized_response = None
-    llm_ms = 0
-    parse_ms = 0
-    try:
-        llm_started = time.monotonic()
+    def _call() -> tuple[dict, dict]:
         if args.live:
-            response, model = pipeline.call_model(
+            return pipeline.call_model(
                 snapshot,
                 os.environ.get("OPENAI_API_KEY", ""),
                 image_attachments,
                 previous_response_id,
             )
-        elif args.seat_experiment:
-            response, model = _seat_experiment_response(snapshot), {"model": "seat_experiment", "usage": {}}
-        else:
-            response, model = _fake_response(snapshot, from_game=args.from_game), {"model": "fixture", "usage": {}}
-        llm_ms = int((time.monotonic() - llm_started) * 1000)
-        raw_model_response = copy.deepcopy(response)
-        parse_started = time.monotonic()
-        normalized_response = pipeline.normalize_model_response(snapshot, response)
-        parse_ms = int((time.monotonic() - parse_started) * 1000)
-        record = _build_approved_record(snapshot, private, normalized_response, model, input_log)
-        thought_memory = _persist_thought_memory(
-            snapshot, normalized_response, model, thought_memory, thought_path,
-        )
+        if args.seat_experiment:
+            return _seat_experiment_response(snapshot), {"model": "seat_experiment", "usage": {}}
+        return _fake_response(snapshot, from_game=args.from_game), {"model": "fixture", "usage": {}}
+
+    def _persist(response: dict, approved: dict) -> None:
+        nonlocal thought_memory
+        thought_memory = _persist_thought_memory(snapshot, response, approved.get("model"), thought_memory, thought_path)
         if isinstance(thought_memory, dict):
             civ6_apply_results.attach_strategy_orders_note(
-                thought_memory, int(snapshot["decision"]["turn"]), record.get("commands") or [],
+                thought_memory, int(snapshot["decision"]["turn"]), approved.get("commands") or [],
             )
-        breaker.record(player_id, True)
-    except Exception as error:
-        breaker.record_failure(player_id, getattr(error, "category", "pipeline_failure"), str(error))
-        salvaged = _salvage_approved_record(
-            snapshot, private, raw_model_response, model, input_log,
-        ) if isinstance(raw_model_response, dict) else None
-        if salvaged is not None:
-            record = salvaged
-            salvaged["salvaged_from"] = getattr(error, "category", "pipeline_failure")
-            thought_memory = _persist_thought_memory(
-                snapshot, salvaged.get("response", {}), model, thought_memory, thought_path,
-            )
-            if isinstance(thought_memory, dict):
-                civ6_apply_results.attach_strategy_orders_note(
-                    thought_memory, int(snapshot["decision"]["turn"]), salvaged.get("commands") or [],
-                )
-            breaker.record(player_id, True)
-        else:
-            record = {
-                "status": "fallback",
-                "private": copy.deepcopy(private),
-                "snapshot_hash": pipeline.canonical_hash(snapshot),
-                "category": getattr(error, "category", "pipeline_failure"),
-                "message": str(error),
-                "commands": [],
-                "model": model,
-                "response": normalized_response,
-                "io": {"input_path": str(input_log)},
-            }
 
-    if raw_model_response is not None:
-        output_log = _write_io_log(args.journal, "_raw_output.json", {
-            "status": record.get("status"),
-            "raw_model_response": raw_model_response,
-            "normalized_response": record.get("response"),
-            "model": record.get("model"),
-        })
-        record["io"]["raw_output_path"] = str(output_log)
+    def _build(normalized: dict, model: dict | None) -> dict:
+        return _build_approved_record(snapshot, private, normalized, model, input_log)
+
+    turn = runner_core.run_model_turn(
+        snapshot, private, input_log, args.journal, breaker, player_id,
+        call=_call, build=_build, persist=_persist, write_io_log=_write_io_log,
+    )
+    record = turn.record
+    llm_ms = turn.timings["llm_ms"]
+    parse_ms = turn.timings["parse_ms"]
 
     wall_ms = int((time.monotonic() - wall_started) * 1000)
     model_meta = record.get("model") if isinstance(record.get("model"), dict) else {}
