@@ -1876,8 +1876,42 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
             lines.append(pipeline._wire_line(
                 f"remembered.T{int(note.get('turn', 0))}", f"{text} ({until})"
             ))
-    lines.extend(civ6_apply_results.thoughts_lines(context))
+        lines.extend(civ6_apply_results.thoughts_lines(context))
     return lines
+
+
+def _memory_section(context: dict[str, Any]) -> list[str]:
+    """Long-term turn-importance memory. Empty until the Civ V port lands.
+
+    Rows come from long_term_memory on the snapshot or _seat_memory. The prompt
+    budget trims this section before protected plan and situation lines.
+    """
+    block = context.get("long_term_memory") if isinstance(context.get("long_term_memory"), dict) else None
+    if block is None:
+        seat = context.get("_seat_memory")
+        if isinstance(seat, dict) and isinstance(seat.get("long_term_memory"), dict):
+            block = seat["long_term_memory"]
+    if not isinstance(block, dict):
+        return []
+    lines: list[str] = []
+    rows = block.get("rows") if isinstance(block.get("rows"), list) else []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        turn = int(row.get("turn") or 0)
+        key = f"memory.T{turn}"
+        if isinstance(row.get("id"), str) and row["id"].strip():
+            key = f"memory.{row['id'].strip()}"
+        lines.append(pipeline._wire_line(key, text[:400]))
+        if row.get("pin") is True or row.get("pinned") is True:
+            lines.append(pipeline._wire_line(f"{key}.pin", True))
+        tier = row.get("tier")
+        if isinstance(tier, str) and tier.strip():
+            lines.append(pipeline._wire_line(f"{key}.tier", tier.strip()))
+    return lines[:24]
 
 
 def _war_going_badly(context: dict[str, Any]) -> bool:
@@ -2290,6 +2324,9 @@ def build_civ6_wire_prompt(
     thoughts = _thoughts_section(context)
     if thoughts:
         sections.append(pipeline._wire_section("THOUGHTS", thoughts))
+    memory = _memory_section(context)
+    if memory:
+        sections.append(pipeline._wire_section("MEMORY", memory))
     sections.append(pipeline._wire_section("ADVICE", _advice_section(context)))
     return "\n\n".join(sections)
 

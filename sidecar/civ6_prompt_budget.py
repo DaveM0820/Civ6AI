@@ -16,7 +16,8 @@ from typing import Any, Callable
 # Compact when the count is greater than this (units > ~10; cities over a threshold).
 UNITS_COMPACT_ABOVE = 10
 CITIES_COMPACT_ABOVE = 6
-MAX_PROMPT_CHARS_DEFAULT = 30000
+# ~60k tokens at 4 chars/token. Slower calls are acceptable.
+MAX_PROMPT_CHARS_DEFAULT = 240000
 CHARS_PER_TOKEN = 4.0
 CATALOG_KEEP = 4
 FOREIGN_CITY_KEEP = 8
@@ -211,11 +212,38 @@ def _clip_value(line: str, limit: int) -> str:
 
 
 def _history(title: str, lines: list[str]) -> list[str]:
+    if title == "MEMORY":
+        return _trim_memory(lines)
     if title == "THOUGHTS":
         return _trim_thoughts(lines)
     if title == "OPPONENTS":
         return [line for line in lines if not _key(line).startswith(("history.", "opinion."))]
     return lines
+
+
+def _trim_memory(lines: list[str]) -> list[str]:
+    """Long-term memory is trimmable. Keep pinned rows; drop the rest."""
+    pinned: set[str] = set()
+    for line in lines:
+        key = _key(line)
+        if key.endswith(".pin") and _value(line).lower() in {"true", "1", "yes"}:
+            pinned.add(key.rsplit(".", 1)[0])
+        if key.endswith(".pinned") and _value(line).lower() in {"true", "1", "yes"}:
+            pinned.add(key.rsplit(".", 1)[0])
+    kept: list[str] = []
+    for line in lines:
+        key = _key(line)
+        if not key:
+            kept.append(line)
+            continue
+        stem = key.rsplit(".", 1)[0] if key.endswith((".pin", ".pinned", ".tier", ".score", ".adjusted")) else key
+        if stem in pinned or key in pinned:
+            kept.append(line)
+            continue
+        if key.startswith("memory."):
+            continue
+        kept.append(line)
+    return kept
 
 
 def _trim_thoughts(lines: list[str]) -> list[str]:

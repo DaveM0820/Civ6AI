@@ -19,6 +19,7 @@ class Civ6ConfigTests(unittest.TestCase):
         self.assertGreaterEqual(cfg.timeout_seconds, 600)
         self.assertTrue(cfg.vision)
         self.assertIn(cfg.reasoning, {"on", "off"})
+        self.assertEqual(240000, cfg.max_prompt_chars)
 
     def test_normalize_reasoning_never_on_as_effort(self):
         self.assertEqual("on", civ6_config.normalize_reasoning("on"))
@@ -116,10 +117,10 @@ class Civ6ConfigTests(unittest.TestCase):
 
     def test_seat_prompt_budget_precedence(self):
         cfg = civ6_config.Civ6AiLocalConfig(
-            max_prompt_chars=30000,
+            max_prompt_chars=240000,
             seat_models={"1": {"max_prompt_chars": 24000}, "PLAYER_3": {"max_prompt_chars": 0}},
         )
-        self.assertEqual(30000, civ6_config.resolve_seat_prompt_chars(cfg, "PLAYER_0"))
+        self.assertEqual(240000, civ6_config.resolve_seat_prompt_chars(cfg, "PLAYER_0"))
         self.assertEqual(24000, civ6_config.resolve_seat_prompt_chars(cfg, "PLAYER_1"))
         self.assertEqual(0, civ6_config.resolve_seat_prompt_chars(cfg, 3))
         applied = civ6_config.apply_seat_runtime(cfg, {"decision": {"player_id": "PLAYER_1"}})

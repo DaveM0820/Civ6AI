@@ -47,10 +47,10 @@ class Civ6AiLocalConfig:
     # Per-seat overrides: {"0": {"model": "...", "reasoning_effort": "high"}, ...}
     seat_models: dict[str, Any] | None = None
     context_budget: bool = True
-    # Text-prompt target for one seat. About 30000 chars ≈ 7500 tokens at 4 chars/token.
-    # 0 disables the size ladder. Per seat: seat_models {"0": {"max_prompt_chars": 28000}}
+    # Text-prompt target for one seat. About 240000 chars ≈ 60000 tokens at 4 chars/token.
+    # 0 disables the size ladder. Per seat: seat_models {"0": {"max_prompt_chars": 200000}}
     # or CIV6AI_MAX_PROMPT_CHARS_PLAYER_<n>. The map image is not dropped to meet this.
-    max_prompt_chars: int = 30000
+    max_prompt_chars: int = 240000
     queue_shared_model: bool = True
     # How many seat jobs may call the model at once. 0 = auto (1 for LM Studio,
     # OPENROUTER_PARALLEL_DEFAULT for OpenRouter, where seats run side by side).
@@ -210,7 +210,7 @@ def resolve_seat_prompt_chars(cfg: Civ6AiLocalConfig, player_id: Any) -> int:
     try:
         chars = max(0, int(cfg.max_prompt_chars))
     except (TypeError, ValueError):
-        chars = 30000
+        chars = 240000
     seat = player_seat_index(player_id)
     seats = _seat_models(cfg.seat_models)
     row = None
@@ -269,7 +269,7 @@ def load_local_config(
     try:
         cfg.max_prompt_chars = max(0, int(cfg.max_prompt_chars))
     except (TypeError, ValueError):
-        cfg.max_prompt_chars = 30000
+        cfg.max_prompt_chars = 240000
     json_effort = data.get("reasoning_effort")
     cfg.timeout_seconds = max(30, int(cfg.timeout_seconds or LMSTUDIO_TIMEOUT_DEFAULT))
     cfg.max_retries = max(1, int(cfg.max_retries or 1))

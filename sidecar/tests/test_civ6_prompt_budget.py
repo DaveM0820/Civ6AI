@@ -115,6 +115,12 @@ def _late_snapshot() -> dict:
         "promises": [],
         "alerts": [],
         "milestones": [{"turn": 10, "text": "met Cleopatra years ago " + essay}],
+        "long_term_memory": {
+            "rows": [
+                {"turn": 12, "text": "Met Cleopatra and opened a delegation.", "tier": "sentence"},
+                {"turn": 40, "text": "Declared war after the border raid.", "pin": True, "tier": "critical"},
+            ],
+        },
     }
     foreign = []
     for index in range(20):
@@ -160,6 +166,9 @@ class PromptBudgetTests(unittest.TestCase):
         self.assertIn("Cleopatra's army is inside move range of Polis1", text)
         self.assertIn("plan.goal = domination", text)
         self.assertIn("situation.T90 = Cleopatra is the threat this turn", text)
+        self.assertIn("=== MEMORY ===", text)
+        self.assertIn("memory.T12 = Met Cleopatra", text)
+        self.assertIn("memory.T40 = Declared war", text)
         self.assertIn(".command", text)
 
     def test_ladder_fits_a_late_prompt_and_logs_sections(self):
@@ -189,7 +198,27 @@ class PromptBudgetTests(unittest.TestCase):
         self.assertIn("WAR", fields["prompt_section_chars"])
         self.assertIn("ATTENTION", fields["prompt_section_chars"])
         self.assertIn("REQUIRED COMMANDS", fields["prompt_section_chars"])
+        self.assertIn("MEMORY", fields["prompt_section_chars_before"])
         self.assertTrue(report["map_image_kept"])
+
+    def test_default_sixty_k_token_budget_keeps_memory_until_trimmed(self):
+        snap = _late_snapshot()
+        text = civ6_wire.build_civ6_model_wire_text(snap, max_prompt_chars=240000)
+        report = snap["advciv"]["prompt_budget"]
+        self.assertEqual(240000, report["max_chars"])
+        self.assertLess(report["before_chars"], 240000)
+        self.assertLessEqual(report["after_chars"], 240000)
+        self.assertNotIn("history", report["compactions"])
+        self.assertIn("units_compact", report["compactions"])
+        self.assertIn("=== MEMORY ===", text)
+        self.assertIn("memory.T12 = Met Cleopatra", text)
+        self.assertIn("memory.T40 = Declared war", text)
+        self.assertIn("MEMORY", report["section_chars"])
+        tight = civ6_wire.build_civ6_model_wire_text(snap, max_prompt_chars=30000)
+        self.assertIn("history", snap["advciv"]["prompt_budget"]["compactions"])
+        self.assertNotIn("memory.T12 = Met Cleopatra", tight)
+        self.assertIn("memory.T40 = Declared war", tight)
+        self.assertIn("memory.T40.pin = true", tight)
 
     def test_tiny_budget_never_drops_protected_sections(self):
         snap = _late_snapshot()
@@ -230,6 +259,10 @@ class PromptBudgetTests(unittest.TestCase):
             "T1.situation = ancient note",
             "T9.situation = this turn",
             "history.memory = a long memory",
+            "=== MEMORY ===",
+            "memory.T12 = Met a rival years ago",
+            "memory.T40 = Border war is the long-term threat",
+            "memory.T40.pin = true",
             "=== OPTIONAL COMMANDS ===",
             '  "12.Athens.production": "UNIT_WARRIOR | UNIT_SETTLER",',
             "=== REQUIRED COMMANDS ===",
@@ -248,6 +281,8 @@ class PromptBudgetTests(unittest.TestCase):
         self.assertNotIn("opinion.Cleopatra", compact)
         self.assertNotIn("T1.situation", compact)
         self.assertIn("T9.situation = this turn", compact)
+        self.assertNotIn("memory.T12", compact)
+        self.assertIn("memory.T40 = Border war is the long-term threat", compact)
         self.assertIn("plan.goal = science", compact)
         self.assertIn("rival.Cleopatra.atWar = true", compact)
         self.assertIn("QUEUE EMPTY: Athens", compact)
