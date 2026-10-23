@@ -418,7 +418,19 @@ function Civ6Ai_Production.ComposeSituation(raw)
   local target = 2 + math.floor(span * online / 70)
   local belowTarget = cities < target and turn <= 100 and pop >= 2 and land == true
   local needExpansion = belowTarget and wars <= 0
-  local needBuilders = builders < cities
+  -- Builder demand is charges against owned tiles still open to improve when
+  -- the caller counted them (SituationFor); otherwise one builder per city.
+  -- Keep in step with sidecar/civ6_priorities.py compose_situation.
+  local openTiles = tonumber(raw.open_tiles)
+  local charges = tonumber(raw.builder_charges)
+  local needBuilders
+  local builderSurplus = false
+  if openTiles ~= nil and charges ~= nil then
+    needBuilders = charges < openTiles
+    builderSurplus = builders > 0 and charges >= openTiles
+  else
+    needBuilders = builders < cities
+  end
   local needed = cities
   if wars > 0 then
     needed = needed + cities
@@ -462,8 +474,11 @@ function Civ6Ai_Production.ComposeSituation(raw)
     threatened = threatened,
     last = raw.last,
     unit_counts = counts,
+    builder_surplus = builderSurplus,
   }
 end
+
+Civ6Ai_Production.BUILDER_SURPLUS_PENALTY = 200
 
 function Civ6Ai_Production.ScoreBuild(buildId, tags, situation, kind)
   situation = situation or {}
@@ -508,6 +523,11 @@ function Civ6Ai_Production.ScoreBuild(buildId, tags, situation, kind)
     if situation.need_expansion ~= true then
       score = score - 40
     end
+  end
+  -- Every open tile already has a charge waiting: another builder adds nothing.
+  if situation.builder_surplus == true and seen["PSEUDOYIELD_IMPROVEMENT"]
+      and (kind == "unit" or string.sub(tostring(buildId or ""), 1, 5) == "UNIT_") then
+    score = score - Civ6Ai_Production.BUILDER_SURPLUS_PENALTY
   end
   if situation.last == buildId then
     score = score - 50
@@ -789,7 +809,12 @@ function Civ6Ai_Production.BuildOptions(city, situation)
   return out
 end
 
--- Deterministic weighted pick. Weight = score above the worst option, plus 1.
+-- Deterministic weighted pick. Weight = score above the worst option, bounded
+-- to [WEIGHT_FLOOR, WEIGHT_CAP] so one inflated item cannot squeeze every
+-- building down to a weight of 1.
+Civ6Ai_Production.WEIGHT_FLOOR = 5
+Civ6Ai_Production.WEIGHT_CAP = 150
+
 function Civ6Ai_Production.WeightedPick(options, seed)
   if #options == 0 then
     return nil, 0
@@ -799,8 +824,12 @@ function Civ6Ai_Production.WeightedPick(options, seed)
     if o.score < low then low = o.score end
   end
   local total = 0
+  local floor, cap = Civ6Ai_Production.WEIGHT_FLOOR, Civ6Ai_Production.WEIGHT_CAP
   for _, o in ipairs(options) do
-    o.weight = o.score - low + 1
+    local w = o.score - low + floor
+    if w > cap then w = cap end
+    if w < floor then w = floor end
+    o.weight = math.floor(w)
     total = total + o.weight
   end
   -- Park-Miller step: products stay below 2^53, exact in Lua 5.1 doubles.
@@ -813,6 +842,122 @@ function Civ6Ai_Production.WeightedPick(options, seed)
     roll = roll - o.weight
   end
   return options[#options], total
+end
+
+Civ6Ai_Production._lastPick = Civ6Ai_Production._lastPick or {}
+
+-- Owned, unimproved land tiles around this seat's cities that some builder
+-- improvement is legal on now (same rule the snapshot uses for Improve offers).
+-- nil when the rule or the map is unavailable, so callers fall back.
+function Civ6Ai_Production.OpenImproveTiles(playerID, cities)
+  if Map == nil or Map.GetPlot == nil or Civ6Ai_Snapshot == nil
+      or Civ6Ai_Snapshot._LegalImprovementsAt == nil or cities == nil then
+    return nil
+  end
+  local seen, open = {}, 0
+  local ok = pcall(function()
+    for _, city in cities:Members() do
+      local cx, cy = city:GetX(), city:GetY()
+      for dx = -3, 3 do
+        for dy = -3, 3 do
+          local plot = Map.GetPlot(cx + dx, cy + dy)
+          local idx = plot ~= nil and call(plot, "GetIndex") or nil
+          if idx ~= nil and not seen[idx] then
+            seen[idx] = true
+            local imp = call(plot, "GetImprovementType")
+            local dist = call(plot, "GetDistrictType")
+            if call(plot, "GetOwner") == playerID and call(plot, "IsWater") ~= true
+                and call(plot, "IsCity") ~= true and (imp == nil or imp < 0)
+                and (dist == nil or dist < 0) then
+              local legal = Civ6Ai_Snapshot._LegalImprovementsAt(playerID, "UNIT_BUILDER", plot)
+              if legal ~= nil and #legal > 0 then
+                open = open + 1
+              end
+            end
+          end
+        end
+      end
+    end
+  end)
+  if not ok then
+    return nil
+  end
+  return open
+end
+
+-- The seat's real situation: the same inputs the prompt side passes to
+-- compose_situation (cities, population, builders and charges, open tiles,
+-- unit counts, army, wars, turn and speed, missing buildings, last pick).
+function Civ6Ai_Production.SituationFor(playerID, city)
+  local raw = { saved = Civ6Ai_Production.SavedLevels(playerID) }
+  local player = Players ~= nil and Players[playerID] or nil
+  local cities = player ~= nil and call(player, "GetCities") or nil
+  local n = 0
+  if cities ~= nil and cities.Members ~= nil then
+    for _ in cities:Members() do n = n + 1 end
+  end
+  raw.cities = n > 0 and n or 1
+  raw.pop = city ~= nil and call(city, "GetPopulation") or nil
+  raw.turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or 0
+  pcall(function()
+    local speed = GameInfo.GameSpeeds[GameConfiguration.GetGameSpeedType()]
+    local mult = speed ~= nil and tonumber(speed.CostMultiplier) or nil
+    if mult ~= nil and mult > 0 then
+      raw.speed_num = math.floor(10000 / mult)
+    end
+  end)
+  local builders, charges, military, counts = 0, 0, 0, {}
+  local units = player ~= nil and call(player, "GetUnits") or nil
+  if units ~= nil and units.Members ~= nil then
+    for _, unit in units:Members() do
+      local info = GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+      local typeId = info ~= nil and info.UnitType or nil
+      if typeId ~= nil then
+        counts[typeId] = (counts[typeId] or 0) + 1
+      end
+      if info ~= nil and positive(info.BuildCharges) then
+        builders = builders + 1
+        local c = nil
+        if Civ6Ai_Snapshot ~= nil and Civ6Ai_Snapshot._BuildCharges ~= nil then
+          local okC, v = pcall(Civ6Ai_Snapshot._BuildCharges, unit)
+          c = okC and tonumber(v) or nil
+        end
+        charges = charges + (c or tonumber(call(unit, "GetBuildCharges")) or 0)
+      elseif info ~= nil and (positive(info.Combat) or positive(info.RangedCombat)) then
+        military = military + 1
+      end
+    end
+  end
+  raw.builders = builders
+  raw.military = military
+  raw.unit_counts = counts
+  if builders > 0 then
+    raw.open_tiles = Civ6Ai_Production.OpenImproveTiles(playerID, cities)
+    if raw.open_tiles ~= nil then
+      raw.builder_charges = charges
+    end
+  end
+  local wars = 0
+  pcall(function()
+    local diplo = player:GetDiplomacy()
+    for _, other in ipairs(PlayerManager.GetAliveMajorIDs()) do
+      if other ~= playerID and diplo:IsAtWarWith(other) == true then wars = wars + 1 end
+    end
+  end)
+  raw.major_wars = wars
+  if city ~= nil then
+    pcall(function()
+      local held = city:GetBuildings()
+      local function missing(id)
+        local row = GameInfo.Buildings[id]
+        return row ~= nil and held:HasBuilding(row.Index) ~= true
+      end
+      raw.missing_monument = missing("BUILDING_MONUMENT")
+      raw.missing_granary = missing("BUILDING_GRANARY")
+    end)
+    raw.last = Civ6Ai_Production._lastPick[tostring(playerID) .. ":" .. tostring(city:GetID())]
+  end
+  return Civ6Ai_Production.ComposeSituation(raw)
 end
 
 function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
@@ -828,14 +973,13 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
     return 0
   end
   local turn = Game.GetCurrentGameTurn()
-  local situation = nil
   local filled = 0
   for _, city in cities:Members() do
     local cid = city:GetID()
     local key = tostring(playerID) .. ":" .. tostring(cid)
     if Civ6Ai_Production._fillTried[key] ~= turn and Civ6Ai_Production._QueueEmpty(city) then
       Civ6Ai_Production._fillTried[key] = turn
-      situation = situation or Civ6Ai_Production.ComposeSituation({ saved = Civ6Ai_Production.SavedLevels(playerID) })
+      local situation = Civ6Ai_Production.SituationFor(playerID, city)
       local options = Civ6Ai_Production.BuildOptions(city, situation)
       local seed = (playerID * 1000003 + (cid % 65536) * 7919 + turn * 104729) % 2147483648
       local pick, total = Civ6Ai_Production.WeightedPick(options, seed)
@@ -847,6 +991,7 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
         outcome = ok and "requested" or "request_error"
         if ok then
           filled = filled + 1
+          Civ6Ai_Production._lastPick[key] = pick.id
         end
       end
       local top = {}
@@ -857,7 +1002,8 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
       Civ6Ai_Util.Log("production|fill_empty|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
         .. "|city=" .. tostring(cid) .. "|build=" .. tostring(pick and pick.id or "")
         .. "|weight=" .. tostring(pick and pick.weight or 0) .. "/" .. tostring(total)
-        .. "|options=" .. tostring(#options) .. "|top=" .. table.concat(parts, ",") .. "|" .. outcome)
+        .. "|options=" .. tostring(#options) .. "|top=" .. table.concat(parts, ",")
+        .. "|builder_surplus=" .. tostring(situation.builder_surplus == true) .. "|" .. outcome)
     end
   end
   return filled

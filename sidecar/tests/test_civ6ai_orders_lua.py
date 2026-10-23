@@ -708,16 +708,14 @@ class OrdersGameplayTests(unittest.TestCase):
             for line in logs
         ), logs)
 
-    def test_builder_move_outside_borders_is_refused(self):
+    def test_builder_move_outside_borders_is_allowed(self):
+        # Civ VI builders walk outside borders; only improving needs own tiles.
         self.rt.execute(
             "GameInfo.Units[2] = {BuildCharges=3}; "
             "table.insert(Players[2].units, MkUnit(2,40,3,4,2)); "
             "Map.GetPlot(5,6):SetOwner(-1)"
         )
         self.order(0, K=1, P=2, U=40, X=5, Y=6, S=30)
-        self.assertEqual(self.last()["reason"], "outside_borders")
-        self.rt.execute("Map.GetPlot(5,6):SetOwner(2)")
-        self.order(0, K=1, P=2, U=40, X=5, Y=6, S=31)
         self.assertNotEqual(self.last()["reason"], "outside_borders")
 
     def test_city_attack_and_strike_without_get_district_id(self):

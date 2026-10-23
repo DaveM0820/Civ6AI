@@ -106,6 +106,56 @@ class LocalFillTests(unittest.TestCase):
             counts[pick.id] += 1
         self.assertGreater(counts["B"], counts["A"] * 10)
 
+    def test_weights_are_bounded(self):
+        opts = self.lua.eval("""{ { id = "A", score = -300 }, { id = "B", score = 0 }, { id = "C", score = 400 } }""")
+        self.g.Civ6Ai_Production.WeightedPick(opts, 1)
+        weights = {o.id: o.weight for o in opts.values()}
+        self.assertEqual(weights["A"], self.g.Civ6Ai_Production.WEIGHT_FLOOR)
+        self.assertEqual(weights["C"], self.g.Civ6Ai_Production.WEIGHT_CAP)
+
+    def test_builder_surplus_penalty_matches_python(self):
+        from sidecar import civ6_priorities as prio
+        P = self.g.Civ6Ai_Production
+        lua_sit = P.ComposeSituation(self.lua.eval("{ builders = 6, builder_charges = 18, open_tiles = 0, cities = 1 }"))
+        self.assertTrue(lua_sit.builder_surplus)
+        tags = self.lua.eval('{ "PSEUDOYIELD_IMPROVEMENT" }')
+        lua_score = P.ScoreBuild("UNIT_BUILDER", tags, lua_sit, "unit")
+        py_sit = prio.compose_situation(builders=6, builder_charges=18, open_tiles=0, cities=1)
+        self.assertEqual(lua_score, prio.item_score("UNIT_BUILDER", ["PSEUDOYIELD_IMPROVEMENT"], py_sit, "unit"))
+        open_sit = P.ComposeSituation(self.lua.eval("{ builders = 1, builder_charges = 2, open_tiles = 5, cities = 1 }"))
+        self.assertFalse(open_sit.builder_surplus)
+
+    def test_situation_for_counts_builders_and_open_tiles(self):
+        self.lua.execute(r"""
+          GameInfo.Units[1] = { UnitType = "UNIT_BUILDER", BuildCharges = 3 }
+          GameInfo.Units[2] = { UnitType = "UNIT_WARRIOR", Combat = 20 }
+          local function mk(t) return { GetType = function() return t end, GetBuildCharges = function() return 3 end } end
+          local list = { mk(1), mk(1), mk(2) }
+          Players[0].GetUnits = function() return { Members = function()
+            local i = 0
+            return function() i = i + 1; if list[i] then return i, list[i] end end
+          end } end
+          for _, c in ipairs(CITIES) do c.GetX = function() return 5 end; c.GetY = function() return 5 end end
+          local plots = {}
+          Map = { GetPlot = function(x, y)
+            local k = x * 100 + y
+            if not plots[k] then
+              plots[k] = { idx = k, own = (x == 5 and y == 6) and 0 or -1,
+                GetIndex = function(p) return p.idx end, GetOwner = function(p) return p.own end,
+                IsWater = function() return false end, IsCity = function() return false end,
+                GetImprovementType = function() return -1 end, GetDistrictType = function() return -1 end }
+            end
+            return plots[k]
+          end }
+          Civ6Ai_Snapshot._LegalImprovementsAt = function() return { "IMPROVEMENT_FARM" } end
+        """)
+        P = self.g.Civ6Ai_Production
+        sit = P.SituationFor(0, self.g.CITIES[1])
+        self.assertEqual(sit.unit_counts["UNIT_BUILDER"], 2)
+        # 6 charges, 1 open tile: surplus, so another builder is penalised.
+        self.assertTrue(sit.builder_surplus)
+        self.assertEqual(P.OpenImproveTiles(0, self.g.Players[0].GetCities()), 1)
+
     def test_apply_drops_hints_quietly(self):
         src = APPLY.read_text(encoding="utf-8")
         self.assertIn('c.kind ~= "fallback_hint"', src)

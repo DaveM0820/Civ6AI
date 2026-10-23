@@ -705,9 +705,8 @@ function Civ6Ai_Orders._DoMove(sender, o)
     Civ6Ai_Orders._ClearGoal(owner, o.U)
     return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, o.U, o.I)
   end
-  if Civ6Ai_Orders._BuilderOutsideBorders(unit, x, y) then
-    return false, "outside_borders"
-  end
+  -- Builders walk anywhere like any civilian; Improve offers stay on owned
+  -- tiles. (_BuilderOutsideBorders is kept for callers that ask about it.)
   local attacked, attackWhy = Civ6Ai_Orders._MoveAsAttack(unit, x, y)
   if attacked ~= nil then
     if attacked then
