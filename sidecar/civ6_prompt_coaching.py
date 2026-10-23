@@ -986,8 +986,7 @@ def builder_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
         more = f" and {len(offers) - 1} more" if len(offers) > 1 else ""
         return [pipeline._wire_line(
             f"{prefix}.improve",
-            f"{len(offers)} owned unimproved tiles near this builder; nearest {offers[0]}{more}. "
-            "An invalid Improve tile is replaced by the nearest owned site.",
+            f"{len(offers)} owned unimproved tiles near this builder; nearest {offers[0]}{more}.",
         )]
     if pipeline.map_image_attach_turn(snapshot):
         return [pipeline._wire_line(
@@ -1008,7 +1007,7 @@ def builder_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
     return [pipeline._wire_line(
         f"{prefix}.improve.sites",
         f"{len(sites)} owned unimproved tiles near this builder; nearest {where}. "
-        "Order Improve(x,y,IMPROVEMENT_X) for that tile. An invalid tile is replaced by the nearest owned site.",
+        "Order Improve(x,y,IMPROVEMENT_X) for that tile.",
     )]
 
 

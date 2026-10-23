@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
+from sidecar import civ6_legality as legality
 from sidecar.civ6_common import dct as _dct
 from sidecar.civ6_common import lst as _lst
 from sidecar.civ6_common import me as _me
@@ -207,13 +208,6 @@ def _usable_problem(snapshot: dict, items: list[dict[str, Any]]) -> str | None:
         if tech and tech not in known:
             return f"{i['res']} is useless to you before {tech}"
     return None
-
-
-def _pact_problem(snapshot: dict, pid: str, kinds: set, require_unlock: bool = True) -> str | None:
-    from sidecar.civ6_legality import pact_problem, reason_text
-
-    problem = pact_problem(snapshot, pid, kinds, require_unlock=require_unlock)
-    return reason_text(problem) if problem else problem
 
 
 def _items_text(items: list[dict[str, Any]]) -> str:
@@ -641,7 +635,7 @@ def deal_status_lines(snapshot: dict) -> list[str]:
     for target in _majors(snapshot):
         pid = target["player_id"]
         for kind, pact in _CATALOG:
-            if _pact_problem(snapshot, pid, {pact}):
+            if legality.pact_problem(snapshot, pid, {pact}):
                 continue
             proposal = f"PROPOSAL_{kind}_{pid}"
             cmd = f"CMD_propose_{proposal}"
@@ -751,8 +745,9 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         ids: list[str] = []
         if answer in ("ACCEPT", "YES"):
             kinds = {i.get("kind") for i in (offer.get("give") or []) + (offer.get("want") or []) if isinstance(i, dict)}
-            problem = _pact_problem(snapshot, pid, kinds - {None}, require_unlock=False)
+            problem = legality.pact_problem(snapshot, pid, kinds - {None}, require_unlock=False)
             if problem:
+                problem = legality.reason_text(problem)
                 offer["status"] = "rejected"
                 offer["reason"] = problem
                 offer["done_turn"] = _turn(snapshot)
@@ -783,8 +778,9 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         for parsed in (give, want):
             if isinstance(parsed, str):
                 return [], [f"{key}={value}: {parsed}"]
-        problem = _pact_problem(snapshot, pid, {i.get("kind") for i in give + want} - {None})
+        problem = legality.pact_problem(snapshot, pid, {i.get("kind") for i in give + want} - {None})
         if problem:
+            problem = legality.reason_text(problem)
             return [], [f"{key}={value}: {problem}"]
         problem = _peace_substance_problem(give, want)
         if problem:

@@ -170,7 +170,7 @@ class WarReviewTests(unittest.TestCase):
         self.assertLess(catalog.index("UNIT_WARRIOR"), catalog.index("BUILDING_MONUMENT"))
         self.assertIn("THREATENED", catalog)
 
-    def test_fortify_resolves_for_a_warrior_and_attack_explains_why(self):
+    def test_unoffered_fortify_and_attack_explain_why(self):
         snap = {
             "your_units": [{
                 "unit_id": "UNIT_0_1", "unit_type_id": "UNIT_WARRIOR",
@@ -183,8 +183,8 @@ class WarReviewTests(unittest.TestCase):
             "game": {"map_width": 20, "map_height": 20},
         }
         out = command_wire.expand_civ6_command_wire(snap, {"warrior_1.command": "Fortify"})
-        self.assertTrue(any(v.startswith("CMD_fortify_") for v in out.values()))
-        snap["legal_commands"] = [c for c in snap["legal_commands"] if c["kind"] != "unit_posture_fortify"]
+        self.assertFalse(any(str(v).startswith("CMD_fortify_") for v in out.values()))
+        self.assertTrue(any("cannot fortify now" in n for n in command_wire.LAST_UNRESOLVED))
         command_wire.expand_civ6_command_wire(snap, {"warrior_1.command": "AttackTo(9,9)"})
         self.assertTrue(any("no attack is legal" in n for n in command_wire.LAST_UNRESOLVED))
 

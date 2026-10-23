@@ -357,6 +357,10 @@ REASON_TEXT = {
     "illegal_dof": "no open friendship offer",
     "government_locked": "a government can only be changed on a turn when a civic completed",
     "city_strike_unavailable": "city_strike_unavailable",
+    "self_tile_move": "the unit is already on that tile; order FoundCity, Fortify or Skip instead",
+    "off_map": "that tile is off the map",
+    "improve_tile_not_offered": "no Improve is offered on that tile; use a listed Improve tile",
+    "found_city_not_offered": "FoundCity is not offered for this settler here",
 }
 
 
@@ -459,22 +463,79 @@ def order_problem(snapshot: dict[str, Any], command: dict[str, Any]) -> str | No
     return None
 
 
-def filter_orders(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-    kept: list[dict[str, Any]] = []
+def _legality_rule(snapshot: dict[str, Any], ctx: dict[str, Any]):
+    def check(command: dict[str, Any]):
+        problem = order_problem(snapshot, command)
+        if not problem:
+            return None
+        line = f"Rejected last turn: {order_label(command)} - {reason_text(problem)}"
+        return line, {"order": order_label(command), "reason": problem, "turn": _turn(snapshot)}
+    return check
+
+
+# Order verdicts: stages of named rules. A rule factory (snapshot, ctx) returns
+# check(command) -> None | (line, rejection_row | None). Within a stage the first
+# rule that fires drops the order; stages run in order over the survivors.
+ORDER_RULES: tuple[tuple[str, ...], ...] = (
+    ("legality",),
+    ("attack_target", "repeat_failure", "duplicate_destination"),
+)
+_RULE_PATHS = {
+    "attack_target": "sidecar.civ6_apply_results:attack_target_rule",
+    "repeat_failure": "sidecar.civ6_apply_results:repeat_failure_rule",
+    "duplicate_destination": "sidecar.civ6_apply_results:duplicate_destination_rule",
+}
+
+
+def _order_rule(name: str):
+    if name == "legality":
+        return _legality_rule
+    import importlib
+
+    module, _, attr = _RULE_PATHS[name].partition(":")
+    return getattr(importlib.import_module(module), attr)
+
+
+def filter_orders(snapshot: dict[str, Any], commands: list[dict[str, Any]],
+                  stages: tuple[tuple[str, ...], ...] | None = None,
+                  ctx: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], list[str]]:
+    """The only order-verdict function. Default stages: legality only."""
+    ctx = {} if ctx is None else ctx
+    kept = [c for c in commands if isinstance(c, dict)]
     rejected: list[str] = []
     rows: list[dict[str, Any]] = []
-    for command in commands:
-        if not isinstance(command, dict):
-            continue
-        problem = order_problem(snapshot, command)
-        if problem:
-            line = f"Rejected last turn: {order_label(command)} - {reason_text(problem)}"
-            rejected.append(line)
-            rows.append({"order": order_label(command), "reason": problem, "turn": _turn(snapshot)})
-            continue
-        kept.append(command)
+    for stage in stages or ORDER_RULES[:1]:
+        checks = [_order_rule(name)(snapshot, ctx) for name in stage]
+        survivors: list[dict[str, Any]] = []
+        for command in kept:
+            verdict = next((v for v in (check(command) for check in checks) if v), None)
+            if verdict is None:
+                survivors.append(command)
+                continue
+            rejected.append(verdict[0])
+            if verdict[1]:
+                rows.append(verdict[1])
+        kept = survivors
     remember_rejections(snapshot, rows)
     return kept, rejected
+
+
+def reject(snapshot: dict[str, Any], label: str, code: str) -> str:
+    """Record one model order the sidecar will not run. Returns the prompt line."""
+    remember_rejections(snapshot, [{"order": label, "reason": code, "turn": _turn(snapshot)}])
+    return f"Rejected last turn: {label} - {reason_text(code)}"
+
+
+def build_offer_set(snapshot: dict[str, Any]) -> None:
+    """The single entry point that turns the game's offers into this turn's offer set."""
+    from sidecar import civ6_apply_results, civ6_priorities, civ6_wire
+
+    civ6_priorities.inject_legal_commands(snapshot)
+    civ6_wire.prune_settlers_without_sites(snapshot)
+    try:
+        civ6_apply_results.suppress_failed_offers(snapshot)
+    except Exception:  # never block a seat-turn on feedback rows
+        pass
 
 
 def _state_path(snapshot: dict[str, Any]) -> Path | None:
@@ -525,7 +586,7 @@ def rejection_lines(snapshot: dict[str, Any]) -> list[str]:
         if when != turn - 1 and when != turn:
             continue
         order = str(row.get("order") or "order")
-        reason = str(row.get("reason") or "rejected")
+        reason = reason_text(str(row.get("reason") or "rejected"))
         lines.append(f"Rejected last turn: {order} - {reason}")
         if len(lines) >= REJECTION_PROMPT_CAP:
             break

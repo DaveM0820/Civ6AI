@@ -461,7 +461,10 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
         return _synthesize_trade_route(snapshot, unit_id, value)
     improves = [(t, c) for t, c in candidates if _verb(t) == "improve" and _COORD_RE.search(t)]
     if improves and verb == "improve":
-        return _pick_improve(improves, value, coord)
+        picked = _pick_improve(improves, value, coord)
+        if picked is None:
+            _reject(snapshot, f"{value} for {unit_id}", "improve_tile_not_offered")
+        return picked
     for token, cmd_id in candidates:
         if _verb(token) != verb:
             continue
@@ -478,8 +481,6 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
         )
     if verb == "moveto" and coord:
         return _synthesize_far_move(snapshot, unit_id, int(coord.group(1)), int(coord.group(2)))
-    if verb == "fortify":
-        return _synthesize_fortify(snapshot, unit_id)
     return None
 
 
@@ -501,19 +502,6 @@ def _is_military_unit(unit: dict[str, Any] | None) -> bool:
             if isinstance(value, int) and not isinstance(value, bool) and value > 0:
                 return True
     return type_id.startswith("UNIT_")
-
-
-def _synthesize_fortify(snapshot: dict[str, Any], unit_id: str) -> str | None:
-    """Fortify was omitted when the UI CanStartOperation check failed for an AI seat."""
-    unit = _unit_row(snapshot, unit_id)
-    if not _is_military_unit(unit):
-        return None
-    return _append_legal(snapshot, {
-        "command_id": f"CMD_fortify_{unit_id}",
-        "kind": "unit_posture_fortify",
-        "description": f"Fortify {unit_id}",
-        "fixed_arguments": {"unit_id": unit_id},
-    })
 
 
 def unresolved_unit_note(snapshot: dict[str, Any], unit_id: str, key: str, value: Any) -> str:
@@ -596,46 +584,11 @@ def _on_map(snapshot: dict[str, Any], x: int, y: int) -> bool:
     return x >= 0 and y >= 0
 
 
-def _append_legal(snapshot: dict[str, Any], command: dict[str, Any]) -> str | None:
+def _reject(snapshot: dict[str, Any], label: str, code: str) -> None:
+    """Record a model order the sidecar will not run; the host fallback handles that unit."""
     from sidecar import civ6_legality as legality
 
-    return legality.add_offer(snapshot, command)
-
-
-def _self_tile_command(snapshot: dict[str, Any], unit_id: str) -> str | None:
-    """Own-tile MoveTo becomes FoundCity when this settler can found here. Otherwise dropped."""
-    unit = _unit_row(snapshot, unit_id)
-    settle = unit.get("settle") if isinstance(unit, dict) else None
-    here_ok = isinstance(settle, dict) and settle.get("here_ok") is True
-    legal = snapshot.get("legal_commands") if isinstance(snapshot.get("legal_commands"), list) else []
-    if here_ok or (isinstance(unit, dict) and str(unit.get("unit_type_id") or "").endswith("SETTLER")):
-        for command in legal:
-            if not isinstance(command, dict):
-                continue
-            fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
-            if command.get("kind") == "found_city" and fixed.get("unit_id") == unit_id:
-                LAST_UNRESOLVED.append(f"dropped: self-tile move for {unit_id} became FoundCity")
-                return str(command.get("command_id"))
-        if here_ok:
-            LAST_UNRESOLVED.append(f"dropped: self-tile move for {unit_id} became FoundCity")
-            return _append_legal(snapshot, {
-                "command_id": f"CMD_found_{unit_id}",
-                "kind": "found_city",
-                "description": "Found city here",
-                "fixed_arguments": {"unit_id": unit_id},
-                "parameter_domains": {},
-                "affected_ids": [unit_id],
-                "runtime_status": "tested",
-            })
-    return _append_legal(snapshot, {
-        "command_id": f"CMD_skip_{unit_id}",
-        "kind": "unit_skip",
-        "description": f"Skip {unit_id}",
-        "fixed_arguments": {"unit_id": unit_id},
-        "parameter_domains": {},
-        "affected_ids": [unit_id],
-        "runtime_status": "tested",
-    })
+    LAST_UNRESOLVED.append(legality.reject(snapshot, label, code))
 
 
 def _improve_xy(token: str) -> tuple[int, int] | None:
@@ -646,7 +599,7 @@ def _improve_xy(token: str) -> tuple[int, int] | None:
 
 
 def _pick_improve(improves: list[tuple[str, str]], value: Any, coord: Any) -> str | None:
-    """The Improve offer for that tile. An invalid tile uses the nearest owned offer."""
+    """The Improve offer on that tile (by improvement name, else the only one). Never another tile."""
     if not coord or not improves:
         return None
     x, y = int(coord.group(1)), int(coord.group(2))
@@ -656,18 +609,7 @@ def _pick_improve(improves: list[tuple[str, str]], value: Any, coord: Any) -> st
         imp = t.rsplit(",", 1)[-1].rstrip(")").lower()
         if imp in want or imp.replace("improvement_", "") in want:
             return c
-    if here:
-        return here[0][1]
-    named = re.search(r"improvement_[a-z0-9_]+", str(value).lower())
-
-    def rank(pair: tuple[str, str]) -> tuple[int, int]:
-        token, _cmd = pair
-        xy = _improve_xy(token) or (x, y)
-        named_penalty = 0 if named and named.group(0) in token.lower() else (1 if named else 0)
-        return named_penalty, _hex_dist(x, y, xy[0], xy[1])
-
-    chosen = min(improves, key=rank)
-    return chosen[1]
+    return here[0][1] if here else None
 
 
 def _legal_attack_at(snapshot: dict[str, Any], unit_id: str, x: int, y: int) -> str | None:
@@ -703,12 +645,13 @@ def _synthesize_far_move(
     Encodes WP-A MOVE G=1 and A=arrival intent (found=1, improve=2, religion=3, trade=4).
     """
     if not _on_map(snapshot, x, y):
-        LAST_UNRESOLVED.append(f"dropped: off-map MoveTo({x},{y}) for {unit_id}")
+        _reject(snapshot, f"MoveTo({x},{y}) for {unit_id}", "off_map")
         return None
     unit = _unit_row(snapshot, unit_id)
     here = _plot_xy(unit)
     if here == (x, y):
-        return _self_tile_command(snapshot, unit_id)
+        _reject(snapshot, f"MoveTo({x},{y}) for {unit_id}", "self_tile_move")
+        return None
     if intent == INTENT_MOVE:
         attack = _legal_attack_at(snapshot, unit_id, x, y)
         if attack:
@@ -720,7 +663,10 @@ def _synthesize_far_move(
         cmd_id = f"CMD_{unit_id}_{intent}_{x}_{y}"
     fixed = {"unit_id": unit_id, "target_x": x, "target_y": y}
     fixed.update(_arrival_fields(intent, A))
-    return _append_legal(snapshot, {
+    from sidecar import civ6_legality as legality
+
+    # A destination order (Civ5-style MoveTo): Lua paths it; not a made-up command kind.
+    return legality.add_offer(snapshot, {
         "command_id": cmd_id,
         "kind": "move_unit",
         "description": "Move toward destination",
@@ -742,15 +688,8 @@ def _synthesize_settle(snapshot: dict[str, Any], unit_id: str, x: int, y: int) -
                 fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
                 if fixed.get("unit_id") == unit_id:
                     return str(command.get("command_id"))
-        return _append_legal(snapshot, {
-            "command_id": f"CMD_found_{unit_id}",
-            "kind": "found_city",
-            "description": "Found city here",
-            "fixed_arguments": {"unit_id": unit_id},
-            "parameter_domains": {},
-            "affected_ids": [unit_id],
-            "runtime_status": "tested",
-        })
+        _reject(snapshot, f"FoundCity({x},{y}) for {unit_id}", "found_city_not_offered")
+        return None
     if not site_obeys_founding_rules(snapshot, x, y):
         sites = labeled_settle_sites(snapshot, radius=12)
         if not sites:

@@ -713,16 +713,17 @@ def main() -> None:
     raw = _read(state_path)
     snapshot = civ6_adapter.upgrade_runtime_snapshot(raw) if args.from_game else raw
     civ6_adapter.normalize_civ6_snapshot(snapshot)
-    civ6_priorities.inject_legal_commands(snapshot)
-    civ6_wire.prune_settlers_without_sites(snapshot)
     _apply_personality(snapshot, args.personality)
+    from sidecar import civ6_legality as legality
+
     try:
         civ6_apply_results.inject_command_results(snapshot, args.session_dir)
-        civ6_apply_results.suppress_failed_offers(snapshot)
+    except Exception as error:  # never block a seat-turn on feedback rows
+        print(f"apply-results feedback skipped: {error}", file=sys.stderr)
+    legality.build_offer_set(snapshot)
+    try:
         if args.session_dir:
             snapshot["_session_dir"] = str(args.session_dir)
-        from sidecar import civ6_legality as legality
-
         legality.ingest_results(snapshot)
     except Exception as error:  # never block a seat-turn on feedback rows
         print(f"apply-results feedback skipped: {error}", file=sys.stderr)

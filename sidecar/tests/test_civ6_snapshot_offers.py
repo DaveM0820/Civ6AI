@@ -713,7 +713,7 @@ class CommandWireVocabTests(unittest.TestCase):
         self.assertIn("founding here is legal", lines)
         self.assertIn("coastal", lines)
 
-    def test_own_tile_move_becomes_found_when_legal(self):
+    def test_own_tile_move_is_rejected_even_when_found_is_offered(self):
         snap = {
             "game": {"map_width": 40, "map_height": 40},
             "your_units": [{
@@ -725,36 +725,35 @@ class CommandWireVocabTests(unittest.TestCase):
                  "fixed_arguments": {"unit_id": "UNIT_SETTLER_1"}},
             ],
         }
-        cmd = command_wire.resolve_unit_token(snap, "UNIT_SETTLER_1", "MoveTo(10,10)")
-        self.assertEqual("CMD_found_UNIT_SETTLER_1", cmd)
-        self.assertTrue(any("self-tile" in n for n in command_wire.LAST_UNRESOLVED))
+        command_wire.LAST_UNRESOLVED.clear()
+        self.assertIsNone(command_wire.resolve_unit_token(snap, "UNIT_SETTLER_1", "MoveTo(10,10)"))
+        self.assertEqual(1, len(snap["legal_commands"]))
+        self.assertTrue(any(n.startswith("Rejected last turn: MoveTo(10,10)") and "already on that tile" in n
+                            for n in command_wire.LAST_UNRESOLVED))
 
-    def test_own_tile_move_without_legal_fortify_is_dropped(self):
-        snap = {
-            "game": {"map_width": 40, "map_height": 40},
-            "your_units": [{"unit_id": "UNIT_W", "unit_type_id": "UNIT_WARRIOR", "plot_id": "PLOT_10_10"}],
-            "legal_commands": [],
-        }
-        self.assertEqual("CMD_skip_UNIT_W", command_wire.resolve_unit_token(snap, "UNIT_W", "MoveTo(10,10)"))
-        self.assertEqual(["CMD_skip_UNIT_W"], [c["command_id"] for c in snap["legal_commands"]])
-        self.assertEqual("unit_skip", snap["legal_commands"][0]["kind"])
-        self.assertFalse(any("does nothing" in n or "Fortify" in n for n in command_wire.LAST_UNRESOLVED))
+    def test_own_tile_move_adds_no_offer(self):
+        for legal in ([], [{"command_id": "CMD_fortify_UNIT_W", "kind": "unit_posture_fortify",
+                            "fixed_arguments": {"unit_id": "UNIT_W"}}]):
+            snap = {
+                "game": {"map_width": 40, "map_height": 40},
+                "your_units": [{"unit_id": "UNIT_W", "unit_type_id": "UNIT_WARRIOR", "plot_id": "PLOT_10_10"}],
+                "legal_commands": list(legal),
+            }
+            self.assertIsNone(command_wire.resolve_unit_token(snap, "UNIT_W", "MoveTo(10,10)"))
+            self.assertEqual(legal, snap["legal_commands"])
 
-    def test_own_tile_move_is_not_turned_into_fortify(self):
-        snap = {
-            "game": {"map_width": 40, "map_height": 40},
-            "your_units": [{"unit_id": "UNIT_W", "unit_type_id": "UNIT_WARRIOR", "plot_id": "PLOT_10_10"}],
-            "legal_commands": [{
-                "command_id": "CMD_fortify_UNIT_W",
-                "kind": "unit_posture_fortify",
-                "fixed_arguments": {"unit_id": "UNIT_W"},
-            }],
-        }
-        self.assertEqual("CMD_skip_UNIT_W", command_wire.resolve_unit_token(snap, "UNIT_W", "MoveTo(10,10)"))
-        ids = [c["command_id"] for c in snap["legal_commands"]]
-        self.assertIn("CMD_fortify_UNIT_W", ids)
-        self.assertIn("CMD_skip_UNIT_W", ids)
-        self.assertFalse(any("Fortify to hold" in n for n in command_wire.LAST_UNRESOLVED))
+    def test_improve_on_unoffered_tile_is_rejected(self):
+        offer = {"command_id": "CMD_B_farm_3_4", "kind": "move_unit",
+                 "fixed_arguments": {"unit_id": "UNIT_B", "target_x": 3, "target_y": 4,
+                                     "improvement_id": "IMPROVEMENT_FARM", "intent": "improve",
+                                     "A": 2, "G": 1, "goal": 1}}
+        snap = {"your_units": [{"unit_id": "UNIT_B", "unit_type_id": "UNIT_BUILDER", "plot_id": "PLOT_1_1"}],
+                "legal_commands": [offer]}
+        command_wire.LAST_UNRESOLVED.clear()
+        self.assertEqual("CMD_B_farm_3_4",
+                         command_wire.resolve_unit_token(snap, "UNIT_B", "Improve(3,4,IMPROVEMENT_FARM)"))
+        self.assertIsNone(command_wire.resolve_unit_token(snap, "UNIT_B", "Improve(9,9,IMPROVEMENT_FARM)"))
+        self.assertTrue(any("no Improve is offered" in n for n in command_wire.LAST_UNRESOLVED))
 
     def test_unknown_unit_token_names_the_real_ids(self):
         snap = {

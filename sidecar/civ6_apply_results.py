@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
+from sidecar import civ6_legality as legality
 
 APPLY_RESULTS_NAME = "apply-results.jsonl"
 KIND_OK = "APPLY_OK"
@@ -515,9 +516,9 @@ def _plot_facts(snapshot: dict[str, Any], x: int, y: int, player_id: str) -> lis
     facts = []
     if plot.get("water"):
         facts.append("water")
-    if plot.get("peak") or _plot_is_mountain(plot):
+    if plot.get("peak") or legality.is_mountain(plot):
         facts.append("mountain")
-    occupied = _own_occupied_plots(snapshot)
+    occupied = legality.own_occupied_plots(snapshot)
     if (x, y) in occupied:
         facts.append(f"occupied by {occupied[(x, y)][0]}")
     owner = plot.get("revealed_owner_id")
@@ -1248,38 +1249,6 @@ def _result_fingerprint(item: dict[str, Any]) -> tuple[str, str, Any, Any] | Non
 _CMD_TARGET_RE = re.compile(r"_(-?\d+)_(-?\d+)$")
 
 
-def _explore_substitute(snapshot: dict[str, Any], dropped_move: dict[str, Any],
-                        reverse: dict[str, str]) -> dict[str, Any] | None:
-    """A legal explore order for the unit whose move was dropped, shaped like the bound move."""
-    args = dropped_move.get("arguments") if isinstance(dropped_move.get("arguments"), dict) else {}
-    unit = str(args.get("unit_id") or "")
-    unit = reverse.get(unit, unit)
-    cmd_id = f"CMD_explore_{unit}"
-    if not any(isinstance(c, dict) and c.get("command_id") == cmd_id for c in snapshot.get("legal_commands") or []):
-        return None
-    sub = {k: v for k, v in dropped_move.items() if k not in ("arguments", "command_id", "kind")}
-    sub.update({"command_id": cmd_id, "kind": "explore", "arguments": {"unit_id": unit}})
-    return sub
-
-
-def _own_occupied_plots(snapshot: dict[str, Any]) -> dict[tuple[int, int], list[str]]:
-    from sidecar.civ6_legality import own_occupied_plots
-
-    return own_occupied_plots(snapshot)
-
-
-def _plot_is_mountain(plot: dict[str, Any]) -> bool:
-    from sidecar.civ6_legality import is_mountain
-
-    return is_mountain(plot)
-
-
-def _land_units_cannot_embark(snapshot: dict[str, Any]) -> bool:
-    from sidecar.civ6_legality import can_embark
-
-    return not can_embark(snapshot)
-
-
 def _failure_matcher(snapshot: dict[str, Any], located: bool = False):
     """One repeat-failure fingerprint check shared by offers and orders.
 
@@ -1313,46 +1282,56 @@ def _failure_matcher(snapshot: dict[str, Any], located: bool = False):
     return fails, match
 
 
-def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-    """Drop illegal orders via the legality layer, then drop duplicate tile orders."""
-    from sidecar import civ6_legality as legality
-
-    kept, dropped = legality.filter_orders(snapshot, commands)
-    fails, match = _failure_matcher(snapshot)
+def attack_target_rule(snapshot: dict[str, Any], ctx: dict[str, Any]):
+    """AttackTo needs a visible enemy unit or city on that tile."""
     combat = (snapshot.get("civ6") or {}).get("combat") or {}
     enemy_plots = {(h.get("x"), h.get("y")) for key in ("hostiles", "hostile_cities") for h in combat.get(key) or [] if isinstance(h, dict)}
-    failed_tiles: set[tuple[Any, Any]] = {(f[0][2], f[0][3]) for f in fails if f[0][0] == "move_unit"}
-    seen_orders: set[tuple[Any, ...]] = set()
-    out: list[dict[str, Any]] = []
-    for command in kept:
+
+    def check(command: dict[str, Any]):
         fp = _command_fingerprint(command)
         if fp[0] == "attack_target" and (fp[2], fp[3]) not in enemy_plots:
-            dropped.append(f"dropped: AttackTo({fp[2]},{fp[3]}) has no visible enemy unit or city to hit")
-            continue
+            return f"dropped: AttackTo({fp[2]},{fp[3]}) has no visible enemy unit or city to hit", None
+        return None
+    return check
+
+
+def repeat_failure_rule(snapshot: dict[str, Any], ctx: dict[str, Any]):
+    """Same order kind, unit and tile as a recorded failure."""
+    _fails, match = _failure_matcher(snapshot)
+
+    def check(command: dict[str, Any]):
+        fp = _command_fingerprint(command)
         matched = match(fp[0], fp[1], fp[2], fp[3])
-        if matched is not None:
-            dropped.append(
-                f"dropped: repeat of T{matched[1]} failure ({matched[2].split(':')[0] or 'non-transient'}). "
-                "Do not order that destination again."
-            )
-            if fp[0] == "move_unit":
-                failed_tiles.add((fp[2], fp[3]))
-            continue
-        if fp[0] in ("move_unit", "attack_target") and fp[2] is not None and fp[3] is not None:
-            signature = (fp[0], fp[1], fp[2], fp[3])
-            if signature in seen_orders:
-                dropped.append(
-                    f"dropped: duplicate order to ({fp[2]},{fp[3]}). Do not order that destination again."
-                )
-                continue
-            seen_orders.add(signature)
-        out.append(command)
-    return out, dropped
+        if matched is None:
+            return None
+        return (
+            f"dropped: repeat of T{matched[1]} failure ({matched[2].split(':')[0] or 'non-transient'}). "
+            "Do not order that destination again."
+        ), None
+    return check
+
+
+def duplicate_destination_rule(snapshot: dict[str, Any], ctx: dict[str, Any]):
+    """A second identical move or attack by the same unit to the same tile."""
+    seen_orders: set[tuple[Any, ...]] = set()
+
+    def check(command: dict[str, Any]):
+        fp = _command_fingerprint(command)
+        if fp[0] not in ("move_unit", "attack_target") or fp[2] is None or fp[3] is None:
+            return None
+        if fp in seen_orders:
+            return f"dropped: duplicate order to ({fp[2]},{fp[3]}). Do not order that destination again.", None
+        seen_orders.add(fp)
+        return None
+    return check
+
+
+def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Run every order rule in the legality layer."""
+    return legality.filter_orders(snapshot, commands, legality.ORDER_RULES)
 
 
 def suppress_failed_offers(snapshot: dict[str, Any]) -> None:
-    from sidecar import civ6_legality as legality
-
     legality.apply_offer_filter(snapshot, "repeat_failures")
 
 
