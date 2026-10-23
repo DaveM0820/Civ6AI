@@ -11,6 +11,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema import RefResolver
 
+from sidecar import civ6_visibility
 from sidecar import pipeline_v2 as pipeline
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -527,6 +528,7 @@ def normalize_civ6_snapshot(snapshot: dict[str, Any]) -> None:
         snapshot.update(coerced)
     _normalize_empire_numbers(snapshot)
     _normalize_wire_shapes(snapshot)
+    civ6_visibility.filter_snapshot_resources(snapshot)
     snapshot["schema_version"] = "civ6ai-input/1"
     pipeline.normalize_personality(snapshot)
     civ6 = snapshot.get("civ6")

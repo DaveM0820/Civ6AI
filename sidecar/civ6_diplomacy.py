@@ -24,6 +24,7 @@ from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
 from sidecar import civ6_legality as legality
+from sidecar import civ6_visibility
 from sidecar.civ6_common import dct as _dct
 from sidecar.civ6_common import lst as _lst
 from sidecar.civ6_common import me as _me
@@ -192,10 +193,7 @@ def _stock_problem(snapshot: dict, items: list[dict[str, Any]]) -> str | None:
     return None
 
 
-STRATEGIC_TECH = {"RESOURCE_HORSES": "TECH_ANIMAL_HUSBANDRY", "RESOURCE_IRON": "TECH_BRONZE_WORKING",
-                  "RESOURCE_NITER": "TECH_MILITARY_ENGINEERING", "RESOURCE_COAL": "TECH_INDUSTRIALIZATION",
-                  "RESOURCE_OIL": "TECH_REFINING", "RESOURCE_ALUMINUM": "TECH_RADIO",
-                  "RESOURCE_URANIUM": "TECH_COMBUSTION"}
+STRATEGIC_TECH = {r: t for r, (t, _c) in civ6_visibility.RESOURCE_REVEAL.items() if t}
 
 
 def _usable_problem(snapshot: dict, items: list[dict[str, Any]]) -> str | None:

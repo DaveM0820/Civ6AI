@@ -253,19 +253,39 @@ function Civ6Ai_Snapshot._FeatureTypeName(plot)
   return nil
 end
 
-function Civ6Ai_Snapshot._ResourceTypeName(plot)
+-- Shared per-seat resource visibility: the engine's IsResourceVisible when present,
+-- else the row's PrereqTech/PrereqCivic against this player's techs/civics.
+function Civ6Ai_Snapshot._ResourceRevealedTo(playerID, row)
+  if row == nil then return false end
+  local M, p = Civ6Ai_Snapshot._Method, Players ~= nil and Players[playerID] or nil
+  if p == nil then return false end
+  local res = M(p, "GetResources")
+  if res ~= nil and row.Hash ~= nil and res.IsResourceVisible ~= nil then
+    local okV, v = pcall(function() return res:IsResourceVisible(row.Hash) end)
+    if okV and type(v) == "boolean" then return v end
+  end
+  if row.PrereqTech ~= nil then
+    local t = GameInfo.Technologies[row.PrereqTech]
+    if t == nil or M(M(p, "GetTechs"), "HasTech", t.Index) ~= true then return false end
+  end
+  if row.PrereqCivic ~= nil then
+    local c = GameInfo.Civics[row.PrereqCivic]
+    if c == nil or M(M(p, "GetCulture"), "HasCivic", c.Index) ~= true then return false end
+  end
+  return true
+end
+
+function Civ6Ai_Snapshot._ResourceTypeName(plot, playerID)
   local idx = plot:GetResourceType()
-  if idx == nil or idx < 0 then
+  if idx == nil or idx < 0 or GameInfo.Resources == nil then
     return nil
   end
-  if GameInfo.Resources ~= nil then
-    for row in GameInfo.Resources() do
-      if row.Index == idx then
-        return row.ResourceType
-      end
-    end
+  local row = GameInfo.Resources[idx]
+  if row == nil then return nil end
+  if playerID ~= nil and not Civ6Ai_Snapshot._ResourceRevealedTo(playerID, row) then
+    return nil
   end
-  return nil
+  return row.ResourceType
 end
 
 function Civ6Ai_Snapshot._ImprovementTypeName(plot)
@@ -3568,7 +3588,7 @@ function Civ6Ai_Snapshot._LegalImprovementsAt(playerID, unitType, plot)
   local terrain = GameInfo.Terrains[M(plot, "GetTerrainType") or -1]
   local feature = GameInfo.Features[M(plot, "GetFeatureType") or -1]
   local resource = GameInfo.Resources[M(plot, "GetResourceType") or -1]
-  if resource ~= nil and not known(resource.PrereqTech, resource.PrereqCivic) then resource = nil end
+  if resource ~= nil and not Civ6Ai_Snapshot._ResourceRevealedTo(playerID, resource) then resource = nil end
   -- DB booleans are true or nil. 0 is truthy in Lua, so `not RequiresRiver` would
   -- reject every non-river tile when the column is stored as 0.
   local function flagged(v)
