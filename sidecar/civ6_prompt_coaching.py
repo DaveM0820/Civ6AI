@@ -536,29 +536,8 @@ def _unit_id_from(value: Any) -> str | None:
 
 
 def explore_quiet_units(snapshot: dict[str, Any], turns_needed: int = 2) -> list[str]:
-    """Units whose explore orders revealed nothing on this many distinct turns.
-
-    While most of the map is still fog, keep Automate(explore) visible: hiding
-    it is what left explorers walking into the same mountain and water tiles.
-    """
-    explored = _civ6_explored_percent(snapshot)
-    if isinstance(explored, int) and explored < CIV6_EXPLORE_NUDGE_BELOW_PCT:
-        return []
-    history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
-    rows = history.get("command_results") if isinstance(history.get("command_results"), list) else []
-    by_unit: dict[str, set[int]] = {}
-    for item in rows:
-        if not isinstance(item, dict) or "explore_no_reveal" not in str(item.get("reason") or ""):
-            continue
-        turn = _as_int(item.get("turn"))
-        if turn is None:
-            continue
-        blobs = [item.get("identity"), item.get("command_id"), *(item.get("affected_ids") or [])]
-        for blob in blobs:
-            unit_id = _unit_id_from(blob)
-            if unit_id:
-                by_unit.setdefault(unit_id, set()).add(turn)
-    return sorted(unit for unit, turns in by_unit.items() if len(turns) >= turns_needed)
+    """Retired: no-reveal tiles go on the legality blacklist instead of hiding explore."""
+    return []
 
 
 def civ6_expansion_attention(snapshot: dict[str, Any]) -> str | None:
@@ -825,30 +804,17 @@ def civ6_idle_resources_attention(snapshot: dict[str, Any]) -> str | None:
     return "IDLE: " + ". ".join(bits) + "."
 
 
-def civ6_occupied_tile_attention(snapshot: dict[str, Any]) -> str | None:
-    """Tiles one of our units already holds — MoveTo there fails occupied."""
-    from sidecar.civ6_apply_results import _own_occupied_plots
+def civ6_rejected_last_turn_attention(snapshot: dict[str, Any]) -> str | None:
+    from sidecar.civ6_legality import rejection_lines
 
-    held = _own_occupied_plots(snapshot)
-    if not held:
-        return None
-    bits = [f"({x},{y})" for x, y in sorted(held)[:12]]
-    extra = "" if len(held) <= 12 else f" and {len(held) - 12} more"
-    return (
-        "OCCUPIED: your units already stand on " + ", ".join(bits) + extra
-        + ". Do not MoveTo those tiles (builders and rams included)."
-    )
+    lines = rejection_lines(snapshot)
+    return "\n".join(lines) if lines else None
 
 
-def civ6_explore_quiet_attention(snapshot: dict[str, Any]) -> str | None:
-    quiet = explore_quiet_units(snapshot)
-    if not quiet:
-        return None
-    noun = "unit" if len(quiet) == 1 else "units"
-    return (
-        f"EXPLORE: {len(quiet)} {noun} revealed nothing for 2 turns. "
-        "Automate(explore) is hidden for them. MoveTo a frontier tile instead."
-    )
+def civ6_host_default_attention(snapshot: dict[str, Any]) -> str | None:
+    from sidecar.civ6_legality import idle_prompt_line
+
+    return idle_prompt_line(snapshot)
 
 
 def collect_civ6_attention_items(snapshot: dict[str, Any]) -> list[str]:
@@ -861,8 +827,8 @@ def collect_civ6_attention_items(snapshot: dict[str, Any]) -> list[str]:
         civ6_focus_fire_attention,
         civ6_expansion_attention,
         civ6_military_cap_attention,
-        civ6_explore_quiet_attention,
-        civ6_occupied_tile_attention,
+        civ6_rejected_last_turn_attention,
+        civ6_host_default_attention,
         civ6_idle_resources_attention,
     ):
         note = fn(snapshot)

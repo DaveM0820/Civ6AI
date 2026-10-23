@@ -1280,47 +1280,28 @@ def _plot_xy(row: dict[str, Any] | None) -> tuple[int, int] | None:
 
 
 def _own_occupied_plots(snapshot: dict[str, Any]) -> dict[tuple[int, int], list[str]]:
-    held: dict[tuple[int, int], list[str]] = {}
-    for unit in snapshot.get("your_units") or []:
-        if not isinstance(unit, dict):
-            continue
-        xy = _plot_xy(unit)
-        if xy is None:
-            continue
-        uid = str(unit.get("unit_id") or "")
-        if uid:
-            held.setdefault(xy, []).append(uid)
-    return held
+    from sidecar.civ6_legality import own_occupied_plots
+
+    return own_occupied_plots(snapshot)
 
 
 def _plot_is_mountain(plot: dict[str, Any]) -> bool:
-    if plot.get("peak"):
-        return True
-    terrain = str(plot.get("terrain_id") or plot.get("terrain") or "")
-    return "MOUNTAIN" in terrain.upper()
+    from sidecar.civ6_legality import is_mountain
+
+    return is_mountain(plot)
 
 
 def _land_units_cannot_embark(snapshot: dict[str, Any]) -> bool:
-    """True until Shipbuilding is known. Water MoveTo before that is illegal."""
-    research = ((snapshot.get("your_empire") or {}).get("research") or {})
-    known = {str(t) for t in (research.get("known_tech_ids") or []) if t}
-    if "TECH_SHIPBUILDING" in known:
-        return False
-    if known:
-        return True
-    techs = ((snapshot.get("civ6") or {}).get("governance") or {}).get("techs") or {}
-    if not isinstance(techs, dict):
-        return True
-    ids = {techs.get("current")} | {o.get("id") for o in techs.get("options") or [] if isinstance(o, dict)}
-    if "TECH_SHIPBUILDING" in ids:
-        return True
-    return "TECH_SHIPBUILDING" not in ids
+    from sidecar.civ6_legality import can_embark
+
+    return not can_embark(snapshot)
 
 
 def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
-    """Drop orders that replay a non-transient failure from the last two decisions."""
-    kept: list[dict[str, Any]] = []
-    dropped: list[str] = []
+    """Drop illegal orders via the legality layer, then drop duplicate tile orders."""
+    from sidecar import civ6_legality as legality
+
+    kept, dropped = legality.filter_orders(snapshot, commands)
     fails: list[tuple[tuple[str, str, Any, Any], int, str]] = []
     for item in command_result_items(snapshot):
         fp = _result_fingerprint(item)
@@ -1332,71 +1313,19 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
     reverse = {v: k for k, v in wire_ids.items()}
     combat = (snapshot.get("civ6") or {}).get("combat") or {}
     enemy_plots = {(h.get("x"), h.get("y")) for key in ("hostiles", "hostile_cities") for h in combat.get(key) or [] if isinstance(h, dict)}
-    water_blocked = _land_units_cannot_embark(snapshot)
-    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
-    water_plots = {(p.get("x"), p.get("y")) for p in known.get("plots") or [] if isinstance(p, dict) and p.get("water")}
-    land_units = {u.get("unit_id") for u in units if u.get("domain_id") == "DOMAIN_LAND"}
-    land_units |= {wire_ids.get(uid) for uid in list(land_units) if wire_ids.get(uid)}
-    peak_plots = {
-        (p.get("x"), p.get("y")) for p in known.get("plots") or []
-        if isinstance(p, dict) and _plot_is_mountain(p)
-    }
-    occupied = _own_occupied_plots(snapshot)
-    substitutes: list[dict[str, Any]] = []
     failed_tiles: set[tuple[Any, Any]] = {(f[0][2], f[0][3]) for f in fails if f[0][0] == "move_unit"}
-    me = str((snapshot.get("decision") or {}).get("player_id") or "")
-    plot_owner = {(p.get("x"), p.get("y")): p.get("revealed_owner_id") for p in known.get("plots") or [] if isinstance(p, dict)}
-    builders = {u.get("unit_id") for u in units if u.get("unit_type_id") == "UNIT_BUILDER"}
-    builders |= {wire_ids.get(uid) for uid in list(builders) if wire_ids.get(uid)}
-
     seen_orders: set[tuple[Any, ...]] = set()
-
-    def _explore_instead(command: dict[str, Any]) -> None:
-        unit = str((command.get("arguments") or {}).get("unit_id") or "")
-        if any(str((c.get("arguments") or {}).get("unit_id") or "") == unit for c in kept + substitutes
-               if c is not command and isinstance(c.get("arguments"), dict)):
-            return
-        sub = _explore_substitute(snapshot, command, reverse)
-        if sub is not None and sub["arguments"]["unit_id"] not in {str((c.get("arguments") or {}).get("unit_id")) for c in substitutes}:
-            substitutes.append(sub)
-            dropped.append(f"note: {unit} explores instead")
-
-    for command in commands:
+    out: list[dict[str, Any]] = []
+    for command in kept:
         fp = _command_fingerprint(command)
-        matched = None
-        if (water_blocked and fp[0] == "move_unit" and (fp[2], fp[3]) in water_plots
-                and (fp[1] in land_units or reverse.get(fp[1]) in land_units)):
-            dropped.append(f"dropped: MoveTo({fp[2]},{fp[3]}) is water; land units cannot embark before Shipbuilding")
-            _explore_instead(command)
-            continue
-        if (fp[0] == "move_unit" and (fp[1] in builders or reverse.get(fp[1]) in builders)
-                and (fp[2], fp[3]) in plot_owner and plot_owner[(fp[2], fp[3])] != me):
-            dropped.append(f"dropped: builder MoveTo({fp[2]},{fp[3]}) is outside your borders; builders improve only your own tiles")
-            continue
-        if fp[0] == "move_unit" and (fp[2], fp[3]) in peak_plots:
-            dropped.append(f"dropped: MoveTo({fp[2]},{fp[3]}) is a mountain; no unit can enter it")
-            _explore_instead(command)
-            continue
-        if fp[0] == "move_unit" and (fp[2], fp[3]) in occupied:
-            holders = occupied[(fp[2], fp[3])]
-            mover = str(fp[1] or "")
-            same = mover in holders or reverse.get(mover) in holders or wire_ids.get(mover) in holders
-            if not same or len(holders) > 1:
-                dropped.append(
-                    f"dropped: MoveTo({fp[2]},{fp[3]}) is already held by your unit "
-                    f"{holders[0]}; that tile is occupied"
-                )
-                continue
         if fp[0] == "attack_target" and (fp[2], fp[3]) not in enemy_plots:
             dropped.append(f"dropped: AttackTo({fp[2]},{fp[3]}) has no visible enemy unit or city to hit")
             continue
+        matched = None
         for fail_fp, fail_turn, fail_reason in fails:
-            same_kind = fail_fp[0] == fp[0] or (fail_fp[0] in ("move_unit", "attack_target") and fp[0] == fail_fp[0])
-            unit_a = fail_fp[1]
-            unit_b = fp[1]
+            unit_a, unit_b = fail_fp[1], fp[1]
             unit_ok = unit_a == unit_b or wire_ids.get(unit_b) == unit_a or reverse.get(unit_a) == unit_b
-            target_ok = fail_fp[2] == fp[2] and fail_fp[3] == fp[3]
-            if same_kind and unit_ok and target_ok:
+            if fail_fp[0] == fp[0] and unit_ok and fail_fp[2] == fp[2] and fail_fp[3] == fp[3]:
                 matched = (fail_turn, fail_reason)
                 break
         if matched is not None:
@@ -1405,7 +1334,6 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
                 "Do not order that destination again."
             )
             if fp[0] == "move_unit":
-                _explore_instead(command)
                 failed_tiles.add((fp[2], fp[3]))
             continue
         if fp[0] in ("move_unit", "attack_target") and fp[2] is not None and fp[3] is not None:
@@ -1416,10 +1344,8 @@ def filter_repeat_failures(snapshot: dict[str, Any], commands: list[dict[str, An
                 )
                 continue
             seen_orders.add(signature)
-        kept.append(command)
-    kept_units = {str((c.get("arguments") or {}).get("unit_id") or "") for c in kept if isinstance(c.get("arguments"), dict)}
-    kept.extend(s for s in substitutes if s["arguments"]["unit_id"] not in kept_units)
-    return _one_site_per_builder(snapshot, kept, dropped, failed_tiles), dropped
+        out.append(command)
+    return _one_site_per_builder(snapshot, out, dropped, failed_tiles), dropped
 
 
 def suppress_failed_offers(snapshot: dict[str, Any]) -> None:

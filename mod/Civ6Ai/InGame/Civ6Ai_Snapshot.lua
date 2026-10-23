@@ -3746,6 +3746,27 @@ end
 
 -- City ranged strike: an enemy unit within 2 tiles. Walls are not required to
 -- offer the order; the strike is the city's own ranged attack.
+function Civ6Ai_Snapshot._CityStrikeAvailableFlag()
+  local shared = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
+  if shared ~= nil and shared.CityStrikeAvailable ~= nil then
+    local okAvail, avail = pcall(shared.CityStrikeAvailable)
+    if okAvail then
+      return avail == true
+    end
+  end
+  if Game ~= nil and Game.GetProperty ~= nil then
+    local ok, value = pcall(function() return Game:GetProperty("CIV6AI_CITY_STRIKE") end)
+    if ok and tonumber(value) == 0 then
+      return false
+    end
+    if ok and tonumber(value) == 1 then
+      return true
+    end
+  end
+  return CityManager ~= nil and CityManager.CanStartCommand ~= nil
+    and Civ6Ai_Snapshot._CityStrikeCommand() ~= nil
+end
+
 function Civ6Ai_Snapshot._AddCityStrikeCommands(commands, playerID)
   local seen = {}
   local function offer(city, tx, ty)
@@ -3757,20 +3778,7 @@ function Civ6Ai_Snapshot._AddCityStrikeCommands(commands, playerID)
     if seen[key] then
       return
     end
-    -- Same availability the gameplay strike uses. PARAM_X is often missing
-    -- there; a Gameplay property of 0 means do not offer (it would come back
-    -- city_strike_unavailable).
-    local shared = ExposedMembers ~= nil and ExposedMembers.Civ6Ai or nil
-    if shared ~= nil and shared.CityStrikeAvailable ~= nil then
-      local okAvail, avail = pcall(shared.CityStrikeAvailable)
-      if okAvail and avail == false then
-        return
-      end
-    elseif Game ~= nil and Game.GetProperty ~= nil
-        and tonumber((function()
-          local ok, value = pcall(function() return Game:GetProperty("CIV6AI_CITY_STRIKE") end)
-          return ok and value or nil
-        end)()) == 0 then
+    if not Civ6Ai_Snapshot._CityStrikeAvailableFlag() then
       return
     end
     local can = nil
@@ -4330,6 +4338,7 @@ function Civ6Ai_Snapshot._BuildCombat(playerID)
     hostile_cities = Civ6Ai_Util.JsonArrayList(),
     previews = Civ6Ai_Util.JsonArrayList(),
     threats = Civ6Ai_Util.JsonArrayList(),
+    city_strike_available = Civ6Ai_Snapshot._CityStrikeAvailableFlag(),
   }
   if player == nil then return out end
   local own = {}

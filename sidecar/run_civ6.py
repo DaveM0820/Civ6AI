@@ -266,6 +266,9 @@ def _build_approved_record(
     private_copy["legal_commands"] = {item["command_id"]: item for item in snapshot["legal_commands"]}
     commands = pipeline.bind_approved_commands(private_copy, validated)
     commands, repeat_notes = civ6_apply_results.filter_repeat_failures(snapshot, commands)
+    from sidecar import civ6_legality as legality
+
+    commands.extend(legality.apply_host_defaults(snapshot, commands))
     commands, buy_notes = civ6_apply_results.drop_unaffordable_purchases(snapshot, commands)
     chats = validated.get("chat_messages") if isinstance(validated.get("chat_messages"), list) else []
     chats, chat_notes = civ6_apply_results.filter_repeat_public_chat(snapshot, chats)
@@ -698,6 +701,9 @@ def main() -> None:
         civ6_apply_results.suppress_failed_offers(snapshot)
         if args.session_dir:
             snapshot["_session_dir"] = str(args.session_dir)
+        from sidecar import civ6_legality as legality
+
+        legality.ingest_results(snapshot)
     except Exception as error:  # never block a seat-turn on feedback rows
         print(f"apply-results feedback skipped: {error}", file=sys.stderr)
 

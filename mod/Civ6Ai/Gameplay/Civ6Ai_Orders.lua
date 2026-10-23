@@ -1829,6 +1829,10 @@ function Civ6Ai_Orders._AutoRanged(sender, owner, ordered, attackOk, attackFaile
   end
   local stopped = false
   local skipWhy = nil
+  if not Civ6Ai_Orders.CityStrikeAvailable() then
+    stopped = true
+    skipWhy = "city_strike_unavailable"
+  end
   local function fire(city, fromX, fromY, commandId)
     if stopped or city == nil then
       return

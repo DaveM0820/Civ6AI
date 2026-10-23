@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from sidecar.civ6_legality import change_government_allowed
+
 REPLY_KEYS = (
     "government", "policies", "pantheon", "religion",
     "governor.appoint", "governor.assign", "governor.promote",
@@ -335,7 +337,7 @@ def attention_items(snapshot: dict) -> list[str]:
     if routes.get("policies", True) and p.get("empty_slots") and p.get("change_allowed") and _lst(p.get("available")):
         out.append(f"{p['empty_slots']} empty policy slot(s): fill them with the \"policies\" key.")
     g = _dct(gov.get("government"))
-    if g.get("change_allowed") and _lst(g.get("available")):
+    if change_government_allowed(snapshot) and _lst(g.get("available")):
         out.append("A new government is unlocked and can be adopted this turn (\"government\" key).")
     r = _dct(gov.get("religion"))
     if r.get("can_found_pantheon") and not r.get("pantheon"):
@@ -366,7 +368,7 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     g = _dct(gov.get("government"))
     avail = [_short(a.get("id"), "GOVERNMENT_") for a in _lst(g.get("available")) if isinstance(a, dict)]
-    if avail and g.get("change_allowed"):
+    if avail and change_government_allowed(snapshot):
         out.append(("government", " | ".join(avail)))
     p = _dct(gov.get("policies"))
     if routes.get("policies", True) and p.get("change_allowed") and _lst(p.get("available")):
@@ -547,7 +549,7 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
             notes.append(f"{key}: you are in anarchy; wait until it ends before changing government")
         elif current and _match_id(value, [current], ("GOVERNMENT_",)):
             notes.append(f"{key}={value}: you already have { _short(current, 'GOVERNMENT_') }; switching to it is blocked")
-        elif g.get("change_allowed") is not True:
+        elif not change_government_allowed(snapshot):
             notes.append(f"{key}: a government can only be changed on a turn when a civic completed")
         else:
             gid = _match_id(value, avail, ("GOVERNMENT_",))

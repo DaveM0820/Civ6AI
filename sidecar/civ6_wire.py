@@ -668,8 +668,6 @@ def _civ6_unit_tokens(snapshot: dict[str, Any]) -> dict[str, list[str]]:
         token = command_wire.unit_command_token(command)
         # Civ5-style movement: a unit that can move gets one free-destination
         # MoveTo(x,y) (any plot; the game walks its own route), not a list of tiles.
-        if token == "Automate(explore)" and unit_id in _explore_quiet_ids(snapshot):
-            token = None
         if token and token.startswith("MoveTo("):
             token = "MoveTo(x,y)"
         elif token and token.startswith("AttackTo("):
@@ -774,12 +772,11 @@ def _plain_strike_coord(token: str) -> str | None:
 
 
 def city_strike_prompt_lines(snapshot: dict[str, Any]) -> list[str]:
-    """Plain city-strike coordinates, only when a city can strike this turn.
+    """Plain city-strike coordinates, only when a city can strike this turn."""
+    from sidecar.civ6_legality import city_strike_available
 
-    The rangeStrike token keeps its combat forecast for binding. This block
-    repeats the coordinates alone, next to the command rules, so a long forecast
-    is not the only place the target appears.
-    """
+    if not city_strike_available(snapshot):
+        return []
     tokens = _civ6_city_tokens(snapshot)
     rows: list[str] = []
     for city in snapshot.get("your_cities") or []:
@@ -1999,23 +1996,13 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
     return lines
 
 
-def _explore_quiet_ids(snapshot: dict[str, Any] | None) -> set[str]:
-    if not isinstance(snapshot, dict):
-        return set()
-    return set(coaching.explore_quiet_units(snapshot))
-
-
 def _explore_offered(snapshot: dict[str, Any] | None) -> bool:
     if not isinstance(snapshot, dict):
         return False
-    quiet = _explore_quiet_ids(snapshot)
-    for command in snapshot.get("legal_commands") or []:
-        if not isinstance(command, dict) or command.get("kind") != "explore":
-            continue
-        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
-        if str(fixed.get("unit_id") or "") not in quiet:
-            return True
-    return False
+    return any(
+        isinstance(command, dict) and command.get("kind") == "explore"
+        for command in snapshot.get("legal_commands") or []
+    )
 
 
 def _orders_execute_clause(snapshot: dict[str, Any] | None) -> str:

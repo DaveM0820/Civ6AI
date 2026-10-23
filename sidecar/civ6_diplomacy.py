@@ -225,30 +225,15 @@ def _usable_problem(snapshot: dict, items: list[dict[str, Any]]) -> str | None:
 
 
 def _pact_problem(snapshot: dict, pid: str, kinds: set, require_unlock: bool = True) -> str | None:
-    """None when this seat may offer (or accept) every pact in kinds to pid.
+    from sidecar.civ6_legality import pact_problem
 
-    Civic/tech unlocks are offer-side only; Gov.Deal checks the other seat.
-    Accept uses require_unlock=False so a legal incoming open-borders or
-    embassy deal is not rejected because the receiver has not unlocked it.
-    """
-    major = next((m for m in _lst(diplomacy(snapshot).get("majors")) if isinstance(m, dict)
-                  and str(m.get("player_id")) == pid), {})
-    empire = _dct(snapshot.get("your_empire"))
-    known = {str(c.get("id")) for c in _lst(empire.get("civics")) if isinstance(c, dict) and c.get("key") == "known"}
-    known |= {str(t) for t in _lst(_dct(empire.get("research")).get("known_tech_ids"))}
-    for kind in sorted(kinds):
-        if kind not in PACTS:
-            continue
-        if (kind == "peace") != bool(major.get("at_war")):
-            return "peace needs a war" if kind == "peace" else f"no {kind} while at war"
-        need = PACTS[kind][1]
-        if require_unlock and need and need not in known:
-            return f"{kind} needs {need}"
-        if kind == "alliance" and not major.get("declared_friendship"):
-            return "alliance needs declared friendship first"
-        if major.get({"friendship": "declared_friendship", "alliance": "alliance", "open_borders": "open_borders"}.get(kind, "_")):
-            return f"you already have {kind}"
-    return None
+    problem = pact_problem(snapshot, pid, kinds, require_unlock=require_unlock)
+    if problem == "peace_not_at_war":
+        return "peace needs a war"
+    if problem and problem.startswith("no_") and problem.endswith("_at_war"):
+        kind = problem[3:-7]
+        return f"no {kind} while at war"
+    return problem
 
 
 def _items_text(items: list[dict[str, Any]]) -> str:
@@ -287,9 +272,12 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     names = []
     for target in _targets(snapshot):
-        if target["at_war"]:
+        from sidecar.civ6_legality import diplo_actions
+
+        allowed = diplo_actions(snapshot, target["player_id"])
+        if "PEACE_TREATY" in allowed:
             out.append((f"legal.diplomacy.{target['name']}", "PEACE_TREATY"))
-        elif target["can_declare_war"]:
+        elif "DECLARE_WAR" in allowed:
             out.append((f"legal.diplomacy.{target['name']}", "DECLARE_WAR"))
         if target["player_id"].startswith("PLAYER_") and target in _majors(snapshot):
             names.append(target["name"])
@@ -840,13 +828,11 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         return bind_reply(snapshot, f"deal.{name}", "peace")
     raw = str(text).strip().upper().replace(" ", "_")
     if raw in {"ACCEPT_DOF", "ACCEPT_FRIENDSHIP", "ACCEPT_DECLARED_FRIENDSHIP"}:
-        kinds = {i.get("kind") for d in _open_offers_to_me(snapshot) if d.get("from") == pid
-                 for i in (d.get("give") or []) + (d.get("want") or []) if isinstance(i, dict)}
-        if "friendship" not in kinds:
-            return [], [f"{key}: no open friendship offer from {name} to accept"]
-        problem = _pact_problem(snapshot, pid, {"friendship"}, require_unlock=False)
+        from sidecar.civ6_legality import diplo_problem
+
+        problem = diplo_problem(snapshot, pid, raw)
         if problem:
-            return [], [f"{key}: {problem}"]
+            return [], [f"{key}: no open friendship offer from {name} to accept"]
         return bind_reply(snapshot, f"deal.{name}.respond", "ACCEPT")
     if raw in {"REJECT", "ACCEPT_EMBASSY", "EMBASSY", "ACCEPT_DELEGATION", "DELEGATION"} or raw.startswith("ACCEPT_"):
         return [], [

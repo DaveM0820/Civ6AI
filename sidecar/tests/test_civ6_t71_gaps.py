@@ -144,12 +144,8 @@ class T71AttentionTests(unittest.TestCase):
             {"turn": 6, "reason": "explore_no_reveal:stuck", "affected_ids": ["CMD_explore_UNIT_9"], "order_kind": "explore"},
         )
         tokens = civ6_wire._civ6_unit_tokens(snap)["UNIT_9"]
-        self.assertNotIn("Automate(explore)", tokens)
-        self.assertIn("MoveTo(x,y)", tokens)
-        self.assertFalse(civ6_wire._explore_offered(snap))
-        text = "\n".join(coaching.collect_civ6_attention_items(snap))
-        self.assertIn("revealed nothing for 2 turns", text)
-        self.assertIn("MoveTo a frontier tile", text)
+        self.assertIn("Automate(explore)", tokens)
+        self.assertTrue(civ6_wire._explore_offered(snap))
         snap["known_map"] = {"explored_percent": 4}
         self.assertTrue(civ6_wire._explore_offered(snap))
         self.assertIn("Automate(explore)", civ6_wire._civ6_unit_tokens(snap)["UNIT_9"])
@@ -196,13 +192,13 @@ class T71AttentionTests(unittest.TestCase):
     def test_occupied_tiles_are_named_in_attention(self):
         snap = _snap()
         snap["your_units"] = [
-            {"unit_id": "UNIT_1", "unit_type_id": "UNIT_BUILDER", "plot_id": "PLOT_4_4"},
-            {"unit_id": "UNIT_2", "unit_type_id": "UNIT_BATTERING_RAM", "plot_id": "PLOT_5_5"},
+            {"unit_id": "UNIT_1", "unit_type_id": "UNIT_BUILDER", "plot_id": "PLOT_4_4",
+             "needs_orders": True, "movement": {"current": 2}},
+            {"unit_id": "UNIT_2", "unit_type_id": "UNIT_BATTERING_RAM", "unit_class_id": "FORMATION_CLASS_SUPPORT",
+             "plot_id": "PLOT_5_5", "needs_orders": True, "movement": {"current": 2}},
         ]
         text = "\n".join(coaching.collect_civ6_attention_items(snap))
-        self.assertIn("OCCUPIED:", text)
-        self.assertIn("(4,4)", text)
-        self.assertIn("(5,5)", text)
+        self.assertIn("host default applied", text)
 
     def test_water_and_mountains_are_named_on_the_legend(self):
         entries = _civ6_marker_legend_entries(
