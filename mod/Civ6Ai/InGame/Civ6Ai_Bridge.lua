@@ -1791,31 +1791,32 @@ function Civ6Ai_Bridge._ParseDecision(text)
   return { commands = commands }
 end
 
+-- The decision's "chat_messages" array, decoded as JSON: escapes (quotes,
+-- \n, \uXXXX) come out as real text and a long message is kept whole.
 function Civ6Ai_Bridge._ParseChatMessages(text)
+  text = tostring(text or "")
   local start = string.find(text, '"chat_messages"', 1, true)
   if start == nil then
     return {}
   end
-  local block = string.sub(text, start, start + 4000)
+  local colon = string.find(text, "%S", start + string.len('"chat_messages"'))
+  if colon == nil or string.sub(text, colon, colon) ~= ":" then
+    return {}
+  end
+  local ok, list = pcall(Civ6Ai_Util.DecodeJsonAt, text, colon + 1)
+  if not ok or type(list) ~= "table" then
+    Civ6Ai_Util.Log("bridge|chat_parse_failed")
+    return {}
+  end
   local messages = {}
-  local pos = 1
-  while true do
-    local targetStart = string.find(block, '"target":"', pos, true)
-    if targetStart == nil then
-      break
-    end
-    local slice = string.sub(block, targetStart, targetStart + 400)
-    local target = string.match(slice, '"target":"([^"]+)"')
-    local body = string.match(slice, '"text":"([^"]*)"')
-    local targetPlayerId = string.match(slice, '"target_player_id":"([^"]+)"')
-    if body ~= nil then
+  for _, row in ipairs(list) do
+    if type(row) == "table" and type(row.text) == "string" and row.text ~= "" then
       table.insert(messages, {
-        target = target or "all",
-        text = body,
-        target_player_id = targetPlayerId,
+        target = type(row.target) == "string" and row.target or "all",
+        text = row.text,
+        target_player_id = row.target_player_id ~= nil and tostring(row.target_player_id) or nil,
       })
     end
-    pos = targetStart + 1
   end
   return messages
 end

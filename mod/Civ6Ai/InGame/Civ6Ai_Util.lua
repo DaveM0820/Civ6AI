@@ -685,3 +685,126 @@ function Civ6Ai_Util.AppendJsonLine(path, payload)
   Civ6Ai_Util.Log("jsonl|" .. Civ6Ai_Util.EncodeJsonObject(logged))
   return false
 end
+
+
+-- Minimal JSON reader: DecodeJsonAt(text, pos) -> value, next position (nil on
+-- bad input). Strings decode every escape, \uXXXX (and surrogate pairs) to UTF-8.
+local function _utf8(code)
+  if code < 0x80 then
+    return string.char(code)
+  elseif code < 0x800 then
+    return string.char(0xC0 + math.floor(code / 0x40), 0x80 + code % 0x40)
+  elseif code < 0x10000 then
+    return string.char(0xE0 + math.floor(code / 0x1000), 0x80 + math.floor(code / 0x40) % 0x40, 0x80 + code % 0x40)
+  end
+  return string.char(0xF0 + math.floor(code / 0x40000), 0x80 + math.floor(code / 0x1000) % 0x40,
+    0x80 + math.floor(code / 0x40) % 0x40, 0x80 + code % 0x40)
+end
+
+local _JSON_ESC = { ['"'] = '"', ["\\"] = "\\", ["/"] = "/", b = "\b", f = "\f", n = "\n", r = "\r", t = "\t" }
+
+function Civ6Ai_Util.DecodeJsonString(text, pos)
+  -- text:sub(pos, pos) is the opening quote
+  local out = {}
+  local i = pos + 1
+  local n = string.len(text)
+  while i <= n do
+    local c = string.sub(text, i, i)
+    if c == '"' then
+      return table.concat(out), i + 1
+    elseif c == "\\" then
+      local e = string.sub(text, i + 1, i + 1)
+      if e == "u" then
+        local code = tonumber(string.sub(text, i + 2, i + 5), 16)
+        if code == nil then
+          return nil, nil
+        end
+        i = i + 6
+        if code >= 0xD800 and code <= 0xDBFF and string.sub(text, i, i + 1) == "\\u" then
+          local low = tonumber(string.sub(text, i + 2, i + 5), 16)
+          if low ~= nil and low >= 0xDC00 and low <= 0xDFFF then
+            code = 0x10000 + (code - 0xD800) * 0x400 + (low - 0xDC00)
+            i = i + 6
+          end
+        end
+        table.insert(out, _utf8(code))
+      else
+        table.insert(out, _JSON_ESC[e] or e)
+        i = i + 2
+      end
+    else
+      local j = string.find(text, '["\\]', i)
+      if j == nil then
+        return nil, nil
+      end
+      table.insert(out, string.sub(text, i, j - 1))
+      i = j
+    end
+  end
+  return nil, nil
+end
+
+function Civ6Ai_Util.DecodeJsonAt(text, pos)
+  pos = string.find(text, "%S", pos or 1)
+  if pos == nil then
+    return nil, nil
+  end
+  local c = string.sub(text, pos, pos)
+  if c == '"' then
+    return Civ6Ai_Util.DecodeJsonString(text, pos)
+  elseif c == "{" or c == "[" then
+    local isObject = c == "{"
+    local out = {}
+    local i = string.find(text, "%S", pos + 1)
+    if i ~= nil and string.sub(text, i, i) == (isObject and "}" or "]") then
+      return out, i + 1
+    end
+    while i ~= nil do
+      local key
+      if isObject then
+        if string.sub(text, i, i) ~= '"' then
+          return nil, nil
+        end
+        key, i = Civ6Ai_Util.DecodeJsonString(text, i)
+        i = i and string.find(text, "%S", i)
+        if i == nil or string.sub(text, i, i) ~= ":" then
+          return nil, nil
+        end
+        i = i + 1
+      end
+      local value
+      value, i = Civ6Ai_Util.DecodeJsonAt(text, i)
+      if i == nil then
+        return nil, nil
+      end
+      if isObject then
+        out[key] = value
+      else
+        table.insert(out, value)
+      end
+      i = string.find(text, "%S", i)
+      local sep = i and string.sub(text, i, i) or nil
+      if sep == "," then
+        i = string.find(text, "%S", i + 1)
+      elseif sep == (isObject and "}" or "]") then
+        return out, i + 1
+      else
+        return nil, nil
+      end
+    end
+    return nil, nil
+  end
+  local word = string.match(text, "^[%w%.%+%-]+", pos)
+  if word == nil then
+    return nil, nil
+  end
+  local nextPos = pos + string.len(word)
+  if word == "true" then
+    return true, nextPos
+  elseif word == "false" then
+    return false, nextPos
+  elseif word == "null" then
+    return nil, nextPos
+  end
+  return tonumber(word), nextPos
+end

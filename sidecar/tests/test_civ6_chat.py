@@ -47,19 +47,25 @@ class ChatWireTextTests(unittest.TestCase):
     def test_local_seat_sends_plain_text(self):
         self.lua.eval('Civ6Ai_Chat.SendMessage(0, { text = "hello", target = "all" })')
         sent = self.lua.eval("SENT[1].text")
-        self.assertEqual("hello", sent)
+        self.assertRegex(sent, r"^\{0>\*:[\w-]+\} hello$")
 
     def test_ai_seat_prefixes_leader_name(self):
         self.lua.eval('Civ6Ai_Chat.SendMessage(1, { text = "trade routes", target = "all" })')
         sent = self.lua.eval("SENT[1].text")
-        self.assertEqual("Wilhelmina: trade routes", sent)
+        self.assertRegex(sent, r"^\{1>\*:[\w-]+~\} Wilhelmina: trade routes$")
 
-    def test_relay_records_the_named_seat_not_the_network_sender(self):
-        self.lua.eval('Civ6Ai_Chat._OnHumanChat(0, -1, "Wilhelmina: trade routes", 1)')
+    def test_relay_records_the_tagged_seat_not_the_network_sender(self):
+        self.lua.eval('Civ6Ai_Chat._OnHumanChat(0, -1, "{1>*:9-1-1~} Wilhelmina: trade routes", 1)')
         sender = self.lua.eval("Civ6Ai_Chat.GetPublicEvents()[1].affected_ids[1]")
         body = self.lua.eval("Civ6Ai_Chat.GetPublicEvents()[1].text")
         self.assertEqual("PLAYER_1", sender)
         self.assertEqual("trade routes", body)
+
+    def test_untagged_name_prefix_stays_with_the_network_sender(self):
+        self.lua.execute("Civ6Ai_Config.IsHumanSeat = function(p) return p == 0 end")
+        self.lua.eval('Civ6Ai_Chat._OnHumanChat(0, -1, "Wilhelmina: trade routes", 1)')
+        self.assertEqual("PLAYER_0", self.lua.eval("Civ6Ai_Chat.GetPublicEvents()[1].affected_ids[1]"))
+        self.assertEqual("Wilhelmina: trade routes", self.lua.eval("Civ6Ai_Chat.GetPublicEvents()[1].text"))
 
     def test_chat_has_met_requires_major(self):
         self.lua.execute(
@@ -96,9 +102,9 @@ class ChatWireTextTests(unittest.TestCase):
             """
         )
         self.lua.eval('Civ6Ai_Chat.SendMessage(1, { text = "hello", target = "all" })')
-        self.assertEqual("Montezuma: hello", self.lua.eval("SENT[1].text"))
+        self.assertTrue(self.lua.eval("SENT[1].text").endswith("~} Montezuma: hello"))
         self.lua.eval('Civ6Ai_Chat.SendMessage(1, { text = "Wilhelmina: hello", target = "all" })')
-        self.assertEqual("Montezuma: hello", self.lua.eval("SENT[2].text"))
+        self.assertTrue(self.lua.eval("SENT[2].text").endswith("~} Montezuma: hello"))
 
     def test_plain_human_line_stays_the_network_sender(self):
         self.lua.eval('Civ6Ai_Chat._OnHumanChat(0, -1, "hello", 1)')

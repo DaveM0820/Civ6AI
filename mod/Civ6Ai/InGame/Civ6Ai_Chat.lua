@@ -187,6 +187,11 @@ function Civ6Ai_Chat._TriggerAiReplies(recipients)
   end
 end
 
+-- Every network line the mod sends carries a seat tag, "{F>T:ID} Name: body"
+-- (T is "*" for all). Each PC reads the seats from the tag and looks the
+-- names up itself, so language, duplicate leaders and a typed "Name:" prefix
+-- cannot change who a line is from. ID dedupes the sender's own echo.
+-- An untagged line (vanilla chat) is always from the network sender.
 function Civ6Ai_Chat._OnHumanChat(fromPlayer, toPlayer, text, eTargetType)
   if text == nil or text == "" then
     return
@@ -194,45 +199,51 @@ function Civ6Ai_Chat._OnHumanChat(fromPlayer, toPlayer, text, eTargetType)
   if string.find(text, "CIV6AI|", 1, true) == 1 then
     return
   end
-  -- Model chat goes out through Network.SendChat as the local player, so it comes
-  -- back here as if the human typed it. Never treat our own messages as human chat
-  -- (that echo re-triggered chat pulses for every seat in a loop).
-  if Civ6Ai_Chat._ConsumeSelfSent(text) then
-    return
+  local tagFrom, tagTo, tagId, body = Civ6Ai_Chat._ParseTag(text)
+  if tagFrom ~= nil then
+    if Civ6Ai_Chat._SeenId(tagId) then
+      return -- our own echo, or a line already recorded here
+    end
+    if not Civ6Ai_Chat._TagTrusted(fromPlayer, tagFrom) then
+      tagFrom, tagTo, body = nil, nil, text -- not this sender's to claim: keep the raw text
+    else
+      Civ6Ai_Chat._MarkSeenId(tagId)
+    end
   end
-  -- A "Leader: body" line was sent as this network account for another seat.
-  -- Record and show that seat. Only a real human line asks the models to reply.
-  local speaker, body = Civ6Ai_Chat._ParseWire(text)
-  local relay = speaker ~= nil and speaker ~= fromPlayer
-  if relay then
-    fromPlayer = speaker
-    text = body
+  if tagFrom == nil then
+    if Civ6Ai_Chat._ConsumeSelfSent(text) then
+      return
+    end
+    body = text
   end
-  if not relay and not Civ6Ai_Chat._IsHumanSender(fromPlayer) then
+  local sender = tagFrom or fromPlayer
+  local relay = sender ~= fromPlayer -- an AI seat's line the host sent for it
+  if not relay and not Civ6Ai_Chat._IsHumanSender(sender) then
     return
   end
   local turn = Game.GetCurrentGameTurn()
+  local target = nil
+  if tagFrom ~= nil then
+    target = tagTo
+  elseif Civ6Ai_Chat._IsPrivateTarget(toPlayer, eTargetType) then
+    target = tonumber(toPlayer)
+  end
   local recipients = {}
-  if Civ6Ai_Chat._IsPrivateTarget(toPlayer, eTargetType) then
-    local target = tonumber(toPlayer)
-    Civ6Ai_Chat._RecordPrivateChat(fromPlayer, target, text, turn)
-    if not relay and fromPlayer == Game.GetLocalPlayer() then
-    end
+  if target ~= nil then
+    Civ6Ai_Chat._RecordPrivateChat(sender, target, body, turn)
     if not relay then
       recipients = Civ6Ai_Chat._ManagedRecipients(target)
     end
     Civ6Ai_Util.Log(
-      "chat|human_private|from=" .. tostring(fromPlayer) .. "|to=" .. tostring(target) .. "|len=" .. tostring(string.len(text))
+      "chat|human_private|from=" .. tostring(sender) .. "|to=" .. tostring(target) .. "|len=" .. tostring(string.len(body))
     )
   else
-    Civ6Ai_Chat._RecordPublicChat(fromPlayer, text, turn)
-    if not relay and fromPlayer == Game.GetLocalPlayer() then
-    end
+    Civ6Ai_Chat._RecordPublicChat(sender, body, turn)
     if not relay then
       recipients = Civ6Ai_Chat._ManagedRecipients(nil)
     end
     Civ6Ai_Util.Log(
-      "chat|human_public|from=" .. tostring(fromPlayer) .. "|len=" .. tostring(string.len(text))
+      "chat|human_public|from=" .. tostring(sender) .. "|len=" .. tostring(string.len(body))
     )
   end
   Civ6Ai_Chat._TriggerAiReplies(recipients)
@@ -308,8 +319,121 @@ function Civ6Ai_Chat._ResolveTargetPlayerId(message)
   return nil
 end
 
+Civ6Ai_Chat.SEEN_MAX = 400
+
+function Civ6Ai_Chat._NextId()
+  Civ6Ai_Chat._chatSeq = (Civ6Ai_Chat._chatSeq or 0) + 1
+  local me = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or 0
+  if me == nil or me < 0 then
+    me = 99
+  end
+  return tostring(me) .. "-" .. tostring(os ~= nil and os.time ~= nil and os.time() or 0) .. "-"
+    .. tostring(Civ6Ai_Chat._chatSeq)
+end
+
+function Civ6Ai_Chat._MarkSeenId(id)
+  if id == nil or id == "" then
+    return
+  end
+  Civ6Ai_Chat._seen = Civ6Ai_Chat._seen or {}
+  Civ6Ai_Chat._seenOrder = Civ6Ai_Chat._seenOrder or {}
+  if Civ6Ai_Chat._seen[id] then
+    return
+  end
+  Civ6Ai_Chat._seen[id] = true
+  table.insert(Civ6Ai_Chat._seenOrder, id)
+  while #Civ6Ai_Chat._seenOrder > Civ6Ai_Chat.SEEN_MAX do
+    Civ6Ai_Chat._seen[table.remove(Civ6Ai_Chat._seenOrder, 1)] = nil
+  end
+end
+
+function Civ6Ai_Chat._SeenId(id)
+  return id ~= nil and Civ6Ai_Chat._seen ~= nil and Civ6Ai_Chat._seen[id] == true
+end
+
+-- named: a readable "Name: " follows the tag (marked "~"), for the vanilla chat window.
+function Civ6Ai_Chat._Tag(fromPlayer, toPlayer, id, named)
+  return "{" .. tostring(fromPlayer) .. ">" .. (toPlayer ~= nil and tostring(toPlayer) or "*")
+    .. ":" .. tostring(id) .. (named and "~" or "") .. "} "
+end
+
+-- "{2>1:0-1-5~} Tomyris: hi" -> 2, 1, "0-1-5", "hi". No tag -> nil.
+function Civ6Ai_Chat._ParseTag(text)
+  local f, t, id, named, rest = string.match(tostring(text or ""), "^{(%d+)>([%d%*]+):([%w%-]+)(~?)} ?(.*)$")
+  if f == nil then
+    return nil
+  end
+  if named == "~" then
+    local head, after = string.match(rest, "^([^:]*): (.*)$")
+    if head ~= nil then
+      rest = after
+    end
+  end
+  return tonumber(f), (t ~= "*" and tonumber(t) or nil), id, rest
+end
+
+-- A network sender may tag its own seat. Only the game host may speak for a
+-- seat no person plays (the AI seats it runs); nobody may speak for another human.
+function Civ6Ai_Chat._TagTrusted(networkSender, tagFrom)
+  if tagFrom == networkSender then
+    return true
+  end
+  if Civ6Ai_Config ~= nil and Civ6Ai_Config.IsHumanSeat ~= nil and Civ6Ai_Config.IsHumanSeat(tagFrom) then
+    return false
+  end
+  local host = Civ6Ai_Chat._HostSeat()
+  return host == nil or host == networkSender
+end
+
+-- The seat of the PC hosting a network game (that PC runs the AI seats).
+-- Network.GetGameHostPlayerID is what the game's own ChatPanel uses; without it,
+-- the lowest human seat (the usual host slot), else nil (single player).
+function Civ6Ai_Chat._HostSeat()
+  if Network ~= nil and Network.GetGameHostPlayerID ~= nil then
+    local ok, id = pcall(Network.GetGameHostPlayerID)
+    if ok and type(id) == "number" and id >= 0 then
+      return id
+    end
+  end
+  if Players ~= nil then
+    for seat = 0, 63 do
+      local player = Players[seat]
+      if player ~= nil and player.IsHuman ~= nil and player:IsHuman() then
+        if not Civ6Ai_Chat._loggedHostFallback then
+          Civ6Ai_Chat._loggedHostFallback = true
+          Civ6Ai_Util.Log("chat|host_seat_fallback|seat=" .. tostring(seat))
+        end
+        return seat
+      end
+    end
+  end
+  return nil
+end
+
+function Civ6Ai_Chat._IsNetworkGame()
+  return GameConfiguration ~= nil and GameConfiguration.IsNetworkMultiplayer ~= nil
+    and GameConfiguration.IsNetworkMultiplayer() == true
+end
+
+-- A person plays the seat (so a network line can reach it).
+function Civ6Ai_Chat._IsPersonSeat(playerID)
+  if Players == nil or playerID == nil or Players[playerID] == nil then
+    return false
+  end
+  local player = Players[playerID]
+  return player.IsHuman ~= nil and player:IsHuman() == true
+end
+
+-- Untagged lines (MpTest probes) still dedupe their echo by text. Bounded.
 function Civ6Ai_Chat._MarkSelfSent(text)
   Civ6Ai_Chat._selfSent = Civ6Ai_Chat._selfSent or {}
+  local count = 0
+  for _ in pairs(Civ6Ai_Chat._selfSent) do
+    count = count + 1
+  end
+  if count > 50 then
+    Civ6Ai_Chat._selfSent = {}
+  end
   Civ6Ai_Chat._selfSent[text] = (Civ6Ai_Chat._selfSent[text] or 0) + 1
 end
 
@@ -344,18 +468,14 @@ end
 
 -- Network.SendChat always attributes the line to the local network player
 -- (Firaxis ChatPanel.lua OnChat uses PlayerConfigurations[fromPlayer]:GetPlayerName()).
--- Seats other than that account prefix the body with their speaker name. The
--- custom panel and the model log parse it back off and store the real seat.
-function Civ6Ai_Chat._WireText(senderPlayerID, text)
+-- The seat tag carries the real sender and recipient. A seat other than that
+-- account also gets a readable "Name: " for the vanilla chat window.
+function Civ6Ai_Chat._WireText(senderPlayerID, text, toPlayer, id)
   text = tostring(text or "")
-  if Game ~= nil and Game.GetLocalPlayer ~= nil and senderPlayerID == Game.GetLocalPlayer() then
-    return text
-  end
-  local name = Civ6Ai_Chat._SpeakerName(senderPlayerID)
-  if name == nil then
-    return text
-  end
-  return name .. ": " .. text
+  local named = not (Game ~= nil and Game.GetLocalPlayer ~= nil and senderPlayerID == Game.GetLocalPlayer())
+  local name = named and Civ6Ai_Chat._SpeakerName(senderPlayerID) or nil
+  return Civ6Ai_Chat._Tag(senderPlayerID, toPlayer, id or Civ6Ai_Chat._NextId(), name ~= nil)
+    .. (name ~= nil and (name .. ": ") or "") .. text
 end
 
 function Civ6Ai_Chat._ParseWire(text)
@@ -389,9 +509,42 @@ function Civ6Ai_Chat._SendNetworkChat(text, targetType, targetID)
   end
   local chatType = targetType or ChatTargetTypes.CHATTARGET_ALL
   local chatId = targetID or -1
-  Civ6Ai_Chat._MarkSelfSent(text)
+  if Civ6Ai_Chat._ParseTag(text) == nil then
+    Civ6Ai_Chat._MarkSelfSent(text) -- tagged lines dedupe by id instead
+  end
   Network.SendChat(text, chatType, chatId)
   return true
+end
+
+-- Send one tagged line to where it can be read: everyone, or the one person it
+-- is for. A line for an AI seat goes nowhere on the network (no PC plays that
+-- seat); from a non-host PC it goes to the host, which runs the AI seats.
+function Civ6Ai_Chat._Deliver(fromPlayer, toPlayer, text)
+  local id = Civ6Ai_Chat._NextId()
+  Civ6Ai_Chat._MarkSeenId(id)
+  local wire = Civ6Ai_Chat._WireText(fromPlayer, text, toPlayer, id)
+  if ChatTargetTypes == nil then
+    return false
+  end
+  if toPlayer == nil then
+    return Civ6Ai_Chat._SendNetworkChat(wire, ChatTargetTypes.CHATTARGET_ALL, -1)
+  end
+  if Civ6Ai_Chat._IsPersonSeat(toPlayer) then
+    local me = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or nil
+    if toPlayer == me and not Civ6Ai_Chat._IsNetworkGame() then
+      return false -- single player: the panel is the only reader
+    end
+    return Civ6Ai_Chat._SendNetworkChat(wire, ChatTargetTypes.CHATTARGET_PLAYER, toPlayer)
+  end
+  if Civ6Ai_Chat._IsNetworkGame() and Civ6Ai_Config ~= nil and Civ6Ai_Config.IsHostPc ~= nil
+      and not Civ6Ai_Config.IsHostPc() then
+    local host = Civ6Ai_Chat._HostSeat()
+    local me = Game.GetLocalPlayer()
+    if host ~= nil and host ~= me then
+      return Civ6Ai_Chat._SendNetworkChat(wire, ChatTargetTypes.CHATTARGET_PLAYER, host)
+    end
+  end
+  return false
 end
 
 function Civ6Ai_Chat.SendMessage(senderPlayerID, message)
@@ -417,27 +570,29 @@ function Civ6Ai_Chat.SendMessage(senderPlayerID, message)
       end
     end
   end
-  local wire = Civ6Ai_Chat._WireText(senderPlayerID, text)
+  -- Also drop the real name if the model wrote it; the tag and panel add it.
+  local own = Civ6Ai_Chat._SpeakerName(senderPlayerID)
+  if own ~= nil and string.sub(text, 1, string.len(own) + 2) == own .. ": " then
+    text = string.sub(text, string.len(own) + 3)
+  end
   local target = tostring(message.target or "all")
+  local turn = Game.GetCurrentGameTurn()
   if target == "all" or target == "public" then
-    if Civ6Ai_Chat._SendNetworkChat(wire, ChatTargetTypes.CHATTARGET_ALL, -1) then
-      -- Record under the real sender (the network echo would say "local player").
-      Civ6Ai_Chat._RecordPublicChat(senderPlayerID, text, Game.GetCurrentGameTurn())
-      Civ6Ai_Util.Log("chat|sent|player=" .. tostring(senderPlayerID) .. "|target=all")
-      return true
-    end
-    Civ6Ai_Util.Log("chat|failed|player=" .. tostring(senderPlayerID) .. "|target=all")
-    return false
+    Civ6Ai_Chat._Deliver(senderPlayerID, nil, text)
+    -- Recorded here under the real sender; the echo is dropped by its id.
+    Civ6Ai_Chat._RecordPublicChat(senderPlayerID, text, turn)
+    Civ6Ai_Util.Log("chat|sent|player=" .. tostring(senderPlayerID) .. "|target=all")
+    return true
   end
   local targetPlayer = Civ6Ai_Chat._ResolveTargetPlayerId(message)
   if targetPlayer ~= nil then
-    if Civ6Ai_Chat._SendNetworkChat(wire, ChatTargetTypes.CHATTARGET_PLAYER, targetPlayer) then
-      Civ6Ai_Chat._RecordPrivateChat(senderPlayerID, targetPlayer, text, Game.GetCurrentGameTurn())
-      Civ6Ai_Util.Log(
-        "chat|sent|player=" .. tostring(senderPlayerID) .. "|target_player=" .. tostring(targetPlayer)
-      )
-      return true
-    end
+    local wired = Civ6Ai_Chat._Deliver(senderPlayerID, targetPlayer, text)
+    Civ6Ai_Chat._RecordPrivateChat(senderPlayerID, targetPlayer, text, turn)
+    Civ6Ai_Util.Log(
+      "chat|sent|player=" .. tostring(senderPlayerID) .. "|target_player=" .. tostring(targetPlayer)
+        .. "|network=" .. tostring(wired)
+    )
+    return true
   end
   Civ6Ai_Util.Log("chat|failed|player=" .. tostring(senderPlayerID) .. "|target=" .. target)
   return false
@@ -575,10 +730,38 @@ function Civ6Ai_Chat._PlainChat(text)
   return string.gsub(tostring(text or ""), "[%[%]]", "")
 end
 
+-- The seat's own colour for its name when the game exposes it, else the chat default.
+function Civ6Ai_Chat._NameColor(playerID)
+  if UI ~= nil and UI.GetPlayerColors ~= nil and playerID ~= nil then
+    local ok, back, front = pcall(UI.GetPlayerColors, playerID)
+    local function rgb(c)
+      if type(c) ~= "number" then
+        return nil
+      end
+      if c < 0 then
+        c = c + 4294967296
+      end
+      local r = c % 256
+      local g = math.floor(c / 256) % 256
+      local b = math.floor(c / 65536) % 256
+      return r, g, b
+    end
+    if ok then
+      for _, c in ipairs({ front, back }) do
+        local r, g, b = rgb(c)
+        if r ~= nil and (r + g + b) >= 180 then -- skip colours too dark for the panel
+          return "[COLOR:" .. r .. "," .. g .. "," .. b .. ",255]"
+        end
+      end
+    end
+  end
+  return "[color:ChatPlayerName]"
+end
+
 -- Same tags the World Tracker chat uses: speaker name, then the message.
 function Civ6Ai_Chat._PanelLine(turn, fromPlayer, toPlayer, text)
   local name = Civ6Ai_Chat._PlainChat(Civ6Ai_Chat._PanelName(fromPlayer))
-  local head = "[color:ChatPlayerName]" .. name
+  local head = Civ6Ai_Chat._NameColor(fromPlayer) .. name .. "[ENDCOLOR][color:ChatPlayerName]"
   if toPlayer ~= nil then
     head = head .. " [" .. Civ6Ai_Chat._PlainChat(Civ6Ai_Chat._PanelName(toPlayer)) .. "]"
   end
@@ -868,10 +1051,15 @@ function Civ6Ai_Chat.PanelOnPublic(fromPlayer, text, turn)
   Civ6Ai_Chat.PanelAdd(Civ6Ai_Chat._PanelLine(turn, fromPlayer, nil, text))
 end
 
+-- A private line shows only on the PC of the person who sent or got it. Outside
+-- network games (one PC) a line to or from a human seat shows too.
 function Civ6Ai_Chat._PanelShowsPrivate(fromPlayer, toPlayer)
   local localPlayer = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or -1
   if toPlayer == localPlayer or fromPlayer == localPlayer then
     return true
+  end
+  if Civ6Ai_Chat._IsNetworkGame() then
+    return false
   end
   return Civ6Ai_Config ~= nil and Civ6Ai_Config.IsHumanSeat ~= nil
     and (Civ6Ai_Config.IsHumanSeat(toPlayer) or Civ6Ai_Config.IsHumanSeat(fromPlayer))
@@ -931,25 +1119,23 @@ function Civ6Ai_Chat.OnPanelInput(text)
   end
   local recipients
   if target ~= nil then
-    Civ6Ai_Chat._RecordPrivateChat(me, target, body, turn)
+    Civ6Ai_Chat._Deliver(me, target, text)
+    Civ6Ai_Chat._RecordPrivateChat(me, target, text, turn)
     recipients = Civ6Ai_Chat._ManagedRecipients(target)
   else
+    if Civ6Ai_Chat._IsNetworkGame() then
+      Civ6Ai_Chat._Deliver(me, nil, text)
+    end
     Civ6Ai_Chat._RecordPublicChat(me, text, turn)
     recipients = Civ6Ai_Chat._ManagedRecipients(nil)
   end
-  -- In a network game the others also see it in the normal chat.
-  if GameConfiguration ~= nil and GameConfiguration.IsNetworkMultiplayer ~= nil
-      and GameConfiguration.IsNetworkMultiplayer() and ChatTargetTypes ~= nil then
-    if target ~= nil then
-      Civ6Ai_Chat._SendNetworkChat(body, ChatTargetTypes.CHATTARGET_PLAYER, target)
-    else
-      Civ6Ai_Chat._SendNetworkChat(text, ChatTargetTypes.CHATTARGET_ALL, -1)
-    end
-  end
+  -- Only the host runs the AI seats; it answers when the line reaches it.
   local others = {}
-  for _, seat in ipairs(recipients or {}) do
-    if seat ~= me or target == me then
-      others[#others + 1] = seat
+  if Civ6Ai_Config == nil or Civ6Ai_Config.IsHostPc == nil or Civ6Ai_Config.IsHostPc() then
+    for _, seat in ipairs(recipients or {}) do
+      if seat ~= me or target == me then
+        others[#others + 1] = seat
+      end
     end
   end
   Civ6Ai_Util.Log("chat|panel_input|to=" .. tostring(target or "all") .. "|len=" .. tostring(string.len(text))
@@ -997,10 +1183,17 @@ function Civ6Ai_Chat.InitPanel()
   -- Refill from this session's history (a reload keeps the chat log file, not
   -- the in-memory lists, so this is what the current Lua state has seen).
   if #Civ6Ai_Chat._panelLines == 0 then
+    local function seat(value)
+      return value ~= nil and tonumber(string.match(tostring(value), "(%d+)$")) or nil
+    end
     for _, e in ipairs(Civ6Ai_Chat._publicEvents) do
-      local sender = e.affected_ids ~= nil and e.affected_ids[1] or nil
-      local id = sender ~= nil and tonumber(string.match(tostring(sender), "(%d+)$")) or nil
-      table.insert(Civ6Ai_Chat._panelLines, Civ6Ai_Chat._PanelLine(e.turn, id, nil, e.text))
+      local ids = e.affected_ids or {}
+      local from, to = seat(ids[1]), seat(ids[2])
+      if e.kind ~= "CHAT_PRIVATE" then
+        table.insert(Civ6Ai_Chat._panelLines, Civ6Ai_Chat._PanelLine(e.turn, from, nil, e.text))
+      elseif Civ6Ai_Chat._PanelShowsPrivate(from, to) then
+        table.insert(Civ6Ai_Chat._panelLines, Civ6Ai_Chat._PanelLine(e.turn, from, to, e.text))
+      end
     end
   end
   if #Civ6Ai_Chat._panelLines == 0 then
