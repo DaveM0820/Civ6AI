@@ -5336,12 +5336,10 @@ function Civ6Ai_Snapshot.Build(playerID, options)
   else
     Civ6Ai_Util.Log("snapshot|economy_failed|" .. tostring(economy))
   end
-  -- Build priorities travel only on the synced order channel (every seat but
-  -- the local one), so only those seats report them; the sidecar offers the
-  -- priorities command only when this list is present.
-  if playerID ~= Game.GetLocalPlayer() then
-    civ6Block.priorities = Civ6Ai_Snapshot._Priorities(playerID)
-  end
+  -- Build priorities travel on the synced order channel for every seat; the
+  -- sidecar offers the priorities command when this list is present. The local
+  -- seat's empty queues are filled from them (FillEmptyQueuesWeighted).
+  civ6Block.priorities = Civ6Ai_Snapshot._Priorities(playerID)
   local okDiplo, civ6Diplomacy = pcall(Civ6Ai_Snapshot._BuildDiplomacy, playerID)
   if okDiplo and type(civ6Diplomacy) == "table" then
     civ6Block.diplomacy = civ6Diplomacy

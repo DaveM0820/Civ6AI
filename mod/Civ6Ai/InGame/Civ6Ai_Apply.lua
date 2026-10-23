@@ -196,7 +196,13 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   Civ6Ai_Apply._orderedUnits[playerID] = {}
   Civ6Ai_Apply._handled = Civ6Ai_Apply._handled or {}
   Civ6Ai_Apply._handled[playerID] = Civ6Ai_Apply._NewHandled()
-  local commands = decision.commands
+  -- Fallback hints (kind 36) are for the synced host pass only; drop them quietly here.
+  local commands = {}
+  for _, c in ipairs(decision.commands or {}) do
+    if c.kind ~= "fallback_hint" then
+      commands[#commands + 1] = c
+    end
+  end
   Civ6Ai_Apply._LogAttacks(playerID, forTurn or snapshotTurn or Game.GetCurrentGameTurn(), "ordered", orderedUnit, orderedCity)
   local maxPasses = 4
   local pending = {}
@@ -517,6 +523,12 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
   end
   if command.kind == "queue_production" then
     return Civ6Ai_Apply._QueueProduction(playerID, args)
+  end
+  if command.kind == "set_build_priority" then
+    -- Priorities are synced game properties; the order channel sets them for every seat.
+    -- The channel records the result (or the send/field failure) itself.
+    Civ6Ai_OrderChannel.SendDecision(playerID, { commands = { command } }, Game.GetCurrentGameTurn(), nil)
+    return false, Civ6Ai_Apply.DEFERRED, args
   end
   if command.kind == "unit_skip" then
     return Civ6Ai_Apply._UnitSkip(playerID, args)
@@ -1069,6 +1081,7 @@ Civ6Ai_Apply.SYNCED_KINDS = {
   -- The local seat's UI research request returns nothing (not true), so every
   -- P0 research order was logged research_rejected. Use the synced channel.
   set_research_tech = true, set_research_civic = true,
+  set_build_priority = true,
 }
 
 local function gcall(obj, name, ...)

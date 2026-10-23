@@ -505,7 +505,10 @@ function Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
 end
 
 function Civ6Ai_Autotest._ClearProductionBlockers(playerID)
-  -- The local seat is the human. Empty cities are not filled from this pulse.
+  -- Empty queues only (never a model or human choice), once per city per turn.
+  if Civ6Ai_Production ~= nil and Civ6Ai_Production.FillEmptyQueuesWeighted ~= nil then
+    pcall(Civ6Ai_Production.FillEmptyQueuesWeighted, playerID)
+  end
 end
 
 -- Auto-fill empty policy slots when FILL_CIVIC_SLOT would leave Change Policies up.

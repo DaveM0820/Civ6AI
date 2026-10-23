@@ -722,3 +722,143 @@ function Civ6Ai_Production.EndQueuePass()
   Civ6Ai_Production._queuePassDepth = depth
 end
 
+
+-- Local seat: no engine AI fills its queues, so after apply every empty queue
+-- gets one build picked at weighted random among what the city can start
+-- (CityManager.CanStartOperation BUILD), weighted by the seat's build
+-- priorities through ScoreBuild (the table set_build_priority sets for every
+-- seat). Seeded per player/city/turn, so a replay picks the same item.
+-- CityManager.RequestOperation is the synced operation a human click sends.
+-- Only empty queues are touched, and each city gets one attempt per turn.
+Civ6Ai_Production._fillTried = Civ6Ai_Production._fillTried or {}
+
+function Civ6Ai_Production._QueueEmpty(city)
+  local bq = call(city, "GetBuildQueue")
+  if bq == nil then
+    return false
+  end
+  local size = call(bq, "GetSize")
+  if size ~= nil then
+    return size == 0
+  end
+  local cur = call(bq, "CurrentlyBuilding")
+  return cur == nil or cur == "" or cur == "NONE"
+end
+
+-- The seat's saved priority levels, id -> level (same read as the snapshot).
+function Civ6Ai_Production.SavedLevels(playerID)
+  local saved = {}
+  if Civ6Ai_Snapshot ~= nil and Civ6Ai_Snapshot._Priorities ~= nil then
+    for _, row in ipairs(Civ6Ai_Snapshot._Priorities(playerID) or {}) do
+      saved[row.id] = row.level
+    end
+  end
+  return saved
+end
+
+-- Every item the city can start now, with its priority score.
+function Civ6Ai_Production.BuildOptions(city, situation)
+  local out = {}
+  local bq = call(city, "GetBuildQueue")
+  local function can(row, paramKey)
+    if bq == nil or row.Hash == nil or paramKey == nil or not call(bq, "CanProduce", row.Hash, true) then
+      return false
+    end
+    local params = {}
+    params[paramKey] = row.Hash
+    local ok, yes = pcall(CityManager.CanStartOperation, city, CityOperationTypes.BUILD, params, true)
+    return ok and yes == true
+  end
+  local function add(tableName, field, paramName)
+    local paramKey = CityOperationTypes[paramName]
+    eachRow(tableName, function(row)
+      local id = row[field]
+      if id ~= nil and can(row, paramKey) then
+        local tags, kind = Civ6Ai_Production._TagsFor(id)
+        out[#out + 1] = {
+          id = id, hash = row.Hash, param = paramKey,
+          score = Civ6Ai_Production.ScoreBuild(id, tags, situation, kind or ""),
+        }
+      end
+    end)
+  end
+  add("Units", "UnitType", "PARAM_UNIT_TYPE")
+  add("Buildings", "BuildingType", "PARAM_BUILDING_TYPE")
+  add("Projects", "ProjectType", "PARAM_PROJECT_TYPE")
+  table.sort(out, function(a, b) return a.id < b.id end)
+  return out
+end
+
+-- Deterministic weighted pick. Weight = score above the worst option, plus 1.
+function Civ6Ai_Production.WeightedPick(options, seed)
+  if #options == 0 then
+    return nil, 0
+  end
+  local low = options[1].score
+  for _, o in ipairs(options) do
+    if o.score < low then low = o.score end
+  end
+  local total = 0
+  for _, o in ipairs(options) do
+    o.weight = o.score - low + 1
+    total = total + o.weight
+  end
+  -- Park-Miller step: products stay below 2^53, exact in Lua 5.1 doubles.
+  local r = ((seed % 2147483646) + 1) * 16807 % 2147483647
+  local roll = r % total
+  for _, o in ipairs(options) do
+    if roll < o.weight then
+      return o, total
+    end
+    roll = roll - o.weight
+  end
+  return options[#options], total
+end
+
+function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
+  if Game == nil or Game.GetLocalPlayer == nil or Game.GetLocalPlayer() ~= playerID then
+    return 0
+  end
+  if CityManager == nil or CityManager.RequestOperation == nil or CityOperationTypes == nil then
+    return 0
+  end
+  local player = Players ~= nil and Players[playerID] or nil
+  local cities = player ~= nil and call(player, "GetCities") or nil
+  if cities == nil or cities.Members == nil then
+    return 0
+  end
+  local turn = Game.GetCurrentGameTurn()
+  local situation = nil
+  local filled = 0
+  for _, city in cities:Members() do
+    local cid = city:GetID()
+    local key = tostring(playerID) .. ":" .. tostring(cid)
+    if Civ6Ai_Production._fillTried[key] ~= turn and Civ6Ai_Production._QueueEmpty(city) then
+      Civ6Ai_Production._fillTried[key] = turn
+      situation = situation or Civ6Ai_Production.ComposeSituation({ saved = Civ6Ai_Production.SavedLevels(playerID) })
+      local options = Civ6Ai_Production.BuildOptions(city, situation)
+      local seed = (playerID * 1000003 + (cid % 65536) * 7919 + turn * 104729) % 2147483648
+      local pick, total = Civ6Ai_Production.WeightedPick(options, seed)
+      local outcome = "nothing_buildable"
+      if pick ~= nil then
+        local params = {}
+        params[pick.param] = pick.hash
+        local ok = pcall(CityManager.RequestOperation, city, CityOperationTypes.BUILD, params)
+        outcome = ok and "requested" or "request_error"
+        if ok then
+          filled = filled + 1
+        end
+      end
+      local top = {}
+      for _, o in ipairs(options) do top[#top + 1] = o end
+      table.sort(top, function(a, b) return a.weight > b.weight or (a.weight == b.weight and a.id < b.id) end)
+      local parts = {}
+      for i = 1, math.min(5, #top) do parts[#parts + 1] = top[i].id .. "=" .. tostring(top[i].weight) end
+      Civ6Ai_Util.Log("production|fill_empty|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
+        .. "|city=" .. tostring(cid) .. "|build=" .. tostring(pick and pick.id or "")
+        .. "|weight=" .. tostring(pick and pick.weight or 0) .. "/" .. tostring(total)
+        .. "|options=" .. tostring(#options) .. "|top=" .. table.concat(parts, ",") .. "|" .. outcome)
+    end
+  end
+  return filled
+end

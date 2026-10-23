@@ -98,6 +98,10 @@ end
 
 function Civ6Ai_InGame._PulseTurn(playerID)
   Civ6Ai_Bridge.RunTurnPulse(playerID)
+  -- After apply: the local seat's empty queues get a priority-weighted build.
+  if Civ6Ai_Production ~= nil and Civ6Ai_Production.FillEmptyQueuesWeighted ~= nil then
+    pcall(Civ6Ai_Production.FillEmptyQueuesWeighted, playerID)
+  end
 end
 
 function Civ6Ai_InGame.PulseAfterTurnStart(playerID, turn)

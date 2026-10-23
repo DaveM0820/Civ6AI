@@ -186,9 +186,16 @@ def priority_hints(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> 
     return out
 
 
+def is_local_seat(snapshot: dict[str, Any]) -> bool:
+    """The local client seat applies through the UI path, which has no fallback pass."""
+    from sidecar.civ6_governance import governance
+
+    return _dct(governance(snapshot).get("routes")).get("mode") == "local_player"
+
+
 def plan(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Every fallback hint for this batch (empty when the ledger is switched off)."""
-    if not enabled():
+    if not enabled() or is_local_seat(snapshot):
         return []
     return unit_hints(snapshot) + priority_hints(snapshot, commands)
 

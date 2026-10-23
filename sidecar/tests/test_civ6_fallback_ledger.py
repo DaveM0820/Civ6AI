@@ -47,6 +47,16 @@ class FallbackLedgerTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CIV6AI_FALLBACK_LEDGER": "0"}):
             self.assertEqual([], fallbacks.plan(_snap(), []))
 
+    def test_local_seat_gets_no_hints(self):
+        # The local seat applies in the UI context, which has no fallback pass.
+        snap = _snap()
+        snap["civ6"] = {"governance": {"routes": {"mode": "local_player"}}}
+        self.assertTrue(fallbacks.is_local_seat(snap))
+        self.assertEqual([], fallbacks.plan(snap, []))
+        snap["civ6"]["governance"]["routes"]["mode"] = "synced_order"
+        self.assertFalse(fallbacks.is_local_seat(snap))
+        self.assertTrue(fallbacks.plan(snap, []))
+
     def test_ledger_model_ok_wins_and_failed_model_yields_to_fallback(self):
         rows = [
             {"kind": "move_unit", "ok": True, "source": "model", "fixed_arguments": {"unit_id": "1"}},
