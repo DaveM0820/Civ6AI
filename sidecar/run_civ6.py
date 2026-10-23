@@ -274,9 +274,6 @@ def _build_approved_record(
     private_copy["legal_commands"] = {item["command_id"]: item for item in snapshot["legal_commands"]}
     commands = pipeline.bind_approved_commands(private_copy, validated)
     commands, repeat_notes = civ6_apply_results.filter_repeat_failures(snapshot, commands)
-    from sidecar import civ6_legality as legality
-
-    commands.extend(legality.apply_host_defaults(snapshot, commands))
     commands, buy_notes = civ6_apply_results.drop_unaffordable_purchases(snapshot, commands)
     chats = validated.get("chat_messages") if isinstance(validated.get("chat_messages"), list) else []
     chats, chat_notes = civ6_apply_results.filter_repeat_public_chat(snapshot, chats)
@@ -291,10 +288,11 @@ def _build_approved_record(
     snapshot["_new_promises"] = new_promises
     validated = copy.deepcopy(validated)
     validated["chat_messages"] = chats
-    from sidecar import civ6_command_wire
-    from sidecar.civ6_priorities import empty_queue_nudge
+    from sidecar import civ6_command_wire, civ6_fallbacks
 
-    commands.extend(empty_queue_nudge(snapshot, commands))
+    # After every filter: hints are targets only. Lua's single fallback pass
+    # uses one only for an entity no successful model order handled.
+    commands.extend(civ6_fallbacks.plan(snapshot, commands))
     commands = [civ6_command_wire.pack_apply_command(snapshot, item) for item in commands]
     unresolved = civ6_command_wire.take_unresolved()
     dropped = list(repeat_notes) + list(chat_notes) + list(buy_notes) + list(contra_notes)

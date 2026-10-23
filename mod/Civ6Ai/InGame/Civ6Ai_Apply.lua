@@ -205,7 +205,6 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   end
   local executedUnit, executedCity, failedAttacks = 0, 0, 0
   local cityStrikeFailed = false
-  local autoAttackOk = {}
   local function noteLocal(command, ok)
     local kind = command.kind
     local attack = kind == "attack_target" or kind == "city_attack" or kind == "range_attack" or kind == "melee_attack"
@@ -253,9 +252,6 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
           local numeric = Civ6Ai_Apply._ParseUnitNumericId(unitId)
           if numeric ~= nil then
             Civ6Ai_Apply._orderedUnits[playerID][numeric] = true
-            if command.kind == "attack_target" then
-              autoAttackOk[numeric] = true
-            end
           end
         end
         local class, hid = Civ6Ai_Apply._CommandEntity(command, fixedArgs)
@@ -308,8 +304,6 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
     local handled = Civ6Ai_Apply._handled[playerID]
     if shared ~= nil and shared.RunHostFallbacks ~= nil then
       pcall(shared.RunHostFallbacks, playerID, playerID, handled, 2)
-    elseif shared ~= nil and shared.AutoRanged ~= nil then
-      pcall(shared.AutoRanged, playerID, playerID, handled, autoAttackOk, {}, 2, {}, {})
     end
   end
 end

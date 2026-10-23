@@ -13,7 +13,6 @@ import re
 from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
-from sidecar.civ6_common import hex_dist as _hex_dist
 from sidecar.civ6_common import plot_xy as _plot_xy
 
 ROW_PREFIX_RE = re.compile(r"^\s*\d+\s*[.):]\s*")
@@ -691,13 +690,8 @@ def _synthesize_settle(snapshot: dict[str, Any], unit_id: str, x: int, y: int) -
         _reject(snapshot, f"FoundCity({x},{y}) for {unit_id}", "found_city_not_offered")
         return None
     if not site_obeys_founding_rules(snapshot, x, y):
-        sites = labeled_settle_sites(snapshot, radius=12)
-        if not sites:
-            LAST_UNRESOLVED.append(f"dropped: Settle({x},{y}) for {unit_id}: too close to a city or not land; no legal site listed")
-            return None
-        best = min(sites, key=lambda r: _hex_dist(x, y, r["x"], r["y"]))
-        LAST_UNRESOLVED.append(f"dropped: Settle({x},{y}) for {unit_id} is not a legal site; going to {best['label']} ({best['x']},{best['y']}) instead")
-        x, y = best["x"], best["y"]
+        _reject(snapshot, f"Settle({x},{y}) for {unit_id}", "not_a_legal_site")
+        return None
     return _synthesize_far_move(snapshot, unit_id, x, y, intent=INTENT_FOUND)
 
 

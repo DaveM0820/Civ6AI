@@ -278,6 +278,44 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertEqual(self.rt.eval("Players[2].units[2].moves"), 0)
         self.assertEqual(self.rt.eval("Players[2].units[4].moves"), 2)
 
+    def test_fallback_never_touches_a_model_ordered_unit(self):
+        # Unit 7's model move succeeds; its defend hint must not run. Unit 8 has
+        # no model order, so its defend hint (fortify) runs as a fallback.
+        self.order(0, K=1, P=2, U=7, X=10, Y=11, S=70, B=7, J=1, N=3, T=6)
+        self.order(0, K=36, P=2, U=7, A=3, X=-1, Y=-1, S=71, B=7, J=2, N=3, T=6)
+        self.order(0, K=36, P=2, U=8, A=3, X=-1, Y=-1, S=72, B=7, J=3, N=3, T=6)
+        self.turn_start(2, turn=6)
+        res = self.results()
+        fallback_units = {r["unit"] for r in res if r.get("source") == "fallback"}
+        self.assertNotIn(7, fallback_units, res)
+        self.assertIn(8, fallback_units, res)
+        self.assertEqual((self.rt.eval("Players[2].units[1].x"), self.rt.eval("Players[2].units[1].y")), (10, 11))
+        logs = [str(x) for x in _vals(self.rt.eval("logs"))]
+        self.assertFalse(any("source=fallback" in line and "entity=unit:7|" in line for line in logs), logs)
+
+    def test_failed_model_order_leaves_the_unit_to_the_fallback(self):
+        # A model attack that fails (no enemy there) does not count as handled.
+        self.order(0, K=7, P=2, U=7, X=15, Y=15, S=80, B=8, J=1, N=2, T=6)
+        self.order(0, K=36, P=2, U=7, A=3, X=-1, Y=-1, S=81, B=8, J=2, N=2, T=6)
+        self.turn_start(2, turn=6)
+        res = self.results()
+        self.assertTrue(any(r["seq"] == 80 and not r["ok"] for r in res), res)
+        self.assertTrue(any(r.get("source") == "fallback" and r["unit"] == 7 and r["ok"] for r in res), res)
+
+    def test_settler_fallback_founds_on_its_hinted_site(self):
+        self.rt.execute("GameInfo.Units[3] = {FoundCity=true, UnitType='UNIT_SETTLER'}; Players[2].units[2].typ = 3")
+        self.order(0, K=36, P=2, U=8, A=4, X=11, Y=10, S=95, B=11, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        self.assertEqual({"x": 11, "y": 10}, dict(self.rt.eval("Players[2].founded").items()))
+
+    def test_hints_get_a_result_and_are_not_orders(self):
+        self.order(0, K=36, P=2, U=8, A=2, X=-1, Y=-1, S=90, B=10, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        hint = [r for r in self.results() if r["seq"] == 90]
+        self.assertEqual(1, len(hint))
+        self.assertEqual("hint", hint[0]["source"])
+        self.assertEqual(self.rt.eval("Players[2].units[2].x"), 11)  # improve hint without target: no move
+
     def test_late_batch_runs_while_seat_turn_is_active(self):
         self.turn_start(2)
         self.order(0, K=2, P=2, I=4, S=7, B=1, J=1, N=1)

@@ -361,6 +361,7 @@ REASON_TEXT = {
     "off_map": "that tile is off the map",
     "improve_tile_not_offered": "no Improve is offered on that tile; use a listed Improve tile",
     "found_city_not_offered": "FoundCity is not offered for this settler here",
+    "not_a_legal_site": "not a legal city site (too close to a city, or not land); use a listed settle site",
 }
 
 
@@ -719,15 +720,6 @@ def _improve_tile(snapshot: dict[str, Any], unit: dict[str, Any]) -> tuple[int, 
     return rows[0][1], rows[0][2]
 
 
-def _cmd(kind: str, command_id: str, arguments: dict[str, Any], source: str = "fallback") -> dict[str, Any]:
-    return {
-        "command_id": command_id,
-        "kind": kind,
-        "arguments": arguments,
-        "source": source,
-    }
-
-
 def handled_unit_ids(commands: list[dict[str, Any]]) -> set[str]:
     out: set[str] = set()
     for command in commands:
@@ -736,70 +728,6 @@ def handled_unit_ids(commands: list[dict[str, Any]]) -> set[str]:
         if uid:
             out.add(uid)
     return out
-
-
-def idle_defaults(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Role defaults for units the model did not order. One table, ROLE_DEFAULTS."""
-    taken = handled_unit_ids(commands)
-    extras: list[dict[str, Any]] = []
-    threatened = _threatened_cities(snapshot)
-    for unit in _lst(snapshot.get("your_units")):
-        if not isinstance(unit, dict):
-            continue
-        uid = str(unit.get("unit_id") or "")
-        if not uid or uid in taken:
-            continue
-        role = unit_role(unit)
-        action = ROLE_DEFAULTS.get(role or "")
-        if not action:
-            continue
-        if action == "explore":
-            dest = frontier_target(snapshot, unit)
-            if dest is not None:
-                extras.append(_cmd("move_unit", f"CMD_idle_{uid}_frontier", {
-                    "unit_id": uid, "target_x": dest[0], "target_y": dest[1],
-                }))
-            else:
-                extras.append(_cmd("explore", f"CMD_explore_{uid}", {"unit_id": uid}))
-        elif action == "improve":
-            dest = _improve_tile(snapshot, unit)
-            if dest is not None:
-                extras.append(_cmd("move_unit", f"CMD_idle_{uid}_improve", {
-                    "unit_id": uid, "target_x": dest[0], "target_y": dest[1],
-                }))
-        elif action == "defend":
-            here = plot_xy(unit)
-            if threatened and here is not None:
-                dest = min(threatened, key=lambda xy: max(abs(here[0] - xy[0]), abs(here[1] - xy[1])))
-                if here != dest and move_problem(snapshot, uid, dest[0], dest[1]) is None:
-                    extras.append(_cmd("move_unit", f"CMD_idle_{uid}_defend", {
-                        "unit_id": uid, "target_x": dest[0], "target_y": dest[1],
-                    }))
-                    continue
-            extras.append(_cmd("unit_posture_fortify", f"CMD_fortify_{uid}", {"unit_id": uid}))
-        taken.add(uid)
-    return extras
-
-
-def unused_city_strikes(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    if not city_strike_available(snapshot):
-        return []
-    used = {str(_dct(c.get("arguments") or c.get("fixed_arguments")).get("city_id") or "")
-            for c in commands if isinstance(c, dict) and c.get("kind") == "city_attack"}
-    extras: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for command in _lst(snapshot.get("legal_commands")):
-        if not isinstance(command, dict) or command.get("kind") != "city_attack":
-            continue
-        fixed = _dct(command.get("fixed_arguments"))
-        cid = str(fixed.get("city_id") or "")
-        if not cid or cid in used or cid in seen:
-            continue
-        seen.add(cid)
-        extras.append(_cmd("city_attack", str(command.get("command_id") or f"CMD_idle_strike_{cid}"), {
-            "city_id": cid, "target_x": fixed.get("target_x"), "target_y": fixed.get("target_y"),
-        }))
-    return extras
 
 
 def idle_units_by_type(snapshot: dict[str, Any], commands: list[dict[str, Any]] | None = None) -> dict[str, int]:
@@ -826,9 +754,3 @@ def idle_prompt_line(snapshot: dict[str, Any]) -> str | None:
         return None
     bits = [f"{n} {typ}" for typ, n in sorted(counts.items())]
     return "IDLE: " + ", ".join(bits) + " — host default applied"
-
-
-def apply_host_defaults(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    extras = idle_defaults(snapshot, commands)
-    extras.extend(unused_city_strikes(snapshot, commands + extras))
-    return extras

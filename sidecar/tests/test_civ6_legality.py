@@ -76,17 +76,12 @@ class LegalityLayerTests(unittest.TestCase):
             "fixed_arguments": {"city_id": "CITY_1", "target_x": 5, "target_y": 5},
         }]
         self.assertTrue(legal.city_strike_available(snap))
-        auto = legal.unused_city_strikes(snap, [])
         model = {"kind": "city_attack", "arguments": {"city_id": "CITY_1", "target_x": 5, "target_y": 5}}
         self.assertIsNone(legal.order_problem(snap, model))
-        self.assertEqual(len(auto), 1)
-        self.assertEqual(auto[0]["kind"], "city_attack")
-        self.assertEqual(legal.unused_city_strikes(snap, [model]), [])
         snap["civ6"]["combat"]["city_strike_available"] = False
         snap["legal_commands"] = []
         self.assertFalse(legal.city_strike_available(snap))
         self.assertEqual(legal.order_problem(snap, model), "city_strike_unavailable")
-        self.assertEqual(legal.unused_city_strikes(snap, []), [])
 
     def test_idle_default_table(self):
         snap = _snap()
@@ -108,11 +103,13 @@ class LegalityLayerTests(unittest.TestCase):
         self.assertEqual(legal.ROLE_DEFAULTS[legal.unit_role(snap["your_units"][0])], "defend")
         self.assertEqual(legal.ROLE_DEFAULTS[legal.unit_role(snap["your_units"][1])], "improve")
         self.assertEqual(legal.ROLE_DEFAULTS[legal.unit_role(snap["your_units"][2])], "explore")
-        extras = legal.idle_defaults(snap, [])
-        kinds = {c["arguments"]["unit_id"]: c["kind"] for c in extras}
-        self.assertEqual(kinds["UNIT_W"], "unit_posture_fortify")
-        self.assertEqual(kinds["UNIT_B"], "move_unit")
-        self.assertIn(kinds["UNIT_S"], {"move_unit", "explore"})
+        from sidecar import civ6_fallbacks
+
+        hints = {c["arguments"]["unit_id"]: c["arguments"] for c in civ6_fallbacks.unit_hints(snap)}
+        self.assertEqual(hints["UNIT_W"]["role"], "defend")
+        self.assertNotIn("target_x", hints["UNIT_W"])  # no threatened city: fortify in Lua
+        self.assertEqual(hints["UNIT_B"]["role"], "improve")
+        self.assertEqual(hints["UNIT_S"]["role"], "explore")
         line = legal.idle_prompt_line(snap)
         self.assertIn("host default applied", line)
         self.assertIn("UNIT_WARRIOR", line)

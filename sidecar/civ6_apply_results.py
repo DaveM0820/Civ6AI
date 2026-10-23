@@ -316,7 +316,8 @@ def load_apply_results(session_dir: Path | None) -> list[dict[str, Any]]:
             row = json.loads(line)
         except ValueError:
             continue
-        if isinstance(row, dict) and row.get("event", "apply_result") == "apply_result":
+        if (isinstance(row, dict) and row.get("event", "apply_result") == "apply_result"
+                and row.get("kind") != "fallback_hint"):
             rows.append(row)
     return rows
 
@@ -1397,10 +1398,13 @@ def order_source_fields(rows: list[dict[str, Any]] | None) -> dict[str, Any]:
         if row.get("command_id"):
             entry["command_id"] = row.get("command_id")
         sources.append(entry)
+    from sidecar.civ6_fallbacks import ledger
+
     return {
         "order_source_model": model,
         "order_source_fallback": fallback,
         "order_sources": sources,
+        "order_entities": ledger(rows),
     }
 
 

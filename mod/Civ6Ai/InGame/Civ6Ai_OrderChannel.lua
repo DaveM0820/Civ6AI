@@ -22,7 +22,7 @@ Civ6Ai_OrderChannel.K = {
   TEST_MELEE_MOVE = 52, TEST_SCRIPTED_COMBAT = 53, TEST_SCRIPTED_PRODUCTION = 54, TEST_IMPROVEMENT = 55,
   TEST_EXPERIENCE = 56, TEST_FAR_MOVE = 57, TEST_COMBAT_PROBE = 58, TEST_DAMAGE_CHECK = 59,
   TEST_RESOLVED_ATTACK = 60, TEST_API_SURVEY = 61,
-  TEST_PRODUCTION_STEER = 62, TEST_FORCE_BUILD = 63, TEST_PRIORITY = 64,
+  TEST_PRODUCTION_STEER = 62, TEST_FORCE_BUILD = 63, TEST_PRIORITY = 64, HINT = 36,
 }
 Civ6Ai_OrderChannel.KIND_BY_COMMAND = {
   move_unit = 1, set_research_tech = 2, set_research_civic = 3, found_city = 4, unit_skip = 5,
@@ -33,7 +33,7 @@ Civ6Ai_OrderChannel.KIND_BY_COMMAND = {
   worker_improve = 21, pillage_improvement = 22,
   trade_route = 24, explore = 25, activate_great_person = 26,
   upgrade_unit = 27, promote_unit = 28, join_formation = 29, city_attack = 31, build_fort = 32,
-  spread_religion = 35,
+  spread_religion = 35, fallback_hint = 36,
 }
 Civ6Ai_OrderChannel.REPORT_DELAY_SECONDS = 5
 Civ6Ai_OrderChannel._counter = Civ6Ai_OrderChannel._counter or 0
@@ -153,6 +153,21 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
     if f.U == nil then
       return nil, "missing_unit_numeric_id"
     end
+  end
+  if kind == 36 then
+    -- A fallback target, not an order: A = role, X/Y = target, I/X for priority.
+    f.A = tonumber(args.role_code) or 0
+    f.U = f.U or -1
+    if f.A == 9 then
+      f.I, f.X = tonumber(args.priority_id), tonumber(args.priority_level)
+      if f.I == nil or f.X == nil then
+        return nil, "missing_priority"
+      end
+    else
+      local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
+      f.X, f.Y = x or -1, y or -1
+    end
+    return f, ""
   end
   if kind == 1 or kind == 7 then
     local x, y = Civ6Ai_Apply._ResolveTargetCoords(args)
