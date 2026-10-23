@@ -622,70 +622,6 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertFalse(any("AUTO_U_9_14_10" in line for line in logs), logs)
         self.assertFalse(any("source=fallback" in line and "entity=unit:9" in line for line in logs), logs)
 
-    def test_model_explore_and_city_strike_are_not_touched_by_fallback(self):
-        # A successful model explore owns that unit. A successful model strike
-        # owns that city-strike opportunity. The host fallback must not
-        # re-issue either.
-        self._install_explore_map(reveal_on_move=True)
-        self.rt.execute(r"""
-          GameInfo.Units[3] = {UnitType="UNIT_SCOUT", Combat=10, PromotionClass="PROMOTION_CLASS_RECON"}
-          table.insert(Players[2].units, MkUnit(2, 50, 2, 1, 3))
-          exploreCalls = {}
-          local origExplore = Civ6Ai_Orders.Gov.Explore
-          Civ6Ai_Orders.Gov.Explore = function(owner, uid)
-            exploreCalls[#exploreCalls + 1] = uid
-            return origExplore(owner, uid)
-          end
-        """)
-        self.order(0, K=25, P=2, U=50, S=200, B=1, J=1, N=1, T=6)
-        self.turn_start(2, turn=6)
-        explore = next(r for r in self.results() if r.get("seq") == 200)
-        self.assertTrue(explore["ok"], explore)
-        self.assertEqual(explore.get("source"), "model")
-        self.assertEqual(list(_vals(self.rt.eval("exploreCalls"))), [50])
-        self.assertEqual(self.rt.eval("GetProp('CIV6AI_H_2_unit_50')"), 6)
-        logs = [str(s) for s in _vals(self.rt.eval("logs"))]
-        self.assertFalse(any("AUTO_E_50" in line for line in logs), logs)
-        self.assertFalse(any("source=fallback" in line and "entity=unit:50" in line for line in logs), logs)
-
-        self.rt.execute(r"""
-          logs = {}
-          CityCommandTypes = { RANGE_ATTACK = 9, PARAM_X = "x", PARAM_Y = "y" }
-          cityStrikeCalls = {}
-          CityManager = {
-            CanStartCommand = function() return true end,
-            RequestCommand = function(city, cmd, params)
-              cityStrikeCalls[#cityStrikeCalls + 1] = {city=city:GetID(), x=params.x, y=params.y}
-            end,
-          }
-          local city = {id=8, owner=2, x=30, y=30}
-          function city:GetID() return self.id end
-          function city:GetOwner() return self.owner end
-          function city:GetX() return self.x end
-          function city:GetY() return self.y end
-          Players[2].GetCities = function()
-            return {Members=function()
-              local i=0
-              return function() i=i+1; if i==1 then return i, city end end
-            end}
-          end
-          Players[1].war = {[2]=true}
-          Players[2].war = {[1]=true}
-          table.insert(Players[1].units, MkUnit(1, 61, 31, 30, 0))
-          table.insert(Players[1].units, MkUnit(1, 62, 30, 31, 0))
-        """)
-        self.order(0, K=31, P=2, I=8, X=31, Y=30, S=201, B=2, J=1, N=1, T=7)
-        self.turn_start(2, turn=7)
-        strike = next(r for r in self.results() if r.get("seq") == 201)
-        self.assertTrue(strike["ok"], strike)
-        self.assertEqual(strike.get("source"), "model")
-        self.assertEqual(self.rt.eval("GetProp('CIV6AI_H_2_strike_8')"), 7)
-        self.assertEqual(self.rt.eval("#cityStrikeCalls"), 1)
-        self.assertEqual(self.rt.eval("cityStrikeCalls[1].x"), 31)
-        logs = [str(s) for s in _vals(self.rt.eval("logs"))]
-        self.assertFalse(any("AUTO_C_8" in line for line in logs), logs)
-        self.assertFalse(any("source=fallback" in line and "entity=strike:8" in line for line in logs), logs)
-
     def test_ranged_auto_skips_melee_humans_and_lethal_forecasts(self):
         self.rt.execute("Players[2].war = {[1]=true}; table.insert(Players[1].units, MkUnit(1,3,10,11,0))")
         self.order(0, K=1, P=2, U=7, X=9, Y=10, S=50, B=1, J=1, N=1, T=6, AR=0)
@@ -1739,6 +1675,70 @@ class WpAApplyCoreTests(unittest.TestCase):
                 "true" if reveal_on_move else "false",
             )
         )
+
+    def test_model_explore_and_city_strike_are_not_touched_by_fallback(self):
+        # A successful model explore owns that unit. A successful model strike
+        # owns that city-strike opportunity. The host fallback must not
+        # re-issue either.
+        self._install_explore_map(reveal_on_move=True)
+        self.rt.execute(r"""
+          GameInfo.Units[3] = {UnitType="UNIT_SCOUT", Combat=10, PromotionClass="PROMOTION_CLASS_RECON"}
+          table.insert(Players[2].units, MkUnit(2, 50, 2, 1, 3))
+          exploreCalls = {}
+          local origExplore = Civ6Ai_Orders.Gov.Explore
+          Civ6Ai_Orders.Gov.Explore = function(owner, uid)
+            exploreCalls[#exploreCalls + 1] = uid
+            return origExplore(owner, uid)
+          end
+        """)
+        self.order(0, K=25, P=2, U=50, S=200, B=1, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        explore = next(r for r in self.results() if r.get("seq") == 200)
+        self.assertTrue(explore["ok"], explore)
+        self.assertEqual(explore.get("source"), "model")
+        self.assertEqual(list(_vals(self.rt.eval("exploreCalls"))), [50])
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_H_2_unit_50')"), 6)
+        logs = [str(s) for s in _vals(self.rt.eval("logs"))]
+        self.assertFalse(any("AUTO_E_50" in line for line in logs), logs)
+        self.assertFalse(any("source=fallback" in line and "entity=unit:50" in line for line in logs), logs)
+
+        self.rt.execute(r"""
+          logs = {}
+          CityCommandTypes = { RANGE_ATTACK = 9, PARAM_X = "x", PARAM_Y = "y" }
+          cityStrikeCalls = {}
+          CityManager = {
+            CanStartCommand = function() return true end,
+            RequestCommand = function(city, cmd, params)
+              cityStrikeCalls[#cityStrikeCalls + 1] = {city=city:GetID(), x=params.x, y=params.y}
+            end,
+          }
+          local city = {id=8, owner=2, x=30, y=30}
+          function city:GetID() return self.id end
+          function city:GetOwner() return self.owner end
+          function city:GetX() return self.x end
+          function city:GetY() return self.y end
+          Players[2].GetCities = function()
+            return {Members=function()
+              local i=0
+              return function() i=i+1; if i==1 then return i, city end end
+            end}
+          end
+          Players[1].war = {[2]=true}
+          Players[2].war = {[1]=true}
+          table.insert(Players[1].units, MkUnit(1, 61, 31, 30, 0))
+          table.insert(Players[1].units, MkUnit(1, 62, 30, 31, 0))
+        """)
+        self.order(0, K=31, P=2, I=8, X=31, Y=30, S=201, B=2, J=1, N=1, T=7)
+        self.turn_start(2, turn=7)
+        strike = next(r for r in self.results() if r.get("seq") == 201)
+        self.assertTrue(strike["ok"], strike)
+        self.assertEqual(strike.get("source"), "model")
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_H_2_strike_8')"), 7)
+        self.assertEqual(self.rt.eval("#cityStrikeCalls"), 1)
+        self.assertEqual(self.rt.eval("cityStrikeCalls[1].x"), 31)
+        logs = [str(s) for s in _vals(self.rt.eval("logs"))]
+        self.assertFalse(any("AUTO_C_8" in line for line in logs), logs)
+        self.assertFalse(any("source=fallback" in line and "entity=strike:8" in line for line in logs), logs)
 
     def test_explore_uses_plot_index_and_stays_on_its_landmass(self):
         # IsRevealed(x, y) used to pass x as the plot index, so explore returned
