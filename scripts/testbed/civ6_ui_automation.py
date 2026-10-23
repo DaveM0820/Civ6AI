@@ -368,11 +368,17 @@ def _post_client_click(hwnd: int, client_x: int, client_y: int, taps: int = 1) -
     """Click via posted mouse messages so Cursor stealing focus cannot eat the input."""
     user32 = ctypes.windll.user32
     lparam = (int(client_y) << 16) | (int(client_x) & 0xFFFF)
+    nudged = (int(client_y) << 16) | ((int(client_x) + 4) & 0xFFFF)
     for _ in range(max(1, taps)):
         user32.PostMessageW(hwnd, 0x0201, 0x0001, lparam)  # WM_LBUTTONDOWN
         time.sleep(0.04)
         user32.PostMessageW(hwnd, 0x0202, 0, lparam)  # WM_LBUTTONUP
         time.sleep(0.08)
+        # Civ applies a click only when the next mouse event arrives.
+        user32.PostMessageW(hwnd, 0x0200, 0, nudged)  # WM_MOUSEMOVE
+        time.sleep(0.02)
+        user32.PostMessageW(hwnd, 0x0200, 0, lparam)
+        time.sleep(0.02)
 
 
 def pin_civ_topmost(hwnd: int, on: bool) -> None:
@@ -413,6 +419,12 @@ def _send_mouse_click_screen(screen_x: int, screen_y: int, taps: int = 1) -> Non
         time.sleep(0.04)
         user32.mouse_event(up, dx, dy, 0, 0)
         time.sleep(0.08)
+        # Civ applies a click only when the next mouse event arrives.
+        nudge = int((int(screen_x) + 4 - vx) * 65535 / vw)
+        user32.mouse_event(move, nudge, dy, 0, 0)
+        time.sleep(0.02)
+        user32.mouse_event(move, dx, dy, 0, 0)
+        time.sleep(0.02)
 
 
 def _client_to_screen(hwnd: int, client_x: int, client_y: int) -> tuple[int, int]:
@@ -2352,8 +2364,43 @@ _SAVE_LIST_CHROME = frozenset({
 })
 
 
+_SAVE_DATE_MDY = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b")
+_SAVE_DATE_ISO = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+
+
+def _save_row_date(text: str) -> tuple[int, int, int] | None:
+    """Year, month, day from one OCR cell, or None when the cell has no full date."""
+    iso = _SAVE_DATE_ISO.search(text)
+    if iso:
+        year, month, day = (int(iso.group(i)) for i in range(1, 4))
+    else:
+        mdy = _SAVE_DATE_MDY.search(text)
+        if mdy is None:
+            return None
+        month, day, year = (int(mdy.group(i)) for i in range(1, 4))
+        if year < 100:
+            year += 2000
+    if not (1 <= month <= 12 and 1 <= day <= 31):
+        return None
+    return year, month, day
+
+
+def _date_only(text: str) -> bool:
+    found = _save_row_date(text)
+    if found is None:
+        return False
+    stripped = _SAVE_DATE_ISO.sub("", text)
+    stripped = _SAVE_DATE_MDY.sub("", stripped)
+    return not stripped.strip(" -/,.")
+
+
 def pick_newest_save_label(rows: list[tuple[str, int, int]]) -> tuple[str, int, int] | None:
-    """Top save row. Civ lists the newest save first under Sort by Last Modified."""
+    """Newest save row.
+
+    Civ lists the newest save first under Sort by Last Modified, so a dateless
+    list uses the top row. When a date is visible, the newest date wins, including
+    when an older 9/23 row sits higher on the screen.
+    """
     ranked: list[tuple[int, int, str]] = []
     for text, x, y in rows:
         low = " ".join(text.lower().split())
@@ -2368,6 +2415,32 @@ def pick_newest_save_label(rows: list[tuple[str, int, int]]) -> tuple[str, int, 
     if not ranked:
         return None
     ranked.sort()
+    lines: list[dict] = []
+    for y, x, text in ranked:
+        if lines and abs(y - lines[-1]["y"]) <= 16:
+            lines[-1]["cells"].append((x, y, text))
+        else:
+            lines.append({"y": y, "cells": [(x, y, text)]})
+    dated: list[tuple[tuple[int, int, int], int, tuple[str, int, int]]] = []
+    for line in lines:
+        best: tuple[int, int, int] | None = None
+        label: tuple[str, int, int] | None = None
+        for x, y, text in line["cells"]:
+            found = _save_row_date(text)
+            if found is not None and (best is None or found > best):
+                best = found
+            if not _date_only(text) and (label is None or len(text) > len(label[0])):
+                label = (text, x, y)
+        if best is None:
+            continue
+        if label is None:
+            x, y, text = line["cells"][0]
+            label = (text, x, y)
+        dated.append((best, line["y"], label))
+    if dated:
+        dated.sort(key=lambda item: (item[0], -item[1]))
+        text, x, y = dated[-1][2]
+        return text, x, y
     y, x, text = ranked[0]
     return text, x, y
 

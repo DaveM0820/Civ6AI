@@ -3076,7 +3076,12 @@ function Civ6Ai_Snapshot._PurchaseCost(city, yieldType, hash, formation)
     cost = Civ6Ai_Snapshot._Method(gold, "GetPurchaseCost", y, hash)
   end
   local bq = Civ6Ai_Snapshot._Method(city, "GetBuildQueue")
-  if bq == nil or not bq:CanProduce(hash, true) or type(cost) ~= "number" or cost <= 0 or cost >= Civ6Ai_Snapshot.PURCHASE_UNAVAILABLE then
+  local canProduce = false
+  if bq ~= nil and bq.CanProduce ~= nil then
+    local okCan, produced = pcall(bq.CanProduce, bq, hash, true)
+    canProduce = okCan and produced == true
+  end
+  if not canProduce or type(cost) ~= "number" or cost <= 0 or cost >= Civ6Ai_Snapshot.PURCHASE_UNAVAILABLE then
     return nil
   end
   return math.floor(cost)

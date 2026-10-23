@@ -453,7 +453,8 @@ def attention_items(snapshot: dict[str, Any]) -> list[str]:
         elif priorities_supported(snapshot):
             detail = (
                 "The engine fills an empty queue from the favored build weights. "
-                "A host nudge raises expansion while you are short of cities, or peace when no posture is set."
+                "A host nudge raises expansion while you are short of cities, switching off one focus first "
+                "when three are already on, or peace when no posture is set."
             )
         else:
             detail = "This seat does not take production orders. Nothing will be queued for you."

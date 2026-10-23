@@ -71,6 +71,15 @@ class NewestAutosaveTests(unittest.TestCase):
     def test_empty_list(self):
         self.assertIsNone(pick_newest_save_label([("Autosaves", 1, 1), ("Back", 2, 2)]))
 
+    def test_newer_date_beats_an_older_row_that_sits_higher(self):
+        rows = [
+            ("AutoSave_0009", 300, 180),
+            ("9/23/2025", 700, 184),
+            ("AutoSave_0186", 300, 260),
+            ("10/22/2026", 700, 264),
+        ]
+        self.assertEqual(pick_newest_save_label(rows), ("AutoSave_0186", 300, 260))
+
 
 class LoadingOrIngameBlobTests(unittest.TestCase):
     def test_staging_turn_mode_is_not_ingame(self):

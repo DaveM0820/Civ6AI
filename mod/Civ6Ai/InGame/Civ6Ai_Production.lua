@@ -480,6 +480,7 @@ function Civ6Ai_Production.ComposeSituation(raw)
     half_war = warlike and (levels[keys.war] or 0) == 0,
     military_over = army >= needed + 2,
     army_heavy = wars <= 0 and army > cities * 2,
+    at_war = wars > 0,
     missing_monument = raw.missing_monument == true,
     missing_granary = raw.missing_granary == true,
     missing_district = raw.missing_district == true,
@@ -522,6 +523,11 @@ function Civ6Ai_Production.ScoreBuild(buildId, tags, situation, kind)
       and buildId ~= "DISTRICT_CITY_CENTER"
       and string.find(tostring(buildId), "WONDER", 1, true) == nil then
     score = score + 10
+  end
+  -- Walls come from the defense list. At peace, with no enemy nearby, they
+  -- lose to a settler. A war or a threatened city keeps the defense weight.
+  if seen["PSEUDOYIELD_CITY_DEFENSES"] and situation.threatened ~= true and situation.at_war ~= true then
+    score = score - 120
   end
   if seen["PSEUDOYIELD_UNIT_SETTLER"] or buildId == "UNIT_SETTLER" then
     if (tonumber(situation.pop) or 1) < 2 or situation.land == false then
@@ -710,7 +716,30 @@ function Civ6Ai_Production._CanProduce(city, buildId)
     return false
   end
   local ok, can = pcall(bq.CanProduce, bq, item.Hash, true)
-  return ok and can == true
+  if not (ok and can == true) then
+    return false
+  end
+  -- CanProduce ignores PopulationCost. A settler the city is too small to
+  -- train is accepted, then never sticks, and the next ranked item (walls) does.
+  return not Civ6Ai_Production._PopulationBlocked(city, buildId)
+end
+
+function Civ6Ai_Production._PopulationBlocked(city, buildId)
+  local id = tostring(buildId or "")
+  if string.sub(id, 1, 5) ~= "UNIT_" then
+    return false
+  end
+  local row = findRow("Units", "UnitType", id)
+  local cost = row ~= nil and tonumber(row.PopulationCost) or nil
+  local found = id == "UNIT_SETTLER" or (row ~= nil and (row.FoundCity == true or row.FoundCity == 1))
+  if (cost == nil or cost <= 0) and found then
+    cost = 1
+  end
+  if cost == nil or cost <= 0 then
+    return false
+  end
+  local pop = tonumber(call(city, "GetPopulation")) or 1
+  return pop <= cost
 end
 
 function Civ6Ai_Production._Candidates(city)
@@ -1166,9 +1195,24 @@ function Civ6Ai_Production._AutoqueuePass(playerID)
           _logProduction("production|autoqueue|no_candidates|city=" .. tostring(cityId) .. "|turn=" .. tostring(turn))
         end
         local miss = Civ6Ai_Production._autoMiss[cityId] or 0
+        local function skipWalls(buildId)
+          if situation.need_expansion ~= true or situation.threatened == true or situation.at_war == true then
+            return false
+          end
+          local name = tostring(buildId or "")
+          return string.find(name, "WALL", 1, true) ~= nil
+            or string.find(name, "CASTLE", 1, true) ~= nil
+            or string.find(name, "STAR_FORT", 1, true) ~= nil
+        end
         for step = 0, #ranked - 1 do
           local buildId = ranked[((miss + step) % #ranked) + 1]
-          local stuck, status, result = Civ6Ai_Production._QueueLocalBuild(city, buildId)
+          if skipWalls(buildId) then
+            buildId = nil
+          end
+          local stuck, status, result
+          if buildId ~= nil then
+            stuck, status, result = Civ6Ai_Production._QueueLocalBuild(city, buildId)
+          end
           if miss + step > 0 then
             _logProduction("production|autoqueue|retry|city=" .. tostring(cityId) .. "|attempt=" .. tostring(miss + step)
               .. "|build=" .. tostring(buildId) .. "|status=" .. tostring(stuck and "stuck" or status) .. "|turn=" .. tostring(turn))

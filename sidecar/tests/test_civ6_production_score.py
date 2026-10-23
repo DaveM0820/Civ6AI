@@ -143,11 +143,11 @@ class ProductionScoreTests(unittest.TestCase):
             "civ6": {"priorities": []},
         }
         nudge = prio.empty_queue_nudge(short, [])
-        self.assertIsNotNone(nudge)
-        self.assertEqual("set_build_priority", nudge["kind"])
-        self.assertEqual(prio.BY_KEY["expansion"]["id"], nudge["arguments"]["priority_id"])
-        self.assertEqual(2, nudge["arguments"]["priority_level"])
-        self.assertIsNone(prio.empty_queue_nudge(short, [{"kind": "set_build_priority"}]))
+        self.assertEqual(1, len(nudge))
+        self.assertEqual("set_build_priority", nudge[0]["kind"])
+        self.assertEqual(prio.BY_KEY["expansion"]["id"], nudge[0]["arguments"]["priority_id"])
+        self.assertEqual(2, nudge[0]["arguments"]["priority_level"])
+        self.assertEqual([], prio.empty_queue_nudge(short, [{"kind": "set_build_priority"}]))
         late = {
             "decision": {"turn": 120},
             "game": {"turn": 120, "game_speed_id": "GAMESPEED_ONLINE"},
@@ -156,8 +156,41 @@ class ProductionScoreTests(unittest.TestCase):
             "civ6": {"priorities": []},
         }
         peace = prio.empty_queue_nudge(late, [])
-        self.assertEqual(prio.BY_KEY["peace"]["id"], peace["arguments"]["priority_id"])
-        self.assertEqual(1, peace["arguments"]["priority_level"])
+        self.assertEqual(1, len(peace))
+        self.assertEqual(prio.BY_KEY["peace"]["id"], peace[0]["arguments"]["priority_id"])
+        self.assertEqual(1, peace[0]["arguments"]["priority_level"])
+
+    def test_empty_queue_drops_a_focus_before_adding_expansion(self):
+        science = prio.BY_KEY["science_victory"]["id"]
+        culture = prio.BY_KEY["culture_victory"]["id"]
+        gold = prio.BY_KEY["gold"]["id"]
+        short = {
+            "decision": {"turn": 70, "player_id": "PLAYER_1"},
+            "game": {"turn": 70, "game_speed_id": "GAMESPEED_ONLINE"},
+            "your_cities": [{"city_id": "CITY_1", "name": "Capital", "population": 12,
+                             "production": {"item_id": "NONE"}}],
+            "your_units": [],
+            "civ6": {"priorities": [
+                {"id": science, "level": 1},
+                {"id": culture, "level": 1},
+                {"id": gold, "level": 1},
+            ]},
+        }
+        nudge = prio.empty_queue_nudge(short, [])
+        self.assertEqual(gold, nudge[0]["arguments"]["priority_id"])
+        self.assertEqual(0, nudge[0]["arguments"]["priority_level"])
+        self.assertEqual(prio.BY_KEY["expansion"]["id"], nudge[1]["arguments"]["priority_id"])
+        self.assertEqual(2, nudge[1]["arguments"]["priority_level"])
+
+    def test_peace_without_a_threat_does_not_prefer_walls(self):
+        situation = prio.compose_situation(
+            cities=3, pop=4, land=True, turn=40, military=1, builders=3,
+        )
+        self.assertFalse(situation["at_war"])
+        self.assertFalse(situation["threatened"])
+        scores = {c["id"]: prio.item_score(c["id"], c["tags"], situation, c["kind"]) for c in _basic()}
+        self.assertLess(scores["BUILDING_WALLS"], scores["UNIT_SETTLER"])
+        self.assertEqual("UNIT_SETTLER", prio.pick_build(_basic(), situation)[0])
 
     def test_a_city_state_war_does_not_turn_on_the_war_list(self):
         snap = {

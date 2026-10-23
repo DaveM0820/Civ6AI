@@ -484,6 +484,18 @@ end
 -- A sent order's result comes back when the gameplay side plays it (at the
 -- seat's turn start) or refuses it. An order still without a result once its
 -- turn is over never ran.
+local function sameResultId(a, b)
+  -- Nil means "not checked". A string player id or a float kind still matches.
+  if a == nil or b == nil then
+    return true
+  end
+  if a == b then
+    return true
+  end
+  local na, nb = tonumber(a), tonumber(b)
+  return na ~= nil and na == nb
+end
+
 function Civ6Ai_OrderChannel.DrainResults()
   local shared = Civ6Ai_OrderChannel._Shared()
   local me = Game.GetLocalPlayer()
@@ -491,8 +503,8 @@ function Civ6Ai_OrderChannel.DrainResults()
     local entry = r.sender == me and not r._old and Civ6Ai_OrderChannel._pending[r.seq] or nil
     -- Same seq can be a result left over from an earlier game (ExposedMembers survives
     -- a return to the main menu); only take the one for this seat and order kind.
-    if entry ~= nil and ((r.player ~= nil and r.player ~= entry.playerID)
-        or (r.kind ~= nil and entry.kind ~= nil and r.kind ~= entry.kind)) then
+    -- A type mismatch used to leave the result unread until no_result_from_gameplay.
+    if entry ~= nil and (not sameResultId(r.player, entry.playerID) or not sameResultId(r.kind, entry.kind)) then
       entry = nil
     end
     if entry ~= nil then

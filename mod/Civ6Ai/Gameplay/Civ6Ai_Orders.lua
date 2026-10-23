@@ -1825,18 +1825,49 @@ function Civ6Ai_Orders._ApplyOrders(sender, owner, orders, autoMode)
         local moveSucceeded = false
         if o.K == Civ6Ai_Orders.K.MOVE and unit ~= nil then
           local nx, ny = Civ6Ai_Orders._RetargetPlot(owner, unit, o.X, o.Y)
+          local recorded = false
+          local lastWhy = nil
           if nx ~= nil then
             local ran, rok, rreason = pcall(Civ6Ai_Orders._MoveOnce, owner, o.U, nx, ny)
             if not ran then
               Civ6Ai_Orders._Record(sender, o, false, "order_error:" .. trimErr(rok))
-            else
-              moveSucceeded = rok == true
-              Civ6Ai_Orders._Record(sender, o, rok, (rok and "retargeted:" or "plot_occupied_exhausted:")
+              recorded = true
+            elseif rok == true then
+              moveSucceeded = true
+              recorded = true
+              Civ6Ai_Orders._Record(sender, o, true, "retargeted:"
                 .. tostring(o.X) .. "," .. tostring(o.Y) .. ">" .. tostring(nx) .. "," .. tostring(ny)
                 .. ":" .. tostring(rreason))
+            else
+              lastWhy = rreason
             end
-          else
-            Civ6Ai_Orders._Record(sender, o, false, "plot_occupied_exhausted")
+          end
+          -- The destination's ring is full (stack_limit). Step toward a free tile.
+          if not recorded then
+            unit = Civ6Ai_Orders._Unit(owner, o.U)
+            local sx, sy = unit ~= nil and Civ6Ai_Orders._StepToward(owner, unit, o.X, o.Y) or nil
+            if sx ~= nil and not (sx == nx and sy == ny) then
+              local ran, rok, rreason = pcall(Civ6Ai_Orders._MoveOnce, owner, o.U, sx, sy)
+              if not ran then
+                Civ6Ai_Orders._Record(sender, o, false, "order_error:" .. trimErr(rok))
+                recorded = true
+              elseif rok == true then
+                moveSucceeded = true
+                recorded = true
+                Civ6Ai_Orders._Record(sender, o, true, "step_toward:" .. tostring(o.X) .. "," .. tostring(o.Y)
+                  .. ">" .. tostring(sx) .. "," .. tostring(sy) .. ":" .. tostring(rreason))
+              else
+                lastWhy = rreason
+              end
+            end
+          end
+          if not recorded then
+            local why = "plot_occupied_exhausted"
+            if nx ~= nil then
+              why = why .. ":" .. tostring(o.X) .. "," .. tostring(o.Y) .. ">" .. tostring(nx) .. "," .. tostring(ny)
+                .. ":" .. tostring(lastWhy)
+            end
+            Civ6Ai_Orders._Record(sender, o, false, why)
           end
         else
           Civ6Ai_Orders._Record(sender, o, false, "plot_occupied_exhausted")
@@ -2336,7 +2367,30 @@ function Civ6Ai_Orders.Checksum()
   return h, units
 end
 
+function Civ6Ai_Orders._FlushOpenBatches(turn)
+  -- An order whose batch never closed (the last send never arrived) has no
+  -- gameplay result, so the UI reports no_result_from_gameplay. Deliver it
+  -- once its turn has passed: received orders get a real result.
+  local senders = {}
+  for sender, cur in pairs(Civ6Ai_Orders._batches) do
+    if cur ~= nil and cur.t ~= nil and cur.t < turn then
+      senders[#senders + 1] = sender
+    end
+  end
+  table.sort(senders)
+  for _, sender in ipairs(senders) do
+    local cur = Civ6Ai_Orders._batches[sender]
+    if cur ~= nil then
+      Civ6Ai_Orders._batches[sender] = nil
+      log("batch_flush|from=" .. tostring(sender) .. "|batch=" .. tostring(cur.id)
+        .. "|for_turn=" .. tostring(cur.t))
+      Civ6Ai_Orders._Deliver(sender, cur)
+    end
+  end
+end
+
 function Civ6Ai_Orders.OnGameTurnStarted(turn)
+  Civ6Ai_Orders._FlushOpenBatches(turn)
   local h, n = Civ6Ai_Orders.Checksum()
   local shared = Civ6Ai_Orders._Shared()
   shared.Checksums = shared.Checksums or {}
@@ -2950,6 +3004,54 @@ function Gov.Explore(owner, unitId)
     streak = 0
   end
   local stuck = streak >= 2
+  -- A no_path frontier stays the nearest tile forever when some other unit
+  -- reveals a tile and resets the quiet streak. Remember those plots.
+  local failed = {}
+  local function failKey(x, y)
+    return tostring(x) .. "," .. tostring(y)
+  end
+  local failCount = propGet("FN") or 0
+  if failCount > 8 then
+    failCount = 8
+  end
+  if failCount < 0 then
+    failCount = 0
+  end
+  for i = 1, failCount do
+    local packed = propGet("F" .. tostring(i))
+    if packed ~= nil and packed >= 0 then
+      failed[failKey(math.floor(packed / 100000), packed % 100000)] = true
+    end
+  end
+  local function rememberFail(x, y)
+    local key = failKey(x, y)
+    if failed[key] then
+      return
+    end
+    failed[key] = true
+    local list = {}
+    for i = 1, failCount do
+      local packed = propGet("F" .. tostring(i))
+      if packed ~= nil and packed >= 0 then
+        list[#list + 1] = packed
+      end
+    end
+    list[#list + 1] = x * 100000 + y
+    while #list > 8 do
+      table.remove(list, 1)
+    end
+    failCount = #list
+    propSet("FN", failCount)
+    for i = 1, 8 do
+      propSet("F" .. tostring(i), list[i] or -1)
+    end
+  end
+  local function unreachableMove(why)
+    local text = tostring(why or "")
+    return string.find(text, "no_path", 1, true) ~= nil
+      or text == "impassable"
+      or string.find(text, "impassable", 1, true) ~= nil
+  end
   local row = GameInfo.Units[unit:GetType()]
   local sea = row ~= nil and row.Domain == "DOMAIN_SEA"
   local ux, uy = unit:GetX(), unit:GetY()
@@ -2972,7 +3074,8 @@ function Gov.Explore(owner, unitId)
       local p = Map.GetPlotByIndex(i)
       if p ~= nil and p.GetX ~= nil then
         local x, y = p:GetX(), p:GetY()
-        if revealed(p) and waterOf(p) == sea and not blocked(p) and not (x == ux and y == uy) and sameBody(p, requireArea) then
+        if revealed(p) and waterOf(p) == sea and not blocked(p) and not (x == ux and y == uy)
+            and sameBody(p, requireArea) and failed[failKey(x, y)] ~= true then
           local d = Map.GetPlotDistance(ux, uy, x, y)
           if d < bestD then
             for dir = 0, 5 do
@@ -3025,7 +3128,8 @@ function Gov.Explore(owner, unitId)
       local p = Map.GetPlotByIndex(i)
       if p ~= nil and p.GetX ~= nil then
         local x, y = p:GetX(), p:GetY()
-        local skip = stuck and lastX ~= nil and lastY ~= nil and x == lastX and y == lastY
+        local skip = failed[failKey(x, y)] == true
+          or (stuck and lastX ~= nil and lastY ~= nil and x == lastX and y == lastY)
         if not skip and not revealed(p) and waterOf(p) == sea and not blocked(p) and sameBody(p, requireArea) then
           local frontier = Map.GetPlotDistance(ux, uy, x, y) <= 1
           if not frontier then
@@ -3063,27 +3167,41 @@ function Gov.Explore(owner, unitId)
   end
   local best, bestD = nil, nil
   local otherArea = false
-  if sea or stuck then
-    local marks = beacons()
-    best, bestD = nearestFog(true, marks)
-    if best == nil then
-      best, bestD = nearestFog(false, marks)
-      otherArea = best ~= nil
+  local tx, ty, okMove, why
+  local attempts = 0
+  while attempts < 6 do
+    attempts = attempts + 1
+    best, bestD, otherArea = nil, nil, false
+    -- After a no_path step, try fog even for a land unit that is not stuck yet.
+    if sea or stuck or attempts > 1 then
+      local marks = beacons()
+      best, bestD = nearestFog(true, marks)
+      if best == nil then
+        best, bestD = nearestFog(false, marks)
+        otherArea = best ~= nil
+      end
     end
-  end
-  if best == nil then
-    otherArea = false
-    best, bestD = nearestBorder(true)
     if best == nil then
-      best, bestD = nearestBorder(false)
-      otherArea = best ~= nil
+      otherArea = false
+      best, bestD = nearestBorder(true)
+      if best == nil then
+        best, bestD = nearestBorder(false)
+        otherArea = best ~= nil
+      end
     end
+    if best == nil then
+      break
+    end
+    tx, ty = best:GetX(), best:GetY()
+    okMove, why = Civ6Ai_Orders._MoveOnce(owner, unitId, tx, ty)
+    if not unreachableMove(why) then
+      break
+    end
+    rememberFail(tx, ty)
   end
-  if best == nil then
+  if tx == nil then
     return false, "explore_unavailable:map_known"
   end
-  local tx, ty = best:GetX(), best:GetY()
-  local okMove, why = Civ6Ai_Orders._MoveOnce(owner, unitId, tx, ty)
   local after = countRevealed()
   propSet("N", after)
   propSet("T", turn)

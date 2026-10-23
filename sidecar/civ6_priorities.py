@@ -266,34 +266,84 @@ def _empty_city_names(snapshot: dict) -> list[str]:
     return names
 
 
-def empty_queue_nudge(snapshot: dict, commands: list) -> dict | None:
-    """One priority packet so the engine queues a build. The model already chose if it sent one."""
-    if not priorities_supported(snapshot) or not _empty_city_names(snapshot):
-        return None
-    if any(isinstance(row, dict) and row.get("kind") == COMMAND_KIND for row in commands):
-        return None
-    levels = current_levels(snapshot)
-    sample = next((city for city in snapshot.get("your_cities") or [] if isinstance(city, dict)), None)
-    situation = situation_for_city(snapshot, sample or {})
-    expansion = BY_KEY["expansion"]["id"]
-    if situation.get("need_expansion") and _major_war_count(snapshot) <= 0:
-        want = 2 if situation.get("city_target") and int(situation["city_target"]) > (
-            sum(1 for row in snapshot.get("your_cities") or [] if isinstance(row, dict)) + 2
-        ) else 1
-        if levels.get(expansion, 0) < want:
-            return {
-                "command_id": command_id(expansion, want),
-                "kind": COMMAND_KIND,
-                "arguments": {"priority_id": expansion, "priority_level": want},
-            }
-    if not any(BY_ID[cid]["group"] == "posture" for cid in levels):
-        peace = BY_KEY["peace"]["id"]
-        return {
-            "command_id": command_id(peace, 1),
-            "kind": COMMAND_KIND,
-            "arguments": {"priority_id": peace, "priority_level": 1},
-        }
+# A new focus is rejected once three are on. Drop the least relevant one first.
+_FOCUS_DROP_ORDER = (
+    "exploration", "wonders", "great_people", "faith", "amenities", "trade", "gold",
+    "diplomatic_victory", "culture_victory", "religious_victory", "science_victory",
+    "production", "growth", "fix_bankruptcy", "domination_victory", "improvements",
+)
+
+
+def _priority_packet(cat_id: int, level: int) -> dict:
+    return {
+        "command_id": command_id(cat_id, level),
+        "kind": COMMAND_KIND,
+        "arguments": {"priority_id": cat_id, "priority_level": level},
+    }
+
+
+def _focus_ids(levels: dict[int, int]) -> list[int]:
+    return [cid for cid, level in levels.items() if level > 0 and BY_ID[cid]["group"] == "focus"]
+
+
+def _drop_focus(levels: dict[int, int]) -> int | None:
+    active = set(_focus_ids(levels))
+    for key in _FOCUS_DROP_ORDER:
+        cid = BY_KEY[key]["id"]
+        if cid in active:
+            return cid
+    for cid in sorted(active):
+        if BY_ID[cid]["key"] != "expansion":
+            return cid
     return None
+
+
+def empty_queue_nudge(snapshot: dict, commands: list) -> list[dict]:
+    """Priority packets so the engine queues a build. Off first, so three focuses do not reject it.
+
+    The model already chose when it sent set_build_priority. Priorities are the synced
+    lever: the engine fills the queue on its turn from these weights. There is no
+    gameplay call that enqueues a build for an AI seat.
+    """
+    if not priorities_supported(snapshot) or not _empty_city_names(snapshot):
+        return []
+    if any(isinstance(row, dict) and row.get("kind") == COMMAND_KIND for row in commands):
+        return []
+    levels = dict(current_levels(snapshot))
+    cities = [city for city in snapshot.get("your_cities") or [] if isinstance(city, dict)]
+    sample = cities[0] if cities else {}
+    situation = situation_for_city(snapshot, sample)
+    wars = _major_war_count(snapshot)
+    threatened = any(_city_threatened(snapshot, city) for city in cities)
+    packets: list[dict] = []
+    defense = BY_KEY["defense"]["id"]
+    peace = BY_KEY["peace"]["id"]
+    # Defense at peace with nothing nearby is why an empty queue sits on walls.
+    if levels.get(defense, 0) > 0 and wars <= 0 and not threatened:
+        packets.append(_priority_packet(peace, 1))
+        levels[defense] = 0
+        levels[peace] = 1
+    expansion = BY_KEY["expansion"]["id"]
+    if situation.get("need_expansion") and wars <= 0:
+        city_n = sum(1 for row in snapshot.get("your_cities") or [] if isinstance(row, dict))
+        want = 2 if situation.get("city_target") and int(situation["city_target"]) > city_n + 2 else 1
+        have = levels.get(expansion, 0)
+        # Already at the wanted level and the queue is still empty: one step stronger.
+        if have >= want and have < 3:
+            want = have + 1
+        if have < want:
+            if have <= 0 and len(_focus_ids(levels)) >= MAX_FOCUS:
+                drop = _drop_focus(levels)
+                if drop is not None:
+                    packets.append(_priority_packet(drop, 0))
+                    levels[drop] = 0
+            packets.append(_priority_packet(expansion, want))
+            return packets
+    if packets:
+        return packets
+    if not any(BY_ID[cid]["group"] == "posture" for cid in levels):
+        return [_priority_packet(peace, 1)]
+    return []
 
 
 def inject_legal_commands(snapshot: dict) -> int:
@@ -462,6 +512,7 @@ def compose_situation(
         "half_war": half_war,
         "military_over": int(military) >= needed + 2,
         "army_heavy": int(major_wars) <= 0 and int(military) > int(cities) * 2,
+        "at_war": int(major_wars) > 0,
         "city_target": target,
         "missing_monument": missing_monument is True,
         "missing_granary": missing_granary is True,
@@ -615,6 +666,11 @@ def item_score(type_id: str, tags: list[str], situation: dict, kind: str = "", w
             score -= 200
         if not situation.get("need_expansion"):
             score -= 40
+    # Walls are the defense list. At peace with no enemy nearby they must not
+    # outrank a settler or a builder. A war, or a city under threat, keeps them.
+    if ("PSEUDOYIELD_CITY_DEFENSES" in seen and not situation.get("threatened")
+            and not situation.get("at_war")):
+        score -= 120
     if situation.get("last") == type_id:
         score -= 50
     if kind == "unit" or str(type_id).startswith("UNIT_"):

@@ -39,7 +39,35 @@ class T71AttentionTests(unittest.TestCase):
         self.assertIn("EXPANSION: 4 cities", text)
         self.assertIn("aim for 6-8 cities by turn 70", text)
         self.assertIn("this turn's target is 8", text)
-        self.assertIn("Settler due.", text)
+        self.assertIn("Settler due:", text)
+        self.assertIn('"priorities": "expansion:2"', text)
+        self.assertNotIn(".purchase", text)
+
+    def test_settler_due_names_an_affordable_purchase_and_skips_a_dear_one(self):
+        snap = _snap(your_empire={"gold": 400})
+        snap["civ6"]["governance"] = {"religion": {"faith": 40, "pantheon_cost": 25}}
+        snap["legal_commands"] = [{
+            "command_id": "CMD_buy_settler",
+            "kind": "purchase_item",
+            "fixed_arguments": {"city_id": "CITY_1", "item_id": "UNIT_SETTLER", "cost": 320},
+        }, {
+            "command_id": "CMD_buy_faith",
+            "kind": "purchase_item",
+            "fixed_arguments": {"city_id": "CITY_1", "item_id": "UNIT_SETTLER", "cost": 200, "yield": "faith"},
+        }, {
+            "command_id": "CMD_train_settler",
+            "kind": "queue_production",
+            "fixed_arguments": {"city_id": "CITY_1", "build_id": "UNIT_SETTLER"},
+        }]
+        text = coaching.civ6_expansion_attention(snap) or ""
+        self.assertIn("Capital.purchase = UNIT_SETTLER (320 gold, you have 400)", text)
+        self.assertNotIn("faith", text.split("Settler due:", 1)[-1])
+        self.assertIn("Capital.production = UNIT_SETTLER", text)
+        self.assertIn('"priorities": "expansion:2"', text)
+        snap["your_empire"] = {"gold": 100}
+        poor = coaching.civ6_expansion_attention(snap) or ""
+        self.assertNotIn(".purchase", poor)
+        self.assertIn("Capital.production = UNIT_SETTLER", poor)
 
     def test_idle_stock_names_gold_faith_envoys_and_a_buy(self):
         snap = _snap(your_empire={"gold": 480, "gold_per_turn": 40})
@@ -55,6 +83,14 @@ class T71AttentionTests(unittest.TestCase):
             "kind": "purchase_item",
             "fixed_arguments": {"city_id": "CITY_1", "item_id": "UNIT_SETTLER", "cost": 320},
         }, {
+            "command_id": "CMD_buy_builder",
+            "kind": "purchase_item",
+            "fixed_arguments": {"city_id": "CITY_1", "item_id": "UNIT_BUILDER", "cost": 200},
+        }, {
+            "command_id": "CMD_buy_scout",
+            "kind": "purchase_item",
+            "fixed_arguments": {"city_id": "CITY_1", "item_id": "UNIT_SCOUT", "cost": 120},
+        }, {
             "command_id": "CMD_buy_warrior",
             "kind": "purchase_item",
             "fixed_arguments": {"city_id": "CITY_1", "item_id": "UNIT_WARRIOR", "cost": 160},
@@ -65,7 +101,10 @@ class T71AttentionTests(unittest.TestCase):
         self.assertIn("2 envoys unspent", text)
         self.assertIn("do not order envoy", text)
         self.assertIn("UNIT_SETTLER in Capital (320 gold)", text)
-        self.assertLess(text.index("UNIT_SETTLER"), text.index("UNIT_WARRIOR"))
+        self.assertIn("UNIT_BUILDER in Capital (200 gold)", text)
+        self.assertLess(text.index("UNIT_SETTLER"), text.index("UNIT_BUILDER"))
+        self.assertNotIn("UNIT_SCOUT", text)
+        self.assertNotIn("UNIT_WARRIOR", text)
         self.assertIn("1 empty policy slot", text)
         self.assertIn("governor title is unassigned", text)
 

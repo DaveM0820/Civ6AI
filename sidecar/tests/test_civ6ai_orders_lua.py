@@ -320,6 +320,15 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertEqual(self.last()["reason"], "stale_turn:7")
         self.assertIsNone(self.rt.eval("GetProp('CIV6AI_Q_2_T')"))
 
+    def test_open_batch_is_flushed_once_its_turn_passes(self):
+        self.order(0, K=2, P=2, I=4, S=21, B=8, J=1, N=2, T=5)
+        self.assertEqual(self.results(), [])
+        self.rt.globals().SetTurn(6)
+        self.rt.globals().Civ6Ai_Orders.OnGameTurnStarted(6)
+        reasons = [r["reason"] for r in self.results()]
+        self.assertIn("stale_turn:5", reasons)
+        self.assertIn("batch_order_missing:2", reasons)
+
     def test_queue_for_a_missed_turn_is_dropped(self):
         self.order(0, K=2, P=2, I=4, S=7, B=1, J=1, N=1, T=6)
         self.turn_start(2, turn=7)
@@ -1708,6 +1717,26 @@ class WpAApplyCoreTests(unittest.TestCase):
         self.assertIn("explore_no_reveal", self.last()["reason"])
         self.assertIn(":stuck", self.last()["reason"])
         self.assertIn("explore_to=0,1", self.last()["reason"])
+
+    def test_unreachable_frontier_is_skipped_for_the_next_tile(self):
+        self._install_explore_map(sea=True, move=False)
+        self.rt.execute(
+            """
+            local function step(p, uid, x, y)
+              if x == 0 and y == 1 then return false, "no_path" end
+              return true, "moved"
+            end
+            ExposedMembers.Civ6Ai.MoveUnitForPlayer = step
+            ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = step
+            """
+        )
+        self.rt.globals().SetTurn(8)
+        self.order(0, K=25, P=2, U=7, S=130, T=8)
+        self.assertIn("explore_to=4,1", self.last()["reason"])
+        self.assertNotIn("explore_to=0,1", self.last()["reason"])
+        self.rt.globals().SetTurn(9)
+        self.order(0, K=25, P=2, U=7, S=131, T=9)
+        self.assertNotIn("explore_to=0,1", self.last()["reason"])
 
     def test_stuck_explorer_walks_toward_a_revealed_city_state(self):
         # Two fog tiles. The nearer one is not the one beside the revealed

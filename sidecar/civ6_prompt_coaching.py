@@ -575,8 +575,130 @@ def civ6_expansion_attention(snapshot: dict[str, Any]) -> str | None:
         f"(this turn's target is {target})."
     )
     if situation.get("need_expansion"):
-        line += " Settler due."
+        line += _settler_due_clause(snapshot, situation, target)
     return line
+
+
+def _settler_due_clause(snapshot: dict[str, Any], situation: dict[str, Any], target: int) -> str:
+    """Name the purchase and priority commands the prompt already offers."""
+    from sidecar.civ6_priorities import priorities_supported
+
+    cities = [city for city in snapshot.get("your_cities") or [] if isinstance(city, dict)]
+    city_n = len(cities)
+    level = 2 if city_n + 2 < int(target) else 1
+    parts: list[str] = []
+    purchase = _affordable_settler_purchase(snapshot)
+    if purchase is not None:
+        city, token, cost, yield_name, balance = purchase
+        parts.append(f"{city}.purchase = {token} ({cost} {yield_name}, you have {balance})")
+    produced = _offered_settler_production(snapshot)
+    if produced is not None:
+        parts.append(f"{produced}.production = UNIT_SETTLER")
+    if priorities_supported(snapshot):
+        parts.append(
+            f'"priorities": "expansion:{level}" '
+            f"(add expansion:{level} to that complete set; a priority you leave out is switched off)"
+        )
+    if not parts:
+        return " Settler due."
+    return " Settler due: " + ", or ".join(parts) + "."
+
+
+def _affordable_settler_purchase(
+    snapshot: dict[str, Any],
+) -> tuple[str, str, int, str, int] | None:
+    """Cheapest settler the offer list can pay for. Unaffordable buys are omitted."""
+    cities = {
+        str(city.get("city_id")): pipeline._city_prompt_name(city)
+        for city in snapshot.get("your_cities") or []
+        if isinstance(city, dict)
+    }
+    best: tuple[int, str, str, int, str, int] | None = None
+    for command in snapshot.get("legal_commands") or []:
+        if not isinstance(command, dict) or command.get("kind") != "purchase_item":
+            continue
+        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+        item = str(fixed.get("item_id") or "")
+        if "SETTLER" not in item.upper():
+            continue
+        cost = _as_int(fixed.get("cost"))
+        if cost is None or cost <= 0:
+            continue
+        yield_name = "faith" if str(fixed.get("yield") or "").lower() == "faith" else "gold"
+        balance = _stockpile(snapshot, yield_name)
+        if balance is None or cost > balance:
+            continue
+        token = f"{item}:faith" if yield_name == "faith" else item
+        city = cities.get(str(fixed.get("city_id") or ""), str(fixed.get("city_id") or "a city"))
+        row = (cost, city, token, cost, yield_name, balance)
+        if best is None or row < best:
+            best = row
+    if best is None:
+        return None
+    _, city, token, cost, yield_name, balance = best
+    return city, token, cost, yield_name, balance
+
+
+def _offered_settler_production(snapshot: dict[str, Any]) -> str | None:
+    """City prompt name when that city's production row offers a settler."""
+    from sidecar.civ6_command_wire import city_command_token
+
+    cities = {
+        str(city.get("city_id")): pipeline._city_prompt_name(city)
+        for city in snapshot.get("your_cities") or []
+        if isinstance(city, dict)
+    }
+    for command in snapshot.get("legal_commands") or []:
+        if not isinstance(command, dict) or command.get("kind") != "queue_production":
+            continue
+        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+        pair = city_command_token(command)
+        if pair is None or pair[0] != "production" or "SETTLER" not in str(pair[1]).upper():
+            continue
+        return cities.get(str(fixed.get("city_id") or ""), str(fixed.get("city_id") or "a city"))
+    return None
+
+
+def _stockpile(snapshot: dict[str, Any], yield_name: str) -> int | None:
+    if yield_name == "faith":
+        from sidecar.civ6_governance import governance
+
+        gov = governance(snapshot)
+        religion = gov.get("religion") if isinstance(gov.get("religion"), dict) else {}
+        faith = _as_int(religion.get("faith"))
+        if faith is not None:
+            return faith
+        empire = snapshot.get("your_empire") if isinstance(snapshot.get("your_empire"), dict) else {}
+        return _as_int(empire.get("faith"))
+    empire = snapshot.get("your_empire") if isinstance(snapshot.get("your_empire"), dict) else {}
+    return _as_int(empire.get("gold"))
+
+
+def _cities_below_target(snapshot: dict[str, Any]) -> bool:
+    from sidecar.civ6_priorities import situation_for_city
+
+    cities = [city for city in snapshot.get("your_cities") or [] if isinstance(city, dict)]
+    if not cities:
+        return False
+    target = _as_int(situation_for_city(snapshot, cities[0]).get("city_target"))
+    return target is not None and len(cities) < target
+
+
+def _exploration_needed(snapshot: dict[str, Any]) -> bool:
+    """Scouts are a buy only while the map is still dark or the reveal streak has stalled."""
+    metric = snapshot.get("_explore_metric")
+    if isinstance(metric, dict):
+        since = metric.get("turns_since_reveal")
+        percent = metric.get("percent")
+        if (
+            isinstance(since, int) and not isinstance(since, bool)
+            and isinstance(percent, int) and not isinstance(percent, bool)
+            and percent < CIV6_EXPLORE_NUDGE_BELOW_PCT
+            and since > CIV6_EXPLORE_QUIET_TURNS
+        ):
+            return True
+    explored = _civ6_explored_percent(snapshot)
+    return isinstance(explored, int) and explored < CIV6_EXPLORE_NUDGE_BELOW_PCT
 
 
 def civ6_military_cap_attention(snapshot: dict[str, Any]) -> str | None:
@@ -603,6 +725,8 @@ def _best_purchase_labels(snapshot: dict[str, Any], limit: int = 3) -> list[str]
         for city in snapshot.get("your_cities") or []
         if isinstance(city, dict)
     }
+    below = _cities_below_target(snapshot)
+    exploring = _exploration_needed(snapshot)
     rows: list[tuple[int, int, str]] = []
     for command in snapshot.get("legal_commands") or []:
         if not isinstance(command, dict) or command.get("kind") != "purchase_item":
@@ -612,9 +736,22 @@ def _best_purchase_labels(snapshot: dict[str, Any], limit: int = 3) -> list[str]
         cost = _as_int(fixed.get("cost"))
         if not item or cost is None:
             continue
+        upper = item.upper()
+        if "SETTLER" in upper:
+            rank = 0
+        elif "BUILDER" in upper:
+            rank = 1
+        elif "SCOUT" in upper or "RECON" in upper:
+            # Below the city target, scouts wait unless the map still needs exploring.
+            if below and not exploring:
+                continue
+            rank = 2
+        elif below:
+            continue
+        else:
+            rank = 2
         yield_name = str(fixed.get("yield") or "gold")
         city = cities.get(str(fixed.get("city_id") or ""), str(fixed.get("city_id") or "a city"))
-        rank = 0 if "SETTLER" in item else 1 if "BUILDER" in item else 2
         rows.append((rank, cost, f"{item} in {city} ({cost} {yield_name})"))
     rows.sort()
     labels: list[str] = []
