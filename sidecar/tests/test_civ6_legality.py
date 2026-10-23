@@ -39,10 +39,27 @@ def _snap(**extra):
 
 
 class LegalityLayerTests(unittest.TestCase):
+    def test_stacking_is_by_formation_class(self):
+        snap = _snap()
+        snap["your_units"] += [
+            {"unit_id": "UNIT_W", "unit_type_id": "UNIT_WARRIOR", "domain_id": "DOMAIN_LAND", "plot_id": "PLOT_3_3"},
+            {"unit_id": "UNIT_S", "unit_type_id": "UNIT_SETTLER", "domain_id": "DOMAIN_LAND", "plot_id": "PLOT_2_2"},
+            {"unit_id": "UNIT_B", "unit_type_id": "UNIT_BUILDER", "domain_id": "DOMAIN_LAND",
+             "plot_id": "PLOT_3_2", "build_charges": 3},
+        ]
+        # A settler may join its own warrior; a scout may not (both land combat).
+        self.assertIsNone(legal.move_problem(snap, "UNIT_S", 3, 3))
+        self.assertEqual(legal.move_problem(snap, "UNIT_1", 3, 3), "occupied")
+        # Two civilians conflict; a civilian and a support unit do not.
+        self.assertEqual(legal.move_problem(snap, "UNIT_S", 3, 2), "occupied")
+        self.assertEqual(legal.stack_class({"unit_type_id": "UNIT_BATTERING_RAM"}), "support")
+        self.assertEqual(legal.stack_class({"unit_class_id": "FORMATION_CLASS_CIVILIAN"}), "civilian")
+
+
     def test_mountain_water_occupied_rejected(self):
         snap = _snap()
         snap["your_units"].append({
-            "unit_id": "UNIT_RAM", "unit_type_id": "UNIT_BATTERING_RAM",
+            "unit_id": "UNIT_RAM", "unit_type_id": "UNIT_WARRIOR",
             "domain_id": "DOMAIN_LAND", "plot_id": "PLOT_3_2",
         })
         self.assertEqual(legal.move_problem(snap, "UNIT_1", 4, 2), "impassable")

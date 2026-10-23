@@ -134,14 +134,38 @@ def tile_passable(snapshot: dict[str, Any], unit: dict[str, Any], x: int, y: int
         return "impassable"
     uid = str(unit.get("unit_id") or "")
     holders = own_occupied_plots(snapshot).get((x, y)) or []
-    others = [h for h in holders if h != uid]
-    if others:
-        return "occupied"
-    if "BUILDER" in str(unit.get("unit_type_id") or ""):
-        owner = plot.get("revealed_owner_id")
-        if owner != _me(snapshot):
-            return "outside_borders"
+    mine = stack_class(unit)
+    for other_id in holders:
+        if other_id == uid:
+            continue
+        other = _unit_by_id(snapshot, other_id)
+        if other is None or stack_class(other) == mine:
+            return "occupied"
     return None
+
+
+# Civ VI stacking: one unit per formation class per tile. A civilian (settler,
+# builder, trader) shares a tile with one combat unit and one support unit.
+_CIVILIAN_TAGS = ("SETTLER", "BUILDER", "TRADER", "MISSIONARY", "APOSTLE", "INQUISITOR",
+                  "GURU", "ARCHAEOLOGIST", "GREAT_", "NATURALIST", "SPY", "MILITARY_ENGINEER")
+_SUPPORT_TAGS = ("BATTERING_RAM", "SIEGE_TOWER", "MEDIC", "SUPPLY_CONVOY", "OBSERVATION_BALLOON",
+                 "DRONE", "ANTIAIR_GUN", "MOBILE_SAM")
+
+
+def stack_class(unit: dict[str, Any]) -> str:
+    """The unit's stacking class: civilian, support, land, naval or air."""
+    cls = str(unit.get("unit_class_id") or unit.get("formation_class") or "").upper()
+    for tag, name in (("CIVILIAN", "civilian"), ("SUPPORT", "support"), ("NAVAL", "naval"),
+                      ("AIR", "air"), ("LAND_COMBAT", "land")):
+        if cls.startswith("FORMATION_CLASS_") and tag in cls:
+            return name
+    typ = str(unit.get("unit_type_id") or "").upper()
+    if int(unit.get("build_charges") or 0) > 0 or any(tag in typ for tag in _CIVILIAN_TAGS):
+        return "civilian"
+    if any(tag in typ for tag in _SUPPORT_TAGS):
+        return "support"
+    domain = str(unit.get("domain_id") or "DOMAIN_LAND")
+    return {"DOMAIN_SEA": "naval", "DOMAIN_AIR": "air"}.get(domain, "land")
 
 
 def reachable(snapshot: dict[str, Any], unit: dict[str, Any], dest: tuple[int, int]) -> bool:
@@ -550,12 +574,34 @@ def remember_rejections(snapshot: dict[str, Any], rows: list[dict[str, Any]]) ->
     save_state(snapshot, state)
 
 
+# What to do instead when the same order keeps being rejected for the same reason.
+REPEAT_ADVICE = {
+    "occupied": "move the unit that stands there first, or pick another listed destination",
+    "impassable": "pick a land tile from the unit's listed options",
+    "no_path": "pick a destination on the same landmass",
+    "outside_borders": "pick a tile inside your borders",
+}
+REPEAT_ADVICE_DEFAULT = "order something else for this unit"
+
+
+def _rejection_turns(rows: list[dict[str, Any]]) -> dict[tuple[str, str], set[int]]:
+    seen: dict[tuple[str, str], set[int]] = {}
+    for row in rows:
+        try:
+            when = int(row.get("turn") or 0)
+        except (TypeError, ValueError):
+            continue
+        key = (str(row.get("order") or "order"), str(row.get("reason") or "rejected"))
+        seen.setdefault(key, set()).add(when)
+    return seen
+
+
 def rejection_lines(snapshot: dict[str, Any]) -> list[str]:
     turn = _turn(snapshot)
     lines: list[str] = []
-    for row in _lst(load_state(snapshot).get("rejections")):
-        if not isinstance(row, dict):
-            continue
+    rows = [r for r in _lst(load_state(snapshot).get("rejections")) if isinstance(r, dict)]
+    turns_of = _rejection_turns(rows)
+    for row in rows:
         try:
             when = int(row.get("turn") or 0)
         except (TypeError, ValueError):
@@ -563,8 +609,15 @@ def rejection_lines(snapshot: dict[str, Any]) -> list[str]:
         if when != turn - 1 and when != turn:
             continue
         order = str(row.get("order") or "order")
-        reason = reason_text(str(row.get("reason") or "rejected"))
-        lines.append(f"Rejected last turn: {order} - {reason}")
+        code = str(row.get("reason") or "rejected")
+        line = f"Rejected last turn: {order} - {reason_text(code)}"
+        repeats = len(turns_of.get((order, code), ()))
+        if repeats >= 2:
+            line += (f" (rejected on {repeats} turns for the same reason; stop ordering it: "
+                     f"{REPEAT_ADVICE.get(code, REPEAT_ADVICE_DEFAULT)})")
+        if line in lines:
+            continue
+        lines.append(line)
         if len(lines) >= REJECTION_PROMPT_CAP:
             break
     return lines

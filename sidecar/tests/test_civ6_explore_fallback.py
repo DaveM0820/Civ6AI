@@ -53,7 +53,7 @@ class ExploreFallbackTests(unittest.TestCase):
     def test_occupied_own_tile_is_dropped(self):
         snap = _snapshot()
         snap["your_units"].append({
-            "unit_id": "UNIT_RAM", "unit_type_id": "UNIT_BATTERING_RAM",
+            "unit_id": "UNIT_RAM", "unit_type_id": "UNIT_WARRIOR",
             "plot_id": "PLOT_44_12",
         })
         kept, dropped = ar.filter_repeat_failures(snap, [_move(44, 12)])
@@ -127,13 +127,13 @@ class BuilderTests(unittest.TestCase):
         self.assertIn("Improve(43,14,IMPROVEMENT_FARM)", line)
         self.assertNotIn("(44,15)", line)
 
-    def test_builder_move_outside_borders_dropped(self):
+    def test_builder_move_outside_borders_allowed(self):
+        # Civ VI builders walk anywhere; they only improve inside borders.
         snap = self._snap()
         out = {"command_id": "CMD_UNIT_5_moveto_40_11", "kind": "move_unit", "arguments": {"unit_id": "UNIT_5", "target_x": 40, "target_y": 11}}
-        ok = {"command_id": "CMD_UNIT_5_moveto_43_14", "kind": "move_unit", "arguments": {"unit_id": "UNIT_5", "target_x": 43, "target_y": 14}}
-        kept, dropped = ar.filter_repeat_failures(snap, [out, ok])
-        self.assertEqual([c["command_id"] for c in kept], ["CMD_UNIT_5_moveto_43_14"])
-        self.assertTrue(any("outside" in d for d in dropped))
+        kept, dropped = ar.filter_repeat_failures(snap, [out])
+        self.assertEqual([c["command_id"] for c in kept], ["CMD_UNIT_5_moveto_40_11"])
+        self.assertFalse(any("outside" in d for d in dropped))
 
     def test_improve_substitute_nearest(self):
         snap = {"legal_commands": [_improve_cmd(3, 4, "IMPROVEMENT_FARM"), _improve_cmd(9, 9, "IMPROVEMENT_FARM")],
@@ -143,8 +143,8 @@ class BuilderTests(unittest.TestCase):
         move = {"command_id": "x", "kind": "move_unit",
                 "arguments": {"unit_id": "UNIT_7", "target_x": 10, "target_y": 9}}
         kept, dropped = ar.filter_repeat_failures(snap, [move])
-        self.assertEqual(kept, [])
-        self.assertTrue(any("outside your borders" in note for note in dropped))
+        # A plain move is never rewritten into an Improve; builders may walk outside borders.
+        self.assertEqual(kept, [move])
         self.assertFalse(any("instead" in note for note in dropped))
 
 
@@ -181,8 +181,7 @@ def test_improve_substitute_nearest():
     move = {"command_id": "x", "kind": "move_unit",
             "arguments": {"unit_id": "UNIT_7", "target_x": 10, "target_y": 9}}
     kept, dropped = ar.filter_repeat_failures(snap, [move])
-    assert kept == []
-    assert any("outside your borders" in note for note in dropped)
+    assert kept == [move]
     assert not any("instead" in note for note in dropped)
 
 

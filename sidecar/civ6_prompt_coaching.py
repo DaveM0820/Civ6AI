@@ -1016,3 +1016,23 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
     return lines
 
 
+
+
+def civ6_builder_work_attention(snapshot: dict[str, Any]) -> str | None:
+    """Builders against the work left: charges vs owned tiles the game offers an Improve on."""
+    from sidecar import civ6_priorities as prio
+
+    builders, charges, open_tiles = prio.builder_work(snapshot)
+    if not builders or open_tiles is None or charges <= open_tiles:
+        return None
+    if builders < 2 and open_tiles > 0:
+        return None
+    improve_on = prio.current_levels(snapshot).get(prio.BY_KEY["improvements"]["id"], 0) > 0
+    text = (f"BUILDERS: {builders} builders with {charges} charges, but only {open_tiles} owned "
+            f"tile{'s' if open_tiles != 1 else ''} can be improved this turn. More builders add nothing until a "
+            "new city, border growth, or a tech opens tiles.")
+    if improve_on:
+        text += ' Switch improvements off in "priorities" (send your complete set without it).'
+    text += (" Keep spare builders safe inside your borders or walk one beside a settler to work "
+             "the next city's tiles.")
+    return text

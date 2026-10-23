@@ -464,6 +464,8 @@ def compose_situation(
     last: str | None = None,
     unit_counts: dict[str, int] | None = None,
     speed: str | None = None,
+    builder_charges: int | None = None,
+    open_tiles: int | None = None,
 ) -> dict:
     """Saved priorities, or peace:1 when the seat has no posture, plus the situation overlays."""
     levels: dict[int, int] = {}
@@ -481,7 +483,15 @@ def compose_situation(
     # A major war keeps the war list in charge, including the settler penalty.
     below_target = int(cities) < target and int(turn) <= EXPANSION_TURN_CAP and int(pop) >= 2 and bool(land)
     need_expansion = below_target and int(major_wars) <= 0
-    need_builders = int(builders) < int(cities)
+    # Builder demand is charges against owned tiles still open to improve, when
+    # the seat reports them; otherwise one builder per city.
+    work_known = open_tiles is not None and builder_charges is not None
+    if work_known:
+        need_builders = int(builder_charges) < int(open_tiles)
+        builder_surplus = int(builders) > 0 and int(builder_charges) >= int(open_tiles)
+    else:
+        need_builders = int(builders) < int(cities)
+        builder_surplus = False
     needed = int(cities)
     if major_wars > 0:
         needed += int(cities)
@@ -523,6 +533,7 @@ def compose_situation(
         "threatened": bool(threatened),
         "last": last,
         "unit_counts": dict(unit_counts or {}),
+        "builder_surplus": builder_surplus,
     }
 
 
@@ -671,6 +682,10 @@ def item_score(type_id: str, tags: list[str], situation: dict, kind: str = "", w
     if ("PSEUDOYIELD_CITY_DEFENSES" in seen and not situation.get("threatened")
             and not situation.get("at_war")):
         score -= 120
+    # Every open tile already has a charge waiting: another builder adds nothing.
+    if situation.get("builder_surplus") and "PSEUDOYIELD_IMPROVEMENT" in seen and (
+            kind == "unit" or str(type_id).startswith("UNIT_")):
+        score -= BUILDER_SURPLUS_PENALTY
     if situation.get("last") == type_id:
         score -= 50
     if kind == "unit" or str(type_id).startswith("UNIT_"):
@@ -801,6 +816,46 @@ def _city_threatened(snapshot: dict, city: dict) -> bool:
     return False
 
 
+BUILDER_SURPLUS_PENALTY = 200
+
+
+def builder_work(snapshot: dict) -> tuple[int, int, int | None]:
+    """(builders, total build charges, owned tiles open to improve).
+
+    Open tiles are the distinct tiles the game offered an Improve on this turn
+    (the mod lists every builder's owned, unimproved, legal sites). None when no
+    builder exists to report them.
+    """
+    builders = 0
+    charges = 0
+    builder_ids: set[str] = set()
+    for unit in snapshot.get("your_units") or []:
+        if not isinstance(unit, dict):
+            continue
+        type_id = str(unit.get("unit_type_id") or "")
+        n = int(unit.get("build_charges") or 0)
+        if "BUILDER" in type_id or type_id.endswith("WORKER") or n > 0:
+            builders += 1
+            charges += max(0, n)
+            builder_ids.add(str(unit.get("unit_id") or ""))
+    if not builders:
+        return 0, 0, None
+    tiles: set[tuple[int, int]] = set()
+    for command in snapshot.get("legal_commands") or []:
+        if not isinstance(command, dict):
+            continue
+        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+        if str(fixed.get("unit_id") or "") not in builder_ids:
+            continue
+        if fixed.get("intent") != "improve" and fixed.get("A") != 2 and not str(command.get("kind") or "").startswith("worker_"):
+            continue
+        try:
+            tiles.add((int(fixed["target_x"]), int(fixed["target_y"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return builders, charges, len(tiles)
+
+
 def _unit_counts(snapshot: dict) -> tuple[int, int]:
     from sidecar.civ6_wire import _is_civilian
 
@@ -832,7 +887,10 @@ def situation_for_city(snapshot: dict, city: dict) -> dict:
     civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
     warlike = civ6.get("warlike") is True
     cities = sum(1 for row in snapshot.get("your_cities") or [] if isinstance(row, dict))
+    _b, charges, open_tiles = builder_work(snapshot if isinstance(snapshot, dict) else {})
     return compose_situation(
+        builder_charges=charges if open_tiles is not None else None,
+        open_tiles=open_tiles,
         saved=current_levels(snapshot),
         major_wars=_major_war_count(snapshot),
         threatened=_city_threatened(snapshot, city),

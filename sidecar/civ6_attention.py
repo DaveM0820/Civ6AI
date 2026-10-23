@@ -132,6 +132,7 @@ PROVIDERS: tuple[Callable[[Any], list[Item]], ...] = (
     _one("war", _coaching("civ6_focus_fire_attention"), "FocusFire", 1),
     _settle,
     _one("military", _coaching("civ6_military_cap_attention"), None, 3),
+    _one("builders", _coaching("civ6_builder_work_attention"), None, 2),
     _one("rejected", _coaching("civ6_rejected_last_turn_attention"), "Blocked", 1),
     _one("idle", _coaching("civ6_host_default_attention"), None, 3),
     _idle_resources,
