@@ -71,14 +71,20 @@ function Civ6Ai_Production._GetCityProduction(city)
     return nil
   end
   local bq = city:GetBuildQueue()
-  if bq == nil or bq:GetSize() <= 0 then
+  if bq == nil then
     return nil
   end
-  local hash = bq:GetCurrentProductionTypeHash()
-  if hash == nil or hash == 0 then
-    return nil
+  -- Read the hash first, as CityBannerManager does. GetSize() reads 0 in the
+  -- InGame context for a local seat even while the banner shows a build.
+  local okHash, hash = pcall(function() return bq:GetCurrentProductionTypeHash() end)
+  if okHash and hash ~= nil and hash ~= 0 then
+    return Civ6Ai_Production._HashToTypeName(hash)
   end
-  return Civ6Ai_Production._HashToTypeName(hash)
+  local okType, typeName = pcall(function() return bq:CurrentlyBuilding() end)
+  if okType and type(typeName) == "string" and typeName ~= "" and typeName ~= "NONE" then
+    return typeName
+  end
+  return nil
 end
 
 function Civ6Ai_Production._GetCityProductionState(city)
