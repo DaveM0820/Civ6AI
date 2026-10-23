@@ -753,6 +753,11 @@ def _best_purchase_labels(snapshot: dict[str, Any], limit: int = 3) -> list[str]
 
 def civ6_idle_resources_attention(snapshot: dict[str, Any]) -> str | None:
     """Unspent gold, faith, and envoys, with the concrete buys the snapshot already priced."""
+    return civ6_idle_resources(snapshot)[0]
+
+
+def civ6_idle_resources(snapshot: dict[str, Any]) -> tuple[str | None, bool]:
+    """(note, spends_gold). spends_gold is True when the note asks for a gold decision."""
     from sidecar.civ6_diplomacy import diplomacy
     from sidecar.civ6_governance import governance
 
@@ -787,12 +792,14 @@ def civ6_idle_resources_attention(snapshot: dict[str, Any]) -> str | None:
         envoys = _as_int(top.get("envoys_to_give"))
     if envoys is not None and envoys > 0:
         bits.append(f"{envoys} envoys unspent (the game's own AI sends them; do not order envoy)")
+    spends_gold = gold_idle
     if gold_idle or faith_idle:
         buys = _best_purchase_labels(snapshot)
         if buys:
             bits.append("Buy " + "; ".join(buys))
+            spends_gold = spends_gold or any("gold" in label.lower() for label in buys)
     if not bits:
-        return None
+        return None, False
     policies = gov.get("policies") if isinstance(gov.get("policies"), dict) else {}
     empty = _as_int(policies.get("empty_slots"))
     if empty and policies.get("change_allowed"):
@@ -802,7 +809,7 @@ def civ6_idle_resources_attention(snapshot: dict[str, Any]) -> str | None:
     routes = gov.get("routes") if isinstance(gov.get("routes"), dict) else {}
     if governors.get("can_appoint") and routes.get("governors", True) is not False:
         bits.append("a governor title is unassigned")
-    return "IDLE: " + ". ".join(bits) + "."
+    return "IDLE: " + ". ".join(bits) + ".", spends_gold
 
 
 def civ6_rejected_last_turn_attention(snapshot: dict[str, Any]) -> str | None:

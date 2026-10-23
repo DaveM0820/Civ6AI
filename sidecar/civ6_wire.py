@@ -896,18 +896,10 @@ def _event_log_rows(snapshot: dict[str, Any]) -> list[tuple[str, str]]:
         rows.append(("Idle", f"{len(idle)} units idle: {', '.join(names)}{extra}"))
     if civ6_apply_results.blocked_attention_lines(snapshot):
         rows.append(("Blocked", "(last turn's failed order: what went wrong and what you do differently)"))
-    for note in coaching.collect_civ6_attention_items(snapshot):
-        low = note.lower()
-        name = None
-        if low.startswith("explore") or "explor" in low[:40]:
-            name = "Explore"
-        elif "retreat" in low or "heal" in low[:60]:
-            name = "Wounded"
-        elif "focus" in low and "fire" in low:
-            name = "FocusFire"
-        elif "gold" in low or "bankrupt" in low or "amenit" in low:
-            name = "Economy"
-        if name and all(existing != name for existing, _ in rows):
+    from sidecar import civ6_attention
+
+    for name in civ6_attention.event_names(snapshot):
+        if all(existing != name for existing, _ in rows):
             rows.append((name, "(write this turn's thought on this item)"))
     return rows
 
@@ -2352,23 +2344,11 @@ def build_civ6_wire_prompt(
     war_lines = combat_wire.war_section_lines(context)
     if war_lines:
         sections.append(pipeline._wire_section("WAR", war_lines))
-    attention = list(coaching.collect_civ6_attention_items(context if isinstance(context, dict) else {}))
-    attention.extend(civ6_apply_results.blocked_attention_lines(context if isinstance(context, dict) else {}))
-    attention.extend(no_city_sites_lines(context))
-    attention.extend(combat_wire.attention_items(context))
-    attention.extend(economy_wire.attention_items(context))
-    attention.extend(gs_wire.attention_items(context))
-    attention.extend(governance_wire.attention_items(context))
+    from sidecar import civ6_attention
+
+    attention = civ6_attention.lines(context)
     if attention:
-        seen_attention: set[str] = set()
-        unique_attention: list[str] = []
-        for line in attention:
-            key = re.sub(r"\s+", " ", str(line).strip().lower())
-            if key in seen_attention:
-                continue
-            seen_attention.add(key)
-            unique_attention.append(line)
-        sections.append(pipeline._wire_section("ATTENTION", unique_attention))
+        sections.append(pipeline._wire_section(civ6_attention.SECTION, attention))
     thoughts = _thoughts_section(context)
     if thoughts:
         sections.append(pipeline._wire_section("THOUGHTS", thoughts))

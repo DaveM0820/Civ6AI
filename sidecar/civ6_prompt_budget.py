@@ -24,7 +24,9 @@ FOREIGN_CITY_KEEP = 8
 CHAT_KEEP = 5
 RANKINGS_KEEP = 12
 
-PROTECTED_SECTIONS = frozenset({"ATTENTION", "WAR", "REQUIRED COMMANDS"})
+from sidecar.civ6_attention import SECTION as ATTENTION_SECTION
+
+PROTECTED_SECTIONS = frozenset({ATTENTION_SECTION, "WAR", "REQUIRED COMMANDS"})
 
 _HEADER = re.compile(r"^=== (.+) ===\n", re.M)
 _THOUGHT_TURN = re.compile(r"^T(\d+)\.(situation|strategy)(?:\.vs\.orders)? = ")
