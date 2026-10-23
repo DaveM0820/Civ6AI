@@ -23,20 +23,16 @@ from pathlib import Path
 from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
+from sidecar.civ6_common import dct as _dct
+from sidecar.civ6_common import lst as _lst
+from sidecar.civ6_common import me as _me
+from sidecar.civ6_common import turn as _turn
 
 WAR_ACTIONS = frozenset({
     "DECLARE_WAR", "DECLARE_FORMAL_WAR", "FORMAL_WAR", "WAR",
     "DECLARE_SURPRISE_WAR", "SURPRISE_WAR",
 })
 SURPRISE_ACTIONS = frozenset({"DECLARE_SURPRISE_WAR", "SURPRISE_WAR"})
-
-
-def _lst(value: Any) -> list:
-    return value if isinstance(value, list) else []
-
-
-def _dct(value: Any) -> dict:
-    return value if isinstance(value, dict) else {}
 
 
 def _civ6(snapshot: dict) -> dict:
@@ -122,17 +118,6 @@ PACTS = {
 _ITEM = re.compile(r"^\s*(\d+)\s+([A-Za-z_]+)\s*$")
 _ITEM_REV = re.compile(r"^\s*([A-Za-z_]+)\s*[:x]\s*(\d+)\s*$")  # 'tobacco:2'
 _LABEL = re.compile(r"^\s*pacts?\b[^:]*:\s*", re.I)  # 'pacts (both ways): open_borders' -> 'open_borders'
-
-
-def _me(snapshot: dict) -> str:
-    return str(_dct(snapshot.get("decision")).get("player_id") or "")
-
-
-def _turn(snapshot: dict) -> int:
-    try:
-        return int(_dct(snapshot.get("decision")).get("turn"))
-    except (TypeError, ValueError):
-        return 0
 
 
 def _deals_path(snapshot: dict) -> Path | None:

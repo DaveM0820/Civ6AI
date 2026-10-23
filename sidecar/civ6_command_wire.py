@@ -13,6 +13,8 @@ import re
 from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
+from sidecar.civ6_common import hex_dist as _hex_dist
+from sidecar.civ6_common import plot_xy as _plot_xy
 
 ROW_PREFIX_RE = re.compile(r"^\s*\d+\s*[.):]\s*")
 _TOKEN_RE = re.compile(r"^\s*(?P<verb>[A-Za-z][A-Za-z0-9_]*)\s*(?:\((?P<args>.*)\))?\s*$")
@@ -49,14 +51,6 @@ def settle_marker_radius() -> int:
     except ValueError:
         value = SETTLE_MARKER_RADIUS_DEFAULT
     return max(3, min(5, value))
-
-
-def _plot_xy(plot_id: Any) -> tuple[int, int] | None:
-    text = str(plot_id or "")
-    match = re.match(r"^PLOT_(-?\d+)_(-?\d+)$", text)
-    if not match:
-        return None
-    return int(match.group(1)), int(match.group(2))
 
 
 def _city_plot_coords(city: dict[str, Any]) -> tuple[int, int] | None:
@@ -320,16 +314,6 @@ def production_token(build_id: Any, fixed: dict[str, Any] | None = None) -> str:
         if xy:
             return f"{text}@({xy[0]},{xy[1]})"
     return text or "item"
-
-
-def _plot_xy(fixed: dict[str, Any]) -> tuple[int, int] | None:
-    for key in ("plot_x", "x"):
-        if key in fixed:
-            try:
-                return int(fixed[key]), int(fixed.get(key.replace("x", "y")))
-            except (TypeError, ValueError):
-                return None
-    return None
 
 
 def city_command_token(command: dict[str, Any]) -> tuple[str, str] | None:
@@ -602,21 +586,6 @@ def _is_listed_settle_site(snapshot: dict[str, Any], unit: dict[str, Any] | None
     return any(row.get("x") == x and row.get("y") == y for row in labeled_settle_sites(snapshot))
 
 
-def _plot_xy_of_unit(unit: dict[str, Any] | None) -> tuple[int, int] | None:
-    if not isinstance(unit, dict):
-        return None
-    plot_id = unit.get("plot_id")
-    if not isinstance(plot_id, str) or not plot_id.startswith("PLOT_"):
-        return None
-    parts = plot_id.split("_")
-    if len(parts) < 3:
-        return None
-    try:
-        return int(parts[1]), int(parts[2])
-    except ValueError:
-        return None
-
-
 def _on_map(snapshot: dict[str, Any], x: int, y: int) -> bool:
     game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
     width, height = game.get("map_width"), game.get("map_height")
@@ -706,15 +675,6 @@ def _pick_improve(improves: list[tuple[str, str]], value: Any, coord: Any) -> st
     return chosen[1]
 
 
-def _hex_dist(x1: int, y1: int, x2: int, y2: int) -> int:
-    def cube(x: int, y: int) -> tuple[int, int, int]:
-        q = x - (y - (y & 1)) // 2
-        return q, y, -q - y
-
-    a, b = cube(x1, y1), cube(x2, y2)
-    return max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[2] - b[2]))
-
-
 def _legal_attack_at(snapshot: dict[str, Any], unit_id: str, x: int, y: int) -> str | None:
     """The offered AttackTo for this unit and tile, when the game already listed one."""
     for command in snapshot.get("legal_commands") or []:
@@ -751,7 +711,7 @@ def _synthesize_far_move(
         LAST_UNRESOLVED.append(f"dropped: off-map MoveTo({x},{y}) for {unit_id}")
         return None
     unit = _unit_row(snapshot, unit_id)
-    here = _plot_xy_of_unit(unit)
+    here = _plot_xy(unit)
     if here == (x, y):
         return _self_tile_command(snapshot, unit_id)
     if intent == INTENT_MOVE:
@@ -778,7 +738,7 @@ def _synthesize_far_move(
 
 def _synthesize_settle(snapshot: dict[str, Any], unit_id: str, x: int, y: int) -> str | None:
     unit = _unit_row(snapshot, unit_id)
-    here = _plot_xy_of_unit(unit)
+    here = _plot_xy(unit)
     settle = unit.get("settle") if isinstance(unit, dict) else None
     if here == (x, y) and isinstance(settle, dict) and settle.get("here_ok") is True:
         legal = snapshot.get("legal_commands") if isinstance(snapshot.get("legal_commands"), list) else []

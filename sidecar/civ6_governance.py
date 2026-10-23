@@ -18,6 +18,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from sidecar.civ6_common import dct as _dct
+from sidecar.civ6_common import lst as _lst
 from sidecar.civ6_legality import change_government_allowed
 
 REPLY_KEYS = (
@@ -26,14 +28,6 @@ REPLY_KEYS = (
     "greatperson.recruit", "greatperson.patronize",
 )
 FIXED_ARG_MAX = 128
-
-
-def _lst(value: Any) -> list:
-    return value if isinstance(value, list) else []
-
-
-def _dct(value: Any) -> dict:
-    return value if isinstance(value, dict) else {}
 
 
 # Sub-blocks the adapter's generic list coercion may wrap in a one-item list

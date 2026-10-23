@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
+from sidecar.civ6_common import hex_dist as _hex_dist
 
 CIV6_RETREAT_HEAL_HP_THRESHOLD = 30
 CIV6_EXPLORE_STALL_TURNS = 5
@@ -925,15 +926,6 @@ def _plot_fresh_coast(snapshot: dict[str, Any], plot_id: str) -> tuple[bool | No
         return (bool(fresh) if isinstance(fresh, bool) else None,
                 bool(coast) if isinstance(coast, bool) else None)
     return None, None
-
-
-def _hex_dist(ax: int, ay: int, bx: int, by: int) -> int:
-    """Odd-r offset hex distance (no X wrap)."""
-    def cube(x: int, y: int) -> tuple[int, int, int]:
-        q = x - (y - (y & 1)) // 2
-        return q, y, -q - y
-    a, b = cube(ax, ay), cube(bx, by)
-    return max(abs(a[0] - b[0]), abs(a[1] - b[1]), abs(a[2] - b[2]))
 
 
 def builder_improve_sites(snapshot: dict[str, Any], x: int, y: int, cap: int = 6) -> list[dict[str, Any]]:

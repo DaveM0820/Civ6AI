@@ -12,19 +12,15 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
+from sidecar.civ6_common import dct as _dct
+from sidecar.civ6_common import lst as _lst
+from sidecar.civ6_common import turn as _turn
+
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = ROOT / "config" / "civ6-turn-importance.json"
 FIELD_CAP_DEFAULT = 16000
 
 _SIT_NORM = re.compile(r"\s+")
-
-
-def _lst(value: Any) -> list:
-    return value if isinstance(value, list) else []
-
-
-def _dct(value: Any) -> dict:
-    return value if isinstance(value, dict) else {}
 
 
 def load_config() -> dict[str, Any]:
@@ -44,13 +40,6 @@ def field_cap() -> int:
 
 def clip_field(text: Any) -> str:
     return str(text or "").strip()[:field_cap()]
-
-
-def _turn(snapshot: dict[str, Any]) -> int:
-    try:
-        return int(_dct(snapshot.get("decision")).get("turn") or 0)
-    except (TypeError, ValueError):
-        return 0
 
 
 def _wars(snapshot: dict[str, Any]) -> set[str]:

@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any
 
 from sidecar import pipeline_v2 as pipeline
+from sidecar.civ6_common import me as _me
+from sidecar.civ6_common import turn as _turn
 
 SITUATION_CAP = 80
 MILESTONE_CAP = 12
@@ -42,17 +44,6 @@ _OBJECTIVE_RE = re.compile(
 )
 _BY_TURN_RE = re.compile(r"\bby\s+T?(\d+)\s*$", re.I)
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]")
-
-
-def _turn(snapshot: dict) -> int:
-    try:
-        return int((snapshot.get("decision") or {}).get("turn") or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _me(snapshot: dict) -> str:
-    return str((snapshot.get("decision") or {}).get("player_id") or "")
 
 
 def _name(snapshot: dict, player_id: str) -> str:

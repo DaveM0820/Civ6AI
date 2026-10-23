@@ -14,6 +14,13 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
+from sidecar.civ6_common import dct as _dct
+from sidecar.civ6_common import lst as _lst
+from sidecar.civ6_common import me as _me
+from sidecar.civ6_common import plot_xy
+from sidecar.civ6_common import turn as _turn
+from sidecar.civ6_common import unit_by_id as _unit_by_id
+
 BLACKLIST_TURNS = 10
 REJECTION_PROMPT_CAP = 5
 STATE_NAME = "legality.json"
@@ -42,42 +49,6 @@ ROLE_OF_CLASS = {
     "FORMATION_CLASS_AIR": "military",
     "FORMATION_CLASS_SUPPORT": "military",
 }
-
-_PLOT_ID_RE = re.compile(r"PLOT_(-?\d+)_(-?\d+)$")
-
-
-def _lst(value: Any) -> list:
-    return value if isinstance(value, list) else []
-
-
-def _dct(value: Any) -> dict:
-    return value if isinstance(value, dict) else {}
-
-
-def _turn(snapshot: dict[str, Any]) -> int:
-    try:
-        return int(_dct(snapshot.get("decision")).get("turn") or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _me(snapshot: dict[str, Any]) -> str:
-    return str(_dct(snapshot.get("decision")).get("player_id") or "")
-
-
-def plot_xy(row: dict[str, Any] | None) -> tuple[int, int] | None:
-    if not isinstance(row, dict):
-        return None
-    try:
-        if row.get("x") is not None and row.get("y") is not None:
-            return int(row["x"]), int(row["y"])
-    except (TypeError, ValueError):
-        pass
-    match = _PLOT_ID_RE.search(str(row.get("plot_id") or ""))
-    if match:
-        return int(match.group(1)), int(match.group(2))
-    return None
-
 
 def known_plots(snapshot: dict[str, Any]) -> dict[tuple[int, int], dict[str, Any]]:
     known = _dct(snapshot.get("known_map"))
@@ -144,13 +115,6 @@ def unit_role(unit: dict[str, Any]) -> str | None:
     if str(unit.get("domain_id") or "") in {"DOMAIN_LAND", "DOMAIN_SEA", "DOMAIN_AIR"}:
         if typ.startswith("UNIT_"):
             return "military"
-    return None
-
-
-def _unit_by_id(snapshot: dict[str, Any], unit_id: str) -> dict[str, Any] | None:
-    for unit in _lst(snapshot.get("your_units")):
-        if isinstance(unit, dict) and str(unit.get("unit_id") or "") == unit_id:
-            return unit
     return None
 
 

@@ -1262,23 +1262,6 @@ def _explore_substitute(snapshot: dict[str, Any], dropped_move: dict[str, Any],
     return sub
 
 
-_PLOT_ID_RE = re.compile(r"PLOT_(-?\d+)_(-?\d+)$")
-
-
-def _plot_xy(row: dict[str, Any] | None) -> tuple[int, int] | None:
-    if not isinstance(row, dict):
-        return None
-    try:
-        if row.get("x") is not None and row.get("y") is not None:
-            return int(row["x"]), int(row["y"])
-    except (TypeError, ValueError):
-        pass
-    match = _PLOT_ID_RE.search(str(row.get("plot_id") or ""))
-    if match:
-        return int(match.group(1)), int(match.group(2))
-    return None
-
-
 def _own_occupied_plots(snapshot: dict[str, Any]) -> dict[tuple[int, int], list[str]]:
     from sidecar.civ6_legality import own_occupied_plots
 
