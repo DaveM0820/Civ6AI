@@ -221,6 +221,7 @@ class Civ6WirePromptTests(unittest.TestCase):
 
         snap = {"civ6": {"governance": {"government": {
             "current": "GOVERNMENT_CHIEFDOM",
+            "change_allowed": True,
             "available": [{"id": "GOVERNMENT_CHIEFDOM"}, {"id": "GOVERNMENT_AUTOCRACY"}],
         }}}, "legal_commands": []}
         ids, notes = gov.bind_reply(snap, "government", "CHIEFDOM")

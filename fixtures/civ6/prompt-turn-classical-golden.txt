@@ -95,6 +95,9 @@ rival.Cleopatra.civ = EGYPT
 rival.Cleopatra.score = 138
 rival.Cleopatra.attitude = ATTITUDE_CAUTIOUS
 
+=== ATTENTION ===
+OCCUPIED: your units already stand on (14,22), (15,23), (16,24). Do not MoveTo those tiles (builders and rams included).
+
 === THOUGHTS ===
 history.memory = Expand to third city after Pottery; scout eastern coast.
 
