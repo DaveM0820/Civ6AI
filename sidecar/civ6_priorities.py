@@ -253,6 +253,49 @@ def priorities_supported(snapshot: dict) -> bool:
     return isinstance(block, dict) and isinstance(block.get("priorities"), list)
 
 
+def _empty_city_names(snapshot: dict) -> list[str]:
+    names: list[str] = []
+    for city in snapshot.get("your_cities") or []:
+        if not isinstance(city, dict):
+            continue
+        production = city.get("production") if isinstance(city.get("production"), dict) else {}
+        item = production.get("item_id")
+        if item and str(item).upper() not in ("NONE", "NULL"):
+            continue
+        names.append(str(city.get("name") or city.get("city_id") or "city"))
+    return names
+
+
+def empty_queue_nudge(snapshot: dict, commands: list) -> dict | None:
+    """One priority packet so the engine queues a build. The model already chose if it sent one."""
+    if not priorities_supported(snapshot) or not _empty_city_names(snapshot):
+        return None
+    if any(isinstance(row, dict) and row.get("kind") == COMMAND_KIND for row in commands):
+        return None
+    levels = current_levels(snapshot)
+    sample = next((city for city in snapshot.get("your_cities") or [] if isinstance(city, dict)), None)
+    situation = situation_for_city(snapshot, sample or {})
+    expansion = BY_KEY["expansion"]["id"]
+    if situation.get("need_expansion") and _major_war_count(snapshot) <= 0:
+        want = 2 if situation.get("city_target") and int(situation["city_target"]) > (
+            sum(1 for row in snapshot.get("your_cities") or [] if isinstance(row, dict)) + 2
+        ) else 1
+        if levels.get(expansion, 0) < want:
+            return {
+                "command_id": command_id(expansion, want),
+                "kind": COMMAND_KIND,
+                "arguments": {"priority_id": expansion, "priority_level": want},
+            }
+    if not any(BY_ID[cid]["group"] == "posture" for cid in levels):
+        peace = BY_KEY["peace"]["id"]
+        return {
+            "command_id": command_id(peace, 1),
+            "kind": COMMAND_KIND,
+            "arguments": {"priority_id": peace, "priority_level": 1},
+        }
+    return None
+
+
 def inject_legal_commands(snapshot: dict) -> int:
     """Add one legal command per category and level (0 switches it off)."""
     if not priorities_supported(snapshot):
@@ -291,6 +334,16 @@ def _fmt(levels: dict[int, int]) -> str:
 _WEIGHT_FIELDS = ("yields", "pseudo", "classes", "districts")
 MILITARY_KEYS = ("war", "total_war", "naval_war", "naval_total_war", "domination_victory")
 EXPANSION_TURN_CAP = 100
+# Online speed, turn 70: 6 cities, or 8 while land is still free. Other speeds
+# scale by their cost multiplier (Standard is about twice as many turns).
+ONLINE_AIM_TURN = 70
+_SPEED_PERCENT = {
+    "GAMESPEED_ONLINE": 200,
+    "GAMESPEED_QUICK": 150,
+    "GAMESPEED_STANDARD": 100,
+    "GAMESPEED_EPIC": 67,
+    "GAMESPEED_MARATHON": 33,
+}
 THREAT_DISTANCE = 4
 _ERAS = {
     "ERA_ANCIENT": 0, "ERA_CLASSICAL": 1, "ERA_MEDIEVAL": 2, "ERA_RENAISSANCE": 3,
@@ -332,6 +385,16 @@ def weight_vector(levels: dict[int, int], half_war: bool = False) -> dict[str, i
     return acc
 
 
+def city_count_target(turn: int, land_free: bool, speed: str | None = None) -> int:
+    """Cities to aim for on this turn. Online T70 is 6, or 8 while land is free."""
+    num = _SPEED_PERCENT.get(str(speed or "GAMESPEED_ONLINE").upper(), 200)
+    online = (max(0, int(turn)) * num) // 200
+    if online > ONLINE_AIM_TURN:
+        online = ONLINE_AIM_TURN
+    span = 6 if land_free else 4
+    return 2 + (span * online) // ONLINE_AIM_TURN
+
+
 def compose_situation(
     *,
     saved: dict[int, int] | None = None,
@@ -350,6 +413,7 @@ def compose_situation(
     missing_district: bool | None = None,
     last: str | None = None,
     unit_counts: dict[str, int] | None = None,
+    speed: str | None = None,
 ) -> dict:
     """Saved priorities, or peace:1 when the seat has no posture, plus the situation overlays."""
     levels: dict[int, int] = {}
@@ -363,8 +427,10 @@ def compose_situation(
         war_id = BY_KEY["war"]["id"]
         if levels.get(war_id, 0) < 1:
             levels[war_id] = 1
-    target = min(8, 3 + max(0, int(era)))
-    need_expansion = int(cities) < target and int(turn) <= EXPANSION_TURN_CAP and int(pop) >= 2 and bool(land)
+    target = city_count_target(int(turn), bool(land), speed)
+    # A major war keeps the war list in charge, including the settler penalty.
+    below_target = int(cities) < target and int(turn) <= EXPANSION_TURN_CAP and int(pop) >= 2 and bool(land)
+    need_expansion = below_target and int(major_wars) <= 0
     need_builders = int(builders) < int(cities)
     needed = int(cities)
     if major_wars > 0:
@@ -378,10 +444,14 @@ def compose_situation(
         defense_id = BY_KEY["defense"]["id"]
         if levels.get(defense_id, 0) < 1:
             levels[defense_id] = 1
-    if need_expansion:
+    # A major war keeps the war list in charge. At peace, expansion stays on
+    # while the seat is short of the turn target, and goes to strong when it
+    # is more than two cities behind.
+    if need_expansion and int(major_wars) <= 0:
         expansion_id = BY_KEY["expansion"]["id"]
-        if levels.get(expansion_id, 0) < 1:
-            levels[expansion_id] = 1
+        want = 2 if int(cities) + 2 < target else 1
+        if levels.get(expansion_id, 0) < want:
+            levels[expansion_id] = want
     if need_builders:
         improve_id = BY_KEY["improvements"]["id"]
         if levels.get(improve_id, 0) < 1:
@@ -391,6 +461,8 @@ def compose_situation(
         "levels": levels,
         "half_war": half_war,
         "military_over": int(military) >= needed + 2,
+        "army_heavy": int(major_wars) <= 0 and int(military) > int(cities) * 2,
+        "city_target": target,
         "missing_monument": missing_monument is True,
         "missing_granary": missing_granary is True,
         "missing_district": missing_district is True,
@@ -526,8 +598,11 @@ def item_score(type_id: str, tags: list[str], situation: dict, kind: str = "", w
             continue
         seen.add(tag)
         score += int(weights.get(tag, 0))
-    if situation.get("military_over") and "PSEUDOYIELD_UNIT_COMBAT" in seen:
-        score -= 40
+    if "PSEUDOYIELD_UNIT_COMBAT" in seen:
+        if situation.get("army_heavy"):
+            score -= 80
+        elif situation.get("military_over"):
+            score -= 40
     if situation.get("missing_monument") and type_id == "BUILDING_MONUMENT":
         score += 15
     if situation.get("missing_granary") and type_id == "BUILDING_GRANARY":
@@ -578,6 +653,12 @@ def _era_index(snapshot: dict) -> int:
         if isinstance(value, str) and value in _ERAS:
             return _ERAS[value]
     return 0
+
+
+def _game_speed(snapshot: dict) -> str | None:
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    speed = game.get("game_speed_id") or game.get("speed")
+    return str(speed) if isinstance(speed, str) and speed else None
 
 
 def _game_turn(snapshot: dict) -> int:
@@ -703,6 +784,7 @@ def situation_for_city(snapshot: dict, city: dict) -> dict:
         cities=cities or 1,
         pop=_city_population(snapshot, city),
         land=not (snapshot.get("_settlers_no_walkable_site") or snapshot.get("_no_city_sites")),
+        speed=_game_speed(snapshot),
         turn=_game_turn(snapshot),
         era=_era_index(snapshot),
         builders=builders,

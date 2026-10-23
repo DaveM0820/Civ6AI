@@ -161,6 +161,46 @@ class LuaRankingsTests(unittest.TestCase):
         self.assertEqual(me["religion"], "Buddhism")
         self.assertNotIn("religion", p2)
 
+    def test_zero_player_yield_uses_the_city_sum(self):
+        self.lua.execute(r"""
+          YieldTypes = {SCIENCE = "SCIENCE", CULTURE = "CULTURE"}
+          Players[0].GetTechs = function() return {GetScienceYield = function() return 0 end} end
+          Players[0].GetCulture = function()
+            return {
+              GetCultureYield = function() return 0 end,
+              GetStaycationers = function() return 0 end,
+              GetTouristsTo = function() return 0 end,
+              GetTouristsFrom = function() return 0 end,
+              IsDominantOver = function() return false end,
+            }
+          end
+          Players[0].GetCities = function()
+            local city = {
+              GetYield = function(_, kind)
+                if kind == "SCIENCE" then return 7 end
+                if kind == "CULTURE" then return 3 end
+                return 0
+              end,
+              IsOriginalCapital = function() return true end,
+              GetOriginalOwner = function() return 0 end,
+            }
+            return {
+              GetCapitalCity = function() return city end,
+              GetCount = function() return 1 end,
+              Members = function()
+                local done = false
+                return function()
+                  if not done then done = true; return 1, city end
+                end
+              end,
+            }
+          end
+        """)
+        block = _to_py(self.lua.eval("Civ6Ai_Snapshot._BuildRankings(0)"))
+        me = next(row for row in block["players"] if row["player_id"] == "PLAYER_0")
+        self.assertEqual(me["science_yield"], 7)
+        self.assertEqual(me["culture_yield"], 3)
+
     def test_missing_methods_never_raise(self):
         self.lua.execute("GameInfo.Governors = nil; Game.GetVictoryProgressForTeam = nil; Players[1].GetStats = nil")
         block = _to_py(self.lua.eval("Civ6Ai_Snapshot._BuildRankings(0)"))

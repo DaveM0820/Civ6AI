@@ -260,16 +260,33 @@ def append_apply_results(civ6ai_root: Path, session_id: str, rows: list[dict[str
     return written
 
 
+def _mirror_body(rest: str, encoded: bool) -> tuple[str, str] | None:
+    path, bar, line = rest.partition("|")
+    if not bar or not path or path.replace("\\", "/").lower().endswith(APPLY_RESULTS_NAME):
+        return None
+    if encoded:
+        try:
+            line = base64.b64decode(line).decode("utf-8")
+        except (ValueError, UnicodeError):
+            return None
+    return path, line
+
+
 def record_failed_appends(civ6ai_root: Path, chunk: str) -> int:
-    """The in-game Lua has no file I/O: write its io|append_failed|<path>|<line> lines
-    (chat_log, chat_replay, ...) under civ6ai_root. apply-results has its own path above."""
+    """The in-game Lua has no file I/O. Chat arrives as io|mirror|<path>|<base64>.
+    Other logs still use io|append_failed|<path>|<line>. apply-results has its own path."""
     root = str(civ6ai_root.resolve()).replace("\\", "/").lower()
     n = 0
     for raw in chunk.splitlines():
-        _, sep, rest = raw.partition("CIV6AI|io|append_failed|")
-        path, bar, line = rest.partition("|")
-        if not sep or not bar or path.endswith(APPLY_RESULTS_NAME):
+        body = None
+        for prefix, encoded in (("CIV6AI|io|mirror|", True), ("CIV6AI|io|append_failed|", False)):
+            _, sep, rest = raw.partition(prefix)
+            if sep:
+                body = _mirror_body(rest, encoded)
+                break
+        if body is None:
             continue
+        path, line = body
         target = Path(path)
         if not str(target.resolve()).replace("\\", "/").lower().startswith(root):
             continue

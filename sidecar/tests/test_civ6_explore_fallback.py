@@ -88,7 +88,8 @@ class BuilderTests(unittest.TestCase):
             else:
                 os.environ["CIV4AI_MAP_IMAGE_CADENCE"] = previous
         self.assertIn("(43,14) Wheat", line)
-        self.assertLess(line.index("(43,14)"), line.index("(44,15)"))
+        self.assertIn("owned unimproved", line)
+        self.assertNotIn("(44,15)", line)
         self.assertNotIn("(45,14)", line)
 
     def test_builder_tile_list_dropped_when_map_image_attached(self):
@@ -134,8 +135,9 @@ def test_improve_token_and_resolve():
     assert cw.resolve_unit_token(snap, "UNIT_7", "Improve(3,4,MINE)").endswith("MINE_improve_3_4")
     moved = cw.resolve_unit_token(snap, "UNIT_7", "MoveTo(8,9)")
     assert moved is None or "improve" not in moved
-    assert cw.resolve_unit_token(snap, "UNIT_7", "Improve(8,9,IMPROVEMENT_FARM)") is None
-    assert any("Improve token unresolved: (8,9)" in note for note in cw.LAST_UNRESOLVED)
+    resolved = cw.resolve_unit_token(snap, "UNIT_7", "Improve(8,9,IMPROVEMENT_FARM)")
+    assert resolved is not None and resolved.endswith("FARM_improve_9_9")
+    assert not any("unresolved" in note for note in cw.LAST_UNRESOLVED)
 
 
 def test_improve_substitute_nearest():

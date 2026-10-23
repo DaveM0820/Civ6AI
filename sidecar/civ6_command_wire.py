@@ -674,23 +674,36 @@ def _self_tile_command(snapshot: dict[str, Any], unit_id: str) -> str | None:
     })
 
 
+def _improve_xy(token: str) -> tuple[int, int] | None:
+    found = _COORD_RE.search(token)
+    if not found:
+        return None
+    return int(found.group(1)), int(found.group(2))
+
+
 def _pick_improve(improves: list[tuple[str, str]], value: Any, coord: Any) -> str | None:
-    """The Improve offer for that exact tile. A different tile is unresolved."""
-    if not coord:
+    """The Improve offer for that tile. An invalid tile uses the nearest owned offer."""
+    if not coord or not improves:
         return None
     x, y = int(coord.group(1)), int(coord.group(2))
-    here = [(t, c) for t, c in improves
-            if (int(_COORD_RE.search(t).group(1)), int(_COORD_RE.search(t).group(2))) == (x, y)]
+    here = [(t, c) for t, c in improves if _improve_xy(t) == (x, y)]
     want = _norm(value)
     for t, c in here:
         imp = t.rsplit(",", 1)[-1].rstrip(")").lower()
         if imp in want or imp.replace("improvement_", "") in want:
             return c
+    if here:
+        return here[0][1]
     named = re.search(r"improvement_[a-z0-9_]+", str(value).lower())
-    if named or not here:
-        LAST_UNRESOLVED.append(f"Improve token unresolved: ({x},{y}) not offered for this builder")
-        return None
-    return here[0][1]
+
+    def rank(pair: tuple[str, str]) -> tuple[int, int]:
+        token, _cmd = pair
+        xy = _improve_xy(token) or (x, y)
+        named_penalty = 0 if named and named.group(0) in token.lower() else (1 if named else 0)
+        return named_penalty, _hex_dist(x, y, xy[0], xy[1])
+
+    chosen = min(improves, key=rank)
+    return chosen[1]
 
 
 def _hex_dist(x1: int, y1: int, x2: int, y2: int) -> int:

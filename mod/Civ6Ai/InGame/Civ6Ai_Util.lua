@@ -216,14 +216,20 @@ function Civ6Ai_Util._IsApplyResults(path)
   return string.find(tostring(path or ""), "apply-results.jsonl", 1, true) ~= nil
 end
 
+function Civ6Ai_Util._IsChatLog(path)
+  local text = tostring(path or "")
+  return string.find(text, "chat_log.jsonl", 1, true) ~= nil
+      or string.find(text, "chat_replay.txt", 1, true) ~= nil
+end
+
 function Civ6Ai_Util.AppendTextLine(path, line)
   -- Apply results are recovered from the CIV6AI|jsonl| line AppendJsonLine
   -- prints when this returns false. The gameplay AppendFile cannot create the
   -- file, so each result was also logged as io|append_failed (about a dozen
   -- lines a turn, the same row the bridge already reads from jsonl). Once a
   -- results write has failed, or the probe already found no file io, skip the
-  -- open and do not log that failure. Chat and other logs still emit
-  -- append_failed: that line is how the bridge copies them onto disk.
+  -- open and do not log that failure. Chat uses one io|mirror line (base64)
+  -- so a chat row cannot split the log. Other logs still emit append_failed.
   if Civ6Ai_Util._IsApplyResults(path)
       and (Civ6Ai_Util._resultsIoDead == true or Civ6Ai_Util._fileIoOk == false) then
     return false
@@ -269,6 +275,14 @@ function Civ6Ai_Util.AppendTextLine(path, line)
   end
   if Civ6Ai_Util._IsApplyResults(path) then
     Civ6Ai_Util._resultsIoDead = true
+    return false
+  end
+  -- Chat cannot use the file. A raw append_failed line carries the text, and
+  -- a newline or a huge row splits Lua.log so later apply rows never arrive.
+  -- One base64 mirror line is what the bridge writes to disk.
+  if Civ6Ai_Util._IsChatLog(path) then
+    local payload = string.gsub(tostring(line or ""), "\n", " ")
+    Civ6Ai_Util.Log("io|mirror|" .. tostring(path) .. "|" .. Civ6Ai_Util.Base64Encode(payload))
     return false
   end
   if why ~= nil then

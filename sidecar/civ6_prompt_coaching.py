@@ -511,6 +511,187 @@ def civ6_loyalty_attention(snapshot: dict[str, Any]) -> list[str]:
     return notes
 
 
+def _as_int(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _unit_id_from(value: Any) -> str | None:
+    text = str(value or "")
+    start = text.find("UNIT_")
+    while start >= 0:
+        cursor = start + len("UNIT_")
+        if cursor < len(text) and text[cursor].isdigit():
+            while cursor < len(text) and (text[cursor].isdigit() or text[cursor] == "_"):
+                cursor += 1
+            token = text[start:cursor].rstrip("_")
+            if any(ch.isdigit() for ch in token):
+                return token
+        start = text.find("UNIT_", start + len("UNIT_"))
+    return None
+
+
+def explore_quiet_units(snapshot: dict[str, Any], turns_needed: int = 2) -> list[str]:
+    """Units whose explore orders revealed nothing on this many distinct turns."""
+    history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
+    rows = history.get("command_results") if isinstance(history.get("command_results"), list) else []
+    by_unit: dict[str, set[int]] = {}
+    for item in rows:
+        if not isinstance(item, dict) or "explore_no_reveal" not in str(item.get("reason") or ""):
+            continue
+        turn = _as_int(item.get("turn"))
+        if turn is None:
+            continue
+        blobs = [item.get("identity"), item.get("command_id"), *(item.get("affected_ids") or [])]
+        for blob in blobs:
+            unit_id = _unit_id_from(blob)
+            if unit_id:
+                by_unit.setdefault(unit_id, set()).add(turn)
+    return sorted(unit for unit, turns in by_unit.items() if len(turns) >= turns_needed)
+
+
+def civ6_expansion_attention(snapshot: dict[str, Any]) -> str | None:
+    """City-count target for this turn, and settler due when a city can train one."""
+    from sidecar.civ6_priorities import ONLINE_AIM_TURN, _SPEED_PERCENT, _game_speed, situation_for_city
+
+    cities = [city for city in snapshot.get("your_cities") or [] if isinstance(city, dict)]
+    if not cities:
+        return None
+    situation = situation_for_city(snapshot, cities[0])
+    target = _as_int(situation.get("city_target"))
+    if target is None or len(cities) >= target:
+        return None
+    speed = str(_game_speed(snapshot) or "GAMESPEED_ONLINE").upper()
+    percent = _SPEED_PERCENT.get(speed, 200) or 200
+    aim_turn = (ONLINE_AIM_TURN * 200) // percent
+    speed_name = speed.replace("GAMESPEED_", "").title() or "Online"
+    band = "6-8" if situation.get("land") is not False else "6"
+    line = (
+        f"EXPANSION: {len(cities)} cities. On {speed_name}, aim for {band} cities by turn {aim_turn} "
+        f"(this turn's target is {target})."
+    )
+    if situation.get("need_expansion"):
+        line += " Settler due."
+    return line
+
+
+def civ6_military_cap_attention(snapshot: dict[str, Any]) -> str | None:
+    """Soft cap: at peace, an army more than twice the city count should stop growing."""
+    from sidecar.civ6_priorities import _unit_counts, situation_for_city
+
+    cities = [city for city in snapshot.get("your_cities") or [] if isinstance(city, dict)]
+    if not cities:
+        return None
+    situation = situation_for_city(snapshot, cities[0])
+    if not situation.get("army_heavy"):
+        return None
+    _, military = _unit_counts(snapshot)
+    return (
+        f"MILITARY: {military} military units for {len(cities)} cities, and you are at peace. "
+        "That is more than twice your cities. Favour settlers, builders, and districts over more combat units "
+        "until a war starts."
+    )
+
+
+def _best_purchase_labels(snapshot: dict[str, Any], limit: int = 3) -> list[str]:
+    cities = {
+        str(city.get("city_id")): pipeline._city_prompt_name(city)
+        for city in snapshot.get("your_cities") or []
+        if isinstance(city, dict)
+    }
+    rows: list[tuple[int, int, str]] = []
+    for command in snapshot.get("legal_commands") or []:
+        if not isinstance(command, dict) or command.get("kind") != "purchase_item":
+            continue
+        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+        item = str(fixed.get("item_id") or "")
+        cost = _as_int(fixed.get("cost"))
+        if not item or cost is None:
+            continue
+        yield_name = str(fixed.get("yield") or "gold")
+        city = cities.get(str(fixed.get("city_id") or ""), str(fixed.get("city_id") or "a city"))
+        rank = 0 if "SETTLER" in item else 1 if "BUILDER" in item else 2
+        rows.append((rank, cost, f"{item} in {city} ({cost} {yield_name})"))
+    rows.sort()
+    labels: list[str] = []
+    for _, _, label in rows:
+        if label in labels:
+            continue
+        labels.append(label)
+        if len(labels) >= limit:
+            break
+    return labels
+
+
+def civ6_idle_resources_attention(snapshot: dict[str, Any]) -> str | None:
+    """Unspent gold, faith, and envoys, with the concrete buys the snapshot already priced."""
+    from sidecar.civ6_diplomacy import diplomacy
+    from sidecar.civ6_governance import governance
+
+    bits: list[str] = []
+    empire = snapshot.get("your_empire") if isinstance(snapshot.get("your_empire"), dict) else {}
+    gold = _as_int(empire.get("gold"))
+    gpt = _as_int(empire.get("gold_per_turn"))
+    gold_idle = gold is not None and (
+        gold >= 300 or (gpt is not None and gpt > 0 and gold > 8 * gpt)
+    )
+    if gold_idle and gold is not None:
+        extra = f", more than 8 turns of +{gpt}/turn" if gpt is not None and gpt > 0 and gold > 8 * gpt else ""
+        bits.append(f"{gold} gold unspent{extra}")
+    gov = governance(snapshot)
+    religion = gov.get("religion") if isinstance(gov.get("religion"), dict) else {}
+    faith = _as_int(religion.get("faith"))
+    faith_rate = _as_int(religion.get("faith_per_turn"))
+    cost = _as_int(religion.get("pantheon_cost")) or 25
+    faith_idle = faith is not None and faith > 0 and (
+        faith >= cost
+        or faith >= 50
+        or (faith_rate is not None and faith_rate > 0 and faith > 8 * faith_rate)
+    )
+    if faith_idle and faith is not None:
+        if religion.get("can_found_pantheon"):
+            bits.append(f"{faith} faith, enough for a pantheon ({cost})")
+        else:
+            bits.append(f"{faith} faith unspent")
+    envoys = _as_int(diplomacy(snapshot).get("envoys_to_give"))
+    if envoys is None:
+        top = snapshot.get("diplomacy") if isinstance(snapshot.get("diplomacy"), dict) else {}
+        envoys = _as_int(top.get("envoys_to_give"))
+    if envoys is not None and envoys > 0:
+        bits.append(f"{envoys} envoys unspent (the game's own AI sends them; do not order envoy)")
+    if gold_idle or faith_idle:
+        buys = _best_purchase_labels(snapshot)
+        if buys:
+            bits.append("Buy " + "; ".join(buys))
+    if not bits:
+        return None
+    policies = gov.get("policies") if isinstance(gov.get("policies"), dict) else {}
+    empty = _as_int(policies.get("empty_slots"))
+    if empty and policies.get("change_allowed"):
+        noun = "slot" if empty == 1 else "slots"
+        bits.append(f"{empty} empty policy {noun}")
+    governors = gov.get("governors") if isinstance(gov.get("governors"), dict) else {}
+    routes = gov.get("routes") if isinstance(gov.get("routes"), dict) else {}
+    if governors.get("can_appoint") and routes.get("governors", True) is not False:
+        bits.append("a governor title is unassigned")
+    return "IDLE: " + ". ".join(bits) + "."
+
+
+def civ6_explore_quiet_attention(snapshot: dict[str, Any]) -> str | None:
+    quiet = explore_quiet_units(snapshot)
+    if not quiet:
+        return None
+    noun = "unit" if len(quiet) == 1 else "units"
+    return (
+        f"EXPLORE: {len(quiet)} {noun} revealed nothing for 2 turns. "
+        "Automate(explore) is hidden for them. MoveTo a frontier tile instead."
+    )
+
+
 def collect_civ6_attention_items(snapshot: dict[str, Any]) -> list[str]:
     items: list[str] = []
     for fn in (
@@ -519,6 +700,10 @@ def collect_civ6_attention_items(snapshot: dict[str, Any]) -> list[str]:
         civ6_lethargy_attention,
         civ6_low_hp_retreat_attention,
         civ6_focus_fire_attention,
+        civ6_expansion_attention,
+        civ6_military_cap_attention,
+        civ6_explore_quiet_attention,
+        civ6_idle_resources_attention,
     ):
         note = fn(snapshot)
         if note:
@@ -680,9 +865,11 @@ def builder_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
 
     offers = _improve_offer_tokens(unit, snapshot)
     if offers:
+        more = f" and {len(offers) - 1} more" if len(offers) > 1 else ""
         return [pipeline._wire_line(
             f"{prefix}.improve",
-            "; ".join(offers) + " — it walks there and builds on arrival",
+            f"{len(offers)} owned unimproved tiles near this builder; nearest {offers[0]}{more}. "
+            "An invalid Improve tile is replaced by the nearest owned site.",
         )]
     if pipeline.map_image_attach_turn(snapshot):
         return [pipeline._wire_line(
@@ -697,13 +884,13 @@ def builder_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
         sites = builder_improve_sites(snapshot, *xy)
     if not sites:
         return [pipeline._wire_line(f"{prefix}.improve.sites", "none inside your borders; move toward a city's tiles")]
-    labels = []
-    for s in sites:
-        res = str(s["resource"] or "").replace("RESOURCE_", "").title()
-        labels.append(f"({s['x']},{s['y']})" + (f" {res}" if res else "") + f", dist {s['dist']}")
+    nearest = sites[0]
+    res = str(nearest["resource"] or "").replace("RESOURCE_", "").title()
+    where = f"({nearest['x']},{nearest['y']})" + (f" {res}" if res else "")
     return [pipeline._wire_line(
         f"{prefix}.improve.sites",
-        "; ".join(labels) + " — order Improve(x,y,IMPROVEMENT_X) from its legal list: it walks there and builds on arrival",
+        f"{len(sites)} owned unimproved tiles near this builder; nearest {where}. "
+        "Order Improve(x,y,IMPROVEMENT_X) for that tile. An invalid tile is replaced by the nearest owned site.",
     )]
 
 

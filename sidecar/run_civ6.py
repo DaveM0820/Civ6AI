@@ -281,7 +281,11 @@ def _build_approved_record(
     validated = copy.deepcopy(validated)
     validated["chat_messages"] = chats
     from sidecar import civ6_command_wire
+    from sidecar.civ6_priorities import empty_queue_nudge
 
+    nudge = empty_queue_nudge(snapshot, commands)
+    if nudge is not None:
+        commands.append(nudge)
     commands = [civ6_command_wire.pack_apply_command(snapshot, item) for item in commands]
     unresolved = civ6_command_wire.take_unresolved()
     dropped = list(repeat_notes) + list(chat_notes) + list(buy_notes) + list(contra_notes)

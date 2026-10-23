@@ -114,6 +114,51 @@ class ProductionScoreTests(unittest.TestCase):
             self.assertLess(scores["UNIT_SETTLER"], scores["BUILDING_GRANARY"])
             self.assertEqual("BUILDING_GRANARY", prio.pick_build(_basic(), situation)[0])
 
+    def test_online_city_target_and_army_soft_cap(self):
+        self.assertEqual(8, prio.city_count_target(70, True, "GAMESPEED_ONLINE"))
+        self.assertEqual(6, prio.city_count_target(70, False, "GAMESPEED_ONLINE"))
+        self.assertEqual(2, prio.city_count_target(10, True))
+        self.assertEqual(5, prio.city_count_target(40, True))
+        self.assertEqual(8, prio.city_count_target(140, True, "GAMESPEED_STANDARD"))
+        self.assertEqual(5, prio.city_count_target(70, True, "GAMESPEED_STANDARD"))
+        behind = prio.compose_situation(cities=3, pop=4, land=True, turn=70, military=1, builders=1)
+        self.assertEqual(8, behind["city_target"])
+        self.assertEqual(2, behind["levels"][prio.BY_KEY["expansion"]["id"]])
+        early = prio.compose_situation(cities=1, pop=2, land=True, turn=10, military=1, builders=1)
+        self.assertEqual(1, early["levels"][prio.BY_KEY["expansion"]["id"]])
+        heavy = prio.compose_situation(cities=4, pop=4, land=True, turn=70, military=16, builders=4)
+        self.assertTrue(heavy["army_heavy"])
+        warrior = _cand("UNIT_WARRIOR", {"combat": 20})
+        self.assertEqual(-100, prio.item_score(warrior["id"], warrior["tags"], heavy, warrior["kind"]))
+        at_war = prio.compose_situation(major_wars=1, cities=4, pop=4, land=True, turn=70, military=16)
+        self.assertFalse(at_war["army_heavy"])
+
+    def test_empty_queue_nudge_raises_expansion_or_peace(self):
+        short = {
+            "decision": {"turn": 70, "player_id": "PLAYER_1"},
+            "game": {"turn": 70, "game_speed_id": "GAMESPEED_ONLINE"},
+            "your_cities": [{"city_id": "CITY_1", "name": "Capital", "population": 12,
+                             "production": {"item_id": "NONE"}}],
+            "your_units": [],
+            "civ6": {"priorities": []},
+        }
+        nudge = prio.empty_queue_nudge(short, [])
+        self.assertIsNotNone(nudge)
+        self.assertEqual("set_build_priority", nudge["kind"])
+        self.assertEqual(prio.BY_KEY["expansion"]["id"], nudge["arguments"]["priority_id"])
+        self.assertEqual(2, nudge["arguments"]["priority_level"])
+        self.assertIsNone(prio.empty_queue_nudge(short, [{"kind": "set_build_priority"}]))
+        late = {
+            "decision": {"turn": 120},
+            "game": {"turn": 120, "game_speed_id": "GAMESPEED_ONLINE"},
+            "your_cities": [{"city_id": "CITY_1", "population": 4, "production": {"item_id": None}}],
+            "your_units": [],
+            "civ6": {"priorities": []},
+        }
+        peace = prio.empty_queue_nudge(late, [])
+        self.assertEqual(prio.BY_KEY["peace"]["id"], peace["arguments"]["priority_id"])
+        self.assertEqual(1, peace["arguments"]["priority_level"])
+
     def test_a_city_state_war_does_not_turn_on_the_war_list(self):
         snap = {
             "decision": {"turn": 40},
@@ -142,10 +187,12 @@ class ProductionScoreTests(unittest.TestCase):
         self.assertIn("these same lists", lines)
         self.assertIn("warlike leader", lines)
         self.assertIn("too few cities", lines)
-        self.assertIn("Nothing will be queued for you", "\n".join(economy.attention_items({
+        queued = "\n".join(economy.attention_items({
             "your_cities": [{"city_id": "CITY_1", "name": "Utrecht", "production": {"item_id": "NONE"}}],
             "civ6": {"priorities": []},
-        })))
+        }))
+        self.assertIn("favored build weights", queued)
+        self.assertIn("QUEUE EMPTY", queued)
 
     def test_unthreatened_catalog_follows_the_peace_list(self):
         snap = {

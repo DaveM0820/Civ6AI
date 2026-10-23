@@ -31,6 +31,7 @@ CIV5_RIVER_EDGE_INDEX: dict[str, int] = {"E": 5, "SE": 0, "SW": 1}
 RIVER_TILE_LABEL = "river on this tile (edge unknown)"
 HILLS_LABEL = "hills (brown bumps)"
 PEAK_LABEL = "mountain (white peak, impassable)"
+WATER_LABEL = "water (blue, impassable to land units until embark)"
 NORTH_UP_ENV = "CIV6_MAP_NORTH_UP"
 FOREIGN_RING = (255, 64, 64)
 # Feature sprite (forest/jungle/marsh) drawn over the base terrain at this scale,
@@ -798,6 +799,27 @@ def _draw_peak_glyph(draw: Any, cx: float, cy: float, hex_radius: float) -> None
     right = (cx + width, cy + height * 0.38)
     draw.polygon([apex, left, right], fill=(244, 244, 244), outline=(24, 24, 32))
     draw.line([left, apex, right], fill=(32, 32, 40), width=max(2, int(hex_radius * 0.08)))
+
+
+def _plot_is_water(plot: dict[str, Any] | None) -> bool:
+    if not isinstance(plot, dict) or _plot_is_peak(plot):
+        return False
+    if plot.get("water") is True:
+        return True
+    terrain = str(plot.get("terrain_id") or "").upper()
+    return terrain.endswith("_OCEAN") or terrain.endswith("_COAST") or terrain.endswith("_WATER")
+
+
+def _draw_water_mark(draw: Any, cx: float, cy: float, hex_radius: float) -> None:
+    """Blue bar so water reads as impassable to a land unit, even on a pale sprite."""
+    width = max(6.0, hex_radius * 0.72)
+    height = max(3.0, hex_radius * 0.16)
+    top = cy + hex_radius * 0.12
+    draw.rectangle(
+        (cx - width / 2, top, cx + width / 2, top + height),
+        fill=(46, 140, 210),
+        outline=(12, 48, 90),
+    )
 
 
 def _plot_is_hills(plot: dict[str, Any] | None) -> bool:
@@ -1617,6 +1639,8 @@ def _civ6_marker_legend_entries(
         entries.append(("__hills__", HILLS_LABEL))
     if any(_plot_is_peak(plot) for plot in in_view):
         entries.append(("__peak__", PEAK_LABEL))
+    if any(_plot_is_water(plot) for plot in in_view):
+        entries.append(("__water__", WATER_LABEL))
     return entries
 
 
@@ -1649,6 +1673,8 @@ def _draw_legend_special(
         _draw_hills_glyph(draw, cx + size * 0.1, cy - size * 0.3, size * 0.6)
     elif slug == "__peak__":
         _draw_peak_glyph(draw, cx, cy, size * 0.55)
+    elif slug == "__water__":
+        _draw_water_mark(draw, cx, cy, size * 0.7)
 
 
 def render_civ6_map_png(
@@ -1979,6 +2005,8 @@ def render_civ6_map_png(
                     # On top of the terrain sprite. A pale mountain tile otherwise
                     # reads as grass, and the model walks units onto it.
                     _draw_peak_glyph(draw, cx, cy, hex_radius)
+                elif _plot_is_water(plot):
+                    _draw_water_mark(draw, cx, cy, hex_radius)
                 if prefer_civ5_sprites:
                     continue
                 if _plot_is_hills(plot):
@@ -2151,6 +2179,8 @@ def render_civ6_map_png(
         ):
             if _plot_is_peak(sample):
                 _draw_peak_glyph(draw, lx + legend_swatch / 2, row_y - legend_swatch / 2, swatch_r)
+            elif _plot_is_water(sample):
+                _draw_water_mark(draw, lx + legend_swatch / 2, row_y - legend_swatch / 2, swatch_r)
             elif _plot_is_hills(sample):
                 _draw_hills_glyph(draw, lx + legend_swatch / 2, row_y - legend_swatch / 2, swatch_r)
         else:

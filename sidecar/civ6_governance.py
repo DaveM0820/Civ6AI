@@ -172,7 +172,7 @@ def prompt_lines(snapshot: dict) -> list[str]:
     if g:
         if g.get("in_anarchy") or g.get("anarchy_turns_left"):
             left = g.get("anarchy_turns_left") or "some"
-            lines.append(f"ANARCHY: {left} turns left. Yields are 0 until it ends. You cannot change government.")
+            lines.append(f"ANARCHY: {left} turns left. You cannot change government until it ends.")
         cur = _short(g.get("current"), "GOVERNMENT_") or "none yet"
         extra = f" (slots {g['current_slots']})" if g.get("current_slots") else ""
         bonus = f" — bonus: {g['current_bonus']}" if g.get("current_bonus") else ""
@@ -547,6 +547,8 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
             notes.append(f"{key}: you are in anarchy; wait until it ends before changing government")
         elif current and _match_id(value, [current], ("GOVERNMENT_",)):
             notes.append(f"{key}={value}: you already have { _short(current, 'GOVERNMENT_') }; switching to it is blocked")
+        elif g.get("change_allowed") is False:
+            notes.append(f"{key}: a government can only be changed on a turn when a civic completed")
         else:
             gid = _match_id(value, avail, ("GOVERNMENT_",))
             if gid is None:
@@ -566,11 +568,15 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
     elif ckey == "pantheon":
         r = _dct(gov.get("religion"))
         beliefs = [str(b.get("id")) for b in _lst(r.get("pantheon_beliefs")) if isinstance(b, dict)]
-        bid = _match_id(value, beliefs, ("BELIEF_",))
-        if bid is None:
-            notes.append(f"{key}={value}: not a free pantheon belief")
+        if r.get("can_found_pantheon") is False:
+            cost = r.get("pantheon_cost") or 25
+            notes.append(f"{key}: a pantheon needs {cost} faith")
         else:
-            ids.append(_add_command(snapshot, "found_pantheon", {"belief_id": bid}, f"found pantheon {bid}"))
+            bid = _match_id(value, beliefs, ("BELIEF_",))
+            if bid is None:
+                notes.append(f"{key}={value}: not a free pantheon belief")
+            else:
+                ids.append(_add_command(snapshot, "found_pantheon", {"belief_id": bid}, f"found pantheon {bid}"))
     elif ckey == "religion":
         r = _dct(gov.get("religion"))
         rel_text, beliefs_text = _split_pair(value, ":(")

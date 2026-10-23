@@ -483,6 +483,50 @@ function Civ6Ai_Orders._MoveOnce(owner, unitId, x, y)
   return ok, reason
 end
 
+-- One passable step from the unit toward x,y. Used when the destination
+-- itself is a mountain, water, or has no route. Does not list tiles.
+function Civ6Ai_Orders._StepToward(owner, unit, x, y)
+  if unit == nil or Map == nil or Map.GetPlotDistance == nil then
+    return nil
+  end
+  local ux, uy = unit:GetX(), unit:GetY()
+  local here = Map.GetPlotDistance(ux, uy, x, y)
+  if here == nil or here <= 0 then
+    return nil
+  end
+  local bestX, bestY, bestD, bestCross = nil, nil, here, nil
+  local function cross(px, py)
+    return math.abs((px - ux) * (y - uy) - (py - uy) * (x - ux))
+  end
+  for _, step in ipairs(Civ6Ai_Orders._Ring1(ux, uy)) do
+    local plot = Map.GetPlot(step.x, step.y)
+    if plot ~= nil and Civ6Ai_Orders._SameDomain(unit, plot) then
+      local okEnter = Civ6Ai_Orders._PlotEnterOk(owner, unit, step.x, step.y)
+      if okEnter then
+        local dist = Map.GetPlotDistance(step.x, step.y, x, y)
+        local stepCross = cross(step.x, step.y)
+        local closer = dist ~= nil and dist < bestD
+        local straighter = bestX ~= nil and dist ~= nil and dist == bestD and stepCross < bestCross
+        if closer or straighter then
+          local can = true
+          local checked, why = Civ6Ai_Orders._Route("CanMoveUnitToForPlayer", owner, unit:GetID(), step.x, step.y)
+          if checked == false then
+            local w = tostring(why or "")
+            if w == "impassable" or w == "land" or w == "water" or w == "occupied_foreign"
+                or w == "stack_limit" or string.find(w, "illegal", 1, true) then
+              can = false
+            end
+          end
+          if can then
+            bestX, bestY, bestD, bestCross = step.x, step.y, dist, stepCross
+          end
+        end
+      end
+    end
+  end
+  return bestX, bestY
+end
+
 function Civ6Ai_Orders._MoveWithRetarget(owner, unit, x, y)
   local okEnter, whyEnter = Civ6Ai_Orders._PlotEnterOk(owner, unit, x, y)
   if not okEnter then
@@ -697,6 +741,27 @@ function Civ6Ai_Orders._DoMove(sender, o)
     or Map.GetPlotDistance(unit:GetX(), unit:GetY(), x, y) > 1
   local ok, reason = Civ6Ai_Orders._MoveWithRetarget(owner, unit, x, y)
   unit = Civ6Ai_Orders._Unit(owner, o.U)
+  if not ok then
+    local text = tostring(reason or "")
+    -- Mountains, water, and a missing route all take one closer step.
+    local blocked = text == "impassable" or text == "no_path" or text == "water"
+        or text == "water_no_ocean_embark" or text == "land"
+        or string.find(text, "no_path", 1, true) ~= nil
+        or string.find(text, "impassable", 1, true) ~= nil
+    if blocked and unit ~= nil then
+      local sx, sy = Civ6Ai_Orders._StepToward(owner, unit, x, y)
+      if sx ~= nil then
+        local sok, swhy = Civ6Ai_Orders._MoveOnce(owner, unit:GetID(), sx, sy)
+        if sok then
+          if persist then
+            Civ6Ai_Orders._StoreGoal(owner, o.U, x, y, intent, o)
+          end
+          return true, "step_toward:" .. tostring(x) .. "," .. tostring(y)
+            .. ">" .. tostring(sx) .. "," .. tostring(sy) .. ":" .. tostring(swhy)
+        end
+      end
+    end
+  end
   if unit ~= nil and unit:GetX() == x and unit:GetY() == y then
     Civ6Ai_Orders._ClearGoal(owner, o.U)
     if intent ~= Civ6Ai_Orders.INTENT.MOVE then

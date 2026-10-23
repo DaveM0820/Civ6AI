@@ -1137,6 +1137,37 @@ function Civ6Ai_Snapshot._BuildCityExtra(playerID)
   return out
 end
 
+-- GetScienceYield and GetCultureYield read 0 on the turn a government
+-- changes, and through anarchy, while each city still reports its yield.
+-- A positive city sum is the real per-turn number. A true zero stays zero.
+function Civ6Ai_Snapshot._YieldOrCities(player, direct, yieldType)
+  local n = tonumber(direct)
+  if n == nil then
+    n = 0
+  end
+  if n > 0 or yieldType == nil or player == nil or player.GetCities == nil then
+    return n
+  end
+  local cities = player:GetCities()
+  local sum = 0
+  if cities ~= nil and cities.Members ~= nil then
+    pcall(function()
+      for _, city in cities:Members() do
+        if city.GetYield ~= nil then
+          local y = city:GetYield(yieldType)
+          if type(y) == "number" and y > 0 then
+            sum = sum + y
+          end
+        end
+      end
+    end)
+  end
+  if sum > 0 then
+    return sum
+  end
+  return n
+end
+
 function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
   local treasury = player:GetTreasury()
   local techs = player:GetTechs()
@@ -1154,7 +1185,14 @@ function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
   }
   if techs ~= nil then
     local idx = techs:GetResearchingTech()
-    local rawYield = techs:GetScienceYield() or 0
+    local directScience = 0
+    if techs.GetScienceYield ~= nil then
+      local okY, y = pcall(function() return techs:GetScienceYield() end)
+      if okY and type(y) == "number" then
+        directScience = y
+      end
+    end
+    local rawYield = Civ6Ai_Snapshot._YieldOrCities(player, directScience, YieldTypes ~= nil and YieldTypes.SCIENCE or nil)
     research.research_per_turn = Civ6Ai_Snapshot._Int(rawYield)
     if idx ~= nil and idx >= 0 then
       research.progress = Civ6Ai_Snapshot._Int(techs:GetResearchProgress(idx))
@@ -1191,7 +1229,15 @@ function Civ6Ai_Snapshot._BuildYourEmpire(playerID, player)
     espionage = {percent = 0, rate = 0},
   }
   if culture ~= nil then
-    commerce.culture.rate = Civ6Ai_Snapshot._Int(culture:GetCultureYield())
+    local directCulture = 0
+    if culture.GetCultureYield ~= nil then
+      local okC, c = pcall(function() return culture:GetCultureYield() end)
+      if okC and type(c) == "number" then
+        directCulture = c
+      end
+    end
+    commerce.culture.rate = Civ6Ai_Snapshot._Int(
+      Civ6Ai_Snapshot._YieldOrCities(player, directCulture, YieldTypes ~= nil and YieldTypes.CULTURE or nil))
   end
   local civics = {}
   for row in GameInfo.Technologies() do
@@ -4818,7 +4864,7 @@ function Civ6Ai_Snapshot._GovCivics(culture, player)
     out.current_boosted = gcall(culture, "HasBoostBeenTriggered", crow.Index) == true
     out.current_boost = Civ6Ai_Snapshot._BoostText(crow.CivicType)
   end
-  out.culture_per_turn = gcall(culture, "GetCultureYield")
+  out.culture_per_turn = Civ6Ai_Snapshot._YieldOrCities(player, gcall(culture, "GetCultureYield"), YieldTypes ~= nil and YieldTypes.CULTURE or nil)
   for c in GameInfo.Civics() do
     if gcall(culture, "CanProgress", c.Index) == true and gcall(culture, "HasCivic", c.Index) == false then
       local unlocks = {}
@@ -4858,7 +4904,7 @@ function Civ6Ai_Snapshot._GovTechs(player)
     out.current_boosted = gcall(techs, "HasBoostBeenTriggered", trow.Index) == true
     out.current_boost = Civ6Ai_Snapshot._BoostText(trow.TechnologyType)
   end
-  out.science_per_turn = gcall(techs, "GetScienceYield")
+  out.science_per_turn = Civ6Ai_Snapshot._YieldOrCities(player, gcall(techs, "GetScienceYield"), YieldTypes ~= nil and YieldTypes.SCIENCE or nil)
   for t in GameInfo.Technologies() do
     if gcall(techs, "CanResearch", t.Index) == true and gcall(techs, "HasTech", t.Index) == false then
       out.options[#out.options + 1] = {
@@ -5373,7 +5419,7 @@ function Civ6Ai_Snapshot.EmpireTelemetry(playerID)
     gpt = player:GetTreasury():GetGoldYield()
   end
   if player:GetTechs() ~= nil then
-    science = player:GetTechs():GetScienceYield()
+    science = Civ6Ai_Snapshot._YieldOrCities(player, player:GetTechs():GetScienceYield(), YieldTypes ~= nil and YieldTypes.SCIENCE or nil)
   end
   local citiesTable = player:GetCities()
   if citiesTable ~= nil then
@@ -5551,12 +5597,12 @@ function Civ6Ai_Snapshot._RankPlayerRow(viewerID, otherID, majorIDs, dipNeeded)
     team_id = Civ6Ai_Snapshot._Method(p, "GetTeam"),
     score = N(Civ6Ai_Snapshot._Method(p, "GetScore")),
     -- science
-    science_yield = N(Civ6Ai_Snapshot._Method(techs, "GetScienceYield")),
+    science_yield = N(Civ6Ai_Snapshot._YieldOrCities(p, Civ6Ai_Snapshot._Method(techs, "GetScienceYield"), YieldTypes ~= nil and YieldTypes.SCIENCE or nil)),
     techs_researched = N(Civ6Ai_Snapshot._Method(stats, "GetNumTechsResearched")),
     science_vp = N(Civ6Ai_Snapshot._Method(stats, "GetScienceVictoryPoints")),
     science_vp_needed = N(Civ6Ai_Snapshot._Method(stats, "GetScienceVictoryPointsTotalNeeded")),
     -- culture
-    culture_yield = N(Civ6Ai_Snapshot._Method(culture, "GetCultureYield")),
+    culture_yield = N(Civ6Ai_Snapshot._YieldOrCities(p, Civ6Ai_Snapshot._Method(culture, "GetCultureYield"), YieldTypes ~= nil and YieldTypes.CULTURE or nil)),
     tourism = N(Civ6Ai_Snapshot._Method(stats, "GetTourism") or Civ6Ai_Snapshot._Method(culture, "GetTourism")),
     domestic_tourists = N(Civ6Ai_Snapshot._Method(culture, "GetStaycationers")),
     foreign_tourists = N(Civ6Ai_Snapshot._Method(culture, "GetTouristsTo")),

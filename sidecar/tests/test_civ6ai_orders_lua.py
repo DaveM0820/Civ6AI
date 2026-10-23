@@ -552,6 +552,34 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertNotIn("forecast_failed", str(self.last()["reason"]))
         self.assertEqual(self.rt.eval("deadThrow.owner"), 2)
 
+    def test_impassable_move_steps_toward_the_target(self):
+        self.rt.execute(r"""
+          local peak = Map.GetPlot(14, 10)
+          function peak:IsImpassable() return true end
+          function peak:IsMountain() return true end
+          local sea = Map.GetPlot(12, 8)
+          function sea:IsWater() return true end
+          local orig = ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer
+          ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = function(p, uid, x, y)
+            local plot = Map.GetPlot(x, y)
+            if plot.IsWater ~= nil and plot:IsWater() == true then return false, "water" end
+            if plot.IsMountain ~= nil and plot:IsMountain() == true then return false, "impassable" end
+            return orig(p, uid, x, y)
+          end
+        """)
+        self.order(0, K=1, P=2, U=9, X=14, Y=10, S=62, B=1, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        reasons = [str(row["reason"]) for row in self.results()]
+        self.assertTrue(any("step_toward:14,10>13,10" in reason for reason in reasons), reasons)
+        self.assertEqual(self.rt.eval("Players[2].units[3].x"), 13)
+        self.assertEqual(self.rt.eval("Players[2].units[3].y"), 10)
+        self.rt.execute("Players[2].units[3].x = 12; Players[2].units[3].y = 10; Players[2].units[3].moves = 2")
+        self.order(0, K=1, P=2, U=9, X=12, Y=8, S=63, B=1, J=1, N=1, T=7)
+        self.turn_start(2, turn=7)
+        reasons = [str(row["reason"]) for row in self.results()]
+        self.assertTrue(any("step_toward:12,8>12,9" in reason for reason in reasons), reasons)
+        self.assertNotEqual((self.rt.eval("Players[2].units[3].x"), self.rt.eval("Players[2].units[3].y")), (12, 8))
+
     def test_ranged_auto_fires_after_a_failed_move(self):
         self.rt.execute(r"""
           Players[2].war = {[1]=true}

@@ -428,8 +428,24 @@ function Civ6Ai_Production.ComposeSituation(raw)
   local army = tonumber(raw.military) or 0
   local threatened = raw.threatened == true
   local warlike = raw.warlike == true
-  local target = math.min(8, 3 + era)
-  local needExpansion = cities < target and turn <= 100 and pop >= 2 and land == true
+  -- Online T70 aims at 6 cities, or 8 while land is free. speed_num is the
+  -- game-speed percent (Online 200). Missing means Online. Keep this in step
+  -- with sidecar/civ6_priorities.py city_count_target.
+  local speedNum = tonumber(raw.speed_num) or 200
+  if speedNum <= 0 then
+    speedNum = 200
+  end
+  local online = math.floor(turn * speedNum / 200)
+  if online > 70 then
+    online = 70
+  end
+  if online < 0 then
+    online = 0
+  end
+  local span = land == false and 4 or 6
+  local target = 2 + math.floor(span * online / 70)
+  local belowTarget = cities < target and turn <= 100 and pop >= 2 and land == true
+  local needExpansion = belowTarget and wars <= 0
   local needBuilders = builders < cities
   local needed = cities
   if wars > 0 then
@@ -444,8 +460,11 @@ function Civ6Ai_Production.ComposeSituation(raw)
   if (threatened or army < needed) and keys.defense ~= nil and (levels[keys.defense] or 0) < 1 then
     levels[keys.defense] = 1
   end
-  if needExpansion and keys.expansion ~= nil and (levels[keys.expansion] or 0) < 1 then
-    levels[keys.expansion] = 1
+  if needExpansion and wars <= 0 and keys.expansion ~= nil then
+    local want = (cities + 2 < target) and 2 or 1
+    if (levels[keys.expansion] or 0) < want then
+      levels[keys.expansion] = want
+    end
   end
   if needBuilders and keys.improvements ~= nil and (levels[keys.improvements] or 0) < 1 then
     levels[keys.improvements] = 1
@@ -460,6 +479,7 @@ function Civ6Ai_Production.ComposeSituation(raw)
     levels = levels,
     half_war = warlike and (levels[keys.war] or 0) == 0,
     military_over = army >= needed + 2,
+    army_heavy = wars <= 0 and army > cities * 2,
     missing_monument = raw.missing_monument == true,
     missing_granary = raw.missing_granary == true,
     missing_district = raw.missing_district == true,
@@ -485,8 +505,12 @@ function Civ6Ai_Production.ScoreBuild(buildId, tags, situation, kind)
       end
     end
   end
-  if situation.military_over == true and seen["PSEUDOYIELD_UNIT_COMBAT"] then
-    score = score - 40
+  if seen["PSEUDOYIELD_UNIT_COMBAT"] then
+    if situation.army_heavy == true then
+      score = score - 80
+    elseif situation.military_over == true then
+      score = score - 40
+    end
   end
   if situation.missing_monument == true and buildId == "BUILDING_MONUMENT" then
     score = score + 15
@@ -1107,9 +1131,21 @@ function Civ6Ai_Production._AutoqueuePass(playerID)
       do
         local hasMonument = Civ6Ai_Production._HasBuilding(city, "BUILDING_MONUMENT")
         local hasGranary = Civ6Ai_Production._HasBuilding(city, "BUILDING_GRANARY")
+        local speedNum = 200
+        pcall(function()
+          local row = GameInfo.GameSpeeds[GameConfiguration.GetGameSpeedType()]
+          local known = {
+            GAMESPEED_ONLINE = 200, GAMESPEED_QUICK = 150, GAMESPEED_STANDARD = 100,
+            GAMESPEED_EPIC = 67, GAMESPEED_MARATHON = 33,
+          }
+          if row ~= nil and known[row.GameSpeedType] ~= nil then
+            speedNum = known[row.GameSpeedType]
+          end
+        end)
         local situation = Civ6Ai_Production.ComposeSituation({
           saved = saved,
           major_wars = wars,
+          speed_num = speedNum,
           threatened = Civ6Ai_Production._CityThreatened(playerID, city),
           warlike = warlike,
           cities = #list,

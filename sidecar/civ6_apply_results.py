@@ -84,6 +84,9 @@ _PARTIAL_MOVE_RE = re.compile(r"^partial_move_to_(?P<x>-?\d+)_(?P<y>-?\d+)$")
 _RETARGET_RE = re.compile(
     r"^retargeted:(?P<ox>-?\d+),(?P<oy>-?\d+)>(?P<nx>-?\d+),(?P<ny>-?\d+)$"
 )
+_STEP_TOWARD_RE = re.compile(
+    r"^step_toward:(?P<ox>-?\d+),(?P<oy>-?\d+)>(?P<nx>-?\d+),(?P<ny>-?\d+)(?::(?P<why>.*))?$"
+)
 
 _SIMPLE_REASONS = {
     "district_tile_invalid": "the game does not allow that district on that tile (out of city range, wrong terrain, or already used)",
@@ -183,6 +186,18 @@ def describe_reason(reason: Any) -> str:
     if match:
         return (f"destination ({match.group('ox')},{match.group('oy')}) was occupied; "
                 f"moved toward ({match.group('nx')},{match.group('ny')}) instead")
+    match = _STEP_TOWARD_RE.match(text)
+    if match:
+        why = match.group("why") or ""
+        detail = ""
+        if why and not why.startswith("moved:"):
+            plain = describe_reason(why)
+            if plain:
+                detail = f" ({plain})"
+        return (
+            f"destination ({match.group('ox')},{match.group('oy')}) is impassable or has no path; "
+            f"stepped to the nearest reachable tile ({match.group('nx')},{match.group('ny')}) instead{detail}"
+        )
     if text.startswith("retargeted:"):
         return "destination occupied; the game picked a free neighbouring tile"
     if text.startswith("auto:"):
@@ -437,6 +452,8 @@ def _success_text(row: dict[str, Any]) -> str:
             return "ok — held on this tile (MoveTo was the unit's own plot)"
         if reason.startswith("retargeted:"):
             return f"ok — retargeted; {detail}"
+        if reason.startswith("step_toward:"):
+            return f"ok — {detail}"
         if not reason or arrived:
             return f"ok — moved to {_coords(fixed) or 'the target'}"
         if reason.startswith("first_step:"):
@@ -539,6 +556,7 @@ def build_command_results(snapshot: dict[str, Any], rows: list[dict[str, Any]], 
             row.get("ok") is True
             or reason.startswith("ok_")
             or reason.startswith("retargeted:")
+            or reason.startswith("step_toward:")
             or reason in ("self_target_hold", "tech_already_known", "civic_already_known")
         )
         no_effect = reason in NO_EFFECT_REASONS

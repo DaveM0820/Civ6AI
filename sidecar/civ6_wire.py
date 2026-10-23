@@ -646,6 +646,8 @@ def _civ6_unit_tokens(snapshot: dict[str, Any]) -> dict[str, list[str]]:
         token = command_wire.unit_command_token(command)
         # Civ5-style movement: a unit that can move gets one free-destination
         # MoveTo(x,y) (any plot; the game walks its own route), not a list of tiles.
+        if token == "Automate(explore)" and unit_id in _explore_quiet_ids(snapshot):
+            token = None
         if token and token.startswith("MoveTo("):
             token = "MoveTo(x,y)"
         elif token and token.startswith("AttackTo("):
@@ -1905,13 +1907,23 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _explore_quiet_ids(snapshot: dict[str, Any] | None) -> set[str]:
+    if not isinstance(snapshot, dict):
+        return set()
+    return set(coaching.explore_quiet_units(snapshot))
+
+
 def _explore_offered(snapshot: dict[str, Any] | None) -> bool:
     if not isinstance(snapshot, dict):
         return False
-    return any(
-        isinstance(command, dict) and command.get("kind") == "explore"
-        for command in snapshot.get("legal_commands") or []
-    )
+    quiet = _explore_quiet_ids(snapshot)
+    for command in snapshot.get("legal_commands") or []:
+        if not isinstance(command, dict) or command.get("kind") != "explore":
+            continue
+        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+        if str(fixed.get("unit_id") or "") not in quiet:
+            return True
+    return False
 
 
 def _orders_execute_clause(snapshot: dict[str, Any] | None) -> str:
@@ -1997,9 +2009,10 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, "
         "except that a unit that has not moved this turn can always enter one adjacent tile, however rough "
         "(that uses all its movement).",
-        "- Never MoveTo a mountain or a tile one of your own units already holds. "
-        "A rejected move says impassable when the tile is a mountain or natural wonder, "
-        "and no_path when no route exists. Do not repeat that destination.",
+        "- Never MoveTo a mountain, a water tile this unit cannot enter, or a tile one of your own units already holds. "
+        "The map marks a mountain with a white peak and water as impassable to land units until they can embark. "
+        "A rejected move says impassable when the tile cannot be entered, and no_path when no route exists. "
+        "The unit then takes one step toward that destination on a tile it can enter. Do not repeat a destination that stays blocked.",
         f"- Coordinates: {coaching.civ6_y_axis_phrase(snapshot)} and x increases east; see the GAME "
         "section for X-wrap.",
         f"- {coaching.CIV6_UNIT_STACKING_GUIDANCE}",

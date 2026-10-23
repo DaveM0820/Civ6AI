@@ -103,19 +103,23 @@ class TickPumpTests(unittest.TestCase):
         self.assertIn("apply_result", jsonl[0])
         # The second and third results writes do not call into gameplay io again.
         self.assertEqual(self.lua.globals().calls, 1)
-        # Chat still uses the append_failed line the bridge copies onto disk.
+        # Chat uses one base64 mirror line. A raw append_failed row can split Lua.log.
         self.lua.execute(
             r"""
             logs = {}
             Civ6Ai_Util.AppendTextLine("/tmp/civ6ai-logs/sessions/sess/chat_log.jsonl", "{\"kind\":\"chat\"}")
             """
         )
+        import base64
+
         chat_count = int(self.lua.eval("#logs"))
         chat_logs = [self.lua.eval(f"logs[{i}]") for i in range(1, chat_count + 1)]
         chat_failed = [line for line in chat_logs if "append_failed" in line]
-        self.assertEqual(len(chat_failed), 1)
-        self.assertIn("chat_log.jsonl", chat_failed[0])
-        self.assertIn('{"kind":"chat"}', chat_failed[0])
+        mirrors = [line for line in chat_logs if "io|mirror|" in line and "chat_log.jsonl" in line]
+        self.assertEqual(chat_failed, [])
+        self.assertEqual(len(mirrors), 1)
+        encoded = mirrors[0].rsplit("|", 1)[-1]
+        self.assertEqual('{"kind":"chat"}', base64.b64decode(encoded).decode("utf-8"))
 
 
 if __name__ == "__main__":

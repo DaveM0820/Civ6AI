@@ -244,6 +244,20 @@ class BlobSplitAcrossReadsTests(unittest.TestCase):
             self.assertIn("CMD_1", saved)
             self.assertEqual(0, record_apply_results(root, chunk, [], ""))
 
+    def test_chat_mirror_line_is_decoded_onto_disk(self):
+        import base64
+
+        from civ6_lua_log_bridge import record_failed_appends
+
+        payload = '{"kind":"chat"}'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "sessions" / "sess" / "chat_log.jsonl"
+            encoded = base64.b64encode(payload.encode("utf-8")).decode("ascii")
+            chunk = f"CIV6AI|io|mirror|{path}|{encoded}\n"
+            self.assertEqual(1, record_failed_appends(root, chunk))
+            self.assertEqual(payload + "\n", path.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()
