@@ -688,13 +688,13 @@ Civ6Ai_Autotest.BLOCKER_HANDLERS = {
     Civ6Ai_Autotest._CloseQueuedPopups()
   end,
   UNITS = function(playerID)
-    Civ6Ai_Autotest._SkipUnitMoves(playerID)
+    Civ6Ai_Autotest._SkipUnitMovesEscalating(playerID)
   end,
   UNIT_NEEDS_ORDERS = function(playerID)
-    Civ6Ai_Autotest._SkipUnitMoves(playerID)
+    Civ6Ai_Autotest._SkipUnitMovesEscalating(playerID)
   end,
   STACKED_UNITS = function(playerID)
-    Civ6Ai_Autotest._SkipUnitMoves(playerID)
+    Civ6Ai_Autotest._SkipUnitMovesEscalating(playerID)
   end,
   PANTHEON = function()
     Civ6Ai_Autotest._CloseQueuedPopups()
@@ -972,7 +972,24 @@ function Civ6Ai_Autotest.StartStallWatchdog()
   end)
 end
 
-function Civ6Ai_Autotest._SkipUnitMoves(playerID)
+-- A unit-blocker that survives repeated skips is a unit we ordered that still has
+-- moves (partial path, dropped goal, failed fallback). After a few tries in the same
+-- turn, finish ordered units too so the turn can never stall on one unit.
+Civ6Ai_Autotest.UNIT_BLOCK_FORCE_AFTER = 3
+Civ6Ai_Autotest._unitBlockTries = { turn = -1, n = 0 }
+function Civ6Ai_Autotest._SkipUnitMovesEscalating(playerID)
+  local turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or -1
+  local t = Civ6Ai_Autotest._unitBlockTries
+  if t.turn ~= turn or t.player ~= playerID then t.turn, t.player, t.n = turn, playerID, 0 end
+  t.n = t.n + 1
+  local force = t.n > Civ6Ai_Autotest.UNIT_BLOCK_FORCE_AFTER
+  if force then
+    Civ6Ai_Util.Log("autotest|unit_block_force|player=" .. tostring(playerID) .. "|tries=" .. tostring(t.n))
+  end
+  Civ6Ai_Autotest._SkipUnitMoves(playerID, force)
+end
+
+function Civ6Ai_Autotest._SkipUnitMoves(playerID, force)
   pcall(function()
     local player = Players[playerID]
     if player == nil then
@@ -985,7 +1002,7 @@ function Civ6Ai_Autotest._SkipUnitMoves(playerID)
     if units.Members ~= nil then
       for _, unit in units:Members() do
         if unit:GetX() ~= -9999 and unit:GetMovesRemaining() > 0
-            and not Civ6Ai_Apply._UnitWasOrdered(playerID, unit) then
+            and (force or not Civ6Ai_Apply._UnitWasOrdered(playerID, unit)) then
           UnitManager.FinishMoves(unit)
         end
       end
@@ -993,7 +1010,7 @@ function Civ6Ai_Autotest._SkipUnitMoves(playerID)
       for i = 0, units:GetCount() - 1 do
         local unit = units:Get(i)
         if unit ~= nil and unit:GetX() ~= -9999 and unit:GetMovesRemaining() > 0
-            and not Civ6Ai_Apply._UnitWasOrdered(playerID, unit) then
+            and (force or not Civ6Ai_Apply._UnitWasOrdered(playerID, unit)) then
           UnitManager.FinishMoves(unit)
         end
       end

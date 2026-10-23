@@ -1628,7 +1628,7 @@ function Civ6Ai_Orders._FbExplore(sender, owner, unit, hint, enabled)
     return false
   end
   local uid = unit:GetID()
-  local ok, why = Gov.Explore(owner, uid)
+  local ok, why = Civ6Ai_Orders.Gov.Explore(owner, uid)
   if ok then
     Civ6Ai_Orders._Record(sender, {
       S = -1, K = Civ6Ai_Orders.K.EXPLORE, P = owner, U = uid, D = Game.GetCurrentGameTurn(),
