@@ -114,6 +114,26 @@ class Civ6ConfigTests(unittest.TestCase):
             self.assertEqual("high", os.environ.get("CIV4AI_OPENAI_REASONING_EFFORT"))
             self.assertNotEqual("on", os.environ.get("CIV4AI_OPENAI_REASONING_EFFORT"))
 
+    def test_seat_prompt_budget_precedence(self):
+        cfg = civ6_config.Civ6AiLocalConfig(
+            max_prompt_chars=30000,
+            seat_models={"1": {"max_prompt_chars": 24000}, "PLAYER_3": {"max_prompt_chars": 0}},
+        )
+        self.assertEqual(30000, civ6_config.resolve_seat_prompt_chars(cfg, "PLAYER_0"))
+        self.assertEqual(24000, civ6_config.resolve_seat_prompt_chars(cfg, "PLAYER_1"))
+        self.assertEqual(0, civ6_config.resolve_seat_prompt_chars(cfg, 3))
+        applied = civ6_config.apply_seat_runtime(cfg, {"decision": {"player_id": "PLAYER_1"}})
+        self.assertEqual(24000, applied.max_prompt_chars)
+        self.assertEqual(cfg.model, applied.model)
+        with mock.patch.dict(os.environ, {"CIV6AI_MAX_PROMPT_CHARS_PLAYER_1": "18000"}, clear=False):
+            self.assertEqual(18000, civ6_config.resolve_seat_prompt_chars(cfg, "PLAYER_1"))
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "civ6ai.local.json"
+            path.write_text(json.dumps({"max_prompt_chars": 26000}), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"CIV6AI_MAX_PROMPT_CHARS": "21000"}, clear=False):
+                loaded = civ6_config.load_local_config(path, apply_env=True)
+            self.assertEqual(21000, loaded.max_prompt_chars)
+
 
 if __name__ == "__main__":
     unittest.main()

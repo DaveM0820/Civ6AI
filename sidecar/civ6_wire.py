@@ -449,7 +449,12 @@ def city_defense_text(defense: dict[str, Any] | None) -> str | None:
     return city_text
 
 
-def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any]) -> None:
+def _append_civ6_city_situation_wire(
+    lines: list[str],
+    snapshot: dict[str, Any],
+    *,
+    city_compact: bool = False,
+) -> None:
     cities = [city for city in snapshot.get("your_cities", []) if isinstance(city, dict)]
     many_cities = len(cities) >= pipeline.WIRE_COMPACT_CITIES_THRESHOLD
     for city in cities:
@@ -457,6 +462,23 @@ def _append_civ6_city_situation_wire(lines: list[str], snapshot: dict[str, Any])
         city_id = city.get("city_id", "")
         extra = _city_extra(snapshot, str(city_id))
         is_capital = bool(city.get("is_capital"))
+        if city_compact:
+            lines.append(pipeline._wire_line(f"{name}.population", int(city.get("population", 1))))
+            if is_capital:
+                lines.append(pipeline._wire_line(f"{name}.capital", True))
+            loyalty = extra.get("loyalty")
+            if isinstance(loyalty, int) and not isinstance(loyalty, bool) and loyalty < 100:
+                lines.append(pipeline._wire_line(f"{name}.loyalty", loyalty))
+            damaged = city_defense_text(city.get("defense") if isinstance(city.get("defense"), dict) else None)
+            if damaged:
+                lines.append(pipeline._wire_line(f"{name}.hp", damaged))
+            production = city.get("production", {})
+            item = production.get("item_id") if isinstance(production, dict) else None
+            if item and str(item).upper() not in ("NONE", "NULL"):
+                lines.append(pipeline._wire_line(f"{name}.currentProduction", _production_label(item)))
+            else:
+                lines.append(pipeline._wire_line(f"{name}.currentProduction", "NONE (queue empty)"))
+            continue
         if many_cities and not is_capital:
             plot_id = city.get("plot_id")
             if isinstance(plot_id, str) and plot_id.strip():
@@ -1190,7 +1212,33 @@ def _leader_names(context: dict[str, Any]) -> dict[str, str]:
     return out
 
 
-def _empire_section(context: dict[str, Any]) -> list[str]:
+def _compact_city_alert_lines(snapshot: dict[str, Any], city: dict[str, Any], name: str) -> list[str]:
+    """Production timing and the alerts a compact city row still has to show."""
+    lines: list[str] = []
+    row = economy_wire._cities_by_id(snapshot).get(str(city.get("city_id")))
+    if isinstance(row, dict):
+        production = city.get("production") if isinstance(city.get("production"), dict) else {}
+        item = row.get("production_item") or production.get("item_id")
+        turns = row.get("production_turns")
+        if item and isinstance(turns, int) and not isinstance(turns, bool):
+            lines.append(pipeline._wire_line(f"{name}.currentProduction.turnsLeft", turns))
+        starve = row.get("turns_to_starve")
+        if isinstance(starve, int) and not isinstance(starve, bool):
+            lines.append(pipeline._wire_line(
+                f"{name}.growth", f"STARVING, loses a citizen in {starve} turns",
+            ))
+    for line in gs_wire.city_lines(snapshot, city, name):
+        if "UNPOWERED" in line:
+            lines.append(line)
+    return lines
+
+
+def _empire_section(
+    context: dict[str, Any],
+    *,
+    unit_compact: bool = False,
+    city_compact: bool = False,
+) -> list[str]:
     lines = ["# == Summary =="]
     _append_civ6_empire_wire(lines, context)
     lines.extend(economy_wire.empire_lines(context))
@@ -1222,7 +1270,7 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
     if cities:
         lines.append("# == Cities ==")
         city_block: list[str] = []
-        _append_civ6_city_situation_wire(city_block, context)
+        _append_civ6_city_situation_wire(city_block, context, city_compact=city_compact)
         for city in cities:
             name = pipeline._city_prompt_name(city)
             production = city.get("production", {})
@@ -1232,8 +1280,11 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
         for city in cities:
             name = pipeline._city_prompt_name(city)
             lines.extend(l for l in city_block if l.startswith((f"{name}.", f"***{name}.")))
-            lines.extend(economy_wire.city_lines(context, city, name))
-            lines.extend(gs_wire.city_lines(context, city, name))
+            if city_compact:
+                lines.extend(_compact_city_alert_lines(context, city, name))
+            else:
+                lines.extend(economy_wire.city_lines(context, city, name))
+                lines.extend(gs_wire.city_lines(context, city, name))
             lines.append("")
         if lines[-1] == "":
             lines.pop()
@@ -1248,10 +1299,11 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
             "units.inventory", ", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
         ))
         wire_ids = pipeline._build_unit_wire_id_map(units)
-        lines.append(pipeline._wire_line(
-            "unit.ids",
-            " | ".join(wire_ids.get(str(unit.get("unit_id")), "unit") for unit in units),
-        ))
+        if not unit_compact:
+            lines.append(pipeline._wire_line(
+                "unit.ids",
+                " | ".join(wire_ids.get(str(unit.get("unit_id")), "unit") for unit in units),
+            ))
         unit_tokens = _civ6_unit_tokens(context)
         for title, group in (("Military", [u for u in units if not _is_civilian(u)]),
                              ("Civilian", [u for u in units if _is_civilian(u)])):
@@ -1287,37 +1339,43 @@ def _empire_section(context: dict[str, Any]) -> list[str]:
                 plot_id = unit.get("plot_id")
                 if isinstance(plot_id, str) and plot_id.strip():
                     lines.append(pipeline._wire_line(f"{prefix}.position", pipeline._plot_coords_text(plot_id)))
-                lines.extend(combat_wire.unit_row_lines(prefix, unit, context))
+                if not unit_compact:
+                    lines.extend(combat_wire.unit_row_lines(prefix, unit, context))
                 pct = coaching.civ6_unit_health_percent(unit)
                 if isinstance(pct, int) and pct < 100:
                     lines.append(pipeline._wire_line(f"{prefix}.hp", f"{pct}%"))
                 if unit.get("needs_orders"):
                     lines.append(f"***{prefix}.needsOrders = true***")
-                if unit.get("promotion_ready"):
+                if not unit_compact and unit.get("promotion_ready"):
                     lines.append(pipeline._wire_line(f"{prefix}.promotionReady", True))
-                upgrades = unit.get("upgrade_options")
-                if isinstance(upgrades, list) and upgrades:
-                    bits = []
-                    for option in upgrades:
-                        if not isinstance(option, dict) or not option.get("unit_type_id"):
-                            continue
-                        label = str(option["unit_type_id"])
-                        cost = option.get("gold_cost")
-                        if isinstance(cost, int) and not isinstance(cost, bool):
-                            label += f" ({cost} gold)"
-                        bits.append(label)
-                    if bits:
-                        lines.append(pipeline._wire_line(f"{prefix}.upgrade", ", ".join(bits)))
+                if not unit_compact:
+                    upgrades = unit.get("upgrade_options")
+                    if isinstance(upgrades, list) and upgrades:
+                        bits = []
+                        for option in upgrades:
+                            if not isinstance(option, dict) or not option.get("unit_type_id"):
+                                continue
+                            label = str(option["unit_type_id"])
+                            cost = option.get("gold_cost")
+                            if isinstance(cost, int) and not isinstance(cost, bool):
+                                label += f" ({cost} gold)"
+                            bits.append(label)
+                        if bits:
+                            lines.append(pipeline._wire_line(f"{prefix}.upgrade", ", ".join(bits)))
                 movement = unit.get("movement", {})
-                if isinstance(movement, dict):
-                    if isinstance(movement.get("current"), int):
-                        lines.append(pipeline._wire_line(f"{prefix}.moves", movement["current"]))
-                    if (isinstance(movement.get("maximum"), int) and movement["maximum"] > 0
-                            and movement.get("maximum") != movement.get("current")):
-                        lines.append(pipeline._wire_line(f"{prefix}.maxMovement", movement["maximum"]))
-                if "SETTLER" in str(unit.get("unit_type_id") or ""):
+                if isinstance(movement, dict) and isinstance(movement.get("current"), int):
+                    current_moves = movement["current"]
+                    if unit_compact:
+                        if current_moves == 0:
+                            lines.append(pipeline._wire_line(f"{prefix}.moves", 0))
+                    else:
+                        lines.append(pipeline._wire_line(f"{prefix}.moves", current_moves))
+                        if (isinstance(movement.get("maximum"), int) and movement["maximum"] > 0
+                                and movement.get("maximum") != current_moves):
+                            lines.append(pipeline._wire_line(f"{prefix}.maxMovement", movement["maximum"]))
+                if not unit_compact and "SETTLER" in str(unit.get("unit_type_id") or ""):
                     lines.extend(coaching.settler_fact_lines(prefix, unit, context))
-                if str(unit.get("unit_type_id") or "") == "UNIT_BUILDER" and unit.get("needs_orders"):
+                if not unit_compact and str(unit.get("unit_type_id") or "") == "UNIT_BUILDER" and unit.get("needs_orders"):
                     lines.extend(coaching.builder_fact_lines(prefix, unit, context))
                 lines.append("")
             if lines[-1] == "":
@@ -2182,12 +2240,20 @@ def _offers_ranged_or_strike(snapshot: dict[str, Any]) -> bool:
     return False
 
 
-def build_civ6_wire_prompt(context: dict[str, Any], map_stats: list[str] | None = None) -> str:
+def build_civ6_wire_prompt(
+    context: dict[str, Any],
+    map_stats: list[str] | None = None,
+    *,
+    unit_compact: bool = False,
+    city_compact: bool = False,
+) -> str:
     """Sectioned Civ VI prompt in the Civ5 layout (everything above RESPONSE INSTRUCTIONS)."""
     combat_wire.retain_runnable_attacks(context)
     sections = [
         pipeline._wire_section("GAME", _game_section(context, map_stats)),
-        pipeline._wire_section("EMPIRE", _empire_section(context)),
+        pipeline._wire_section("EMPIRE", _empire_section(
+            context, unit_compact=unit_compact, city_compact=city_compact,
+        )),
         pipeline._wire_section("DIPLOMACY", _diplomacy_section(context)),
     ]
     opponents = _opponents_section(context)
@@ -2264,7 +2330,49 @@ def build_civ6_playable_context(snapshot: dict[str, Any]) -> dict[str, Any]:
     return context
 
 
-def build_civ6_model_wire_text(snapshot: dict[str, Any]) -> str:
+def _assemble_model_wire(
+    snapshot: dict[str, Any],
+    context: dict[str, Any],
+    map_stats: list[str] | None,
+    *,
+    unit_compact: bool,
+    city_compact: bool,
+) -> str:
+    return (
+        build_civ6_wire_prompt(
+            context, map_stats=map_stats, unit_compact=unit_compact, city_compact=city_compact,
+        )
+        + "\n\n"
+        + build_civ6_response_instructions(snapshot)
+    )
+
+
+def build_civ6_model_wire_text(snapshot: dict[str, Any], *, max_prompt_chars: int | None = None) -> str:
+    from sidecar import civ6_prompt_budget as prompt_budget
+
     map_stats = pipeline._map_wire_stats_from_snapshot(snapshot)
     context = build_civ6_playable_context(snapshot)
-    return build_civ6_wire_prompt(context, map_stats=map_stats) + "\n\n" + build_civ6_response_instructions(snapshot)
+    units = [unit for unit in context.get("your_units") or [] if isinstance(unit, dict)]
+    cities = [city for city in context.get("your_cities") or [] if isinstance(city, dict)]
+    unit_compact = prompt_budget.units_need_compact(len(units))
+    city_compact = prompt_budget.cities_need_compact(len(cities))
+    full = _assemble_model_wire(
+        snapshot, context, map_stats, unit_compact=False, city_compact=False,
+    )
+    compactions: list[str] = []
+    if unit_compact or city_compact:
+        text = _assemble_model_wire(
+            snapshot, context, map_stats, unit_compact=unit_compact, city_compact=city_compact,
+        )
+        if unit_compact:
+            compactions.append("units_compact")
+        if city_compact:
+            compactions.append("cities_compact")
+    else:
+        text = full
+    limit = prompt_budget.resolve_max_prompt_chars(snapshot, max_prompt_chars)
+    if limit > 0 and len(text) > limit:
+        text, fired = prompt_budget.compact_to_budget(text, limit)
+        compactions.extend(fired)
+    prompt_budget.store_report(snapshot, prompt_budget.make_report(full, text, limit, compactions))
+    return text

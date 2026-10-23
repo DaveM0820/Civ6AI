@@ -982,6 +982,9 @@ def main() -> None:
     if isinstance(score, int) and not isinstance(score, bool):
         metrics["score"] = score
     metrics.update(board_for_turn_metrics(snapshot))
+    from sidecar import civ6_prompt_budget as prompt_budget
+
+    metrics.update(prompt_budget.metrics_fields(snapshot))
     pipeline.append_turn_metrics(metrics_dir, metrics)
     record["metrics"] = metrics
     report = civ6_turn_report.build_turn_report(

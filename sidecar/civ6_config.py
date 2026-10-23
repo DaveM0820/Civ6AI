@@ -47,6 +47,10 @@ class Civ6AiLocalConfig:
     # Per-seat overrides: {"0": {"model": "...", "reasoning_effort": "high"}, ...}
     seat_models: dict[str, Any] | None = None
     context_budget: bool = True
+    # Text-prompt target for one seat. About 30000 chars ≈ 7500 tokens at 4 chars/token.
+    # 0 disables the size ladder. Per seat: seat_models {"0": {"max_prompt_chars": 28000}}
+    # or CIV6AI_MAX_PROMPT_CHARS_PLAYER_<n>. The map image is not dropped to meet this.
+    max_prompt_chars: int = 30000
     queue_shared_model: bool = True
     # How many seat jobs may call the model at once. 0 = auto (1 for LM Studio,
     # OPENROUTER_PARALLEL_DEFAULT for OpenRouter, where seats run side by side).
@@ -196,8 +200,39 @@ def resolve_seat_runtime(cfg: Civ6AiLocalConfig, player_id: Any) -> tuple[str, s
     return model, effort
 
 
+def resolve_seat_prompt_chars(cfg: Civ6AiLocalConfig, player_id: Any) -> int:
+    """Max prompt characters for one seat.
+
+    Precedence matches the model: CIV6AI_MAX_PROMPT_CHARS_PLAYER_<n>, then
+    seat_models[n].max_prompt_chars, then the shared max_prompt_chars (which
+    load_local_config already overrode from CIV6AI_MAX_PROMPT_CHARS).
+    """
+    try:
+        chars = max(0, int(cfg.max_prompt_chars))
+    except (TypeError, ValueError):
+        chars = 30000
+    seat = player_seat_index(player_id)
+    seats = _seat_models(cfg.seat_models)
+    row = None
+    if seat is not None:
+        row = seats.get(str(seat)) or seats.get(f"PLAYER_{seat}")
+    if isinstance(row, dict) and row.get("max_prompt_chars") is not None and str(row.get("max_prompt_chars")).strip() != "":
+        try:
+            chars = max(0, int(row.get("max_prompt_chars")))
+        except (TypeError, ValueError):
+            pass
+    if seat is not None:
+        raw = os.environ.get(f"CIV6AI_MAX_PROMPT_CHARS_PLAYER_{seat}", "").strip()
+        if raw:
+            try:
+                chars = max(0, int(raw))
+            except ValueError:
+                pass
+    return chars
+
+
 def apply_seat_runtime(cfg: Civ6AiLocalConfig, snapshot: dict[str, Any] | None) -> Civ6AiLocalConfig:
-    """Copy cfg with this snapshot's seat model and effort applied."""
+    """Copy cfg with this snapshot's seat model, effort, and prompt budget applied."""
     player_id = None
     if isinstance(snapshot, dict):
         decision = snapshot.get("decision")
@@ -205,7 +240,13 @@ def apply_seat_runtime(cfg: Civ6AiLocalConfig, snapshot: dict[str, Any] | None) 
             player_id = decision.get("player_id")
     model, effort = resolve_seat_runtime(cfg, player_id)
     reasoning = "off" if effort == "off" else "on"
-    return replace(cfg, model=model, reasoning=reasoning, reasoning_effort=effort)
+    return replace(
+        cfg,
+        model=model,
+        reasoning=reasoning,
+        reasoning_effort=effort,
+        max_prompt_chars=resolve_seat_prompt_chars(cfg, player_id),
+    )
 
 
 def load_local_config(
@@ -225,6 +266,10 @@ def load_local_config(
     cfg = Civ6AiLocalConfig(**kwargs)
     cfg.reasoning = normalize_reasoning(cfg.reasoning)
     cfg.seat_models = _seat_models(cfg.seat_models)
+    try:
+        cfg.max_prompt_chars = max(0, int(cfg.max_prompt_chars))
+    except (TypeError, ValueError):
+        cfg.max_prompt_chars = 30000
     json_effort = data.get("reasoning_effort")
     cfg.timeout_seconds = max(30, int(cfg.timeout_seconds or LMSTUDIO_TIMEOUT_DEFAULT))
     cfg.max_retries = max(1, int(cfg.max_retries or 1))
@@ -282,6 +327,7 @@ def load_local_config(
         cfg.reasoning_effort = normalize_reasoning_effort(cfg.reasoning)
     cfg.reasoning = "off" if cfg.reasoning_effort == "off" else "on"
     cfg.context_budget = _env_bool("CIV6AI_CONTEXT_BUDGET", default=cfg.context_budget)
+    cfg.max_prompt_chars = max(0, _env_int("CIV6AI_MAX_PROMPT_CHARS", default=cfg.max_prompt_chars))
     cfg.queue_shared_model = _env_bool("CIV6AI_QUEUE_SHARED_MODEL", default=cfg.queue_shared_model)
     cfg.timeout_seconds = max(30, int(cfg.timeout_seconds))
     cfg.max_retries = max(1, int(cfg.max_retries))
@@ -332,6 +378,7 @@ def apply_config_to_environ(cfg: Civ6AiLocalConfig) -> None:
     openai_effort = {"low": "low", "medium": "medium", "high": "high", "xhigh": "high"}.get(effort, "low")
     os.environ["CIV4AI_OPENAI_REASONING_EFFORT"] = openai_effort
     os.environ["CIV6AI_CONTEXT_BUDGET"] = "1" if cfg.context_budget else "0"
+    os.environ["CIV6AI_MAX_PROMPT_CHARS"] = str(int(cfg.max_prompt_chars))
     os.environ["CIV6AI_QUEUE_SHARED_MODEL"] = "1" if cfg.queue_shared_model else "0"
     os.environ["CIV6AI_PARALLEL_SEATS"] = str(cfg.effective_parallel_seats)
     if cfg.is_openrouter:
