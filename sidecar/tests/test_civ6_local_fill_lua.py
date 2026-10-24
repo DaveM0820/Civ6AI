@@ -147,13 +147,13 @@ class LocalFillTests(unittest.TestCase):
         ("BUILDING_MONUMENT", 60, "building", []),
     ]
 
-    def test_early_shares_third_settler_third_builder(self):
+    def test_early_shares_half_settler_quarter_builder(self):
         freq, sit = self._shares(self.OPTS, cities=1, pop=2, turn=8)
         self.assertTrue(sit.early)
-        self.assertAlmostEqual(1 / 3, freq["UNIT_SETTLER"], delta=0.04)
-        self.assertAlmostEqual(1 / 3, freq["UNIT_BUILDER"], delta=0.04)
+        self.assertAlmostEqual(1 / 2, freq["UNIT_SETTLER"], delta=0.04)
+        self.assertAlmostEqual(1 / 4, freq["UNIT_BUILDER"], delta=0.04)
         rest = freq.get("UNIT_SCOUT", 0) + freq.get("BUILDING_MONUMENT", 0)
-        self.assertAlmostEqual(1 / 3, rest, delta=0.04)
+        self.assertAlmostEqual(1 / 4, rest, delta=0.04)
         self.assertEqual(0, freq.get("UNIT_WARRIOR", 0))  # no military share in peace
         # The rest keeps the priority weights: scout (score 80) beats monument (60).
         self.assertGreater(freq["UNIT_SCOUT"], freq["BUILDING_MONUMENT"])
@@ -161,7 +161,7 @@ class LocalFillTests(unittest.TestCase):
     def test_missing_settler_share_goes_to_builder(self):
         opts = [o for o in self.OPTS if o[0] != "UNIT_SETTLER"]  # pop 1: no settler offered
         freq, _ = self._shares(opts, cities=1, pop=1, turn=3)
-        self.assertAlmostEqual(2 / 3, freq["UNIT_BUILDER"], delta=0.04)
+        self.assertAlmostEqual(3 / 4, freq["UNIT_BUILDER"], delta=0.04)
         opts = [o for o in opts if o[0] != "UNIT_BUILDER"]
         freq, _ = self._shares(opts, cities=1, pop=1, turn=3)
         self.assertAlmostEqual(1.0, freq.get("UNIT_SCOUT", 0) + freq.get("BUILDING_MONUMENT", 0), delta=0.001)

@@ -82,7 +82,7 @@ INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES
 ('CIV6AI_STRATEGY_EARLY_THREAT', 'Civ6AiEarlyThreatPseudoYields');
 
 INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) VALUES
-('Civ6AiEarlyExpandPseudoYields', 'PSEUDOYIELD_UNIT_SETTLER',          1, 400),
+('Civ6AiEarlyExpandPseudoYields', 'PSEUDOYIELD_UNIT_SETTLER',          1, 600),
 ('Civ6AiEarlyExpandPseudoYields', 'PSEUDOYIELD_IMPROVEMENT',           1, 150),
 ('Civ6AiEarlyExpandPseudoYields', 'PSEUDOYIELD_UNIT_EXPLORER',         1, -200),
 ('Civ6AiEarlyExpandPseudoYields', 'PSEUDOYIELD_UNIT_COMBAT',           1, -40),

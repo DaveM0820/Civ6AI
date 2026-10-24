@@ -46,7 +46,7 @@ class StrategiesSqlTests(unittest.TestCase):
     def test_early_strategies_favour_settlers_or_military(self):
         rows = dict(((l, i), v) for l, i, v in self.db.execute(
             "SELECT ListType, Item, Value FROM AiFavoredItems WHERE ListType LIKE 'Civ6AiEarly%'"))
-        self.assertGreater(rows[("Civ6AiEarlyExpandPseudoYields", "PSEUDOYIELD_UNIT_SETTLER")], 0)
+        self.assertEqual(rows[("Civ6AiEarlyExpandPseudoYields", "PSEUDOYIELD_UNIT_SETTLER")], 600)
         self.assertLess(rows[("Civ6AiEarlyExpandPseudoYields", "PSEUDOYIELD_UNIT_EXPLORER")], 0)
         self.assertGreater(rows[("Civ6AiEarlyThreatPseudoYields", "PSEUDOYIELD_UNIT_COMBAT")], 0)
         self.assertLess(rows[("Civ6AiEarlyThreatPseudoYields", "PSEUDOYIELD_UNIT_SETTLER")], 0)

@@ -496,7 +496,7 @@ Civ6Ai_Production.EARLY_CITY_TARGET = 3
 Civ6Ai_Production.EARLY_TURN = 60
 Civ6Ai_Production.SHARE_SCALE = 3000
 Civ6Ai_Production.PROFILE = {
-  expand = { settler = 1 / 3, builder = 1 / 3, military = 0, rest = 1 / 3 },
+  expand = { settler = 1 / 2, builder = 1 / 4, military = 0, rest = 1 / 4 },
   threat = { settler = 0, builder = 1 / 6, military = 1 / 2, rest = 1 / 3 },
 }
 
