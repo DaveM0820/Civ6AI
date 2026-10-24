@@ -989,6 +989,70 @@ function Civ6Ai_Autotest._SkipUnitMovesEscalating(playerID)
   Civ6Ai_Autotest._SkipUnitMoves(playerID, force)
 end
 
+-- One military unit per tile. A unit the city finished while its center was
+-- already held stays stacked there until it moves; the engine asks for that
+-- move, and finishing its moves instead (the skip below) left it stacked for
+-- good (live T36: P0 had five land military units in its capital). Before a
+-- stacked land military unit is finished, step it to an adjacent tile with no
+-- foreign unit and no land military unit of ours, through the normal MOVE_TO
+-- request. True when a move was requested.
+function Civ6Ai_Autotest._LandMilitary(unit)
+  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+  return row ~= nil and row.FormationClass == "FORMATION_CLASS_LAND_COMBAT"
+end
+
+Civ6Ai_Autotest.UNSTACK_STEPS = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, -1 }, { -1, 1 }, { 1, 1 }, { -1, -1 } }
+
+function Civ6Ai_Autotest._Unstack(playerID, unit)
+  local ok, moved = pcall(function()
+    if Units == nil or Units.GetUnitsInPlot == nil or Map == nil or Map.GetPlot == nil
+        or UnitManager == nil or UnitManager.RequestOperation == nil or UnitOperationTypes == nil then
+      return false
+    end
+    if not Civ6Ai_Autotest._LandMilitary(unit) then
+      return false
+    end
+    local x, y = unit:GetX(), unit:GetY()
+    local function blocked(px, py, selfId)
+      local plot = Map.GetPlot(px, py)
+      if plot == nil then return true end
+      for _, other in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+        if other:GetOwner() ~= playerID then
+          return true
+        end
+        if other:GetID() ~= selfId and Civ6Ai_Autotest._LandMilitary(other) then
+          return true
+        end
+      end
+      return false
+    end
+    if not blocked(x, y, unit:GetID()) then
+      return false
+    end
+    local moveOp = UnitOperationTypes.MOVE_TO
+    for _, d in ipairs(Civ6Ai_Autotest.UNSTACK_STEPS) do
+      local px, py = x + d[1], y + d[2]
+      local plot = Map.GetPlot(px, py)
+      if plot ~= nil and (Map.GetPlotDistance == nil or Map.GetPlotDistance(x, y, px, py) == 1)
+          and not blocked(px, py, nil) then
+        local params = {}
+        params[UnitOperationTypes.PARAM_X] = px
+        params[UnitOperationTypes.PARAM_Y] = py
+        if UnitManager.CanStartOperation == nil or UnitManager.CanStartOperation(unit, moveOp, nil, params) then
+          UnitManager.RequestOperation(unit, moveOp, params)
+          Civ6Ai_Util.Log("autotest|unstack|player=" .. tostring(playerID) .. "|unit=" .. tostring(unit:GetID())
+            .. "|from=" .. x .. "," .. y .. "|to=" .. px .. "," .. py)
+          return true
+        end
+      end
+    end
+    Civ6Ai_Util.Log("autotest|unstack|player=" .. tostring(playerID) .. "|unit=" .. tostring(unit:GetID())
+      .. "|from=" .. x .. "," .. y .. "|to=none")
+    return false
+  end)
+  return ok and moved == true
+end
+
 function Civ6Ai_Autotest._SkipUnitMoves(playerID, force)
   pcall(function()
     local player = Players[playerID]
@@ -1002,7 +1066,8 @@ function Civ6Ai_Autotest._SkipUnitMoves(playerID, force)
     if units.Members ~= nil then
       for _, unit in units:Members() do
         if unit:GetX() ~= -9999 and unit:GetMovesRemaining() > 0
-            and (force or not Civ6Ai_Apply._UnitWasOrdered(playerID, unit)) then
+            and (force or not Civ6Ai_Apply._UnitWasOrdered(playerID, unit))
+            and not Civ6Ai_Autotest._Unstack(playerID, unit) then
           UnitManager.FinishMoves(unit)
         end
       end
@@ -1010,7 +1075,8 @@ function Civ6Ai_Autotest._SkipUnitMoves(playerID, force)
       for i = 0, units:GetCount() - 1 do
         local unit = units:Get(i)
         if unit ~= nil and unit:GetX() ~= -9999 and unit:GetMovesRemaining() > 0
-            and (force or not Civ6Ai_Apply._UnitWasOrdered(playerID, unit)) then
+            and (force or not Civ6Ai_Apply._UnitWasOrdered(playerID, unit))
+            and not Civ6Ai_Autotest._Unstack(playerID, unit) then
           UnitManager.FinishMoves(unit)
         end
       end

@@ -497,7 +497,7 @@ Civ6Ai_Production.EARLY_TURN = 60
 Civ6Ai_Production.SHARE_SCALE = 3000
 Civ6Ai_Production.PROFILE = {
   expand = { settler = 1 / 2, builder = 1 / 4, military = 0, rest = 1 / 4 },
-  threat = { settler = 0, builder = 1 / 6, military = 1 / 2, rest = 1 / 3 },
+  threat = { settler = 1 / 6, builder = 1 / 6, military = 1 / 2, rest = 1 / 6 },
 }
 
 -- Which share an option belongs to: settler, builder, military (land combat) or rest.
@@ -532,7 +532,8 @@ function Civ6Ai_Production.ApplyEarlyShares(options, situation)
   if situation == nil or situation.early ~= true or options == nil or #options == 0 then
     return nil
   end
-  local mode = (situation.threatened == true or situation.at_war == true) and "threat" or "expand"
+  -- ThreatNear already weighs a war against the army near our cities.
+  local mode = situation.threatened == true and "threat" or "expand"
   local shares = {}
   for k, v in pairs(Civ6Ai_Production.PROFILE[mode]) do shares[k] = v end
   local sums = { settler = 0, builder = 0, military = 0, rest = 0 }
@@ -986,9 +987,29 @@ end
 -- The seat's real situation: the same inputs the prompt side passes to
 -- compose_situation (cities, population, builders and charges, open tiles,
 -- unit counts, army, wars, turn and speed, missing buildings, last pick).
--- A barbarian camp, or a barbarian or at-war unit, within THREAT_RADIUS of a city.
+-- Same rule as Gameplay Civ6Ai_Orders.ThreatInfo: hostile land combat units
+-- (barbarian or at war; not scouts or civilians) within THREAT_RADIUS of a
+-- city, a camp within CAMP_RADIUS as one, a war with a major as WAR_WEIGHT,
+-- against our own land combat units there. Threatened while defenders <=
+-- hostiles; an army that already answers the threat goes back to expanding.
 Civ6Ai_Production.THREAT_RADIUS = 6
+Civ6Ai_Production.CAMP_RADIUS = 4
+Civ6Ai_Production.WAR_WEIGHT = 2
 Civ6Ai_Production._threatCache = Civ6Ai_Production._threatCache or {}
+
+function Civ6Ai_Production.LandCombat(unit)
+  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[call(unit, "GetType")] or nil
+  if row == nil then
+    return true
+  end
+  if row.FormationClass ~= nil and row.FormationClass ~= "FORMATION_CLASS_LAND_COMBAT" then
+    return false
+  end
+  if row.PromotionClass == "PROMOTION_CLASS_RECON" then
+    return false
+  end
+  return (tonumber(row.Combat) or 0) > 0 or (tonumber(row.RangedCombat) or 0) > 0
+end
 
 function Civ6Ai_Production.ThreatNear(playerID, cities)
   if Map == nil or Map.GetPlot == nil or cities == nil or cities.Members == nil then
@@ -996,13 +1017,22 @@ function Civ6Ai_Production.ThreatNear(playerID, cities)
   end
   local turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or 0
   local key = tostring(playerID) .. ":" .. tostring(turn)
-  if Civ6Ai_Production._threatCache[key] ~= nil then
-    return Civ6Ai_Production._threatCache[key]
+  local cached = Civ6Ai_Production._threatCache[key]
+  if cached ~= nil then
+    return cached.threat, cached.hostiles, cached.defenders
   end
-  local found = false
+  local hostiles, defenders = 0, 0
   pcall(function()
     local player = Players[playerID]
     local diplo = player ~= nil and call(player, "GetDiplomacy") or nil
+    if PlayerManager ~= nil and PlayerManager.GetAliveMajorIDs ~= nil and diplo ~= nil then
+      for _, other in ipairs(PlayerManager.GetAliveMajorIDs()) do
+        if other ~= playerID and call(diplo, "IsAtWarWith", other) == true then
+          hostiles = hostiles + Civ6Ai_Production.WAR_WEIGHT
+          break
+        end
+      end
+    end
     local camp = GameInfo ~= nil and GameInfo.Improvements ~= nil and GameInfo.Improvements["IMPROVEMENT_BARBARIAN_CAMP"] or nil
     local campIndex = camp ~= nil and camp.Index or nil
     local hostile = {}
@@ -1017,21 +1047,29 @@ function Civ6Ai_Production.ThreatNear(playerID, cities)
       return hostile[owner]
     end
     local r = Civ6Ai_Production.THREAT_RADIUS
+    local seen = {}
     for _, c in cities:Members() do
       local cx, cy = c:GetX(), c:GetY()
       for dx = -r, r do
         for dy = -r, r do
           local plot = Map.GetPlot(cx + dx, cy + dy)
-          if plot ~= nil and Map.GetPlotDistance(cx, cy, plot:GetX(), plot:GetY()) <= r then
-            if campIndex ~= nil and call(plot, "GetImprovementType") == campIndex then
-              found = true
-              return
-            end
-            if Units ~= nil and Units.GetUnitsInPlot ~= nil then
-              for _, u in ipairs(Units.GetUnitsInPlot(plot) or {}) do
-                if isHostile(u:GetOwner()) then
-                  found = true
-                  return
+          if plot ~= nil then
+            local px, py = plot:GetX(), plot:GetY()
+            local pk = px .. "," .. py
+            local d = Map.GetPlotDistance(cx, cy, px, py)
+            if d <= r and not seen[pk] then
+              seen[pk] = true
+              if campIndex ~= nil and d <= Civ6Ai_Production.CAMP_RADIUS and call(plot, "GetImprovementType") == campIndex then
+                hostiles = hostiles + 1
+              end
+              if Units ~= nil and Units.GetUnitsInPlot ~= nil then
+                for _, u in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+                  local o = u:GetOwner()
+                  if o == playerID then
+                    if Civ6Ai_Production.LandCombat(u) then defenders = defenders + 1 end
+                  elseif isHostile(o) and Civ6Ai_Production.LandCombat(u) then
+                    hostiles = hostiles + 1
+                  end
                 end
               end
             end
@@ -1040,8 +1078,9 @@ function Civ6Ai_Production.ThreatNear(playerID, cities)
       end
     end
   end)
-  Civ6Ai_Production._threatCache[key] = found
-  return found
+  local threat = hostiles > 0 and defenders <= hostiles
+  Civ6Ai_Production._threatCache[key] = { threat = threat, hostiles = hostiles, defenders = defenders }
+  return threat, hostiles, defenders
 end
 
 function Civ6Ai_Production.SituationFor(playerID, city)
@@ -1167,6 +1206,8 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
         .. "|options=" .. tostring(#options) .. "|top=" .. table.concat(parts, ",")
         .. "|builder_surplus=" .. tostring(situation.builder_surplus == true)
         .. "|early=" .. tostring(situation.early == true) .. "|threat=" .. tostring(situation.threatened == true)
+        .. "|hostiles=" .. tostring(select(2, Civ6Ai_Production.ThreatNear(playerID, cities)) or 0)
+        .. "|defenders=" .. tostring(select(3, Civ6Ai_Production.ThreatNear(playerID, cities)) or 0)
         .. "|" .. outcome)
     end
   end

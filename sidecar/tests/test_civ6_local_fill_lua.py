@@ -166,11 +166,42 @@ class LocalFillTests(unittest.TestCase):
         freq, _ = self._shares(opts, cities=1, pop=1, turn=3)
         self.assertAlmostEqual(1.0, freq.get("UNIT_SCOUT", 0) + freq.get("BUILDING_MONUMENT", 0), delta=0.001)
 
-    def test_threat_shifts_to_military_and_drops_settlers(self):
+    def test_threat_shifts_to_military_and_keeps_some_settlers(self):
         freq, _ = self._shares(self.OPTS, cities=1, pop=3, turn=12, threatened=True)
-        self.assertEqual(0, freq.get("UNIT_SETTLER", 0))
+        self.assertAlmostEqual(1 / 6, freq.get("UNIT_SETTLER", 0), delta=0.04)
         self.assertAlmostEqual(1 / 2, freq["UNIT_WARRIOR"], delta=0.04)
         self.assertGreater(freq["UNIT_WARRIOR"], freq["UNIT_BUILDER"])
+
+    def test_threat_near_ignores_scouts_and_ends_once_defended(self):
+        P = self.g.Civ6Ai_Production
+        self.lua.execute("""
+          GameInfo.Units = GameInfo.Units or {}
+          GameInfo.Units["UNIT_SCOUT"] = { Combat = 10, PromotionClass = "PROMOTION_CLASS_RECON", FormationClass = "FORMATION_CLASS_LAND_COMBAT" }
+          GameInfo.Units["UNIT_SPEARMAN"] = { Combat = 25, PromotionClass = "PROMOTION_CLASS_ANTI_CAVALRY", FormationClass = "FORMATION_CLASS_LAND_COMBAT" }
+          GameInfo.Units["UNIT_SLINGER"] = { Combat = 5, RangedCombat = 15, PromotionClass = "PROMOTION_CLASS_RANGED", FormationClass = "FORMATION_CLASS_LAND_COMBAT" }
+          GameInfo.Improvements = GameInfo.Improvements or {}
+          TPlots = {}
+          Map = Map or {}
+          Map.GetPlot = function(x, y) return { GetX = function() return x end, GetY = function() return y end, GetImprovementType = function() return -1 end } end
+          Map.GetPlotDistance = function(ax, ay, bx, by) return math.max(math.abs(ax - bx), math.abs(ay - by)) end
+          Units = Units or {}
+          Units.GetUnitsInPlot = function(plot) return TPlots[plot:GetX() .. "," .. plot:GetY()] or {} end
+          Players[63] = { IsBarbarian = function() return true end }
+          Players[0] = Players[0] or {}
+          Players[0].GetDiplomacy = function() return { IsAtWarWith = function() return false end } end
+          function TUnit(owner, t) return { GetOwner = function() return owner end, GetType = function() return t end } end
+          TCities = { Members = function() local done = false; return function() if not done then done = true; return 1, { GetX = function() return 10 end, GetY = function() return 10 end } end end end }
+        """)
+        def threat(turn, units):
+            self.lua.execute("TPlots = {}")
+            for xy, owner, typ in units:
+                self.lua.execute('TPlots["%s"] = TPlots["%s"] or {}; table.insert(TPlots["%s"], TUnit(%d, "%s"))' % (xy, xy, xy, owner, typ))
+            self.lua.execute("Game = Game or {}; Game.GetCurrentGameTurn = function() return %d end" % turn)
+            return P.ThreatNear(0, self.lua.eval("TCities"))
+        self.assertFalse(threat(100, [("11,12", 63, "UNIT_SCOUT")])[0])  # live P0 T13: a barbarian scout
+        self.assertTrue(threat(101, [("12,11", 63, "UNIT_SPEARMAN")])[0])
+        t, h, d = threat(102, [("12,11", 63, "UNIT_SPEARMAN"), ("10,10", 0, "UNIT_SLINGER"), ("11,10", 0, "UNIT_SLINGER")])
+        self.assertEqual((False, 1, 2), (t, h, d))
 
     def test_shares_end_at_three_cities_or_turn_sixty(self):
         P = self.g.Civ6Ai_Production

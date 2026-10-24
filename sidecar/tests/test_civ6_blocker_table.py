@@ -151,3 +151,65 @@ class BlockerTableTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipIf(LuaRuntime is None, "lupa not installed")
+class UnstackTests(unittest.TestCase):
+    """Live T36: five land military units sat in P0's capital because the unit
+    skip finished the moves of units the city produced onto an occupied center."""
+
+    def setUp(self):
+        self.lua = LuaRuntime(unpack_returned_tuples=True)
+        self.lua.execute(STUBS)
+        self.lua.execute(AUTOTEST.read_text(encoding="utf-8"))
+        self.lua.execute(r"""
+          GameInfo = { Units = {
+            UNIT_SLINGER = { FormationClass = "FORMATION_CLASS_LAND_COMBAT" },
+            UNIT_BUILDER = { FormationClass = "FORMATION_CLASS_CIVILIAN" } } }
+          PLOTS = {}
+          function U(id, owner, t, x, y)
+            local u = { id = id, x = x, y = y, moves = 2 }
+            function u:GetID() return self.id end
+            function u:GetOwner() return owner end
+            function u:GetType() return t end
+            function u:GetX() return self.x end
+            function u:GetY() return self.y end
+            function u:GetMovesRemaining() return self.moves end
+            local k = x .. "," .. y
+            PLOTS[k] = PLOTS[k] or {}
+            table.insert(PLOTS[k], u)
+            return u
+          end
+          Map = { GetPlot = function(x, y) return { x = x, y = y } end,
+                  GetPlotDistance = function(ax, ay, bx, by) return math.max(math.abs(ax - bx), math.abs(ay - by)) end }
+          Units = { GetUnitsInPlot = function(p) return PLOTS[p.x .. "," .. p.y] or {} end }
+          UnitOperationTypes = { MOVE_TO = 7, PARAM_X = "X", PARAM_Y = "Y" }
+          MOVES = {}; FINISHED = {}
+          UnitManager = {
+            CanStartOperation = function() return true end,
+            RequestOperation = function(u, op, p) table.insert(MOVES, u:GetID() .. ">" .. p.X .. "," .. p.Y) end,
+            FinishMoves = function(u) table.insert(FINISHED, u:GetID()) end,
+          }
+          Civ6Ai_Apply._UnitWasOrdered = function() return true end
+        """)
+        self.g = self.lua.globals()
+
+    def test_stacked_military_steps_out_instead_of_finishing(self):
+        self.lua.execute("""
+          A = U(1, 0, "UNIT_SLINGER", 5, 5); B = U(2, 0, "UNIT_SLINGER", 5, 5)
+          C = U(3, 0, "UNIT_SLINGER", 6, 5); D = U(4, 63, "UNIT_SLINGER", 4, 5)
+          W = U(5, 0, "UNIT_BUILDER", 5, 6)
+          Players[0].GetUnits = function() return { Members = function()
+            local list, i = { A, B, W }, 0
+            return function() i = i + 1; if list[i] then return i, list[i] end end end } end
+        """)
+        self.g.Civ6Ai_Autotest._SkipUnitMoves(0, True)
+        moves = [self.g.MOVES[i] for i in range(1, len(self.g.MOVES) + 1)]
+        finished = [self.g.FINISHED[i] for i in range(1, len(self.g.FINISHED) + 1)]
+        # 6,5 has our slinger, 4,5 a foreign unit: 5,6 (only our builder) is free.
+        self.assertEqual(["1>5,6", "2>5,6"], moves)
+        self.assertEqual([5], finished)
+
+    def test_lone_garrison_is_not_moved(self):
+        self.lua.execute('A = U(1, 0, "UNIT_SLINGER", 5, 5)')
+        self.assertFalse(self.g.Civ6Ai_Autotest._Unstack(0, self.g.A))

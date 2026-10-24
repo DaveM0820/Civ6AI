@@ -49,7 +49,7 @@ class StrategiesSqlTests(unittest.TestCase):
         self.assertEqual(rows[("Civ6AiEarlyExpandPseudoYields", "PSEUDOYIELD_UNIT_SETTLER")], 600)
         self.assertLess(rows[("Civ6AiEarlyExpandPseudoYields", "PSEUDOYIELD_UNIT_EXPLORER")], 0)
         self.assertGreater(rows[("Civ6AiEarlyThreatPseudoYields", "PSEUDOYIELD_UNIT_COMBAT")], 0)
-        self.assertLess(rows[("Civ6AiEarlyThreatPseudoYields", "PSEUDOYIELD_UNIT_SETTLER")], 0)
+        self.assertEqual(rows[("Civ6AiEarlyThreatPseudoYields", "PSEUDOYIELD_UNIT_SETTLER")], 0)  # threat no longer stops settlers
 
     def test_modinfo_loads_the_sql(self):
         info = (MOD / "Civ6Ai.modinfo").read_text()

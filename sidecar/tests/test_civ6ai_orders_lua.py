@@ -252,6 +252,21 @@ class OrdersGameplayTests(unittest.TestCase):
         self.rt.globals().SetTurn(61)
         self.assertIsNone(O.EarlyMode(7))
 
+    def test_early_threat_clears_once_army_outnumbers_hostiles(self):
+        O = self.rt.globals().Civ6Ai_Orders
+        self._early_world(cities=1, barb_at=(13, 12))
+        self.rt.execute("""
+          GameInfo.Units = GameInfo.Units or {}
+          GameInfo.Units["UNIT_SCOUT"] = { Combat = 10, PromotionClass = "PROMOTION_CLASS_RECON", FormationClass = "FORMATION_CLASS_LAND_COMBAT" }
+          GameInfo.Units["UNIT_WARRIOR"] = { Combat = 20, PromotionClass = "PROMOTION_CLASS_MELEE", FormationClass = "FORMATION_CLASS_LAND_COMBAT" }
+          BarbUnits["10,10"] = { { GetOwner = function() return 7 end, GetType = function() return "UNIT_WARRIOR" end },
+                                 { GetOwner = function() return 7 end, GetType = function() return "UNIT_WARRIOR" end } }
+        """)
+        self.assertEqual("expand", O.EarlyMode(7))
+        self._early_world(cities=1)
+        self.rt.execute('BarbUnits["12,12"] = { { GetOwner = function() return 63 end, GetType = function() return "UNIT_SCOUT" end } }')
+        self.assertEqual("expand", O.EarlyMode(7))  # a barbarian scout is not a threat
+
     def test_early_strategy_handlers_answer_from_early_mode(self):
         self._early_world(cities=1)
         expand = self.rt.eval("GameEvents.Civ6AiEarlyExpand.fns[1]")

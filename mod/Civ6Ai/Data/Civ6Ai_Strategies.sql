@@ -50,9 +50,10 @@ INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) VALUES
 -- Early-game build order for engine-AI seats (the local fill uses the same
 -- rule in InGame/Civ6Ai_Production.lua). Active for a seat the model drives
 -- (any Civ6Ai priority set) with fewer than 3 cities by turn 60. EXPAND favours
--- settlers, then builders, and drops scouts and spare army; THREAT (at war, or a
--- barbarian camp or hostile unit within 6 tiles of a city) favours land combat
--- units and holds settlers back until it clears. The two are exclusive.
+-- settlers, then builders, and drops scouts and spare army; THREAT (hostile land
+-- combat units, a camp within 4 or a war outnumber our army near our cities;
+-- scouts do not count) favours land combat units without holding settlers back,
+-- and clears once our army near the cities outnumbers them. Exclusive.
 INSERT INTO Types (Type, Kind) VALUES
 ('CIV6AI_STRATEGY_EARLY_EXPAND', 'KIND_VICTORY_STRATEGY'),
 ('CIV6AI_STRATEGY_EARLY_THREAT', 'KIND_VICTORY_STRATEGY');
@@ -89,5 +90,5 @@ INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) VALUES
 ('Civ6AiEarlyExpandPseudoYields', 'PSEUDOYIELD_WONDER',                1, -80),
 ('Civ6AiEarlyThreatPseudoYields', 'PSEUDOYIELD_UNIT_COMBAT',           1, 300),
 ('Civ6AiEarlyThreatPseudoYields', 'PSEUDOYIELD_STANDING_ARMY_NUMBER',  1, 100),
-('Civ6AiEarlyThreatPseudoYields', 'PSEUDOYIELD_UNIT_SETTLER',          1, -200),
+('Civ6AiEarlyThreatPseudoYields', 'PSEUDOYIELD_UNIT_SETTLER',          1, 0),
 ('Civ6AiEarlyThreatPseudoYields', 'PSEUDOYIELD_UNIT_EXPLORER',         1, -200);

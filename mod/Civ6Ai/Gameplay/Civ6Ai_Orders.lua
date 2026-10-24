@@ -5341,12 +5341,40 @@ Civ6Ai_Orders.EARLY_TURN = 60
 Civ6Ai_Orders.THREAT_RADIUS = 6
 Civ6Ai_Orders._earlyCache = Civ6Ai_Orders._earlyCache or {}
 
-function Civ6Ai_Orders.ThreatNear(owner)
+-- Threat = hostile land combat power near our cities that our own army near
+-- them does not already cover. Hostile: a barbarian, or a player we are at war
+-- with. Scouts and civilians are not a threat; a barbarian camp within
+-- CAMP_RADIUS counts as one unit; a war with a major counts WAR_WEIGHT. Our
+-- land combat units (not recon) within THREAT_RADIUS of a city defend. Threat
+-- while defenders <= hostiles, so a seat that already built its answer goes
+-- back to expanding (T36 live: a barbarian scout two tiles out kept P0 in
+-- threat from T13 with nine military units and zero settlers).
+Civ6Ai_Orders.CAMP_RADIUS = 4
+Civ6Ai_Orders.WAR_WEIGHT = 2
+
+local function landCombat(unit)
+  local row = GameInfo.Units ~= nil and GameInfo.Units[call(unit, "GetType")] or nil
+  if row == nil then
+    return true
+  end
+  if row.FormationClass ~= nil and row.FormationClass ~= "FORMATION_CLASS_LAND_COMBAT" then
+    return false
+  end
+  if row.PromotionClass == "PROMOTION_CLASS_RECON" then
+    return false
+  end
+  return (tonumber(row.Combat) or 0) > 0 or (tonumber(row.RangedCombat) or 0) > 0
+end
+Civ6Ai_Orders._LandCombat = landCombat
+
+function Civ6Ai_Orders.ThreatInfo(owner)
   local player = Players[owner]
   local diplo = call(player, "GetDiplomacy")
+  local hostiles, defenders = 0, 0
   for _, other in ipairs(PlayerManager.GetAliveMajorIDs()) do
     if other ~= owner and call(diplo, "IsAtWarWith", other) == true then
-      return true
+      hostiles = hostiles + Civ6Ai_Orders.WAR_WEIGHT
+      break
     end
   end
   local camp = GameInfo.Improvements["IMPROVEMENT_BARBARIAN_CAMP"]
@@ -5360,27 +5388,44 @@ function Civ6Ai_Orders.ThreatNear(owner)
     return hostile[o]
   end
   local r = Civ6Ai_Orders.THREAT_RADIUS
-  for _, c in ipairs(sortedMembers(call(player, "GetCities"))) do
+  local seen = {}
+  local cities = sortedMembers(call(player, "GetCities"))
+  for _, c in ipairs(cities) do
     local cx, cy = c:GetX(), c:GetY()
     for dx = -r, r do
       for dy = -r, r do
         local plot = Map.GetPlot(cx + dx, cy + dy)
-        if plot ~= nil and Map.GetPlotDistance(cx, cy, plot:GetX(), plot:GetY()) <= r then
-          if campIndex ~= nil and plot:GetImprovementType() == campIndex then
-            return true
-          end
-          for _, u in ipairs(Units.GetUnitsInPlot(plot) or {}) do
-            if isHostile(u:GetOwner()) then
-              return true
+        if plot ~= nil then
+          local px, py = plot:GetX(), plot:GetY()
+          local key = px .. "," .. py
+          local d = Map.GetPlotDistance(cx, cy, px, py)
+          if d <= r and not seen[key] then
+            seen[key] = true
+            if campIndex ~= nil and d <= Civ6Ai_Orders.CAMP_RADIUS and plot:GetImprovementType() == campIndex then
+              hostiles = hostiles + 1
+            end
+            for _, u in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+              local o = u:GetOwner()
+              if o == owner then
+                if landCombat(u) then defenders = defenders + 1 end
+              elseif isHostile(o) and landCombat(u) then
+                hostiles = hostiles + 1
+              end
             end
           end
         end
       end
     end
   end
-  return false
+  return hostiles, defenders
 end
 
+function Civ6Ai_Orders.ThreatNear(owner)
+  local hostiles, defenders = Civ6Ai_Orders.ThreatInfo(owner)
+  return hostiles > 0 and defenders <= hostiles, hostiles, defenders
+end
+
+local mode_detail = ""
 function Civ6Ai_Orders.EarlyMode(owner)
   local turn = Game.GetCurrentGameTurn()
   local key = tostring(owner) .. ":" .. tostring(turn)
@@ -5389,18 +5434,22 @@ function Civ6Ai_Orders.EarlyMode(owner)
     return cached ~= "" and cached or nil
   end
   local mode = ""
+  mode_detail = ""
   local player = Players[owner]
   if player ~= nil and call(player, "IsMajor") == true and turn <= Civ6Ai_Orders.EARLY_TURN
       and #Civ6Ai_Orders.PriorityLevels(owner) > 0 then
     local n = #sortedMembers(call(player, "GetCities"))
     if n < Civ6Ai_Orders.EARLY_CITY_TARGET then
-      local ok, threat = pcall(Civ6Ai_Orders.ThreatNear, owner)
+      local ok, threat, h, d = pcall(Civ6Ai_Orders.ThreatNear, owner)
       mode = (ok and threat == true) and "threat" or "expand"
+      if ok then
+        mode_detail = "|hostiles=" .. tostring(h) .. "|defenders=" .. tostring(d)
+      end
     end
   end
   Civ6Ai_Orders._earlyCache[key] = mode
   if mode ~= "" then
-    log("early_mode|turn=" .. tostring(turn) .. "|player=" .. tostring(owner) .. "|mode=" .. mode)
+    log("early_mode|turn=" .. tostring(turn) .. "|player=" .. tostring(owner) .. "|mode=" .. mode .. mode_detail)
   end
   return mode ~= "" and mode or nil
 end
