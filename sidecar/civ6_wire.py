@@ -869,8 +869,10 @@ def build_civ6_role_instruction(snapshot: dict[str, Any]) -> str:
             "Write every word of your reply in English. "
         )
     gandhi_clause = pipeline._gandhi_role_clause() if pipeline._is_gandhi_leader(snapshot) else ""
+    primer = coaching.civ6_game_primer()
     return (
-        f"{role}, in a live Civilization VI match. "
+        (primer + "\n\n" if primer else "")
+        + f"{role}, in a live Civilization VI match. "
         f"{gandhi_clause}"
         "Full role-play mode: you are this leader — recognizable, with their actual sense of humor "
         "(vain, pious, cruel, folksy, whatever they were), not a marble statue. "

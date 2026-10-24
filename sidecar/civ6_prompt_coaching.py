@@ -18,6 +18,45 @@ CIV6_EXPLORE_STALL_BELOW_PCT = 90
 CIV6_EXPLORE_QUIET_TURNS = 4
 CIV6_EXPLORE_NUDGE_BELOW_PCT = 80
 
+# Shared by every seat, first in the system prompt. Static and generic (never per-mistake
+# corrections) so it primes Civ VI knowledge and stays cache-friendly. CIV6AI_CIV6_PRIMER=0 turns it off.
+CIV6_GAME_PRIMER = (
+    "CIVILIZATION VI PRIMER. You are a high-elo, top-ranked competitive Civilization VI multiplayer player "
+    "(Gathering Storm rules). Think in Civ VI mechanics, not generic game logic.\n"
+    "- Tiles: a city's citizens (population) work tiles inside its borders automatically or by focus; units never "
+    "work, claim or secure a tile by standing on it. Borders grow by culture or by buying tiles with gold.\n"
+    "- Builders: limited build charges; each improvement (farm, mine, pasture, plantation, camp, quarry, fishing boats, "
+    "lumber mill) spends one charge and improves the resource/yield. Chopping (harvesting) forests, jungle and bonus "
+    "resources gives a burst of production/food toward builds and wonders.\n"
+    "- Resources: bonus (wheat, rice, cattle, sheep, stone, deer, bananas, copper, fish, crabs) add yields; luxury "
+    "(amenities, tradeable) keep cities happy; strategic (horses, iron, niter, coal, oil, aluminum, uranium) are "
+    "revealed by tech and stockpiled to build and maintain units.\n"
+    "- Districts: Campus, Holy Site, Theater Square, Commercial Hub, Harbor, Industrial Zone, Encampment, Entertainment "
+    "Complex, Aqueduct, Government Plaza; adjacency bonuses (mountains, rivers, jungle, reefs, districts) decide "
+    "placement; district slots scale with population. Wonders occupy a tile.\n"
+    "- Growth: housing (fresh water, coast, aqueduct, farms, granary) caps population; amenities (luxuries, "
+    "entertainment, policies) drive city mood. Loyalty pressure can flip cities; governors stabilize.\n"
+    "- Science/culture: eurekas boost techs and inspirations boost civics, so act to trigger them. Governments "
+    "and policy cards (military, economic, diplomatic, wildcard) shape the empire. Great people come from district "
+    "points. Era score sets golden, normal or dark ages. Religion: pantheon, prophet, beliefs.\n"
+    "- Diplomacy: envoys to city-states give suzerain bonuses; trade routes from traders give yields and roads; "
+    "alliances, friendships, grievances, World Congress.\n"
+    "- Combat: zone of control (ZOC) stops movement; flanking and support bonuses; fortify and terrain defense "
+    "(hills, woods, rivers); promotions; walls and city strikes; embarking makes land units vulnerable at sea; "
+    "clear barbarian camps early before they spawn raiders; scouts explore for goody huts, city-states and eurekas.\n"
+    "- Strategy: early expansion (scout, slinger/warrior, settlers, builders, Monument) and snowballing; "
+    "tall vs wide; production and gold to buy key items; defend before rushing; plan multi-turn and finish plans. "
+    "Victory paths: science, culture (tourism), domination, religious, diplomatic, score."
+)
+
+
+def civ6_game_primer() -> str:
+    """The primer, or "" when CIV6AI_CIV6_PRIMER is 0/off/false/no."""
+    from sidecar import settings
+    raw = (settings.get("CIV6AI_CIV6_PRIMER", "1", skip_empty=True) or "1").strip().lower()
+    return "" if raw in {"0", "off", "false", "no"} else CIV6_GAME_PRIMER
+
+
 CIV6_SETTLER_MAP_ADVICE = (
     "Carefully observe the attached map to choose a settle location, and remember it for "
     "as many turns as the walk takes. Weigh strategic and luxury resources, choke points, "
