@@ -459,7 +459,14 @@ function Civ6Ai_Production.ComposeSituation(raw)
       counts[key] = tonumber(value) or 0
     end
   end
+  -- Early game: fewer than EARLY_CITY_TARGET cities and game turn <= EARLY_TURN.
+  local early = cities < Civ6Ai_Production.EARLY_CITY_TARGET and turn <= Civ6Ai_Production.EARLY_TURN
   return {
+    early = early,
+    cities = cities,
+    builders = builders,
+    army = army,
+    recon = tonumber(raw.recon) or 0,
     levels = levels,
     half_war = warlike and (levels[keys.war] or 0) == 0,
     military_over = army >= needed + 2,
@@ -479,6 +486,62 @@ function Civ6Ai_Production.ComposeSituation(raw)
 end
 
 Civ6Ai_Production.BUILDER_SURPLUS_PENALTY = 200
+
+-- Early-game production profile: one shared, bounded multiplier on an option's
+-- fill weight (after the score from the model's priority lists), the same for
+-- every seat that uses the fill. It shapes, never overrides: the model's levels
+-- still set the scores it multiplies.
+Civ6Ai_Production.EARLY_CITY_TARGET = 3
+Civ6Ai_Production.EARLY_TURN = 60
+Civ6Ai_Production.PROFILE_MIN = 0.2
+Civ6Ai_Production.PROFILE_MAX = 4
+Civ6Ai_Production.PROFILE = {
+  settler = 4,          -- early, pop >= 2, land to settle
+  builder_capped = 0.25, -- early, already one builder per city
+  scout_capped = 0.2,   -- recon units at the soft cap (1, +1 per 3 more cities)
+  military_capped = 0.3, -- early, no threat or war, army already one per city
+  monument = 2,         -- early, city has no Monument
+}
+
+function Civ6Ai_Production.ScoutCap(cities)
+  return 1 + math.floor(math.max(0, (tonumber(cities) or 1) - 1) / 3)
+end
+
+function Civ6Ai_Production.ProfileMultiplier(buildId, tags, kind, situation)
+  situation = situation or {}
+  local P = Civ6Ai_Production.PROFILE
+  local has = {}
+  for _, tag in ipairs(tags or {}) do has[tag] = true end
+  local id = tostring(buildId or "")
+  local isUnit = kind == "unit" or string.sub(id, 1, 5) == "UNIT_"
+  local early = situation.early == true
+  local cities = tonumber(situation.cities) or 1
+  local m = 1
+  if has["PSEUDOYIELD_UNIT_SETTLER"] or id == "UNIT_SETTLER" then
+    if early and (tonumber(situation.pop) or 1) >= 2 and situation.land ~= false then
+      m = m * P.settler
+    end
+  elseif isUnit and has["PSEUDOYIELD_IMPROVEMENT"] then
+    if early and (tonumber(situation.builders) or 0) >= cities then
+      m = m * P.builder_capped
+    end
+  elseif has["PSEUDOYIELD_UNIT_EXPLORER"] then
+    if (tonumber(situation.recon) or 0) >= Civ6Ai_Production.ScoutCap(cities) then
+      m = m * P.scout_capped
+    end
+  elseif has["PSEUDOYIELD_UNIT_COMBAT"] then
+    if early and situation.threatened ~= true and situation.at_war ~= true
+        and (tonumber(situation.army) or 0) >= cities then
+      m = m * P.military_capped
+    end
+  end
+  if id == "BUILDING_MONUMENT" and early and situation.missing_monument == true then
+    m = m * P.monument
+  end
+  if m < Civ6Ai_Production.PROFILE_MIN then m = Civ6Ai_Production.PROFILE_MIN end
+  if m > Civ6Ai_Production.PROFILE_MAX then m = Civ6Ai_Production.PROFILE_MAX end
+  return m
+end
 
 function Civ6Ai_Production.ScoreBuild(buildId, tags, situation, kind)
   situation = situation or {}
@@ -798,6 +861,7 @@ function Civ6Ai_Production.BuildOptions(city, situation)
         out[#out + 1] = {
           id = id, hash = row.Hash, param = paramKey,
           score = Civ6Ai_Production.ScoreBuild(id, tags, situation, kind or ""),
+          mult = Civ6Ai_Production.ProfileMultiplier(id, tags, kind or "", situation),
         }
       end
     end)
@@ -811,7 +875,8 @@ end
 
 -- Deterministic weighted pick. Weight = score above the worst option, bounded
 -- to [WEIGHT_FLOOR, WEIGHT_CAP] so one inflated item cannot squeeze every
--- building down to a weight of 1.
+-- building down to a weight of 1, then times the option's profile multiplier
+-- (ProfileMultiplier, itself bounded), so an early settler can stand out.
 Civ6Ai_Production.WEIGHT_FLOOR = 5
 Civ6Ai_Production.WEIGHT_CAP = 150
 
@@ -829,6 +894,8 @@ function Civ6Ai_Production.WeightedPick(options, seed)
     local w = o.score - low + floor
     if w > cap then w = cap end
     if w < floor then w = floor end
+    w = w * (tonumber(o.mult) or 1)
+    if w < 1 then w = 1 end
     o.weight = math.floor(w)
     total = total + o.weight
   end
@@ -888,6 +955,64 @@ end
 -- The seat's real situation: the same inputs the prompt side passes to
 -- compose_situation (cities, population, builders and charges, open tiles,
 -- unit counts, army, wars, turn and speed, missing buildings, last pick).
+-- A barbarian camp, or a barbarian or at-war unit, within THREAT_RADIUS of a city.
+Civ6Ai_Production.THREAT_RADIUS = 6
+Civ6Ai_Production._threatCache = Civ6Ai_Production._threatCache or {}
+
+function Civ6Ai_Production.ThreatNear(playerID, cities)
+  if Map == nil or Map.GetPlot == nil or cities == nil or cities.Members == nil then
+    return false
+  end
+  local turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or 0
+  local key = tostring(playerID) .. ":" .. tostring(turn)
+  if Civ6Ai_Production._threatCache[key] ~= nil then
+    return Civ6Ai_Production._threatCache[key]
+  end
+  local found = false
+  pcall(function()
+    local player = Players[playerID]
+    local diplo = player ~= nil and call(player, "GetDiplomacy") or nil
+    local camp = GameInfo ~= nil and GameInfo.Improvements ~= nil and GameInfo.Improvements["IMPROVEMENT_BARBARIAN_CAMP"] or nil
+    local campIndex = camp ~= nil and camp.Index or nil
+    local hostile = {}
+    local function isHostile(owner)
+      if owner == nil or owner < 0 or owner == playerID then return false end
+      if hostile[owner] == nil then
+        local other = Players[owner]
+        local barb = other ~= nil and call(other, "IsBarbarian") == true
+        local war = diplo ~= nil and call(diplo, "IsAtWarWith", owner) == true
+        hostile[owner] = barb or war
+      end
+      return hostile[owner]
+    end
+    local r = Civ6Ai_Production.THREAT_RADIUS
+    for _, c in cities:Members() do
+      local cx, cy = c:GetX(), c:GetY()
+      for dx = -r, r do
+        for dy = -r, r do
+          local plot = Map.GetPlot(cx + dx, cy + dy)
+          if plot ~= nil and Map.GetPlotDistance(cx, cy, plot:GetX(), plot:GetY()) <= r then
+            if campIndex ~= nil and call(plot, "GetImprovementType") == campIndex then
+              found = true
+              return
+            end
+            if Units ~= nil and Units.GetUnitsInPlot ~= nil then
+              for _, u in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+                if isHostile(u:GetOwner()) then
+                  found = true
+                  return
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end)
+  Civ6Ai_Production._threatCache[key] = found
+  return found
+end
+
 function Civ6Ai_Production.SituationFor(playerID, city)
   local raw = { saved = Civ6Ai_Production.SavedLevels(playerID) }
   local player = Players ~= nil and Players[playerID] or nil
@@ -906,7 +1031,7 @@ function Civ6Ai_Production.SituationFor(playerID, city)
       raw.speed_num = math.floor(10000 / mult)
     end
   end)
-  local builders, charges, military, counts = 0, 0, 0, {}
+  local builders, charges, military, counts, recon = 0, 0, 0, {}, 0
   local units = player ~= nil and call(player, "GetUnits") or nil
   if units ~= nil and units.Members ~= nil then
     for _, unit in units:Members() do
@@ -924,12 +1049,17 @@ function Civ6Ai_Production.SituationFor(playerID, city)
         end
         charges = charges + (c or tonumber(call(unit, "GetBuildCharges")) or 0)
       elseif info ~= nil and (positive(info.Combat) or positive(info.RangedCombat)) then
-        military = military + 1
+        if info.PromotionClass == "PROMOTION_CLASS_RECON" then
+          recon = recon + 1
+        else
+          military = military + 1
+        end
       end
     end
   end
   raw.builders = builders
   raw.military = military
+  raw.recon = recon
   raw.unit_counts = counts
   if builders > 0 then
     raw.open_tiles = Civ6Ai_Production.OpenImproveTiles(playerID, cities)
@@ -945,6 +1075,7 @@ function Civ6Ai_Production.SituationFor(playerID, city)
     end
   end)
   raw.major_wars = wars
+  raw.threatened = Civ6Ai_Production.ThreatNear(playerID, cities)
   if city ~= nil then
     pcall(function()
       local held = city:GetBuildings()
@@ -1003,7 +1134,9 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
         .. "|city=" .. tostring(cid) .. "|build=" .. tostring(pick and pick.id or "")
         .. "|weight=" .. tostring(pick and pick.weight or 0) .. "/" .. tostring(total)
         .. "|options=" .. tostring(#options) .. "|top=" .. table.concat(parts, ",")
-        .. "|builder_surplus=" .. tostring(situation.builder_surplus == true) .. "|" .. outcome)
+        .. "|builder_surplus=" .. tostring(situation.builder_surplus == true)
+        .. "|early=" .. tostring(situation.early == true) .. "|threat=" .. tostring(situation.threatened == true)
+        .. "|" .. outcome)
     end
   end
   return filled

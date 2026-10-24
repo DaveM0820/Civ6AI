@@ -125,6 +125,51 @@ class LocalFillTests(unittest.TestCase):
         open_sit = P.ComposeSituation(self.lua.eval("{ builders = 1, builder_charges = 2, open_tiles = 5, cities = 1 }"))
         self.assertFalse(open_sit.builder_surplus)
 
+    def _mult(self, build_id, tags, kind, **raw):
+        P = self.g.Civ6Ai_Production
+        parts = ", ".join(f"{k} = {str(v).lower() if isinstance(v, bool) else v}" for k, v in raw.items())
+        sit = P.ComposeSituation(self.lua.eval("{ " + parts + " }"))
+        return P.ProfileMultiplier(build_id, self.lua.eval("{ " + ", ".join(f'"{t}"' for t in tags) + " }"), kind, sit), sit
+
+    def test_early_profile_boosts_settlers_and_caps_the_rest(self):
+        m, sit = self._mult("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], "unit", cities=1, pop=2, turn=8)
+        self.assertTrue(sit.early)
+        self.assertEqual(4, m)
+        m, _ = self._mult("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], "unit", cities=1, pop=1, turn=8)
+        self.assertEqual(1, m)  # pop 1 cannot build a settler
+        m, sit = self._mult("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], "unit", cities=3, pop=4, turn=20)
+        self.assertFalse(sit.early)
+        self.assertEqual(1, m)
+        m, _ = self._mult("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], "unit", cities=1, pop=3, turn=70)
+        self.assertEqual(1, m)  # past turn 60
+        m, _ = self._mult("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], "unit", cities=2, pop=3, turn=60)
+        self.assertEqual(4, m)
+
+    def test_builder_scout_military_monument_soft_caps(self):
+        b, _ = self._mult("UNIT_BUILDER", ["PSEUDOYIELD_IMPROVEMENT"], "unit", cities=1, pop=2, turn=8, builders=1)
+        self.assertAlmostEqual(0.25, b)
+        b0, _ = self._mult("UNIT_BUILDER", ["PSEUDOYIELD_IMPROVEMENT"], "unit", cities=1, pop=2, turn=8, builders=0)
+        self.assertEqual(1, b0)
+        s1, _ = self._mult("UNIT_SCOUT", ["PSEUDOYIELD_UNIT_EXPLORER"], "unit", cities=1, turn=8, recon=1)
+        self.assertAlmostEqual(0.2, s1)
+        s0, _ = self._mult("UNIT_SCOUT", ["PSEUDOYIELD_UNIT_EXPLORER"], "unit", cities=4, turn=8, recon=1)
+        self.assertEqual(1, s0)  # cap scales: 4 cities allow 2 recon
+        w, _ = self._mult("UNIT_WARRIOR", ["PSEUDOYIELD_UNIT_COMBAT"], "unit", cities=1, turn=8, military=1)
+        self.assertAlmostEqual(0.3, w)
+        wt, _ = self._mult("UNIT_WARRIOR", ["PSEUDOYIELD_UNIT_COMBAT"], "unit", cities=1, turn=8, military=1, threatened=True)
+        self.assertEqual(1, wt)
+        mo, _ = self._mult("BUILDING_MONUMENT", [], "building", cities=1, turn=8, missing_monument=True)
+        self.assertEqual(2, mo)
+
+    def test_profile_multiplies_the_bounded_weight(self):
+        opts = self.lua.eval("""{ { id = "S", score = 400, mult = 4 }, { id = "B", score = 400, mult = 0.25 },
+                                  { id = "W", score = 0 } }""")
+        self.g.Civ6Ai_Production.WeightedPick(opts, 1)
+        weights = {o.id: o.weight for o in opts.values()}
+        cap = self.g.Civ6Ai_Production.WEIGHT_CAP
+        self.assertEqual(cap * 4, weights["S"])
+        self.assertEqual(cap // 4, weights["B"])
+
     def test_situation_for_counts_builders_and_open_tiles(self):
         self.lua.execute(r"""
           GameInfo.Units[1] = { UnitType = "UNIT_BUILDER", BuildCharges = 3 }
