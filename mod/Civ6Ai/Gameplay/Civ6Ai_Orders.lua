@@ -5332,6 +5332,91 @@ function Civ6Ai_Orders.RegisterPriorityStrategies()
   return n
 end
 
+-- Early-game build order for engine-AI seats (Data/Civ6Ai_Strategies.sql).
+-- Game state only (synced), so every PC answers the same. "expand" or "threat"
+-- for a seat the model drives with fewer than EARLY_CITY_TARGET cities by
+-- EARLY_TURN; nil otherwise. Same rule as InGame Civ6Ai_Production.
+Civ6Ai_Orders.EARLY_CITY_TARGET = 3
+Civ6Ai_Orders.EARLY_TURN = 60
+Civ6Ai_Orders.THREAT_RADIUS = 6
+Civ6Ai_Orders._earlyCache = Civ6Ai_Orders._earlyCache or {}
+
+function Civ6Ai_Orders.ThreatNear(owner)
+  local player = Players[owner]
+  local diplo = call(player, "GetDiplomacy")
+  for _, other in ipairs(PlayerManager.GetAliveMajorIDs()) do
+    if other ~= owner and call(diplo, "IsAtWarWith", other) == true then
+      return true
+    end
+  end
+  local camp = GameInfo.Improvements["IMPROVEMENT_BARBARIAN_CAMP"]
+  local campIndex = camp ~= nil and camp.Index or nil
+  local hostile = {}
+  local function isHostile(o)
+    if o == nil or o < 0 or o == owner then return false end
+    if hostile[o] == nil then
+      hostile[o] = call(Players[o], "IsBarbarian") == true or call(diplo, "IsAtWarWith", o) == true
+    end
+    return hostile[o]
+  end
+  local r = Civ6Ai_Orders.THREAT_RADIUS
+  for _, c in ipairs(sortedMembers(call(player, "GetCities"))) do
+    local cx, cy = c:GetX(), c:GetY()
+    for dx = -r, r do
+      for dy = -r, r do
+        local plot = Map.GetPlot(cx + dx, cy + dy)
+        if plot ~= nil and Map.GetPlotDistance(cx, cy, plot:GetX(), plot:GetY()) <= r then
+          if campIndex ~= nil and plot:GetImprovementType() == campIndex then
+            return true
+          end
+          for _, u in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+            if isHostile(u:GetOwner()) then
+              return true
+            end
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+
+function Civ6Ai_Orders.EarlyMode(owner)
+  local turn = Game.GetCurrentGameTurn()
+  local key = tostring(owner) .. ":" .. tostring(turn)
+  local cached = Civ6Ai_Orders._earlyCache[key]
+  if cached ~= nil then
+    return cached ~= "" and cached or nil
+  end
+  local mode = ""
+  local player = Players[owner]
+  if player ~= nil and call(player, "IsMajor") == true and turn <= Civ6Ai_Orders.EARLY_TURN
+      and #Civ6Ai_Orders.PriorityLevels(owner) > 0 then
+    local n = #sortedMembers(call(player, "GetCities"))
+    if n < Civ6Ai_Orders.EARLY_CITY_TARGET then
+      local ok, threat = pcall(Civ6Ai_Orders.ThreatNear, owner)
+      mode = (ok and threat == true) and "threat" or "expand"
+    end
+  end
+  Civ6Ai_Orders._earlyCache[key] = mode
+  if mode ~= "" then
+    log("early_mode|turn=" .. tostring(turn) .. "|player=" .. tostring(owner) .. "|mode=" .. mode)
+  end
+  return mode ~= "" and mode or nil
+end
+
+function Civ6Ai_Orders.RegisterEarlyStrategies()
+  for fn, want in pairs({ Civ6AiEarlyExpand = "expand", Civ6AiEarlyThreat = "threat" }) do
+    local ev = GameEvents[fn]
+    if ev ~= nil and ev.Add ~= nil then
+      ev.Add(function(owner, threshold)
+        local ok, mode = pcall(Civ6Ai_Orders.EarlyMode, owner)
+        return ok and mode == want
+      end)
+    end
+  end
+end
+
 -- Test: priority read-back. Seats P, U, X, Y. I == 3 grants every seat the
 -- same unlocking techs (so all can build ships, campuses, markets); I == 1
 -- reads each seat's units by formation, districts, production and priorities.
@@ -5464,6 +5549,7 @@ function Civ6Ai_Orders.Init()
   end)
   Civ6Ai_Orders.RegisterForceStrategies()
   local nPrio = Civ6Ai_Orders.RegisterPriorityStrategies()
+  Civ6Ai_Orders.RegisterEarlyStrategies()
   local shared = Civ6Ai_Orders._Shared()
   shared.OrdersVersion = Civ6Ai_Orders.VERSION
   shared.OrderChecksum = Civ6Ai_Orders.Checksum

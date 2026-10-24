@@ -215,6 +215,50 @@ class OrdersGameplayTests(unittest.TestCase):
             self.rt.globals().SetTurn(turn)
         self.rt.eval("GameEvents.PlayerTurnStartComplete.fns[1]")(owner)
 
+    def _early_world(self, cities=1, war=False, barb_at=None):
+        self.rt.execute("""
+          EarlyCities = {}
+          BarbUnits = {}
+          for i = 1, %d do EarlyCities[i] = { GetID = function() return i end, GetX = function() return 10 * i end, GetY = function() return 10 end } end
+          Players[7] = {
+            IsMajor = function() return true end,
+            GetCities = function() return { Members = function() local i = 0; return function() i = i + 1; if EarlyCities[i] then return i, EarlyCities[i] end end end } end,
+            GetDiplomacy = function() return { IsAtWarWith = function(_, o) return %s and o == 8 end } end,
+          }
+          Players[8] = { IsMajor = function() return true end, IsBarbarian = function() return false end }
+          Players[63] = { IsBarbarian = function() return true end }
+          PlayerManager = PlayerManager or {}
+          PlayerManager.GetAliveMajorIDs = function() return { 7, 8 } end
+          GameInfo.Improvements = GameInfo.Improvements or {}
+          Units = Units or {}
+          Units.GetUnitsInPlot = function(plot) return BarbUnits[plot:GetX() .. "," .. plot:GetY()] or {} end
+          Civ6Ai_Orders._earlyCache = {}
+          Game:SetProperty("CIV6AI_PRIO_7_19", 3)
+        """ % (cities, "true" if war else "false"))
+        if barb_at is not None:
+            self.rt.execute('BarbUnits["%d,%d"] = { { GetOwner = function() return 63 end } }' % barb_at)
+
+    def test_early_mode_expand_then_threat_then_off(self):
+        O = self.rt.globals().Civ6Ai_Orders
+        self._early_world(cities=1)
+        self.assertEqual("expand", O.EarlyMode(7))
+        self._early_world(cities=1, barb_at=(13, 12))
+        self.assertEqual("threat", O.EarlyMode(7))
+        self._early_world(cities=1, war=True)
+        self.assertEqual("threat", O.EarlyMode(7))
+        self._early_world(cities=3)
+        self.assertIsNone(O.EarlyMode(7))
+        self._early_world(cities=1)
+        self.rt.globals().SetTurn(61)
+        self.assertIsNone(O.EarlyMode(7))
+
+    def test_early_strategy_handlers_answer_from_early_mode(self):
+        self._early_world(cities=1)
+        expand = self.rt.eval("GameEvents.Civ6AiEarlyExpand.fns[1]")
+        threat = self.rt.eval("GameEvents.Civ6AiEarlyThreat.fns[1]")
+        self.assertTrue(expand(7, 0))
+        self.assertFalse(threat(7, 0))
+
     def test_registers_event_handler(self):
         self.assertEqual(len(_vals(self.rt.eval("GameEvents.Civ6AiOrder.fns"))), 1)
         self.assertEqual(len(_vals(self.rt.eval("GameEvents.OnGameTurnStarted.fns"))), 1)

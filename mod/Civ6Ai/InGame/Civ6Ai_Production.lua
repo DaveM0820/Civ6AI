@@ -221,7 +221,7 @@ Civ6Ai_Production.PRIORITY_WEIGHTS = {
   [16] = { PSEUDOYIELD_HAPPINESS = 100, PSEUDOYIELD_RESOURCE_LUXURY = 80, DISTRICT_ENTERTAINMENT_COMPLEX = 80, DISTRICT_WATER_ENTERTAINMENT_COMPLEX = 60 }, -- amenities
   [17] = { YIELD_FOOD = 50, PSEUDOYIELD_CITY_POPULATION = 50, PSEUDOYIELD_IMPROVEMENT = 15, DISTRICT_AQUEDUCT = 60, DISTRICT_NEIGHBORHOOD = 60 }, -- growth
   [18] = { YIELD_PRODUCTION = 50, PSEUDOYIELD_GPP_ENGINEER = 30, PSEUDOYIELD_IMPROVEMENT = 15, DISTRICT_INDUSTRIAL_ZONE = 70 }, -- production
-  [19] = { PSEUDOYIELD_UNIT_SETTLER = 100, PSEUDOYIELD_UNIT_EXPLORER = 20, PSEUDOYIELD_WONDER = -20 }, -- expansion
+  [19] = { PSEUDOYIELD_UNIT_SETTLER = 100, PSEUDOYIELD_WONDER = -20 }, -- expansion
   [20] = { YIELD_FOOD = 10, YIELD_PRODUCTION = 10, PSEUDOYIELD_IMPROVEMENT = 80 }, -- improvements
   [21] = { YIELD_PRODUCTION = 15, PSEUDOYIELD_WONDER = 100, PSEUDOYIELD_GPP_ENGINEER = 30 }, -- wonders
   [22] = { PSEUDOYIELD_GPP_ADMIRAL = 50, PSEUDOYIELD_GPP_ARTIST = 50, PSEUDOYIELD_GPP_ENGINEER = 50, PSEUDOYIELD_GPP_GENERAL = 50, PSEUDOYIELD_GPP_MERCHANT = 50, PSEUDOYIELD_GPP_MUSICIAN = 50, PSEUDOYIELD_GPP_PROPHET = 50, PSEUDOYIELD_GPP_SCIENTIST = 50, PSEUDOYIELD_GPP_WRITER = 50, PSEUDOYIELD_DISTRICT = 15 }, -- great_people
@@ -487,60 +487,89 @@ end
 
 Civ6Ai_Production.BUILDER_SURPLUS_PENALTY = 200
 
--- Early-game production profile: one shared, bounded multiplier on an option's
--- fill weight (after the score from the model's priority lists), the same for
--- every seat that uses the fill. It shapes, never overrides: the model's levels
--- still set the scores it multiplies.
+-- Early-game build order: fixed shares of the fill roll, the same for every
+-- seat that uses the fill, until the seat has EARLY_CITY_TARGET cities (or past
+-- EARLY_TURN). Within a share the options keep their priority-list weights, so
+-- the model's levels still choose among them. A war or a threat near a city
+-- (ThreatNear) switches to the threat shares until it clears.
 Civ6Ai_Production.EARLY_CITY_TARGET = 3
 Civ6Ai_Production.EARLY_TURN = 60
-Civ6Ai_Production.PROFILE_MIN = 0.2
-Civ6Ai_Production.PROFILE_MAX = 4
+Civ6Ai_Production.SHARE_SCALE = 3000
 Civ6Ai_Production.PROFILE = {
-  settler = 4,          -- early, pop >= 2, land to settle
-  builder_capped = 0.25, -- early, already one builder per city
-  scout_capped = 0.2,   -- recon units at the soft cap (1, +1 per 3 more cities)
-  military_capped = 0.3, -- early, no threat or war, army already one per city
-  monument = 2,         -- early, city has no Monument
+  expand = { settler = 1 / 3, builder = 1 / 3, military = 0, rest = 1 / 3 },
+  threat = { settler = 0, builder = 1 / 6, military = 1 / 2, rest = 1 / 3 },
 }
 
-function Civ6Ai_Production.ScoutCap(cities)
-  return 1 + math.floor(math.max(0, (tonumber(cities) or 1) - 1) / 3)
-end
-
-function Civ6Ai_Production.ProfileMultiplier(buildId, tags, kind, situation)
-  situation = situation or {}
-  local P = Civ6Ai_Production.PROFILE
+-- Which share an option belongs to: settler, builder, military (land combat) or rest.
+function Civ6Ai_Production.ShareGroup(buildId, tags, kind)
   local has = {}
   for _, tag in ipairs(tags or {}) do has[tag] = true end
   local id = tostring(buildId or "")
   local isUnit = kind == "unit" or string.sub(id, 1, 5) == "UNIT_"
-  local early = situation.early == true
-  local cities = tonumber(situation.cities) or 1
-  local m = 1
   if has["PSEUDOYIELD_UNIT_SETTLER"] or id == "UNIT_SETTLER" then
-    if early and (tonumber(situation.pop) or 1) >= 2 and situation.land ~= false then
-      m = m * P.settler
-    end
-  elseif isUnit and has["PSEUDOYIELD_IMPROVEMENT"] then
-    if early and (tonumber(situation.builders) or 0) >= cities then
-      m = m * P.builder_capped
-    end
-  elseif has["PSEUDOYIELD_UNIT_EXPLORER"] then
-    if (tonumber(situation.recon) or 0) >= Civ6Ai_Production.ScoutCap(cities) then
-      m = m * P.scout_capped
-    end
-  elseif has["PSEUDOYIELD_UNIT_COMBAT"] then
-    if early and situation.threatened ~= true and situation.at_war ~= true
-        and (tonumber(situation.army) or 0) >= cities then
-      m = m * P.military_capped
+    return "settler"
+  end
+  if isUnit and has["PSEUDOYIELD_IMPROVEMENT"] then
+    return "builder"
+  end
+  if isUnit and has["PSEUDOYIELD_UNIT_COMBAT"] then
+    return "military"
+  end
+  return "rest"
+end
+
+-- Rescale bounded weights to the early shares. A share with no buildable option
+-- passes to the next group in SHARE_FALLBACK (settler and builder first to each
+-- other); a zero share drops its options from the roll. Returns mode, total.
+Civ6Ai_Production.SHARE_FALLBACK = {
+  settler = { "builder", "military", "rest" },
+  builder = { "settler", "military", "rest" },
+  military = { "builder", "rest", "settler" },
+  rest = { "settler", "builder", "military" },
+}
+
+function Civ6Ai_Production.ApplyEarlyShares(options, situation)
+  if situation == nil or situation.early ~= true or options == nil or #options == 0 then
+    return nil
+  end
+  local mode = (situation.threatened == true or situation.at_war == true) and "threat" or "expand"
+  local shares = {}
+  for k, v in pairs(Civ6Ai_Production.PROFILE[mode]) do shares[k] = v end
+  local sums = { settler = 0, builder = 0, military = 0, rest = 0 }
+  for _, o in ipairs(options) do
+    o.group = o.group or Civ6Ai_Production.ShareGroup(o.id, o.tags, o.kind)
+    sums[o.group] = sums[o.group] + (o.weight or 0)
+  end
+  for _, g in ipairs({ "settler", "builder", "military", "rest" }) do
+    if sums[g] <= 0 and shares[g] > 0 then
+      local to = nil
+      for _, cand in ipairs(Civ6Ai_Production.SHARE_FALLBACK[g]) do
+        if to == nil and sums[cand] > 0 and shares[cand] > 0 then to = cand end
+      end
+      for _, cand in ipairs(Civ6Ai_Production.SHARE_FALLBACK[g]) do
+        if to == nil and sums[cand] > 0 then to = cand end
+      end
+      if to ~= nil then
+        shares[to] = shares[to] + shares[g]
+      end
+      shares[g] = 0
     end
   end
-  if id == "BUILDING_MONUMENT" and early and situation.missing_monument == true then
-    m = m * P.monument
+  local total = 0
+  for _, o in ipairs(options) do
+    local share, sum = shares[o.group] or 0, sums[o.group]
+    local w = 0
+    if share > 0 and sum > 0 then
+      w = math.floor(share * Civ6Ai_Production.SHARE_SCALE * (o.weight or 0) / sum)
+      if w < 1 then w = 1 end
+    end
+    o.weight = w
+    total = total + w
   end
-  if m < Civ6Ai_Production.PROFILE_MIN then m = Civ6Ai_Production.PROFILE_MIN end
-  if m > Civ6Ai_Production.PROFILE_MAX then m = Civ6Ai_Production.PROFILE_MAX end
-  return m
+  if total <= 0 then
+    return nil
+  end
+  return mode, total
 end
 
 function Civ6Ai_Production.ScoreBuild(buildId, tags, situation, kind)
@@ -860,8 +889,8 @@ function Civ6Ai_Production.BuildOptions(city, situation)
         local tags, kind = Civ6Ai_Production._TagsFor(id)
         out[#out + 1] = {
           id = id, hash = row.Hash, param = paramKey,
+          tags = tags, kind = kind or "",
           score = Civ6Ai_Production.ScoreBuild(id, tags, situation, kind or ""),
-          mult = Civ6Ai_Production.ProfileMultiplier(id, tags, kind or "", situation),
         }
       end
     end)
@@ -875,12 +904,12 @@ end
 
 -- Deterministic weighted pick. Weight = score above the worst option, bounded
 -- to [WEIGHT_FLOOR, WEIGHT_CAP] so one inflated item cannot squeeze every
--- building down to a weight of 1, then times the option's profile multiplier
--- (ProfileMultiplier, itself bounded), so an early settler can stand out.
+-- building down to a weight of 1. With a situation in the early game the
+-- weights are then rescaled to the early shares (ApplyEarlyShares).
 Civ6Ai_Production.WEIGHT_FLOOR = 5
 Civ6Ai_Production.WEIGHT_CAP = 150
 
-function Civ6Ai_Production.WeightedPick(options, seed)
+function Civ6Ai_Production.WeightedPick(options, seed, situation)
   if #options == 0 then
     return nil, 0
   end
@@ -894,16 +923,18 @@ function Civ6Ai_Production.WeightedPick(options, seed)
     local w = o.score - low + floor
     if w > cap then w = cap end
     if w < floor then w = floor end
-    w = w * (tonumber(o.mult) or 1)
-    if w < 1 then w = 1 end
     o.weight = math.floor(w)
     total = total + o.weight
+  end
+  local mode, shared = Civ6Ai_Production.ApplyEarlyShares(options, situation)
+  if mode ~= nil then
+    total = shared
   end
   -- Park-Miller step: products stay below 2^53, exact in Lua 5.1 doubles.
   local r = ((seed % 2147483646) + 1) * 16807 % 2147483647
   local roll = r % total
   for _, o in ipairs(options) do
-    if roll < o.weight then
+    if o.weight > 0 and roll < o.weight then
       return o, total
     end
     roll = roll - o.weight
@@ -1113,7 +1144,7 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
       local situation = Civ6Ai_Production.SituationFor(playerID, city)
       local options = Civ6Ai_Production.BuildOptions(city, situation)
       local seed = (playerID * 1000003 + (cid % 65536) * 7919 + turn * 104729) % 2147483648
-      local pick, total = Civ6Ai_Production.WeightedPick(options, seed)
+      local pick, total = Civ6Ai_Production.WeightedPick(options, seed, situation)
       local outcome = "nothing_buildable"
       if pick ~= nil then
         local params = {}

@@ -125,50 +125,62 @@ class LocalFillTests(unittest.TestCase):
         open_sit = P.ComposeSituation(self.lua.eval("{ builders = 1, builder_charges = 2, open_tiles = 5, cities = 1 }"))
         self.assertFalse(open_sit.builder_surplus)
 
-    def _mult(self, build_id, tags, kind, **raw):
+    def _shares(self, opts, seeds=3000, **raw):
+        """Pick frequency per id over many seeds with the early situation from raw."""
         P = self.g.Civ6Ai_Production
         parts = ", ".join(f"{k} = {str(v).lower() if isinstance(v, bool) else v}" for k, v in raw.items())
         sit = P.ComposeSituation(self.lua.eval("{ " + parts + " }"))
-        return P.ProfileMultiplier(build_id, self.lua.eval("{ " + ", ".join(f'"{t}"' for t in tags) + " }"), kind, sit), sit
+        counts = {}
+        for seed in range(seeds):
+            options = self.lua.eval("{ " + ", ".join(
+                '{ id = "%s", score = %d, kind = "%s", tags = { %s } }' % (
+                    i, sc, k, ", ".join(f'"{t}"' for t in tags)) for i, sc, k, tags in opts) + " }")
+            pick, _ = P.WeightedPick(options, seed * 7919 + 13, sit)
+            counts[pick.id] = counts.get(pick.id, 0) + 1
+        return {k: v / seeds for k, v in counts.items()}, sit
 
-    def test_early_profile_boosts_settlers_and_caps_the_rest(self):
-        m, sit = self._mult("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], "unit", cities=1, pop=2, turn=8)
+    OPTS = [
+        ("UNIT_SETTLER", 100, "unit", ["PSEUDOYIELD_UNIT_SETTLER"]),
+        ("UNIT_BUILDER", 10, "unit", ["PSEUDOYIELD_IMPROVEMENT"]),
+        ("UNIT_SCOUT", 80, "unit", ["PSEUDOYIELD_UNIT_EXPLORER"]),
+        ("UNIT_WARRIOR", 0, "unit", ["PSEUDOYIELD_UNIT_COMBAT"]),
+        ("BUILDING_MONUMENT", 60, "building", []),
+    ]
+
+    def test_early_shares_third_settler_third_builder(self):
+        freq, sit = self._shares(self.OPTS, cities=1, pop=2, turn=8)
         self.assertTrue(sit.early)
-        self.assertEqual(4, m)
-        m, _ = self._mult("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], "unit", cities=1, pop=1, turn=8)
-        self.assertEqual(1, m)  # pop 1 cannot build a settler
-        m, sit = self._mult("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], "unit", cities=3, pop=4, turn=20)
-        self.assertFalse(sit.early)
-        self.assertEqual(1, m)
-        m, _ = self._mult("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], "unit", cities=1, pop=3, turn=70)
-        self.assertEqual(1, m)  # past turn 60
-        m, _ = self._mult("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], "unit", cities=2, pop=3, turn=60)
-        self.assertEqual(4, m)
+        self.assertAlmostEqual(1 / 3, freq["UNIT_SETTLER"], delta=0.04)
+        self.assertAlmostEqual(1 / 3, freq["UNIT_BUILDER"], delta=0.04)
+        rest = freq.get("UNIT_SCOUT", 0) + freq.get("BUILDING_MONUMENT", 0)
+        self.assertAlmostEqual(1 / 3, rest, delta=0.04)
+        self.assertEqual(0, freq.get("UNIT_WARRIOR", 0))  # no military share in peace
+        # The rest keeps the priority weights: scout (score 80) beats monument (60).
+        self.assertGreater(freq["UNIT_SCOUT"], freq["BUILDING_MONUMENT"])
 
-    def test_builder_scout_military_monument_soft_caps(self):
-        b, _ = self._mult("UNIT_BUILDER", ["PSEUDOYIELD_IMPROVEMENT"], "unit", cities=1, pop=2, turn=8, builders=1)
-        self.assertAlmostEqual(0.25, b)
-        b0, _ = self._mult("UNIT_BUILDER", ["PSEUDOYIELD_IMPROVEMENT"], "unit", cities=1, pop=2, turn=8, builders=0)
-        self.assertEqual(1, b0)
-        s1, _ = self._mult("UNIT_SCOUT", ["PSEUDOYIELD_UNIT_EXPLORER"], "unit", cities=1, turn=8, recon=1)
-        self.assertAlmostEqual(0.2, s1)
-        s0, _ = self._mult("UNIT_SCOUT", ["PSEUDOYIELD_UNIT_EXPLORER"], "unit", cities=4, turn=8, recon=1)
-        self.assertEqual(1, s0)  # cap scales: 4 cities allow 2 recon
-        w, _ = self._mult("UNIT_WARRIOR", ["PSEUDOYIELD_UNIT_COMBAT"], "unit", cities=1, turn=8, military=1)
-        self.assertAlmostEqual(0.3, w)
-        wt, _ = self._mult("UNIT_WARRIOR", ["PSEUDOYIELD_UNIT_COMBAT"], "unit", cities=1, turn=8, military=1, threatened=True)
-        self.assertEqual(1, wt)
-        mo, _ = self._mult("BUILDING_MONUMENT", [], "building", cities=1, turn=8, missing_monument=True)
-        self.assertEqual(2, mo)
+    def test_missing_settler_share_goes_to_builder(self):
+        opts = [o for o in self.OPTS if o[0] != "UNIT_SETTLER"]  # pop 1: no settler offered
+        freq, _ = self._shares(opts, cities=1, pop=1, turn=3)
+        self.assertAlmostEqual(2 / 3, freq["UNIT_BUILDER"], delta=0.04)
+        opts = [o for o in opts if o[0] != "UNIT_BUILDER"]
+        freq, _ = self._shares(opts, cities=1, pop=1, turn=3)
+        self.assertAlmostEqual(1.0, freq.get("UNIT_SCOUT", 0) + freq.get("BUILDING_MONUMENT", 0), delta=0.001)
 
-    def test_profile_multiplies_the_bounded_weight(self):
-        opts = self.lua.eval("""{ { id = "S", score = 400, mult = 4 }, { id = "B", score = 400, mult = 0.25 },
-                                  { id = "W", score = 0 } }""")
-        self.g.Civ6Ai_Production.WeightedPick(opts, 1)
-        weights = {o.id: o.weight for o in opts.values()}
-        cap = self.g.Civ6Ai_Production.WEIGHT_CAP
-        self.assertEqual(cap * 4, weights["S"])
-        self.assertEqual(cap // 4, weights["B"])
+    def test_threat_shifts_to_military_and_drops_settlers(self):
+        freq, _ = self._shares(self.OPTS, cities=1, pop=3, turn=12, threatened=True)
+        self.assertEqual(0, freq.get("UNIT_SETTLER", 0))
+        self.assertAlmostEqual(1 / 2, freq["UNIT_WARRIOR"], delta=0.04)
+        self.assertGreater(freq["UNIT_WARRIOR"], freq["UNIT_BUILDER"])
+
+    def test_shares_end_at_three_cities_or_turn_sixty(self):
+        P = self.g.Civ6Ai_Production
+        self.assertFalse(P.ComposeSituation(self.lua.eval("{ cities = 3, pop = 4, turn = 20 }")).early)
+        self.assertFalse(P.ComposeSituation(self.lua.eval("{ cities = 1, pop = 4, turn = 61 }")).early)
+        self.assertTrue(P.ComposeSituation(self.lua.eval("{ cities = 2, pop = 4, turn = 60 }")).early)
+        opts = self.lua.eval("""{ { id = "A", score = 0 }, { id = "B", score = 99 } }""")
+        late = P.ComposeSituation(self.lua.eval("{ cities = 3, pop = 4, turn = 20 }"))
+        P.WeightedPick(opts, 1, late)
+        self.assertEqual([5, 104], sorted(o.weight for o in opts.values()))
 
     def test_situation_for_counts_builders_and_open_tiles(self):
         self.lua.execute(r"""

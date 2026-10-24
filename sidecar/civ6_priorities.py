@@ -176,7 +176,7 @@ CATEGORIES: list[dict] = [
          districts={"DISTRICT_INDUSTRIAL_ZONE": 70}),
     dict(id=19, key="expansion", group="focus",
          desc="settlers and new cities",
-         pseudo={"PSEUDOYIELD_UNIT_SETTLER": 100, "PSEUDOYIELD_UNIT_EXPLORER": 20, "PSEUDOYIELD_WONDER": -20}),
+         pseudo={"PSEUDOYIELD_UNIT_SETTLER": 100, "PSEUDOYIELD_WONDER": -20}),
     dict(id=20, key="improvements", group="focus",
          desc="builders and tile improvements",
          yields={"YIELD_FOOD": 10, "YIELD_PRODUCTION": 10},

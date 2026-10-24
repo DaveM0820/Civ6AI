@@ -1518,7 +1518,6 @@ INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_EXPANSION_LIGHT_PseudoYi
 INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_EXPANSION_LIGHT_PseudoYields', 'PseudoYields');
 INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_EXPANSION_LIGHT', 'CIV6AI_PRIO_EXPANSION_LIGHT_PseudoYields');
 INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_EXPANSION_LIGHT_PseudoYields', PseudoYieldType, 1, 100 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_SETTLER';
-INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_EXPANSION_LIGHT_PseudoYields', PseudoYieldType, 1, 20 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_EXPLORER';
 INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_EXPANSION_LIGHT_PseudoYields', PseudoYieldType, 1, -20 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_WONDER';
 
 -- expansion (strong): settlers and new cities
@@ -1530,7 +1529,6 @@ INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_EXPANSION_STRONG_PseudoY
 INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_EXPANSION_STRONG_PseudoYields', 'PseudoYields');
 INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_EXPANSION_STRONG', 'CIV6AI_PRIO_EXPANSION_STRONG_PseudoYields');
 INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_EXPANSION_STRONG_PseudoYields', PseudoYieldType, 1, 200 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_SETTLER';
-INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_EXPANSION_STRONG_PseudoYields', PseudoYieldType, 1, 40 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_EXPLORER';
 INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_EXPANSION_STRONG_PseudoYields', PseudoYieldType, 1, -40 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_WONDER';
 
 -- expansion (all_in): settlers and new cities
@@ -1542,7 +1540,6 @@ INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_EXPANSION_ALL_IN_PseudoY
 INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_EXPANSION_ALL_IN_PseudoYields', 'PseudoYields');
 INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_EXPANSION_ALL_IN', 'CIV6AI_PRIO_EXPANSION_ALL_IN_PseudoYields');
 INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_EXPANSION_ALL_IN_PseudoYields', PseudoYieldType, 1, 400 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_SETTLER';
-INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_EXPANSION_ALL_IN_PseudoYields', PseudoYieldType, 1, 80 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_EXPLORER';
 INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_EXPANSION_ALL_IN_PseudoYields', PseudoYieldType, 1, -80 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_WONDER';
 
 -- improvements (light): builders and tile improvements
