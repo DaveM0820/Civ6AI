@@ -19,9 +19,9 @@ class Civ6PrimerTests(unittest.TestCase):
         self.assertTrue(a.startswith(coaching.CIV6_GAME_PRIMER))
         self.assertEqual(a, b)
         self.assertIn("Seondeok", a)
-        self.assertTrue(1500 <= len(coaching.CIV6_GAME_PRIMER) <= 3000)
+        self.assertTrue(1500 <= len(coaching.CIV6_GAME_PRIMER) <= 4000)
         for kw in ("high-elo", "adjacency", "build charges", "luxury", "strategic", "eurekas", "envoys",
-                   "zone of control", "tall vs wide", "Victory paths", "never"):
+                   "zone of control", "tall vs wide", "Victory paths", "never", "mountains", "Cartography", "focus fire", "escort"):
             self.assertIn(kw, coaching.CIV6_GAME_PRIMER)
 
     def test_primer_toggle_off(self):

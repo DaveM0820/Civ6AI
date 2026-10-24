@@ -46,7 +46,17 @@ CIV6_GAME_PRIMER = (
     "clear barbarian camps early before they spawn raiders; scouts explore for goody huts, city-states and eurekas.\n"
     "- Strategy: early expansion (scout, slinger/warrior, settlers, builders, Monument) and snowballing; "
     "tall vs wide; production and gold to buy key items; defend before rushing; plan multi-turn and finish plans. "
-    "Victory paths: science, culture (tourism), domination, religious, diplomatic, score."
+    "Victory paths: science, culture (tourism), domination, religious, diplomatic, score.\n"
+    "- Concepts: movement: one military plus one civilian unit per tile, never two of one class; mountains "
+    "impassable; rivers, hills, woods cost extra moves. City sites: fresh water or coast, hills, luxuries, room "
+    "for districts, 3-4 tiles apart, little overlap. Settlers and builders are captured on contact: escort them, "
+    "never end a civilian adjacent to barbarians or enemies. Early expansion is vital. Navy is vital, above all on "
+    "island/archipelago maps: Sailing, Shipbuilding, Celestial Navigation, Cartography for ocean; galleys, "
+    "quadriremes, Harbors; naval melee vs naval ranged; screen embarked units; coastal raids; control sea lanes; "
+    "settle other islands. Explore aggressively with scouts and boats: goody huts, city-states, natural wonders, "
+    "settle spots. Tactics: read the map tactically; know each unit's movement and attack range; focus fire to "
+    "kill one unit before the next; a mutually supporting front, ranged behind melee; chokepoints; retreat and "
+    "heal damaged units; take cities with siege plus melee."
 )
 
 
