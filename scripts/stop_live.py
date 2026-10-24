@@ -16,12 +16,13 @@ from civ6_paths import live_runtime_dir  # noqa: E402
 PID_FILE = live_runtime_dir() / "live_workers.json"
 
 
-def _terminate(pid: int) -> None:
+def _terminate(pid: int, *, tree: bool = True) -> None:
     if pid <= 0:
         return
     if os.name == "nt":
-        # taskkill hides better than console CTRL events for pythonw children
-        os.system(f'taskkill /PID {pid} /T /F >NUL 2>&1')
+        # taskkill hides better than console CTRL events for pythonw children.
+        # The watchdog is ended without /T: a restart it spawned must survive.
+        os.system(f'taskkill /PID {pid} {"/T " if tree else ""}/F >NUL 2>&1')
         return
     try:
         os.kill(pid, signal.SIGTERM)
@@ -55,7 +56,7 @@ def main() -> int:
         pid = int(worker.get("pid") or 0)
         name = worker.get("name") or "?"
         print(f"Stopping {name} pid={pid}")
-        _terminate(pid)
+        _terminate(pid, tree=name != "watchdog")
     PID_FILE.unlink(missing_ok=True)
     print("Stopped.")
     return 0

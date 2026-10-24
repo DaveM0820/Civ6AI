@@ -103,6 +103,17 @@ INT_DEFAULTS: dict[str, tuple[int, int, int]] = {
     "CIV6AI_STALE_SITUATION_PERCENT": (60, 1, 100),
     # Same-reason rejections of one order before the prompt lists that unit's legal moves.
     "CIV6AI_REPEAT_LEGAL_MOVES_AFTER": (3, 1, 20),
+    # Live watchdog stall restarts (scripts/testbed/civ6_stall_restart.py).
+    # Minutes a seat's snapshot may wait unanswered with no pipeline activity.
+    "CIV6AI_WATCHDOG_STALL_MINUTES": (8, 2, 120),
+    # Consecutive sidecar failures per seat that count as "failing" ...
+    "CIV6AI_WATCHDOG_FAIL_COUNT": (2, 1, 50),
+    # ... for at least this percent of seats.
+    "CIV6AI_WATCHDOG_FAIL_SEAT_PERCENT": (60, 1, 100),
+    # Minimum minutes between two automatic restarts.
+    "CIV6AI_WATCHDOG_RESTART_GAP_MINUTES": (10, 1, 240),
+    # Automatic restarts allowed per game turn.
+    "CIV6AI_WATCHDOG_MAX_RESTARTS_PER_TURN": (3, 0, 20),
 }
 
 

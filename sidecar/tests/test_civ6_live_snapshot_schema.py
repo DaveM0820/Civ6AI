@@ -244,6 +244,38 @@ class LiveSnapshotSchemaTest(unittest.TestCase):
         self.assertEqual(0, snap["your_cities"][0]["defense"]["wall_max_hp"])
         self.assertEqual(0, snap["your_cities"][0]["defense"]["wall_hp"])
 
+    def test_lua_game_block_validates_against_schemas(self):
+        # f62b654 added map_seed/game_seed/start_turn to the Lua game block and
+        # decision-input-v2 (game: additionalProperties false) rejected every
+        # seat at T1. Build the block with the real snapshot Lua, every field it
+        # emits filled in, and run the whole snapshot through the sidecar validator.
+        lua = LuaRuntime(unpack_returned_tuples=True)
+        lua.execute((MOD / "Civ6Ai_Util.lua").read_text(encoding="utf-8"))
+        lua.execute((MOD / "Civ6Ai_Snapshot.lua").read_text(encoding="utf-8"))
+        lua.execute(r"""
+            Map = { GetGridSize = function() return 44, 26 end }
+            MapConfiguration = { GetValue = function(key) return key == "RANDOM_SEED" and 123456 or nil end }
+            GameConfiguration = {
+              GetValue = function(key) return key == "GAME_SYNC_RANDOM_SEED" and 987654 or nil end,
+              GetStartTurn = function() return 1 end,
+            }
+            Civ6Ai_Snapshot._MapWrap = function() return true, false end
+            Civ6Ai_Snapshot._CurrentEraId = function() return "ERA_ANCIENT" end
+            Civ6Ai_Snapshot._GameSpeedId = function() return "GAMESPEED_ONLINE" end
+            Civ6Ai_Snapshot._MapSizeId = function() return "MAPSIZE_SMALL" end
+            Civ6Ai_Snapshot._IsNetworkMultiplayer = function() return true end
+            ENCODED = Civ6Ai_Util.EncodeJsonObject(Civ6Ai_Snapshot._BuildGameBlock())
+        """)
+        game = json.loads(lua.globals().ENCODED)
+        for key in ("map_seed", "game_seed", "start_turn"):
+            self.assertIn(key, game)
+            self.assertIsNotNone(game[key])
+        raw = json.loads((ROOT / "fixtures" / "civ6" / "live-runtime-t4-city-snapshot.json").read_text(encoding="utf-8"))
+        raw["game"] = game
+        snap = civ6_adapter.upgrade_runtime_snapshot(raw)
+        civ6_adapter.validate_civ6_snapshot(snap)
+        self.assertEqual(game["map_seed"], snap["game"]["map_seed"])
+
     def test_negative_sentinels_do_not_fail_the_schema(self):
         # T187 stalled every seat: a city with no walls reports wall_max_hp -1,
         # and the schema minimum is 0. The same -1 sentinel is applied to every
