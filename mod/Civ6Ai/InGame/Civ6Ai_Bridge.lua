@@ -974,7 +974,11 @@ function Civ6Ai_Bridge._TryInboxApply(playerID)
   return Civ6Ai_Bridge._WasAppliedThisPulse(playerID)
 end
 
-function Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
+-- Seconds of unanswered inbox wait before the snapshot is printed to Lua.log again,
+-- so helpers that were down (or skipped the first dump) still get this turn.
+Civ6Ai_Bridge.REDUMP_SECONDS = 240
+
+function Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID, snapshotJson)
   if Civ6Ai_Bridge._WasAppliedThisPulse(playerID) then
     if not Civ6Ai_Bridge._WasPulseFinished(playerID) then
       Civ6Ai_Bridge._FinishTurnPulse(playerID)
@@ -993,6 +997,8 @@ function Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
   local waitTurn = Game.GetCurrentGameTurn()
   local attempts = 0
   local lastWaitLog = nil
+  local lastDump = Civ6Ai_Bridge._WallClock()
+  local redumps = 0
   Civ6Ai_Bridge._inboxWaiting = Civ6Ai_Bridge._inboxWaiting or {}
   Civ6Ai_Bridge._inboxWaiting[playerID] = waitTurn
   local function done()
@@ -1020,6 +1026,19 @@ function Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
       return done()
     end
     local now = Civ6Ai_Bridge._WallClock()
+    if snapshotJson ~= nil and now ~= nil and lastDump ~= nil and now - lastDump >= Civ6Ai_Bridge.REDUMP_SECONDS then
+      lastDump = now
+      redumps = redumps + 1
+      Civ6Ai_Util.DumpBlob("snapshot", {
+        session = Civ6Ai_Bridge.SessionId(),
+        player = playerID,
+        turn = waitTurn,
+        live = Civ6Ai_Config.IsSidecarLive() and 1 or 0,
+        redump = redumps,
+      }, snapshotJson)
+      Civ6Ai_Util.Log("bridge|snapshot_redumped|player=" .. tostring(playerID) .. "|turn=" .. tostring(waitTurn)
+        .. "|n=" .. tostring(redumps))
+    end
     if attempts == 1 or (now ~= nil and lastWaitLog ~= nil and now - lastWaitLog >= 120) then
       lastWaitLog = now
       Civ6Ai_Util.Log(
@@ -1400,7 +1419,7 @@ function Civ6Ai_Bridge.RunTurnPulse(playerID, opts)
     Civ6Ai_Bridge._FinishTurnPulse(playerID)
     return
   end
-  Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID)
+  Civ6Ai_Bridge._ScheduleInboxApplyWait(playerID, dumped and snapshotJson or nil)
 end
 
 function Civ6Ai_Bridge.RunChatPulse(playerID)

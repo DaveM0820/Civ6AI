@@ -2080,8 +2080,24 @@ function Civ6Ai_Snapshot._MapSizeId()
   end)
 end
 
+-- Identity of this game for the host's new-game detection (seeds differ per game).
+function Civ6Ai_Snapshot._GameSeeds()
+  local function read(fn)
+    local ok, value = pcall(fn)
+    if ok and value ~= nil and value ~= "" then
+      return tostring(value)
+    end
+    return Civ6Ai_Util.JsonNull()
+  end
+  local mapSeed = read(function() return MapConfiguration.GetValue("RANDOM_SEED") end)
+  local gameSeed = read(function() return GameConfiguration.GetValue("GAME_SYNC_RANDOM_SEED") end)
+  local startTurn = read(function() return GameConfiguration.GetStartTurn() end)
+  return mapSeed, gameSeed, tonumber(startTurn) or Civ6Ai_Util.JsonNull()
+end
+
 function Civ6Ai_Snapshot._BuildGameBlock()
   local mapWidth, mapHeight = Map.GetGridSize()
+  local mapSeed, gameSeed, startTurn = Civ6Ai_Snapshot._GameSeeds()
   local wrapX, wrapY = Civ6Ai_Snapshot._MapWrap()
   return {
     map_width = mapWidth,
@@ -2101,6 +2117,9 @@ function Civ6Ai_Snapshot._BuildGameBlock()
     network_multiplayer = Civ6Ai_Snapshot._IsNetworkMultiplayer(),
     options = {},
     victory_ids = {},
+    map_seed = mapSeed,
+    game_seed = gameSeed,
+    start_turn = startTurn,
   }
 end
 

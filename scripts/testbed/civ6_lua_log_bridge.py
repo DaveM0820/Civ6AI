@@ -33,6 +33,7 @@ _BEGIN = re.compile(
     r"(?P<live>\d+)\|(?P<player>\d+)\|(?P<turn>-?\d+)\|(?P<session>[^\r\n]*)"
 )
 _CHUNK = re.compile(r"CIV6AI\|blob\|c\|(?P<id>[^|]+)\|(?P<index>\d+)\|(?P<data>[^\r\n]*)")
+_REDUMP_ID = re.compile(r"_r\d+$")
 _END = re.compile(r"CIV6AI\|blob\|end\|(?P<id>[^|]+)")
 
 
@@ -598,6 +599,13 @@ def process_lua_log_blobs(
     python_exe = str(runtime.get("python") or python)
     repo_path = Path(str(runtime.get("repo") or repo))
     active_session = str(runtime.get("session_id") or "").strip()
+    try:
+        from civ6_new_game import track_game
+
+        # Adopt the running game's session; reset it in place when a new game began.
+        blobs, active_session = track_game(civ6ai_root, blobs, active_session, lua_log=log_path)
+    except Exception as error:
+        log.warning("new-game tracking failed: %s", error)
     record_apply_results(civ6ai_root, chunk, blobs, active_session)
     record_failed_appends(civ6ai_root, chunk)
     _note_build_stamp(chunk, repo_path)
@@ -622,6 +630,19 @@ def process_lua_log_blobs(
         player = int(blob.get("player") or 0)
         player_dir = civ6ai_root / "sessions" / session_id / f"PLAYER_{player}"
         player_dir.mkdir(parents=True, exist_ok=True)
+        if not is_chat and _REDUMP_ID.search(str(blob.get("id") or "")):
+            # Lua re-printed an unanswered snapshot. If this turn is already answered,
+            # publish that answer again instead of paying for a second model call.
+            try:
+                from civ6_pending_apply import decision_turn, publish_from_player_dir
+
+                if decision_turn(player_dir) == int(blob.get("turn") or -1):
+                    log.info("redump|player=%s|turn=%s|republishing existing answer", player, blob.get("turn"))
+                    mirror_player_outputs(player_dir, log_path, session_id, player)
+                    publish_from_player_dir(player_dir)
+                    continue
+            except Exception as error:
+                log.warning("redump republish failed player=%s: %s", player, error)
         snapshot_name = "snapshot_chat.json" if is_chat else "snapshot.json"
         decision_name = "decision_chat.json" if is_chat else "decision.json"
         snapshot_path = player_dir / snapshot_name

@@ -32,7 +32,7 @@ if str(ROOT / "scripts") not in sys.path:
 import circuit_breaker_state  # noqa: E402
 from civ6_paths import live_runtime_dir, logs_dirs, lua_log_candidates  # noqa: E402
 from sidecar.civ6_config import apply_config_to_environ, load_local_config  # noqa: E402
-from windows_process import popen_hidden, python_executable, run_hidden  # noqa: E402
+from windows_process import pid_alive, popen_hidden, python_executable, run_hidden  # noqa: E402
 
 PID_DIR = live_runtime_dir()
 PID_FILE = PID_DIR / "live_workers.json"
@@ -228,11 +228,31 @@ def _start_new_session() -> None:
         if lua_log is not None:
             autotest = civ6ai_root() / "autotest"
             size = lua_log.stat().st_size
-            for name in ("lua_bridge_offset.txt", "lua_nudge_offset.txt"):
-                store_log_offset(autotest / name, lua_log, size)
-            print(f"Lua.log offsets set to end ({size} bytes).")
+            store_log_offset(autotest / "lua_nudge_offset.txt", lua_log, size)
+            # A game that just began before the helpers started (log written in the last
+            # 30 min, newest turn <= 3) keeps its snapshots: read from its first blob.
+            # Older content is a previous game's backlog and is skipped.
+            from civ6_new_game import current_game_offset
+
+            fresh = time.time() - lua_log.stat().st_mtime < 1800
+            start = current_game_offset(lua_log.read_bytes(), max_turn=3) if fresh else None
+            bridge_at = size if start is None else start
+            store_log_offset(autotest / "lua_bridge_offset.txt", lua_log, bridge_at)
+            print(f"Lua.log offsets: bridge at {bridge_at}, nudges at end ({size} bytes).")
     except Exception as error:  # pragma: no cover - host dependent
         print(_ascii(f"WARNING: Lua.log offset reset failed: {error}"))
+
+
+def recorded_live_workers(pid_file: Path, alive=pid_alive) -> list[dict]:
+    """Workers in live_workers.json whose PID is still running (empty for a stale record)."""
+    try:
+        payload = json.loads(pid_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    workers = payload.get("workers") if isinstance(payload, dict) else None
+    if not isinstance(workers, list):
+        return []
+    return [w for w in workers if isinstance(w, dict) and alive(int(w.get("pid") or 0))]
 
 
 def main() -> int:
@@ -257,6 +277,11 @@ def main() -> int:
         "move Lua.log offsets to the end, clear PendingApply).",
     )
     parser.add_argument(
+        "--no-watchdog",
+        action="store_true",
+        help="Do not start live_watchdog.py (it respawns a dead job_poller / lua_bridge, same session).",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=None,
@@ -271,8 +296,13 @@ def main() -> int:
         return _dry_run(cfg, args.state, args.timeout)
 
     if PID_FILE.is_file():
-        print(f"Workers already recorded in {PID_FILE}. Run scripts/stop_live.py first.")
-        return 1
+        alive = recorded_live_workers(PID_FILE)
+        if alive:
+            names = ", ".join(f"{w.get('name')} pid={w.get('pid')}" for w in alive)
+            print(f"Workers already running ({names}). Run scripts/stop_live.py first.")
+            return 1
+        print(f"Stale {PID_FILE.name}: no recorded worker is running; treating the helpers as stopped.")
+        PID_FILE.unlink(missing_ok=True)
 
     # Reuse the session already on disk unless a new game was asked for.
     # --keep-session is the same as the default, so an old restart command still works.
@@ -315,6 +345,10 @@ def main() -> int:
         bridge_cmd.extend(["--lua-log", str(lua_log)])
     workers.append(_spawn("lua_bridge", bridge_cmd, env))
 
+    if not args.no_watchdog:
+        # First in the record so stop_live stops it before the workers it would respawn.
+        watchdog = ROOT / "scripts" / "live_watchdog.py"
+        workers.insert(0, _spawn("watchdog", [py, str(watchdog)], env))
     _write_pid_record(workers)
     print(f"Started {len(workers)} hidden worker(s). PIDs -> {PID_FILE}")
     for w in workers:

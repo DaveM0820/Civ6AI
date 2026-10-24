@@ -362,6 +362,10 @@ function Civ6Ai_Util.DumpBlob(kind, meta, content)
   local turn = tostring(meta.turn or 0)
   local live = tostring(meta.live or 0)
   local id = session .. "_" .. player .. "_" .. turn .. "_" .. tostring(kind)
+  if meta.redump ~= nil then
+    -- A re-dump of an unanswered snapshot gets its own id so the host reads it again.
+    id = id .. "_r" .. tostring(meta.redump)
+  end
   Civ6Ai_Util.Log(
     "blob|begin|"
       .. tostring(kind)
