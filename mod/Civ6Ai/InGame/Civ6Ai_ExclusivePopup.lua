@@ -30,6 +30,7 @@ function Civ6Ai_ExclusivePopup._Log(line)
   end
 end
 
+-- name: string or function returning the label to log.
 -- closeFn: the popup's own global Close (same path as Esc / the Close button).
 function Civ6Ai_ExclusivePopup.Install(name, closeFn)
   if ContextPtr == nil or closeFn == nil then
@@ -48,7 +49,12 @@ function Civ6Ai_ExclusivePopup.Install(name, closeFn)
     end
     shownFor = 0
     local ok, err = pcall(closeFn)
-    Civ6Ai_ExclusivePopup._Log("autotest|exclusive_popup_closed|name=" .. tostring(name)
+    local label = name
+    if type(name) == "function" then
+      local okName, value = pcall(name)
+      label = okName and value or "?"
+    end
+    Civ6Ai_ExclusivePopup._Log("autotest|exclusive_popup_closed|name=" .. tostring(label)
       .. "|ok=" .. tostring(ok) .. (ok and "" or ("|err=" .. tostring(err))))
   end)
 end

@@ -54,6 +54,7 @@
     <File>InGame/Civ6Ai_WonderBuiltPopup.lua</File>
     <File>InGame/Civ6Ai_ProjectBuiltPopup.lua</File>
     <File>InGame/Civ6Ai_CreateCorporationPopup.lua</File>
+    <File>InGame/Civ6Ai_InGamePopup.lua</File>
   </Files>
   <Components>
     <UpdateDatabase id="Civ6Ai_Strategies">
@@ -111,6 +112,7 @@
         <File>InGame/Civ6Ai_WonderBuiltPopup.lua</File>
         <File>InGame/Civ6Ai_ProjectBuiltPopup.lua</File>
         <File>InGame/Civ6Ai_CreateCorporationPopup.lua</File>
+        <File>InGame/Civ6Ai_InGamePopup.lua</File>
       </Items>
     </ImportFiles>
     <UserInterface id="Civ6Ai_InGame_UI">
@@ -134,6 +136,13 @@
         <LoadOrder>500</LoadOrder>
         <LuaContext>ActionPanel</LuaContext>
         <LuaReplace>InGame/Civ6Ai_ActionPanel.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
+    <ReplaceUIScript id="Civ6Ai_InGamePopup">
+      <Properties>
+        <LoadOrder>500</LoadOrder>
+        <LuaContext>InGamePopup</LuaContext>
+        <LuaReplace>InGame/Civ6Ai_InGamePopup.lua</LuaReplace>
       </Properties>
     </ReplaceUIScript>
     <ReplaceUIScript id="Civ6Ai_NaturalDisasterPopup">

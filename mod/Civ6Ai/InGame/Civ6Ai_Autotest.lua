@@ -239,7 +239,6 @@ function Civ6Ai_Autotest._CloseQueuedPopups()
     "CityNamePopup",
     "ChooseCityNamePopup",
     "CityRenamePopup",
-    "InGamePopup",
     "GenericPopup",
     "PopupDialog",
     -- Expansion popups; HistoricMoments held P0's end turn for 25+ min on turn 10.
@@ -247,6 +246,8 @@ function Civ6Ai_Autotest._CloseQueuedPopups()
     -- WonderBuilt, ProjectBuilt, EraComplete, CreateCorporation) are NOT listed:
     -- dequeuing them hides the screen but keeps the engine event lock and the
     -- BulkHide, which froze T28. Civ6Ai_ExclusivePopup closes them natively.
+    -- InGamePopup (PopupDialogInGame: Unit Captured etc.) is a PushModal; it is
+    -- closed by its own OnClosePopup in Civ6Ai_InGamePopup.lua instead.
     "HistoricMoments",
     "EraReviewPopup",
     "DedicationPopup",
