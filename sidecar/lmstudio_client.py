@@ -313,6 +313,9 @@ def call_lmstudio_chat(
                             return _chat_message_text(repair_payload)
 
                     result, retried = pipeline.parse_model_text_with_repair(text, _repair)
+                    from sidecar import civ6_coverage
+
+                    result, coverage = civ6_coverage.repair(snapshot, result, _repair)
                     usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
                     metadata = {
                         "status": getattr(response, "status", 200),
@@ -328,6 +331,7 @@ def call_lmstudio_chat(
                         "endpoint": cfg.endpoint,
                         "attempts": attempt + 1,
                         "parse_retry": retried,
+                        **coverage,
                     }
                     return result, metadata
             except urllib.error.HTTPError as error:
