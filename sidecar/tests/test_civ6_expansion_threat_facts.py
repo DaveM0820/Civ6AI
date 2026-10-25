@@ -45,3 +45,17 @@ class ExpansionThreatFactsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_schema_allows_expansion_and_threat_summary():
+    import json
+    from pathlib import Path
+    import jsonschema
+    root = Path(__file__).resolve().parents[2]
+    schema = json.loads((root / "schemas" / "decision-input-v2.json").read_text(encoding="utf-8"))
+    summary = dict(schema["$defs"]["summary"])
+    summary["$defs"] = schema["$defs"]
+    doc = {k: [] for k in summary["required"]}
+    doc["expansion"] = {"cities": 1, "settlers_on_map": 1}
+    doc["threat"] = {"defenders": 1, "hostiles": []}
+    jsonschema.validate(doc, summary)
