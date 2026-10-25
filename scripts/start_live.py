@@ -30,7 +30,7 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 
 import circuit_breaker_state  # noqa: E402
-from civ6_paths import live_runtime_dir, logs_dirs, lua_log_candidates  # noqa: E402
+from civ6_paths import active_lua_log, live_runtime_dir, logs_dirs, lua_log_candidates  # noqa: E402
 from sidecar.civ6_config import apply_config_to_environ, load_local_config  # noqa: E402
 from windows_process import pid_alive, popen_hidden, python_executable, run_hidden  # noqa: E402
 
@@ -224,7 +224,7 @@ def _start_new_session() -> None:
         from civ6_lua_log_bridge import store_log_offset
         from civ6_paths import civ6ai_root
 
-        lua_log = next((p for p in lua_log_candidates() if p.is_file()), None)
+        lua_log = active_lua_log()
         if lua_log is not None:
             autotest = civ6ai_root() / "autotest"
             size = lua_log.stat().st_size
@@ -338,11 +338,11 @@ def main() -> int:
     )
 
     bridge = ROOT / "scripts" / "live_lua_bridge.py"
-    lua_candidates = lua_log_candidates()
-    lua_log = next((p for p in lua_candidates if p.is_file()), lua_candidates[0] if lua_candidates else None)
+    # No --lua-log: the bridge follows whichever candidate Civ6 is writing
+    # (newest mtime) and switches when another becomes active.
+    lua_log = active_lua_log()
+    print(_ascii(f"Lua.log (active now): {lua_log}"))
     bridge_cmd = [py, str(bridge)]
-    if lua_log is not None:
-        bridge_cmd.extend(["--lua-log", str(lua_log)])
     workers.append(_spawn("lua_bridge", bridge_cmd, env))
 
     if not args.no_watchdog:

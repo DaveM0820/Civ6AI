@@ -80,6 +80,25 @@ def lua_log_candidates() -> list[Path]:
     return [d / "Lua.log" for d in logs_dirs()]
 
 
+def active_lua_log(candidates: list[Path] | None = None) -> Path | None:
+    """The Lua.log Civ6 is writing: newest mtime among existing candidates.
+
+    Civ6 may log under Documents/My Games (OneDrive-redirected) or under
+    %LOCALAPPDATA%; a stale copy in the other folder must not win just by
+    being first in the list (16:31 bridge tailed a dead OneDrive log).
+    """
+    best: Path | None = None
+    best_mtime = -1.0
+    for path in lua_log_candidates() if candidates is None else candidates:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            continue
+        if mtime > best_mtime:
+            best, best_mtime = path, mtime
+    return best
+
+
 def _steam_library_roots() -> list[Path]:
     roots: list[Path] = []
     program_files = [
