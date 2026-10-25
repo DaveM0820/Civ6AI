@@ -203,6 +203,8 @@ function Civ6Ai_InitializeInGame()
   ExposedMembers.Civ6Ai.RequestHostEndTurn = Civ6Ai_Bridge.RequestHostEndTurn
   ExposedMembers.Civ6Ai.HostEndTurnWaiting = Civ6Ai_Bridge.HostEndTurnWaiting
   ExposedMembers.Civ6Ai.HostEndTurnStatus = Civ6Ai_Bridge.HostEndTurnStatus
+  ExposedMembers.Civ6Ai.IsAutotest = Civ6Ai_Config.IsAutotest
+  ExposedMembers.Civ6Ai.Log = Civ6Ai_Util.Log
   if Civ6Ai_MpTest ~= nil then
     Civ6Ai_MpTest.Initialize()
   end

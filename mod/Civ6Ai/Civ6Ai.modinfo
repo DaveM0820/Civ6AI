@@ -47,6 +47,13 @@
     <File>InGame/Civ6Ai_InGame.lua</File>
     <File>InGame/Civ6Ai_DiplomacyRibbon.lua</File>
     <File>InGame/Civ6Ai_ActionPanel.lua</File>
+    <File>InGame/Civ6Ai_ExclusivePopup.lua</File>
+    <File>InGame/Civ6Ai_NaturalDisasterPopup.lua</File>
+    <File>InGame/Civ6Ai_EraCompletePopup.lua</File>
+    <File>InGame/Civ6Ai_NaturalWonderPopup.lua</File>
+    <File>InGame/Civ6Ai_WonderBuiltPopup.lua</File>
+    <File>InGame/Civ6Ai_ProjectBuiltPopup.lua</File>
+    <File>InGame/Civ6Ai_CreateCorporationPopup.lua</File>
   </Files>
   <Components>
     <UpdateDatabase id="Civ6Ai_Strategies">
@@ -97,6 +104,13 @@
         <File>InGame/Civ6Ai_Chat.lua</File>
         <File>InGame/Civ6Ai_DiplomacyRibbon.lua</File>
         <File>InGame/Civ6Ai_ActionPanel.lua</File>
+        <File>InGame/Civ6Ai_ExclusivePopup.lua</File>
+        <File>InGame/Civ6Ai_NaturalDisasterPopup.lua</File>
+        <File>InGame/Civ6Ai_EraCompletePopup.lua</File>
+        <File>InGame/Civ6Ai_NaturalWonderPopup.lua</File>
+        <File>InGame/Civ6Ai_WonderBuiltPopup.lua</File>
+        <File>InGame/Civ6Ai_ProjectBuiltPopup.lua</File>
+        <File>InGame/Civ6Ai_CreateCorporationPopup.lua</File>
       </Items>
     </ImportFiles>
     <UserInterface id="Civ6Ai_InGame_UI">
@@ -120,6 +134,48 @@
         <LoadOrder>500</LoadOrder>
         <LuaContext>ActionPanel</LuaContext>
         <LuaReplace>InGame/Civ6Ai_ActionPanel.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
+    <ReplaceUIScript id="Civ6Ai_NaturalDisasterPopup">
+      <Properties>
+        <LoadOrder>500</LoadOrder>
+        <LuaContext>NaturalDisasterPopup</LuaContext>
+        <LuaReplace>InGame/Civ6Ai_NaturalDisasterPopup.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
+    <ReplaceUIScript id="Civ6Ai_EraCompletePopup">
+      <Properties>
+        <LoadOrder>500</LoadOrder>
+        <LuaContext>EraCompletePopup</LuaContext>
+        <LuaReplace>InGame/Civ6Ai_EraCompletePopup.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
+    <ReplaceUIScript id="Civ6Ai_NaturalWonderPopup">
+      <Properties>
+        <LoadOrder>500</LoadOrder>
+        <LuaContext>NaturalWonderPopup</LuaContext>
+        <LuaReplace>InGame/Civ6Ai_NaturalWonderPopup.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
+    <ReplaceUIScript id="Civ6Ai_WonderBuiltPopup">
+      <Properties>
+        <LoadOrder>500</LoadOrder>
+        <LuaContext>WonderBuiltPopup</LuaContext>
+        <LuaReplace>InGame/Civ6Ai_WonderBuiltPopup.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
+    <ReplaceUIScript id="Civ6Ai_ProjectBuiltPopup">
+      <Properties>
+        <LoadOrder>500</LoadOrder>
+        <LuaContext>ProjectBuiltPopup</LuaContext>
+        <LuaReplace>InGame/Civ6Ai_ProjectBuiltPopup.lua</LuaReplace>
+      </Properties>
+    </ReplaceUIScript>
+    <ReplaceUIScript id="Civ6Ai_CreateCorporationPopup">
+      <Properties>
+        <LoadOrder>500</LoadOrder>
+        <LuaContext>CreateCorporationPopup</LuaContext>
+        <LuaReplace>InGame/Civ6Ai_CreateCorporationPopup.lua</LuaReplace>
       </Properties>
     </ReplaceUIScript>
   </Components>
