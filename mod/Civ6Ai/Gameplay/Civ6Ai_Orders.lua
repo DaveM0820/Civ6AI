@@ -2212,23 +2212,26 @@ function Civ6Ai_Orders._ModelCommandsUnit(unit, ordered)
 end
 
 -- An AI seat's model-commanded units end their turn after its orders, so the
--- game's AI does not move the units the model left in place. A human seat
--- finishes its own units.
+-- game's AI cannot override a unit the model (or a host fallback / standing
+-- goal) handled successfully. A unit still without a successful order after
+-- the reply and the sidecar's coverage repair goes to the game's own AI the
+-- same turn (as Civ 5 leaves leftovers to the Community Patch AI); it used to
+-- be held for two idle turns, which piled new units up in the capital.
+-- handled == nil (T1 dump, no orders yet): every unit ends its moves, as before.
+-- A human seat finishes its own units.
 function Civ6Ai_Orders._FinishIdleUnits(owner, handled)
-  local ran = handled ~= nil and handled.unit or {}
   local p = Players[owner]
   if p == nil or call(p, "IsHuman") then
     return 0
   end
-  local count, native, now = 0, 0, Game.GetCurrentGameTurn()
+  local ran = handled ~= nil and handled.unit or nil
+  local count, native = 0, 0
   for _, u in ipairs(sortedMembers(call(p, "GetUnits"))) do
-    local key = "CIV6AI_OK_" .. tostring(owner) .. "_" .. tostring(u:GetID())
-    local done = ran[u:GetID()]
-    if (done ~= nil and done ~= false and done ~= Civ6Ai_Orders.K.SKIP) or Game:GetProperty(key) == nil then
-      Game:SetProperty(key, now)
-    end
     if (call(u, "GetMovesRemaining") or 0) > 0 and Civ6Ai_Orders._ModelCommandsUnit(u, ran) then
-      if now - (num(Game:GetProperty(key)) or now) >= 2 then
+      local done = ran ~= nil and ran[u:GetID()] or nil
+      local held = ran == nil or (done ~= nil and done ~= false)
+        or Civ6Ai_Orders._ReadGoal(owner, u:GetID()) ~= nil
+      if not held then
         native = native + 1
       elseif pcall(UnitManager.FinishMoves, u) then
         count = count + 1

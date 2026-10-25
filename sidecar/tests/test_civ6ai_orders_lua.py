@@ -330,12 +330,32 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertIsNone(self.rt.eval("ExposedMembers.Civ6Ai.OrderResults"))
         self.assertEqual(self.rt.eval("Players[2].units[2].moves"), 2)
 
-    def test_idle_units_end_their_turn_but_builders_stay_with_game_ai(self):
+    def test_unordered_units_go_to_game_ai_same_turn_builders_too(self):
+        # Like Civ 5: a unit with no successful order is left to the game's AI
+        # this turn (moves kept), not held for two idle turns.
         self.rt.execute("GameInfo.Units[2] = {BuildCharges=3}; table.insert(Players[2].units, MkUnit(2,10,1,1,2))")
         self.order(0, K=2, P=2, I=4, S=7, B=1, J=1, N=1, T=6)
         self.turn_start(2, turn=6)
-        self.assertEqual(self.rt.eval("Players[2].units[2].moves"), 0)
+        self.assertEqual(self.rt.eval("Players[2].units[2].moves"), 2)
         self.assertEqual(self.rt.eval("Players[2].units[4].moves"), 2)
+        logs = [str(x) for x in _vals(self.rt.eval("logs"))]
+        self.assertTrue(any("finish_idle|player=2|" in l and "native=" in l and "native=0" not in l for l in logs), logs)
+
+    def test_model_ordered_unit_ends_its_turn_so_game_ai_cannot_override(self):
+        # Unit 8 told to Skip (hold): the order succeeds and the unit's moves
+        # end, so the game's AI cannot move it; unordered units keep moves.
+        uid = self.rt.eval("Players[2].units[2].id")
+        self.order(0, K=5, P=2, U=uid, S=9, B=2, J=1, N=1, T=6)
+        self.turn_start(2, turn=6)
+        res = self.results()
+        self.assertTrue(any(r["seq"] == 9 and r["ok"] for r in res), res)
+        self.assertEqual(self.rt.eval("Players[2].units[2].moves"), 0)
+        self.assertEqual(self.rt.eval("Players[2].units[1].moves"), 2)
+
+    def test_human_seat_units_are_never_finished(self):
+        self.rt.execute("Players[2].human = true")
+        self.rt.globals().Civ6Ai_Orders._FinishIdleUnits(2, None)
+        self.assertEqual(self.rt.eval("Players[2].units[1].moves"), 2)
 
     def test_fallback_never_touches_a_model_ordered_unit(self):
         # Unit 7's model move succeeds; its defend hint must not run. Unit 8 has
