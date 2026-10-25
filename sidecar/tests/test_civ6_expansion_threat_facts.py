@@ -59,3 +59,14 @@ def test_schema_allows_expansion_and_threat_summary():
     doc["expansion"] = {"cities": 1, "settlers_on_map": 1}
     doc["threat"] = {"defenders": 1, "hostiles": []}
     jsonschema.validate(doc, summary)
+
+
+def test_schema_allows_unit_goal_set_turn():
+    import json
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2]
+    schema = json.loads((root / "schemas" / "decision-input-v2.json").read_text(encoding="utf-8"))
+    goal = schema["$defs"]["owned_unit"]["properties"]["goal"]
+    assert "set_turn" in goal["properties"]
+    import jsonschema
+    jsonschema.validate({"x": 1, "y": 2, "intent": "settle", "A": 1, "eta": 3, "set_turn": 30}, goal)
