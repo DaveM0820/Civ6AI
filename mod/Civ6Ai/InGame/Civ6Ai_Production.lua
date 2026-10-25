@@ -494,84 +494,11 @@ Civ6Ai_Production.BUILDER_SURPLUS_PENALTY = 200
 -- (ThreatNear) switches to the threat shares until it clears.
 Civ6Ai_Production.EARLY_CITY_TARGET = 3
 Civ6Ai_Production.EARLY_TURN = 60
-Civ6Ai_Production.SHARE_SCALE = 3000
-Civ6Ai_Production.PROFILE = {
-  expand = { settler = 1 / 2, builder = 1 / 4, military = 0, rest = 1 / 4 },
-  threat = { settler = 1 / 6, builder = 1 / 6, military = 1 / 2, rest = 1 / 6 },
-}
 
--- Which share an option belongs to: settler, builder, military (land combat) or rest.
-function Civ6Ai_Production.ShareGroup(buildId, tags, kind)
-  local has = {}
-  for _, tag in ipairs(tags or {}) do has[tag] = true end
-  local id = tostring(buildId or "")
-  local isUnit = kind == "unit" or string.sub(id, 1, 5) == "UNIT_"
-  if has["PSEUDOYIELD_UNIT_SETTLER"] or id == "UNIT_SETTLER" then
-    return "settler"
-  end
-  if isUnit and has["PSEUDOYIELD_IMPROVEMENT"] then
-    return "builder"
-  end
-  if isUnit and has["PSEUDOYIELD_UNIT_COMBAT"] then
-    return "military"
-  end
-  return "rest"
-end
-
--- Rescale bounded weights to the early shares. A share with no buildable option
--- passes to the next group in SHARE_FALLBACK (settler and builder first to each
--- other); a zero share drops its options from the roll. Returns mode, total.
-Civ6Ai_Production.SHARE_FALLBACK = {
-  settler = { "builder", "military", "rest" },
-  builder = { "settler", "military", "rest" },
-  military = { "builder", "rest", "settler" },
-  rest = { "settler", "builder", "military" },
-}
-
-function Civ6Ai_Production.ApplyEarlyShares(options, situation)
-  if situation == nil or situation.early ~= true or options == nil or #options == 0 then
-    return nil
-  end
-  -- ThreatNear already weighs a war against the army near our cities.
-  local mode = situation.threatened == true and "threat" or "expand"
-  local shares = {}
-  for k, v in pairs(Civ6Ai_Production.PROFILE[mode]) do shares[k] = v end
-  local sums = { settler = 0, builder = 0, military = 0, rest = 0 }
-  for _, o in ipairs(options) do
-    o.group = o.group or Civ6Ai_Production.ShareGroup(o.id, o.tags, o.kind)
-    sums[o.group] = sums[o.group] + (o.weight or 0)
-  end
-  for _, g in ipairs({ "settler", "builder", "military", "rest" }) do
-    if sums[g] <= 0 and shares[g] > 0 then
-      local to = nil
-      for _, cand in ipairs(Civ6Ai_Production.SHARE_FALLBACK[g]) do
-        if to == nil and sums[cand] > 0 and shares[cand] > 0 then to = cand end
-      end
-      for _, cand in ipairs(Civ6Ai_Production.SHARE_FALLBACK[g]) do
-        if to == nil and sums[cand] > 0 then to = cand end
-      end
-      if to ~= nil then
-        shares[to] = shares[to] + shares[g]
-      end
-      shares[g] = 0
-    end
-  end
-  local total = 0
-  for _, o in ipairs(options) do
-    local share, sum = shares[o.group] or 0, sums[o.group]
-    local w = 0
-    if share > 0 and sum > 0 then
-      w = math.floor(share * Civ6Ai_Production.SHARE_SCALE * (o.weight or 0) / sum)
-      if w < 1 then w = 1 end
-    end
-    o.weight = w
-    total = total + w
-  end
-  if total <= 0 then
-    return nil
-  end
-  return mode, total
-end
+-- The fixed early shares (settler 1/2, builder 1/4, ...) are gone: what a city
+-- builds follows the seat's production preset (synced build priorities,
+-- sidecar civ6-production-presets.json), the same weights the engine AI uses.
+-- With no preset chosen the fill is a neutral weighted pick.
 
 function Civ6Ai_Production.ScoreBuild(buildId, tags, situation, kind)
   situation = situation or {}
@@ -905,8 +832,7 @@ end
 
 -- Deterministic weighted pick. Weight = score above the worst option, bounded
 -- to [WEIGHT_FLOOR, WEIGHT_CAP] so one inflated item cannot squeeze every
--- building down to a weight of 1. With a situation in the early game the
--- weights are then rescaled to the early shares (ApplyEarlyShares).
+-- building down to a weight of 1.
 Civ6Ai_Production.WEIGHT_FLOOR = 5
 Civ6Ai_Production.WEIGHT_CAP = 150
 
@@ -926,10 +852,6 @@ function Civ6Ai_Production.WeightedPick(options, seed, situation)
     if w < floor then w = floor end
     o.weight = math.floor(w)
     total = total + o.weight
-  end
-  local mode, shared = Civ6Ai_Production.ApplyEarlyShares(options, situation)
-  if mode ~= nil then
-    total = shared
   end
   -- Park-Miller step: products stay below 2^53, exact in Lua 5.1 doubles.
   local r = ((seed % 2147483646) + 1) * 16807 % 2147483647

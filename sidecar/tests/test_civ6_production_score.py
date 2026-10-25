@@ -217,9 +217,7 @@ class ProductionScoreTests(unittest.TestCase):
 
     def test_prompt_says_the_test_seat_uses_the_same_lists(self):
         lines = "\n".join(prio.prompt_lines({"civ6": {"priorities": []}}))
-        self.assertIn("these same lists", lines)
-        self.assertIn("warlike leader", lines)
-        self.assertIn("too few cities", lines)
+        self.assertIn("An empty city queue is filled from the same weights", lines)
         queued = "\n".join(economy.attention_items({
             "your_cities": [{"city_id": "CITY_1", "name": "Utrecht", "production": {"item_id": "NONE"}}],
             "civ6": {"priorities": []},

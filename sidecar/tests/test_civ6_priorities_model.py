@@ -59,7 +59,7 @@ class PrioritiesModelTests(unittest.TestCase):
         snap = _snapshot({peace: 1})
         prio.inject_legal_commands(snap)
         lines = "\n".join(prio.prompt_lines(snap))
-        self.assertIn("Current: peace:1", lines)
+        self.assertIn("Current: custom (peace:1)", lines)
         wire = civ6_command_wire.expand_civ6_command_wire(copy.deepcopy(snap), {"7.priorities": "war:2"})
         ids = [v for k, v in sorted(wire.items()) if k.startswith("cmd.")]
         self.assertIn(prio.command_id(peace, 0), ids)
@@ -70,14 +70,24 @@ class PrioritiesModelTests(unittest.TestCase):
         ok = [c["command_id"] for c in validated["commands"]]
         self.assertIn(prio.command_id(war, 2), ok)
 
-    def test_prompt_states_the_focus_cap_of_three(self):
-        from sidecar import civ6_apply_results
-
-        lines = "\n".join(prio.prompt_lines(_snapshot({})))
-        self.assertIn("at most 3 focuses", lines)
-        self.assertIn("The maximum is 3", lines)
-        self.assertIn("rejected", lines)
-        self.assertIn("maximum is 3", civ6_apply_results.describe_reason("too_many_focus"))
+    def test_presets_are_era_gated_and_expand_to_priorities(self):
+        snap = _snapshot({})
+        ancient = "\n".join(prio.prompt_lines(snap))
+        self.assertIn("- expansion:", ancient)
+        self.assertNotIn("- wonder_push:", ancient)
+        self.assertNotIn("- science:", ancient)
+        snap["your_empire"] = {"research": {"known_tech_ids": ["TECH_WRITING"]}}
+        self.assertIn("- science:", "\n".join(prio.prompt_lines(snap)))
+        snap["game"] = dict(snap.get("game") or {}, era_id="ERA_CLASSICAL")
+        self.assertIn("- wonder_push:", "\n".join(prio.prompt_lines(snap)))
+        wanted, problems = prio.parse_reply("expansion")
+        self.assertEqual([], problems)
+        self.assertEqual(3, wanted[prio.BY_KEY["expansion"]["id"]])
+        self.assertEqual("expansion", prio.matching_preset(wanted))
+        for preset in prio.PRESETS:
+            levels, problems = prio.parse_reply(preset["set"])
+            self.assertEqual([], problems, preset["key"])
+            self.assertTrue(levels, preset["key"])
 
     def test_prompt_says_priorities_steer_production_when_queue_is_absent(self):
         from sidecar import civ6_wire

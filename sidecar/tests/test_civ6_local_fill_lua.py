@@ -147,30 +147,14 @@ class LocalFillTests(unittest.TestCase):
         ("BUILDING_MONUMENT", 60, "building", []),
     ]
 
-    def test_early_shares_half_settler_quarter_builder(self):
-        freq, sit = self._shares(self.OPTS, cities=1, pop=2, turn=8)
-        self.assertTrue(sit.early)
-        self.assertAlmostEqual(1 / 2, freq["UNIT_SETTLER"], delta=0.04)
-        self.assertAlmostEqual(1 / 4, freq["UNIT_BUILDER"], delta=0.04)
-        rest = freq.get("UNIT_SCOUT", 0) + freq.get("BUILDING_MONUMENT", 0)
-        self.assertAlmostEqual(1 / 4, rest, delta=0.04)
-        self.assertEqual(0, freq.get("UNIT_WARRIOR", 0))  # no military share in peace
-        # The rest keeps the priority weights: scout (score 80) beats monument (60).
-        self.assertGreater(freq["UNIT_SCOUT"], freq["BUILDING_MONUMENT"])
-
-    def test_missing_settler_share_goes_to_builder(self):
-        opts = [o for o in self.OPTS if o[0] != "UNIT_SETTLER"]  # pop 1: no settler offered
-        freq, _ = self._shares(opts, cities=1, pop=1, turn=3)
-        self.assertAlmostEqual(3 / 4, freq["UNIT_BUILDER"], delta=0.04)
-        opts = [o for o in opts if o[0] != "UNIT_BUILDER"]
-        freq, _ = self._shares(opts, cities=1, pop=1, turn=3)
-        self.assertAlmostEqual(1.0, freq.get("UNIT_SCOUT", 0) + freq.get("BUILDING_MONUMENT", 0), delta=0.001)
-
-    def test_threat_shifts_to_military_and_keeps_some_settlers(self):
-        freq, _ = self._shares(self.OPTS, cities=1, pop=3, turn=12, threatened=True)
-        self.assertAlmostEqual(1 / 6, freq.get("UNIT_SETTLER", 0), delta=0.04)
-        self.assertAlmostEqual(1 / 2, freq["UNIT_WARRIOR"], delta=0.04)
-        self.assertGreater(freq["UNIT_WARRIOR"], freq["UNIT_BUILDER"])
+    def test_no_fixed_early_shares(self):
+        # The fill is neutral: shares follow the priority weights (the preset),
+        # not a hard-coded settler 1/2 / builder 1/4 split, and threat changes nothing.
+        freq, _ = self._shares(self.OPTS, cities=1, pop=2, turn=8)
+        threat, _ = self._shares(self.OPTS, cities=1, pop=2, turn=8, threatened=True)
+        self.assertNotAlmostEqual(1 / 2, freq.get("UNIT_SETTLER", 0), delta=0.04)
+        self.assertGreater(freq.get("UNIT_SCOUT", 0), freq.get("UNIT_BUILDER", 0))
+        self.assertAlmostEqual(freq.get("UNIT_WARRIOR", 0), threat.get("UNIT_WARRIOR", 0), delta=0.04)
 
     def test_threat_near_ignores_scouts_and_ends_once_defended(self):
         P = self.g.Civ6Ai_Production

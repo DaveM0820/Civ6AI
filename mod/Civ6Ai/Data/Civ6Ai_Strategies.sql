@@ -47,13 +47,10 @@ INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) VALUES
 ('Civ6AiForceGranaryBuildings', 'BUILDING_GRANARY', 1, 1000),
 ('Civ6AiForceCampusDistricts',  'DISTRICT_CAMPUS',  1, 1000);
 
--- Early-game build order for engine-AI seats (the local fill uses the same
--- rule in InGame/Civ6Ai_Production.lua). Active for a seat the model drives
--- (any Civ6Ai priority set) with fewer than 3 cities by turn 60. EXPAND favours
--- settlers, then builders, and drops scouts and spare army; THREAT (hostile land
--- combat units, a camp within 4 or a war outnumber our army near our cities;
--- scouts do not count) favours land combat units without holding settlers back,
--- and clears once our army near the cities outnumbers them. Exclusive.
+-- Early-game mode markers (expand / threat) for a seat the model drives with
+-- fewer than 3 cities by turn 60. They carry no build weights any more: what
+-- gets built follows the model's production preset. Kept for the early_mode
+-- log. Exclusive.
 INSERT INTO Types (Type, Kind) VALUES
 ('CIV6AI_STRATEGY_EARLY_EXPAND', 'KIND_VICTORY_STRATEGY'),
 ('CIV6AI_STRATEGY_EARLY_THREAT', 'KIND_VICTORY_STRATEGY');
@@ -82,13 +79,6 @@ INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES
 ('CIV6AI_STRATEGY_EARLY_EXPAND', 'Civ6AiEarlyExpandPseudoYields'),
 ('CIV6AI_STRATEGY_EARLY_THREAT', 'Civ6AiEarlyThreatPseudoYields');
 
-INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) VALUES
-('Civ6AiEarlyExpandPseudoYields', 'PSEUDOYIELD_UNIT_SETTLER',          1, 600),
-('Civ6AiEarlyExpandPseudoYields', 'PSEUDOYIELD_IMPROVEMENT',           1, 150),
-('Civ6AiEarlyExpandPseudoYields', 'PSEUDOYIELD_UNIT_EXPLORER',         1, -200),
-('Civ6AiEarlyExpandPseudoYields', 'PSEUDOYIELD_UNIT_COMBAT',           1, -40),
-('Civ6AiEarlyExpandPseudoYields', 'PSEUDOYIELD_WONDER',                1, -80),
-('Civ6AiEarlyThreatPseudoYields', 'PSEUDOYIELD_UNIT_COMBAT',           1, 300),
-('Civ6AiEarlyThreatPseudoYields', 'PSEUDOYIELD_STANDING_ARMY_NUMBER',  1, 100),
-('Civ6AiEarlyThreatPseudoYields', 'PSEUDOYIELD_UNIT_SETTLER',          1, 0),
-('Civ6AiEarlyThreatPseudoYields', 'PSEUDOYIELD_UNIT_EXPLORER',         1, -200);
+-- No favoured items: the early strategies only record the mode (early_mode
+-- log, threat facts). What gets built follows the model's production preset.
+

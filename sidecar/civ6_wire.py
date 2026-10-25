@@ -1997,7 +1997,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
 
     prio_lines = civ6_priorities.prompt_lines(snapshot)
     if prio_lines:
-        optional_keys.append((civ6_priorities.REPLY_KEY, "key:level, key:level | none (see BUILD PRIORITIES)"))
+        optional_keys.append((civ6_priorities.REPLY_KEY, "preset name | none (see PRODUCTION PRESET)"))
     required_keys = {key for key, _ in required}
     units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
     wire_ids = pipeline._build_unit_wire_id_map(units)

@@ -43,13 +43,9 @@ class StrategiesSqlTests(unittest.TestCase):
         for name in names:
             self.assertRegex(lua, r'(fn = "%s"|%s = ")' % (re.escape(name), re.escape(name)))
 
-    def test_early_strategies_favour_settlers_or_military(self):
-        rows = dict(((l, i), v) for l, i, v in self.db.execute(
-            "SELECT ListType, Item, Value FROM AiFavoredItems WHERE ListType LIKE 'Civ6AiEarly%'"))
-        self.assertEqual(rows[("Civ6AiEarlyExpandPseudoYields", "PSEUDOYIELD_UNIT_SETTLER")], 600)
-        self.assertLess(rows[("Civ6AiEarlyExpandPseudoYields", "PSEUDOYIELD_UNIT_EXPLORER")], 0)
-        self.assertGreater(rows[("Civ6AiEarlyThreatPseudoYields", "PSEUDOYIELD_UNIT_COMBAT")], 0)
-        self.assertEqual(rows[("Civ6AiEarlyThreatPseudoYields", "PSEUDOYIELD_UNIT_SETTLER")], 0)  # threat no longer stops settlers
+    def test_early_strategies_force_no_builds(self):
+        rows = self.db.execute("SELECT COUNT(*) FROM AiFavoredItems WHERE ListType LIKE 'Civ6AiEarly%'").fetchone()
+        self.assertEqual(rows[0], 0)
 
     def test_modinfo_loads_the_sql(self):
         info = (MOD / "Civ6Ai.modinfo").read_text()

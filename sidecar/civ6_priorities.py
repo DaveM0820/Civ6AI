@@ -205,6 +205,61 @@ CATEGORIES: list[dict] = [
 BY_ID = {c["id"]: c for c in CATEGORIES}
 BY_KEY = {c["key"]: c for c in CATEGORIES}
 
+# Named production presets (config/civ6-production-presets.json): each is a
+# complete priority set, applied through the same synced set_build_priority
+# path. Era/tech gated; the prompt lists only the available ones.
+PRESETS_PATH = __import__("pathlib").Path(__file__).resolve().parents[1] / "config" / "civ6-production-presets.json"
+
+
+def load_presets() -> list[dict]:
+    import json
+
+    data = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
+    return [p for p in data.get("presets") or [] if isinstance(p, dict) and p.get("key")]
+
+
+PRESETS: list[dict] = load_presets()
+PRESET_BY_KEY = {p["key"]: p for p in PRESETS}
+
+
+def _known_ids(snapshot: dict) -> set[str]:
+    empire = snapshot.get("your_empire") if isinstance(snapshot.get("your_empire"), dict) else {}
+    research = empire.get("research") if isinstance(empire.get("research"), dict) else {}
+    known = {str(t) for t in research.get("known_tech_ids") or []}
+    for row in empire.get("civics") or []:
+        if isinstance(row, dict) and row.get("key") == "known" and row.get("id"):
+            known.add(str(row["id"]))
+    return known
+
+
+def available_presets(snapshot: dict) -> list[dict]:
+    era = _era_index(snapshot)
+    known = _known_ids(snapshot)
+    out = []
+    for preset in PRESETS:
+        if int(preset.get("min_era") or 0) > era:
+            continue
+        needs = preset.get("requires") or []
+        if needs and not any(n in known for n in needs):
+            continue
+        out.append(preset)
+    return out
+
+
+def preset_levels(key: str) -> dict[int, int] | None:
+    preset = PRESET_BY_KEY.get(str(key).strip().lower().replace(" ", "_").replace("-", "_"))
+    if preset is None:
+        return None
+    wanted, _ = parse_reply(preset["set"])
+    return wanted
+
+
+def matching_preset(levels: dict[int, int]) -> str | None:
+    for preset in PRESETS:
+        if preset_levels(preset["key"]) == levels:
+            return preset["key"]
+    return None
+
 
 def scaled(value: int, level: int) -> int:
     v = value * LEVEL_MULT[level]
@@ -913,25 +968,22 @@ def prompt_lines(snapshot: dict) -> list[str]:
     """=== BUILD PRIORITIES === block for the prompt (empty when unsupported)."""
     if not priorities_supported(snapshot):
         return []
-    posture = " | ".join(f"{c['key']} ({c['desc']})" for c in CATEGORIES if c["group"] == "posture")
-    focus = " | ".join(f"{c['key']} ({c['desc']})" for c in CATEGORIES if c["group"] == "focus")
-    return [
-        "=== BUILD PRIORITIES ===",
-        "Your cities' production is chosen by the game's own AI. Build priorities steer what it builds across "
-        "your whole empire (which units, buildings, districts and wonders it favours). They stay on every turn "
-        "until you change them.",
-        "The local test seat fills an empty queue from these same lists, with extra weight for war, nearby "
-        "enemies, a warlike leader, too few cities, too few builders, and a penalty for repeating the same item.",
-        f"Current: {_fmt(current_levels(snapshot))}",
-        "Levels: 1 = light, 2 = strong, 3 = all-in (almost nothing else gets built).",
-        f"Pick at most ONE posture: {posture}",
-        f"Pick at most {MAX_FOCUS} focuses. The maximum is {MAX_FOCUS}; any focus past that is rejected "
-        f"and not applied: {focus}",
-        f'To change them, add the optional key "{REPLY_KEY}" with your COMPLETE new set, e.g. '
-        f'"{REPLY_KEY}": "war:2, production:1, expansion:1". Anything you leave out is switched off. '
-        f'"{REPLY_KEY}": "none" switches all off. Omit the key to keep the current set.',
-        "Change them when your situation changes (war starts or ends, bankruptcy, a victory plan), not every turn.",
+    current = current_levels(snapshot)
+    name = matching_preset(current)
+    lines = [
+        "=== PRODUCTION PRESET ===",
+        "Your cities' production is picked from weighted lists, like the game's own AI. A preset sets those "
+        "weights for your whole empire (all cities) and stays on until you change it. An empty city queue is "
+        "filled from the same weights.",
+        f"Current: {name or 'custom'} ({_fmt(current)})" if current else "Current: none (neutral game default)",
+        "Available presets:",
     ]
+    for preset in available_presets(snapshot):
+        lines.append(f"- {preset['key']}: {preset['desc']}")
+    lines.append(
+        f'To change it, add the optional key "{REPLY_KEY}" with one preset name, e.g. "{REPLY_KEY}": "expansion". '
+        f'"{REPLY_KEY}": "none" returns to the neutral default. Omit the key to keep the current preset.')
+    return lines
 
 
 def parse_reply(value) -> tuple[dict[int, int] | None, list[str]]:
@@ -949,6 +1001,9 @@ def parse_reply(value) -> tuple[dict[int, int] | None, list[str]]:
             return None, problems
         if text.lower() in ("none", "clear", "off", "0"):
             return {}, problems
+        preset = PRESET_BY_KEY.get(text.lower().strip('"').replace(" ", "_").replace("-", "_"))
+        if preset is not None:
+            text = preset["set"]
         items = [p for p in text.replace(";", ",").replace("+", ",").split(",")]
     wanted: dict[int, int] = {}
     for raw in items:
