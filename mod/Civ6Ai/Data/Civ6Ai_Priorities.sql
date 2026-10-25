@@ -1787,3 +1787,33 @@ INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_EXPLORATION_ALL_IN_UnitB
 INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_EXPLORATION_ALL_IN_UnitBuilds', 'UnitPromotionClasses');
 INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_EXPLORATION_ALL_IN', 'CIV6AI_PRIO_EXPLORATION_ALL_IN_UnitBuilds');
 INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_EXPLORATION_ALL_IN_UnitBuilds', PromotionClassType, 1, 120 FROM UnitPromotionClasses WHERE PromotionClassType = 'PROMOTION_CLASS_RECON';
+
+-- settlers_only (light): settlers only: every city builds settlers to found new cities fast
+INSERT INTO Types (Type, Kind) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_LIGHT', 'KIND_VICTORY_STRATEGY');
+INSERT INTO Strategies (StrategyType, VictoryType, NumConditionsNeeded) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_LIGHT', NULL, 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, Disqualifier) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_LIGHT', 'Is Not Major', 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, StringValue, ThresholdValue) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_LIGHT', 'Call Lua Function', 'Civ6AiPrio_25_1', 0);
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_LIGHT_PseudoYields');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_LIGHT_PseudoYields', 'PseudoYields');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_LIGHT', 'CIV6AI_PRIO_SETTLERS_ONLY_LIGHT_PseudoYields');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_SETTLERS_ONLY_LIGHT_PseudoYields', PseudoYieldType, 1, 100 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_SETTLER';
+
+-- settlers_only (strong): settlers only: every city builds settlers to found new cities fast
+INSERT INTO Types (Type, Kind) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_STRONG', 'KIND_VICTORY_STRATEGY');
+INSERT INTO Strategies (StrategyType, VictoryType, NumConditionsNeeded) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_STRONG', NULL, 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, Disqualifier) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_STRONG', 'Is Not Major', 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, StringValue, ThresholdValue) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_STRONG', 'Call Lua Function', 'Civ6AiPrio_25_2', 0);
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_STRONG_PseudoYields');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_STRONG_PseudoYields', 'PseudoYields');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_STRONG', 'CIV6AI_PRIO_SETTLERS_ONLY_STRONG_PseudoYields');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_SETTLERS_ONLY_STRONG_PseudoYields', PseudoYieldType, 1, 200 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_SETTLER';
+
+-- settlers_only (all_in): settlers only: every city builds settlers to found new cities fast
+INSERT INTO Types (Type, Kind) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_ALL_IN', 'KIND_VICTORY_STRATEGY');
+INSERT INTO Strategies (StrategyType, VictoryType, NumConditionsNeeded) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_ALL_IN', NULL, 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, Disqualifier) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_ALL_IN', 'Is Not Major', 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, StringValue, ThresholdValue) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_ALL_IN', 'Call Lua Function', 'Civ6AiPrio_25_3', 0);
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_ALL_IN_PseudoYields');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_ALL_IN_PseudoYields', 'PseudoYields');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_ALL_IN', 'CIV6AI_PRIO_SETTLERS_ONLY_ALL_IN_PseudoYields');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_SETTLERS_ONLY_ALL_IN_PseudoYields', PseudoYieldType, 1, 400 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_SETTLER';

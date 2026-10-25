@@ -1,6 +1,8 @@
 {
   "_doc": "Named production presets. Each is a complete set of build priorities (category:level, categories in sidecar/civ6_priorities.py). Applied through the synced set_build_priority path, so the native AI and the empty-queue fill both use it. Per seat, not per city. min_era: 0 ancient, 1 classical, 2 medieval, ... requires: any one of these techs/civics known (empty = none). Only available presets are listed in the prompt.",
   "presets": [
+    {"key": "settlers_only", "min_era": 0, "requires": [], "set": "settlers_only:3",
+     "desc": "settlers only: every city builds settlers to found new cities fast (falls back to the normal fill when a city cannot build one)"},
     {"key": "expansion", "min_era": 0, "requires": [], "set": "peace:1, expansion:3, improvements:1",
      "desc": "heavy settlers, some builders, a small army"},
     {"key": "expansion_builders", "min_era": 0, "requires": [], "set": "peace:1, expansion:2, improvements:2",

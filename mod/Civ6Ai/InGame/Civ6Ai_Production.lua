@@ -227,6 +227,7 @@ Civ6Ai_Production.PRIORITY_WEIGHTS = {
   [22] = { PSEUDOYIELD_GPP_ADMIRAL = 50, PSEUDOYIELD_GPP_ARTIST = 50, PSEUDOYIELD_GPP_ENGINEER = 50, PSEUDOYIELD_GPP_GENERAL = 50, PSEUDOYIELD_GPP_MERCHANT = 50, PSEUDOYIELD_GPP_MUSICIAN = 50, PSEUDOYIELD_GPP_PROPHET = 50, PSEUDOYIELD_GPP_SCIENTIST = 50, PSEUDOYIELD_GPP_WRITER = 50, PSEUDOYIELD_DISTRICT = 15 }, -- great_people
   [23] = { YIELD_FAITH = 50, PSEUDOYIELD_GPP_PROPHET = 20, DISTRICT_HOLY_SITE = 50 }, -- faith
   [24] = { PSEUDOYIELD_UNIT_EXPLORER = 100, PROMOTION_CLASS_RECON = 30 }, -- exploration
+  [25] = { PSEUDOYIELD_UNIT_SETTLER = 100 }, -- settlers_only
 }
 Civ6Ai_Production.PRIORITY_GROUP = {
   [1] = "posture",
@@ -253,6 +254,7 @@ Civ6Ai_Production.PRIORITY_GROUP = {
   [22] = "focus",
   [23] = "focus",
   [24] = "focus",
+  [25] = "focus",
 }
 Civ6Ai_Production.PRIORITY_KEY_ID = {
   peace = 1,
@@ -279,6 +281,7 @@ Civ6Ai_Production.PRIORITY_KEY_ID = {
   great_people = 22,
   faith = 23,
   exploration = 24,
+  settlers_only = 25,
 }
 -- END GENERATED PRIORITY_WEIGHTS
 
@@ -867,6 +870,27 @@ end
 
 Civ6Ai_Production._lastPick = Civ6Ai_Production._lastPick or {}
 
+-- settlers_only priority: keep only UNIT_SETTLER among the buildable options.
+-- When the city cannot start a settler (pop 1, no room), keep every option so
+-- the normal weighted fill still queues something. Returns options, note.
+function Civ6Ai_Production.SettlersOnly(options, situation)
+  local id = Civ6Ai_Production.PRIORITY_KEY_ID.settlers_only
+  local levels = situation ~= nil and situation.levels or nil
+  if id == nil or levels == nil or (levels[id] or 0) <= 0 then
+    return options, nil
+  end
+  local only = {}
+  for _, o in ipairs(options or {}) do
+    if o.id == "UNIT_SETTLER" or (o.tags ~= nil and o.tags.UNIT_SETTLER) then
+      only[#only + 1] = o
+    end
+  end
+  if #only > 0 then
+    return only, "settler"
+  end
+  return options, "fallback"
+end
+
 -- Owned, unimproved land tiles around this seat's cities that some builder
 -- improvement is legal on now (same rule the snapshot uses for Improve offers).
 -- nil when the rule or the map is unavailable, so callers fall back.
@@ -1118,6 +1142,8 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
       Civ6Ai_Production._fillTried[key] = turn
       local situation = Civ6Ai_Production.SituationFor(playerID, city)
       local options = Civ6Ai_Production.BuildOptions(city, situation)
+      local onlyNote
+      options, onlyNote = Civ6Ai_Production.SettlersOnly(options, situation)
       local seed = (playerID * 1000003 + (cid % 65536) * 7919 + turn * 104729) % 2147483648
       local pick, total = Civ6Ai_Production.WeightedPick(options, seed, situation)
       local outcome = "nothing_buildable"
@@ -1144,6 +1170,7 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
         .. "|early=" .. tostring(situation.early == true) .. "|threat=" .. tostring(situation.threatened == true)
         .. "|hostiles=" .. tostring(select(2, Civ6Ai_Production.ThreatNear(playerID, cities)) or 0)
         .. "|defenders=" .. tostring(select(3, Civ6Ai_Production.ThreatNear(playerID, cities)) or 0)
+        .. (onlyNote and ("|settlers_only=" .. onlyNote) or "")
         .. "|" .. outcome)
     end
   end

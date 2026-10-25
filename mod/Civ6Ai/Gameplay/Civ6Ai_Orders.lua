@@ -5208,6 +5208,7 @@ Civ6Ai_Orders.PRIORITY_IDS = {
   { id = 22, key = "great_people", group = "focus" },
   { id = 23, key = "faith", group = "focus" },
   { id = 24, key = "exploration", group = "focus" },
+  { id = 25, key = "settlers_only", group = "focus" },
 }
 Civ6Ai_Orders.PRIORITY_MAX_FOCUS = 3
 Civ6Ai_Orders.PRIORITY_MAX_LEVEL = 3

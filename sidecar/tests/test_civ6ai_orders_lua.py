@@ -1525,10 +1525,15 @@ class PriorityOrderTests(unittest.TestCase):
 
     def test_every_category_and_level_registered(self):
         ids = _vals(self.O.PRIORITY_IDS)
-        self.assertEqual(len(ids), 24)
+        self.assertEqual(len(ids), 25)
         for cat in ids:
             for level in (1, 2, 3):
                 self.assertEqual(len(_vals(self.rt.eval("GameEvents['Civ6AiPrio_%d_%d'].fns" % (cat.id, level)))), 1)
+
+    def test_settlers_only_is_accepted(self):
+        r = self.order(0, K=9, P=2, I=25, X=3, S=1)
+        self.assertTrue(r["ok"], r["reason"])
+        self.assertEqual(self.level(2, 25), 3)
 
     def test_set_turns_on_exactly_that_level(self):
         r = self.order(0, K=9, P=2, I=8, X=3, S=1)

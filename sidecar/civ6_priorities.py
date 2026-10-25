@@ -200,6 +200,11 @@ CATEGORIES: list[dict] = [
          desc="scouts and exploring the map",
          pseudo={"PSEUDOYIELD_UNIT_EXPLORER": 100},
          classes={"PROMOTION_CLASS_RECON": 30}),
+    # Exclusive: the empty-queue fill builds only settlers while this is on and
+    # falls back to the normal weighted fill when a city cannot start one.
+    dict(id=25, key="settlers_only", group="focus",
+         desc="settlers only: every city builds settlers to found new cities fast",
+         pseudo={"PSEUDOYIELD_UNIT_SETTLER": 100}),
 ]
 
 BY_ID = {c["id"]: c for c in CATEGORIES}
