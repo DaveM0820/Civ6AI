@@ -204,7 +204,14 @@ CATEGORIES: list[dict] = [
     # falls back to the normal weighted fill when a city cannot start one.
     dict(id=25, key="settlers_only", group="focus",
          desc="settlers only: every city builds settlers to found new cities fast",
-         pseudo={"PSEUDOYIELD_UNIT_SETTLER": 100}),
+         # Engine AiFavoredItems values are percent adjustments (base Expansion
+         # strategy uses +25 for settlers). 250 * 4 at all_in = +1000%; rivals
+         # are cut to the -100 clamp at all_in so settlers win the queue.
+         yields={"YIELD_CULTURE": -25, "YIELD_FAITH": -25, "YIELD_SCIENCE": -25},
+         pseudo={"PSEUDOYIELD_UNIT_SETTLER": 250, "PSEUDOYIELD_IMPROVEMENT": -25,
+                 "PSEUDOYIELD_UNIT_COMBAT": -25, "PSEUDOYIELD_UNIT_EXPLORER": -25,
+                 "PSEUDOYIELD_DISTRICT": -25, "PSEUDOYIELD_WONDER": -25,
+                 "PSEUDOYIELD_CITY_DEFENSES": -25}),
 ]
 
 BY_ID = {c["id"]: c for c in CATEGORIES}

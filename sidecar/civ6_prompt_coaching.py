@@ -385,12 +385,7 @@ def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
     tracking = history.get("explore_tracking") if isinstance(history, dict) else None
     samples = tracking.get("samples") if isinstance(tracking, dict) else None
     if not isinstance(samples, list) or len(samples) < 2:
-        if explored < 25:
-            return (
-                f"Map only {explored}% explored — soft advice: give scouts Automate(explore) or push them into fog "
-                "when safe; under-explored maps hide settle sites and rivals."
-            )
-        return None
+        return civ6_explored_fact_line(snapshot, explored)
     try:
         newest = max(samples, key=lambda row: int(row.get("turn", -1)) if isinstance(row, dict) else -1)
         newest_turn = int(newest.get("turn", -1))
@@ -414,7 +409,24 @@ def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
             f"No new exploration in {CIV6_EXPLORE_STALL_TURNS}+ turns while map is only "
             f"{explored}% explored — soft advice: send a scout or military unit into fog this turn."
         )
-    return None
+    return civ6_explored_fact_line(snapshot, explored)
+
+
+def civ6_explored_fact_line(snapshot: dict[str, Any], explored: int) -> str | None:
+    """Plain fact, same for every seat: how much of the map this seat has revealed and why it matters."""
+    if explored >= CIV6_EXPLORE_NUDGE_BELOW_PCT:
+        return None
+    true = civ6_true_explored(snapshot)
+    if true is not None:
+        revealed, total, pct = true
+        seen = f"{pct}% of the map revealed ({revealed} of {total} tiles)"
+    else:
+        seen = f"{explored}% of the map revealed"
+    return (
+        f"EXPLORATION: {seen}. Unrevealed land hides settle sites, rivals, city-states and tribal villages. "
+        "explore moves a unit toward the nearest fog it can reach and fails with explore_no_reveal when nothing new "
+        "is in reach; then give it a move_unit to a farther dark tile."
+    )
 
 
 def civ6_low_hp_retreat_attention(snapshot: dict[str, Any]) -> str | None:

@@ -63,7 +63,7 @@ class SeatMemoryTests(unittest.TestCase):
         self.assertEqual(0, first["_explore_metric"]["turns_since_reveal"])
         self.assertNotIn("new_tiles_this_turn", first["_explore_metric"])
         early = coaching.civ6_exploration_attention(first)
-        self.assertIn("Map only 10% explored", early)
+        self.assertIn("10% of the map revealed (10 of 100 tiles)", early)
         self.assertNotIn("without revealing any new tiles", early)
 
         second = snap(2, 14)

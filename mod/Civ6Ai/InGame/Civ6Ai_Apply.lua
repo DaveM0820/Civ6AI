@@ -1821,27 +1821,10 @@ function Civ6Ai_Apply._Work(playerID, command, args)
   if unitNum == nil then
     return false, "missing_unit_id", args
   end
-  -- Local seat: the game's own auto-explore (a synced unit operation that keeps going).
-  -- UnitOperationTypes has no AUTOMATE_EXPLORE entry in the UI context; the UnitPanel
-  -- passes the UnitOperations row Hash, so do the same.
-  local auto = UnitOperationTypes ~= nil and UnitOperationTypes.AUTOMATE_EXPLORE or nil
-  if auto == nil and GameInfo ~= nil and GameInfo.UnitOperations ~= nil then
-    local row = GameInfo.UnitOperations["UNITOPERATION_AUTOMATE_EXPLORE"]
-    auto = row ~= nil and row.Hash or nil
-  end
-  if command.kind == "explore" and auto ~= nil and playerID == Game.GetLocalPlayer() then
-    local unit = UnitManager.GetUnit(playerID, unitNum)
-    local can = false
-    if unit ~= nil then
-      local okc, res = pcall(UnitManager.CanStartOperation, unit, auto, nil, true)
-      can = okc and res == true
-    end
-    if can then
-      UnitManager.RequestOperation(unit, auto)
-      return true, "auto_explore", args
-    end
-    Civ6Ai_Util.Log("apply|auto_explore_unavailable|player=" .. tostring(playerID) .. "|unit=" .. tostring(unitNum))
-  end
+  -- Every seat explores through the same synced Gov.Explore (MoveTo toward
+  -- reachable fog, verified by newly revealed tiles). The local seat used to
+  -- send UNITOPERATION_AUTOMATE_EXPLORE, which reported ok every turn without
+  -- a measurable reveal and differed from the other seats.
   local ok, reason = Civ6Ai_Apply._GovRoute(command.kind == "explore" and "Explore" or "PillageImprovement", playerID, unitNum, x, y)
   return ok, reason, args
 end

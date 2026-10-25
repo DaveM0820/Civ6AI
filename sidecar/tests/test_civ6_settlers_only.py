@@ -51,3 +51,10 @@ class SettlersOnlyFillTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SettlersOnlyWeightTest(unittest.TestCase):
+    def test_all_in_settler_dominates_and_rivals_clamped(self):
+        cat = P.BY_KEY["settlers_only"]
+        self.assertEqual(P.scaled(cat["pseudo"]["PSEUDOYIELD_UNIT_SETTLER"], 3), 1000)
+        self.assertEqual(P.scaled(cat["pseudo"]["PSEUDOYIELD_IMPROVEMENT"], 3), -100)
