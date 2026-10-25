@@ -1066,6 +1066,7 @@ def _empire_section(
                 index = counts.get(name, 0)
                 counts[name] = index + 1
                 lines.append(pipeline._wire_line(f"alert.{name}.{index}", text))
+        lines.extend(_expansion_threat_lines(summary))
     # Cities
     cities = [c for c in context.get("your_cities", []) if isinstance(c, dict)]
     if cities:
@@ -2255,3 +2256,38 @@ def build_civ6_model_wire_text(snapshot: dict[str, Any], *, max_prompt_chars: in
         compactions.extend(fired)
     prompt_budget.store_report(snapshot, prompt_budget.make_report(full, text, limit, compactions))
     return text
+
+
+def _expansion_threat_lines(summary: dict[str, Any]) -> list[str]:
+    """Plain facts from strategic_summary.expansion / .threat (no advice)."""
+    out: list[str] = []
+    exp = summary.get("expansion")
+    if isinstance(exp, dict) and "cities" in exp:
+        peers = [p for p in exp.get("met_majors") or [] if isinstance(p, dict)]
+        peer_text = ", ".join(f"{p.get('player_id')}={p.get('cities')}" for p in peers[:8]) or "none met"
+        out.append(pipeline._wire_line(
+            "expansion.cities",
+            f"you {exp.get('cities')}; met majors {peer_text}; settlers on map "
+            f"{exp.get('settlers_on_map', 0)}; cities building a settler {exp.get('cities_building_settler', 0)}",
+        ))
+    threat = summary.get("threat")
+    if isinstance(threat, dict):
+        hostiles = [h for h in threat.get("hostiles") or [] if isinstance(h, dict)]
+        camps = [c for c in threat.get("camps") or [] if isinstance(c, dict)]
+        out.append(pipeline._wire_line(
+            "threat.near_cities",
+            f"visible hostile land units within {threat.get('radius', 6)} tiles {len(hostiles)}; "
+            f"revealed camps {len(camps)}; your land combat units there {threat.get('defenders', 0)}",
+        ))
+        for i, h in enumerate(sorted(hostiles, key=lambda r: r.get("distance", 99))[:6]):
+            out.append(pipeline._wire_line(
+                f"threat.hostile.{i}",
+                f"{h.get('unit_type')} ({h.get('owner_kind')} {h.get('owner_id')}) at ({h.get('x')},{h.get('y')}), "
+                f"{h.get('distance')} tiles from {h.get('nearest_city')}",
+            ))
+        for i, c in enumerate(sorted(camps, key=lambda r: r.get("distance", 99))[:3]):
+            out.append(pipeline._wire_line(
+                f"threat.camp.{i}",
+                f"barbarian camp at ({c.get('x')},{c.get('y')}), {c.get('distance')} tiles from {c.get('nearest_city')}",
+            ))
+    return out

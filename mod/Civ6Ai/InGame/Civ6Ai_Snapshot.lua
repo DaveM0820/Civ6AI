@@ -2254,6 +2254,130 @@ function Civ6Ai_Snapshot._MergeNotificationAlerts(playerID, summary)
   return summary
 end
 
+-- A settler still short of the destination it was sent to SETTLER_GOAL_STALE
+-- or more turns ago. Such a settler stays in the prompt (a standing goal
+-- otherwise hides it) and the summary says so; the model picks what to do.
+Civ6Ai_Snapshot.SETTLER_GOAL_STALE = 2
+
+function Civ6Ai_Snapshot._StaleSettlerGoal(unit, goal)
+  if unit == nil or goal == nil or goal.set_turn == nil or Game == nil then
+    return nil
+  end
+  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+  if row == nil or not (row.FoundCity == true or row.FoundCity == 1) then
+    return nil
+  end
+  if unit:GetX() == goal.x and unit:GetY() == goal.y then
+    return nil
+  end
+  local age = Game.GetCurrentGameTurn() - goal.set_turn
+  if age < Civ6Ai_Snapshot.SETTLER_GOAL_STALE then
+    return nil
+  end
+  return age
+end
+
+-- Plain facts for expansion and nearby danger; no advice. Own city count
+-- against majors this seat has met, settlers on the map or in production,
+-- and every hostile land unit on a tile the seat sees within THREAT_RADIUS
+-- of its cities (owner kind, distance), revealed barbarian camps, and the
+-- seat's own land combat units in that ring.
+function Civ6Ai_Snapshot._ExpansionFacts(playerID)
+  local player = Players[playerID]
+  local out = { cities = 0, met_majors = Civ6Ai_Util.JsonArrayList(), settlers_on_map = 0,
+    cities_building_settler = 0 }
+  if player == nil then return out end
+  local cities = {}
+  for _, c in Civ6Ai_Snapshot._Method(player, "GetCities"):Members() do cities[#cities + 1] = c end
+  out.cities = #cities
+  for _, c in ipairs(cities) do
+    if Civ6Ai_Production ~= nil and Civ6Ai_Production._GetCityProduction(c) == "UNIT_SETTLER" then
+      out.cities_building_settler = out.cities_building_settler + 1
+    end
+  end
+  for _, u in ipairs(Civ6Ai_Snapshot._IterateUnits(player:GetUnits())) do
+    local row = GameInfo.Units[u:GetType()]
+    if row ~= nil and (row.FoundCity == true or row.FoundCity == 1) and u:GetX() >= 0 then
+      out.settlers_on_map = out.settlers_on_map + 1
+    end
+  end
+  if PlayerManager ~= nil and PlayerManager.GetAliveMajorIDs ~= nil then
+    for _, other in ipairs(PlayerManager.GetAliveMajorIDs()) do
+      if other ~= playerID and Civ6Ai_Snapshot._HasMet(playerID, other) then
+        local oc = Civ6Ai_Snapshot._Method(Players[other], "GetCities")
+        local n = Civ6Ai_Snapshot._Method(oc, "GetCount")
+        if type(n) == "number" then
+          table.insert(out.met_majors, { player_id = "PLAYER_" .. tostring(other), cities = n })
+        end
+      end
+    end
+  end
+  return out
+end
+
+function Civ6Ai_Snapshot._ThreatFacts(playerID)
+  local out = { hostiles = Civ6Ai_Util.JsonArrayList(), camps = Civ6Ai_Util.JsonArrayList(),
+    defenders = 0, radius = Civ6Ai_Production ~= nil and Civ6Ai_Production.THREAT_RADIUS or 6 }
+  local player = Players[playerID]
+  if player == nil or Map == nil or Units == nil or Units.GetUnitsInPlot == nil then return out end
+  local vis = PlayersVisibility ~= nil and PlayersVisibility[playerID] or nil
+  local function seen(x, y, fn)
+    if vis == nil then return true end
+    local ok, v = pcall(vis[fn], vis, x, y)
+    return ok and v == true
+  end
+  local diplo = Civ6Ai_Snapshot._Method(player, "GetDiplomacy")
+  local camp = GameInfo.Improvements ~= nil and GameInfo.Improvements["IMPROVEMENT_BARBARIAN_CAMP"] or nil
+  local r = out.radius
+  local best = {}
+  local cityList = {}
+  for _, c in Civ6Ai_Snapshot._Method(player, "GetCities"):Members() do cityList[#cityList + 1] = c end
+  for _, c in ipairs(cityList) do
+    local cx, cy = c:GetX(), c:GetY()
+    for dx = -r, r do
+      for dy = -r, r do
+        local plot = Map.GetPlot(cx + dx, cy + dy)
+        if plot ~= nil then
+          local px, py = plot:GetX(), plot:GetY()
+          local d = Map.GetPlotDistance(cx, cy, px, py)
+          local key = px .. "," .. py
+          if d <= r and (best[key] == nil or d < best[key].d) then
+            best[key] = { d = d, city = Civ6Ai_Snapshot._Try(function() return Locale.Lookup(c:GetName()) end) or "city", plot = plot }
+          end
+        end
+      end
+    end
+  end
+  local keys = {}
+  for k in pairs(best) do keys[#keys + 1] = k end
+  table.sort(keys)
+  for _, key in ipairs(keys) do
+    local b = best[key]
+    local px, py = b.plot:GetX(), b.plot:GetY()
+    if camp ~= nil and b.plot:GetImprovementType() == camp.Index and seen(px, py, "IsRevealed") then
+      table.insert(out.camps, { x = px, y = py, distance = b.d, nearest_city = b.city })
+    end
+    local visible = seen(px, py, "IsVisible")
+    for _, u in ipairs(Units.GetUnitsInPlot(b.plot) or {}) do
+      local o = u:GetOwner()
+      local land = Civ6Ai_Production ~= nil and Civ6Ai_Production.LandCombat(u)
+      if o == playerID then
+        if land then out.defenders = out.defenders + 1 end
+      elseif visible and land then
+        local kind = Civ6Ai_Snapshot._PlayerKind(o)
+        local war = diplo ~= nil and Civ6Ai_Snapshot._Method(diplo, "IsAtWarWith", o) == true
+        if kind == "barbarian" or war then
+          local row = GameInfo.Units[u:GetType()]
+          table.insert(out.hostiles, {
+            unit_type = row ~= nil and row.UnitType or "?", owner_id = "PLAYER_" .. tostring(o),
+            owner_kind = kind or "?", x = px, y = py, distance = b.d, nearest_city = b.city })
+        end
+      end
+    end
+  end
+  return out
+end
+
 function Civ6Ai_Snapshot._DeriveStrategicSummary(playerID, yourCities, yourUnits, empire, diplomacy)
   local summary = Civ6Ai_Snapshot._EmptyStrategicSummary()
   local unitCounts = empire.unit_counts or {}
@@ -2306,8 +2430,23 @@ function Civ6Ai_Snapshot._DeriveStrategicSummary(playerID, yourCities, yourUnits
             .. "). See that settler's settle.here / settle.sites facts (legal tiles only, unranked).",
           { wireId }))
       end
+      local goal = Civ6Ai_Snapshot._UnitGoal(playerID, unit:GetID())
+      local age = Civ6Ai_Snapshot._StaleSettlerGoal(unit, goal)
+      if age ~= nil then
+        local wireId = Civ6Ai_Snapshot._UnitWireId(unit)
+        table.insert(summary.city_alerts, Civ6Ai_Snapshot._MakeAlert(
+          "city", "warning",
+          wireId .. " was sent to (" .. tostring(goal.x) .. "," .. tostring(goal.y) .. ") " .. tostring(age)
+            .. " turns ago and is still at (" .. tostring(unit:GetX()) .. "," .. tostring(unit:GetY())
+            .. "). Its settle.here / settle.sites facts list the legal tiles near it.",
+          { wireId }))
+      end
     end
   end
+  local okE, expansion = pcall(Civ6Ai_Snapshot._ExpansionFacts, playerID)
+  if okE then summary.expansion = expansion end
+  local okT, threat = pcall(Civ6Ai_Snapshot._ThreatFacts, playerID)
+  if okT then summary.threat = threat end
   return Civ6Ai_Snapshot._MergeNotificationAlerts(playerID, summary)
 end
 
@@ -2512,7 +2651,8 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   local goal = Civ6Ai_Snapshot._UnitGoal(unit:GetOwner(), unit:GetID())
   if goal ~= nil then
     local plot = Map ~= nil and Map.GetPlot ~= nil and Map.GetPlot(goal.x, goal.y) or nil
-    if not Civ6Ai_Snapshot._PlotImpassable(plot) then
+    if not Civ6Ai_Snapshot._PlotImpassable(plot)
+        and Civ6Ai_Snapshot._StaleSettlerGoal(unit, goal) == nil then
       return false
     end
     -- The standing destination is a mountain. Keep the unit in the prompt so
@@ -2602,6 +2742,7 @@ function Civ6Ai_Snapshot._UnitGoal(playerID, unitNumericId)
     intent = Civ6Ai_Snapshot.INTENT_NAMES[a] or tostring(a),
     A = a,
     eta = eta,
+    set_turn = setTurn,
   }
 end
 

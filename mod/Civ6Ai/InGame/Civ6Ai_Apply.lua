@@ -1791,9 +1791,16 @@ function Civ6Ai_Apply._Deal(playerID, command, args)
     if cityNum == nil or (unitRow == nil and bldRow == nil) then
       return false, "missing_city_or_item", args
     end
+    -- Same engine price the order channel sends for queued seats (f.V). The
+    -- local path passed none, so Gov.PurchaseItem refused every buy as
+    -- "cannot be purchased" (P0 held 400+ gold for 20 turns).
+    local faith = string.lower(tostring(args.yield or "gold")) == "faith"
+    local row = unitRow or bldRow
+    local cost = Civ6Ai_Snapshot._PurchaseCost(CityManager.GetCity(playerID, cityNum),
+      faith and "YIELD_FAITH" or "YIELD_GOLD", row.Hash,
+      unitRow ~= nil and MilitaryFormationTypes ~= nil and MilitaryFormationTypes.STANDARD_MILITARY_FORMATION or nil)
     local ok, reason = Civ6Ai_Apply._GovRoute(
-      "PurchaseItem", playerID, cityNum, (unitRow or bldRow).Index, bldRow ~= nil,
-      string.lower(tostring(args.yield or "gold")) == "faith")
+      "PurchaseItem", playerID, cityNum, row.Index, bldRow ~= nil, faith, cost)
     return ok, reason, args
   end
   if kind == "purchase_tile" then

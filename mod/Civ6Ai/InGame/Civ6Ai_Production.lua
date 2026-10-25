@@ -990,8 +990,9 @@ end
 -- Same rule as Gameplay Civ6Ai_Orders.ThreatInfo: hostile land combat units
 -- (barbarian or at war; not scouts or civilians) within THREAT_RADIUS of a
 -- city, a camp within CAMP_RADIUS as one, a war with a major as WAR_WEIGHT,
--- against our own land combat units there. Threatened while defenders <=
--- hostiles; an army that already answers the threat goes back to expanding.
+-- against our own land combat units there, counting only units on tiles the
+-- seat sees (camps on revealed tiles). Threatened while hostiles > defenders;
+-- an army that already answers the threat goes back to expanding.
 Civ6Ai_Production.THREAT_RADIUS = 6
 Civ6Ai_Production.CAMP_RADIUS = 4
 Civ6Ai_Production.WAR_WEIGHT = 2
@@ -1046,6 +1047,17 @@ function Civ6Ai_Production.ThreatNear(playerID, cities)
       end
       return hostile[owner]
     end
+    local vis = PlayersVisibility ~= nil and PlayersVisibility[playerID] or nil
+    local function visible(x, y)
+      if vis == nil then return true end
+      local ok, v = pcall(vis.IsVisible, vis, x, y)
+      return not ok or v == true
+    end
+    local function revealed(x, y)
+      if vis == nil then return true end
+      local ok, v = pcall(vis.IsRevealed, vis, x, y)
+      return not ok or v == true
+    end
     local r = Civ6Ai_Production.THREAT_RADIUS
     local seen = {}
     for _, c in cities:Members() do
@@ -1059,15 +1071,17 @@ function Civ6Ai_Production.ThreatNear(playerID, cities)
             local d = Map.GetPlotDistance(cx, cy, px, py)
             if d <= r and not seen[pk] then
               seen[pk] = true
-              if campIndex ~= nil and d <= Civ6Ai_Production.CAMP_RADIUS and call(plot, "GetImprovementType") == campIndex then
+              if campIndex ~= nil and d <= Civ6Ai_Production.CAMP_RADIUS and call(plot, "GetImprovementType") == campIndex
+                  and revealed(px, py) then
                 hostiles = hostiles + 1
               end
               if Units ~= nil and Units.GetUnitsInPlot ~= nil then
+                local seenHere = visible(px, py)
                 for _, u in ipairs(Units.GetUnitsInPlot(plot) or {}) do
                   local o = u:GetOwner()
                   if o == playerID then
                     if Civ6Ai_Production.LandCombat(u) then defenders = defenders + 1 end
-                  elseif isHostile(o) and Civ6Ai_Production.LandCombat(u) then
+                  elseif seenHere and isHostile(o) and Civ6Ai_Production.LandCombat(u) then
                     hostiles = hostiles + 1
                   end
                 end
@@ -1078,7 +1092,7 @@ function Civ6Ai_Production.ThreatNear(playerID, cities)
       end
     end
   end)
-  local threat = hostiles > 0 and defenders <= hostiles
+  local threat = hostiles > defenders
   Civ6Ai_Production._threatCache[key] = { threat = threat, hostiles = hostiles, defenders = defenders }
   return threat, hostiles, defenders
 end

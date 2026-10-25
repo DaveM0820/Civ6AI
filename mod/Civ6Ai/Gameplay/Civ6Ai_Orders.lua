@@ -5345,8 +5345,9 @@ Civ6Ai_Orders._earlyCache = Civ6Ai_Orders._earlyCache or {}
 -- them does not already cover. Hostile: a barbarian, or a player we are at war
 -- with. Scouts and civilians are not a threat; a barbarian camp within
 -- CAMP_RADIUS counts as one unit; a war with a major counts WAR_WEIGHT. Our
--- land combat units (not recon) within THREAT_RADIUS of a city defend. Threat
--- while defenders <= hostiles, so a seat that already built its answer goes
+-- land combat units (not recon) within THREAT_RADIUS of a city defend. Only
+-- units on tiles the seat sees count (camps: revealed tiles). Threat while
+-- hostiles > defenders (a tie is not a threat), so a seat that already built its answer goes
 -- back to expanding (T36 live: a barbarian scout two tiles out kept P0 in
 -- threat from T13 with nine military units and zero settlers).
 Civ6Ai_Orders.CAMP_RADIUS = 4
@@ -5387,6 +5388,19 @@ function Civ6Ai_Orders.ThreatInfo(owner)
     end
     return hostile[o]
   end
+  -- Only what the seat can see: hostile units on visible tiles, camps on
+  -- revealed tiles (counting fogged units leaked hidden information).
+  local vis = PlayersVisibility ~= nil and PlayersVisibility[owner] or nil
+  local function visible(x, y)
+    if vis == nil then return true end
+    local ok, v = pcall(vis.IsVisible, vis, x, y)
+    return not ok or v == true
+  end
+  local function revealed(x, y)
+    if vis == nil then return true end
+    local ok, v = pcall(vis.IsRevealed, vis, x, y)
+    return not ok or v == true
+  end
   local r = Civ6Ai_Orders.THREAT_RADIUS
   local seen = {}
   local cities = sortedMembers(call(player, "GetCities"))
@@ -5401,14 +5415,16 @@ function Civ6Ai_Orders.ThreatInfo(owner)
           local d = Map.GetPlotDistance(cx, cy, px, py)
           if d <= r and not seen[key] then
             seen[key] = true
-            if campIndex ~= nil and d <= Civ6Ai_Orders.CAMP_RADIUS and plot:GetImprovementType() == campIndex then
+            if campIndex ~= nil and d <= Civ6Ai_Orders.CAMP_RADIUS and plot:GetImprovementType() == campIndex
+                and revealed(px, py) then
               hostiles = hostiles + 1
             end
+            local seenHere = visible(px, py)
             for _, u in ipairs(Units.GetUnitsInPlot(plot) or {}) do
               local o = u:GetOwner()
               if o == owner then
                 if landCombat(u) then defenders = defenders + 1 end
-              elseif isHostile(o) and landCombat(u) then
+              elseif seenHere and isHostile(o) and landCombat(u) then
                 hostiles = hostiles + 1
               end
             end
@@ -5422,7 +5438,9 @@ end
 
 function Civ6Ai_Orders.ThreatNear(owner)
   local hostiles, defenders = Civ6Ai_Orders.ThreatInfo(owner)
-  return hostiles > 0 and defenders <= hostiles, hostiles, defenders
+  -- Threatened only while visible hostiles outnumber our army there (a tie
+  -- is not a threat).
+  return hostiles > defenders, hostiles, defenders
 end
 
 local mode_detail = ""
