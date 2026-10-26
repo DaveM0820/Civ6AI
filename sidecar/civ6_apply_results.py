@@ -1309,7 +1309,11 @@ def filter_repeat_public_chat(
     chat_messages: list[dict[str, Any]],
     commands: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """The one chat gate: novelty (no repeats or re-intros) and per-recipient cadence."""
+    """The one chat gate. Chat is always allowed: no cooldown, rate limit or near-repeat drops.
+
+    Only an exact duplicate inside this same reply and a line addressed to your own
+    leader are dropped. The cadence gate stays off unless its settings are raised.
+    """
     recent_map = recent_self_chats_by_target(snapshot)
     events = chat_event_players(snapshot, commands)
     last_turns = last_self_chat_turns(snapshot)
@@ -1322,30 +1326,16 @@ def filter_repeat_public_chat(
             continue
         text = str(message.get("text") or "")
         needle = text.strip()
-        if needle and any(needle.lower() == prior.lower() or is_near_duplicate_chat(needle, [prior]) for prior in batch):
+        if needle and any(needle.lower() == prior.lower() for prior in batch):
             dropped.append("dropped: public chat repeated a line in this reply and was not sent")
             continue
         key = chat_target_key(message)
         prior_rows = recent_map.get(key, []) + recent_map.get("all", [])
         prior_texts = list(dict.fromkeys(row[1] for row in prior_rows))
-        if prior_texts and is_self_reintroduction(text, snapshot):
-            dropped.append(
-                "dropped: public chat re-introduced you after a prior line to that civilization and was not sent"
-            )
-            continue
-        if prior_texts and is_near_duplicate_chat(text, prior_texts):
-            dropped.append(
-                "dropped: public chat was a near-repeat of your own recent line and was not sent"
-            )
-            continue
         leader = str(((snapshot.get("personality") or {}).get("leader_name")) or "").strip().lower()
         low = text.strip().lower()
         if leader and (low.startswith(f"friend {leader}") or low.startswith(leader + ",") or low.startswith(leader + ":")):
             dropped.append("dropped: public chat addressed your own leader and was not sent")
-            continue
-        others = _recent_other_lines(snapshot)
-        if others and is_near_duplicate_chat(text, others):
-            dropped.append("dropped: chat repeated another player's recent line and was not sent")
             continue
         too_soon = chat_cadence_problem(snapshot, key, events, last_turns)
         if too_soon is None and key in spoken_to and chat_cooldown_turns(key) > 0 and not (

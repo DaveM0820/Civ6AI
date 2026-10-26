@@ -79,9 +79,9 @@ INT_DEFAULTS: dict[str, tuple[int, int, int]] = {
     # name: (default, min, max)
     # Turns a seat waits before chatting the same recipient again (0 = no cadence gate).
     # A real event with that recipient (war, deal, denouncement, a DM to answer) skips the wait.
-    "CIV6AI_CHAT_RECIPIENT_COOLDOWN_TURNS": (3, 0, 50),
+    "CIV6AI_CHAT_RECIPIENT_COOLDOWN_TURNS": (0, 0, 50),
     # Public chat.all gets its own, longer wait.
-    "CIV6AI_CHAT_PUBLIC_COOLDOWN_TURNS": (4, 0, 50),
+    "CIV6AI_CHAT_PUBLIC_COOLDOWN_TURNS": (0, 0, 50),
     # How many turns back a non-chat diplomatic event still counts as "new" for the gate.
     "CIV6AI_CHAT_EVENT_WINDOW_TURNS": (1, 0, 10),
     # Per-seat model escalation (civ6_escalation). A struggle signal fires when at least

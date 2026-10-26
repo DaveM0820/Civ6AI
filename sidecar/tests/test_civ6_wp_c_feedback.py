@@ -173,55 +173,8 @@ class ChatRobustnessTests(unittest.TestCase):
         self.assertGreater(len(trimmed), 240)
         self.assertLessEqual(len(trimmed), pipeline.CHAT_TEXT_MAX_LENGTH)
 
-    def test_near_duplicate_public_chat_is_dropped(self):
-        snap = _snap(decision={"turn": 4, "player_id": "PLAYER_1"})
-        snap["history"]["public_events"] = [
-            {"turn": 1, "kind": "CHAT_PUBLIC", "text": "Greetings from the Sumerian shore, I am glad to meet you all.",
-             "affected_ids": ["PLAYER_1"]},
-            {"turn": 2, "kind": "CHAT_PUBLIC", "text": "Greetings from the Sumerian shore, I am glad to meet you all!",
-             "affected_ids": ["PLAYER_1"]},
-            {"turn": 3, "kind": "CHAT_PUBLIC", "text": "Greetings from the Sumerian shore, I am glad to meet you all.",
-             "affected_ids": ["PLAYER_1"]},
-        ]
-        chats = [{"target": "all", "text": "Greetings from the Sumerian shore, I am glad to meet you all."}]
-        kept, dropped = results.filter_repeat_public_chat(snap, chats)
-        self.assertEqual(kept, [])
-        self.assertTrue(any("near-repeat" in note for note in dropped))
 
-    def test_private_chat_near_duplicate_of_public_is_dropped(self):
-        snap = _snap(decision={"turn": 13, "player_id": "PLAYER_1"})
-        snap["history"]["public_events"] = [
-            {"turn": 1, "kind": "CHAT_PUBLIC",
-             "text": "Greetings from the Sumerian shore, I am glad to meet you all.",
-             "affected_ids": ["PLAYER_1"]},
-        ]
-        chats = [{
-            "target": "player", "target_player_id": "PLAYER_2",
-            "text": "Greetings from the Sumerian shore, I am glad to meet you all.",
-        }]
-        kept, dropped = results.filter_repeat_public_chat(snap, chats)
-        self.assertEqual(kept, [])
-        self.assertTrue(dropped)
 
-    def test_paraphrased_reintroduction_is_dropped(self):
-        snap = _snap(decision={"turn": 2, "player_id": "PLAYER_1"})
-        snap["personality"] = {
-            "leader_name": "Robert the Bruce",
-            "leader_id": "LEADER_ROBERT_THE_BRUCE",
-            "civilization_id": "CIVILIZATION_SCOTLAND",
-        }
-        snap["history"]["public_events"] = [
-            {"turn": 1, "kind": "CHAT_PUBLIC",
-             "text": "I am Robert the Bruce of SCOTLAND — may your lands tremble before my banner, and your rivers run red with the blood of those who dare oppose me. Let history remember this day.",
-             "affected_ids": ["PLAYER_1"]},
-        ]
-        paraphrase = {
-            "target": "all",
-            "text": "Robert the Bruce of SCOTLAND stands firm — your rivers may run red, but mine flow with steel. Let history judge who bends first.",
-        }
-        kept, dropped = results.filter_repeat_public_chat(snap, [paraphrase])
-        self.assertEqual(kept, [])
-        self.assertTrue(dropped)
 
     @mock.patch.dict("os.environ", {"CIV6AI_CHAT_PUBLIC_COOLDOWN_TURNS": "0"})
     def test_distinct_reply_is_not_treated_as_repeat_intro(self):
@@ -245,20 +198,6 @@ class ChatRobustnessTests(unittest.TestCase):
         self.assertEqual(1, len(kept))
         self.assertEqual(dropped, [])
 
-    def test_echo_of_a_received_private_line_is_dropped(self):
-        snap = _snap(decision={"turn": 122, "player_id": "PLAYER_1"})
-        snap["diplomacy"] = {"private_inbox": [{
-            "from_player_id": "PLAYER_0",
-            "turn": 121,
-            "text": "Your polders will not hold.",
-        }]}
-        chats = [{
-            "target": "player", "target_player_id": "PLAYER_0",
-            "text": "Your polders will not hold.",
-        }]
-        kept, dropped = results.filter_repeat_public_chat(snap, chats)
-        self.assertEqual(kept, [])
-        self.assertTrue(any("another player" in note for note in dropped))
 
     def test_intro_coaching_after_first_public_line(self):
         snap = _snap(decision={"turn": 2, "player_id": "PLAYER_1"})

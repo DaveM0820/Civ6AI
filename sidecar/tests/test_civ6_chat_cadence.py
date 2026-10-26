@@ -39,11 +39,6 @@ class CadenceGateTests(unittest.TestCase):
         for name in settings.INT_DEFAULTS:
             os.environ.pop(name, None)
 
-    def test_recent_dm_to_same_recipient_is_dropped(self):
-        snap = _snap(events=[_dm(9, "PLAYER_2", "Lovely weather on your border, shame about your army.")])
-        kept, dropped = results.filter_repeat_public_chat(snap, [DM2])
-        self.assertEqual(kept, [])
-        self.assertTrue(any("too soon" in d for d in dropped))
 
     def test_dm_after_cooldown_is_kept(self):
         snap = _snap(events=[_dm(6, "PLAYER_2", "Lovely weather on your border, shame about your army.")])
@@ -81,33 +76,9 @@ class CadenceGateTests(unittest.TestCase):
         self.assertFalse(results._is_diplo_word("CMD_MOVE_UNIT_WARRIOR_1"))
         self.assertTrue(results._is_diplo_word("DENOUNCED"))
 
-    def test_public_cooldown_and_setting(self):
-        snap = _snap(events=[_pub(8, "The river is mine, enjoy the desert.")])
-        kept, _ = results.filter_repeat_public_chat(snap, [ALL])
-        self.assertEqual(kept, [])
-        with mock.patch.dict(os.environ, {"CIV6AI_CHAT_PUBLIC_COOLDOWN_TURNS": "0"}):
-            kept, _ = results.filter_repeat_public_chat(snap, [ALL])
-        self.assertEqual(kept, [ALL])
 
-    def test_one_line_per_recipient_per_turn(self):
-        second = dict(DM2, text="Also, your capital is in a swamp.")
-        kept, dropped = results.filter_repeat_public_chat(_snap(), [DM2, second])
-        self.assertEqual(kept, [DM2])
-        self.assertTrue(dropped)
 
-    def test_prompt_lists_resting_recipients(self):
-        snap = _snap(events=[_dm(9, "PLAYER_2", "Lovely weather on your border, shame about your army.")])
-        lines = results.chat_cadence_lines(snap, lambda pid: "Gilgamesh")
-        self.assertEqual(len(lines), 1)
-        self.assertIn("Gilgamesh", lines[0])
-        self.assertIn("turn 12", lines[0])
-        self.assertEqual(results.chat_cadence_lines(_snap()), [])
 
-    def test_get_int_clamps_and_defaults(self):
-        with mock.patch.dict(os.environ, {"CIV6AI_CHAT_RECIPIENT_COOLDOWN_TURNS": "999"}):
-            self.assertEqual(settings.get_int("CIV6AI_CHAT_RECIPIENT_COOLDOWN_TURNS"), 50)
-        with mock.patch.dict(os.environ, {"CIV6AI_CHAT_RECIPIENT_COOLDOWN_TURNS": "x"}):
-            self.assertEqual(settings.get_int("CIV6AI_CHAT_RECIPIENT_COOLDOWN_TURNS"), 3)
 
 
 class SharedPromptTextTests(unittest.TestCase):
@@ -124,3 +95,14 @@ class SharedPromptTextTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_chat_is_always_allowed():
+    from sidecar import civ6_apply_results as results
+    snap = {"decision": {"player_id": "PLAYER_1", "turn": 10},
+            "history": {"chat": [{"turn": 9, "from": "PLAYER_1", "target": "all", "text": "Hello friends"}]}}
+    msgs = [{"target": "all", "text": "Hello friends"},
+            {"target": "player", "target_player_id": "PLAYER_2", "text": "Peace?"},
+            {"target": "player", "target_player_id": "PLAYER_2", "text": "Still peace?"}]
+    kept, dropped = results.filter_repeat_public_chat(snap, msgs)
+    assert len(kept) == 3 and dropped == []
