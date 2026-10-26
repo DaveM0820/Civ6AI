@@ -101,6 +101,18 @@ def site_obeys_founding_rules(snapshot: dict[str, Any], x: int, y: int) -> bool:
     return True
 
 
+def _walk_bits(site: dict[str, Any]) -> list[str]:
+    """Walking distance facts for one settle site: path tiles and turns, then straight-line."""
+    bits: list[str] = []
+    if isinstance(site.get("path_tiles"), int):
+        bits.append(f"walk {site['path_tiles']} tiles")
+    if isinstance(site.get("turns"), int):
+        bits.append(f"{site['turns']} turns")
+    if not bits and site.get("dist") is not None:
+        bits.append(f"dist {site.get('dist')}")
+    return bits
+
+
 def labeled_settle_sites(snapshot: dict[str, Any], radius: int | None = None) -> list[dict[str, Any]]:
     """Stable S1..Sn labels for legal nearby settle tiles (unranked; overlay + prompt)."""
     if radius is None:
@@ -135,11 +147,21 @@ def labeled_settle_sites(snapshot: dict[str, Any], radius: int | None = None) ->
                 "x": x,
                 "y": y,
                 "dist": dist,
+                "path_tiles": site.get("path_tiles") if isinstance(site.get("path_tiles"), int) else None,
+                "turns": site.get("turns") if isinstance(site.get("turns"), int) else None,
                 "coastal": bool(site.get("coastal") or site.get("coast")),
                 "fresh_water": bool(site.get("fresh_water")),
                 "unit_id": unit_id,
             })
-    collected.sort(key=lambda row: (row.get("dist") is None, row.get("dist") or 0, row["x"], row["y"]))
+    def _walk(row: dict[str, Any]) -> tuple:
+        # Engine walking path first (turns, then tiles), straight-line distance last.
+        reach = row.get("turns") if row.get("turns") is not None else row.get("path_tiles")
+        if reach is None:
+            reach = row.get("dist")
+        tiles = row.get("path_tiles") if row.get("path_tiles") is not None else row.get("dist")
+        return (reach is None, reach or 0, tiles or 0, row.get("dist") or 0, row["x"], row["y"])
+
+    collected.sort(key=_walk)
     for index, row in enumerate(collected, start=1):
         row["label"] = f"S{index}"
     return collected
@@ -1075,8 +1097,7 @@ def sitrep_offer_lines(snapshot: dict[str, Any]) -> list[str]:
                     flags.append("coastal")
                 if site.get("fresh_water"):
                     flags.append("fresh water")
-                if site.get("dist") is not None:
-                    flags.append(f"dist {site.get('dist')}")
+                flags.extend(_walk_bits(site))
                 if flags:
                     bit += " " + ", ".join(flags)
                 site_bits.append(bit)

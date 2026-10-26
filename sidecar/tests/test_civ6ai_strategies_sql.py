@@ -26,7 +26,8 @@ class StrategiesSqlTests(unittest.TestCase):
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
         # Vanilla list the mod reuses (Base Victories.xml, STRATEGY_RAPID_EXPANSION).
-        self.db.execute("INSERT INTO AiListTypes (ListType) VALUES ('ExpansionSettlementBoost')")
+        for vanilla in ("ExpansionSettlementBoost", "ExpansionSettlementPreferences", "ExpansionUnitPreferences"):
+            self.db.execute("INSERT INTO AiListTypes (ListType) VALUES (?)", (vanilla,))
         self.db.executescript((MOD / "Data" / "Civ6Ai_Strategies.sql").read_text())
 
     def test_each_strategy_has_one_single_item_list(self):
@@ -64,11 +65,13 @@ class EarlySettleSqlTests(unittest.TestCase):
         db = sqlite3.connect(":memory:")
         db.execute("PRAGMA foreign_keys = ON")
         db.executescript(SCHEMA)
-        db.execute("INSERT INTO AiListTypes (ListType) VALUES ('ExpansionSettlementBoost')")
+        for vanilla in ("ExpansionSettlementBoost", "ExpansionSettlementPreferences", "ExpansionUnitPreferences"):
+            db.execute("INSERT INTO AiListTypes (ListType) VALUES (?)", (vanilla,))
         db.executescript((MOD / "Data" / "Civ6Ai_Strategies.sql").read_text())
         lists = {r[0] for r in db.execute(
             "SELECT ListType FROM Strategy_Priorities WHERE StrategyType = 'CIV6AI_STRATEGY_EARLY_SETTLE'")}
-        self.assertEqual(lists, {"ExpansionSettlementBoost", "Civ6AiSettleUnits"})
+        self.assertEqual(lists, {"ExpansionSettlementBoost", "ExpansionSettlementPreferences",
+                                 "ExpansionUnitPreferences", "Civ6AiSettleUnits"})
         row = db.execute("SELECT f.Item, f.Value, l.System FROM AiFavoredItems f JOIN AiLists l ON l.ListType = f.ListType "
                          "WHERE f.ListType = 'Civ6AiSettleUnits'").fetchone()
         self.assertEqual(row, ("UNIT_SETTLER", 300, "Units"))

@@ -97,6 +97,11 @@ INSERT INTO StrategyConditions (StrategyType, ConditionFunction, StringValue, Th
 INSERT INTO AiListTypes (ListType) VALUES ('Civ6AiSettleUnits');
 INSERT INTO AiLists (ListType, System) VALUES ('Civ6AiSettleUnits', 'Units');
 INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) VALUES ('Civ6AiSettleUnits', 'UNIT_SETTLER', 1, 300);
+-- All three lists of the vanilla STRATEGY_RAPID_EXPANSION (Victories.xml):
+-- settle-spot bar, plot preferences, and pseudoyields (settler +25, land and
+-- naval combat -25), plus the direct Units weight.
 INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES
 ('CIV6AI_STRATEGY_EARLY_SETTLE', 'ExpansionSettlementBoost'),
+('CIV6AI_STRATEGY_EARLY_SETTLE', 'ExpansionSettlementPreferences'),
+('CIV6AI_STRATEGY_EARLY_SETTLE', 'ExpansionUnitPreferences'),
 ('CIV6AI_STRATEGY_EARLY_SETTLE', 'Civ6AiSettleUnits');

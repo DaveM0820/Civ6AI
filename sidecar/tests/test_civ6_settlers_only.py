@@ -89,11 +89,22 @@ class EarlyLockGameplayTest(unittest.TestCase):
         self.assertTrue(O.ApplyEarlyLock(6))
         self.assertEqual(self._levels(O), {"peace": 1, "expansion": 3, "improvements": 1, "war": 0})
 
-    def test_three_cities_or_human_untouched(self):
-        for cities, human in ((3, False), (1, True)):
-            rt, O = self._rt(cities, human)
-            self.assertFalse(O.ApplyEarlyLock(6))
-            self.assertEqual(self._levels(O)["expansion"], 0)
+    def test_three_cities_untouched(self):
+        rt, O = self._rt(3)
+        self.assertFalse(O.ApplyEarlyLock(6))
+        self.assertEqual(self._levels(O)["expansion"], 0)
+
+    def test_human_flagged_host_seat_gets_early_set_too(self):
+        rt, O = self._rt(1, True)
+        self.assertTrue(O.ApplyEarlyLock(6))
+        self.assertEqual(self._levels(O)["expansion"], 3)
+
+    def test_once_three_cities_reached_losing_one_does_not_reopen(self):
+        rt, O = self._rt(3)
+        self.assertFalse(O.ApplyEarlyLock(6))
+        rt.execute("Players[6].GetCities = function() return { GetCount = function() return 2 end } end")
+        self.assertFalse(O.ApplyEarlyLock(6))
+        self.assertEqual(self._levels(O)["expansion"], 0)
 
     def test_matches_sidecar_early_set(self):
         rt, O = self._rt(1)

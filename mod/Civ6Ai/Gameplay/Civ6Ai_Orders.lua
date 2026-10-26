@@ -5579,6 +5579,57 @@ function Civ6Ai_Orders.ThreatNear(owner)
   return hostiles > defenders, hostiles, defenders
 end
 
+-- Most cities this seat has ever held (synced Game property, raised at turn start).
+-- The early rules are for a new empire: a seat that reached EARLY_CITY_TARGET
+-- and then lost cities does not go back to settler-first.
+function Civ6Ai_Orders.PeakCities(owner)
+  local key = "CIV6AI_PEAK_CITIES_" .. tostring(owner)
+  local peak = num(Game:GetProperty(key)) or 0
+  local cities = call(Players[owner], "GetCities")
+  local n = num(call(cities, "GetCount")) or #sortedMembers(cities)
+  if n > peak then
+    Game:SetProperty(key, n)
+    peak = n
+  end
+  return peak, n
+end
+
+-- The vanilla STRATEGY_RAPID_EXPANSION conditions: no city under threat and no
+-- war with a major (Victories.xml "Cities Under Threat" / "Major Civ Wars").
+function Civ6Ai_Orders.AtWarWithMajor(owner)
+  local diplo = call(Players[owner], "GetDiplomacy")
+  if diplo == nil or PlayerManager == nil then
+    return false
+  end
+  for _, other in ipairs(PlayerManager.GetAliveMajorIDs()) do
+    if other ~= owner and call(diplo, "IsAtWarWith", other) == true then
+      return true
+    end
+  end
+  return false
+end
+
+-- Early-expansion rules apply while the seat is a new empire: 1..2 cities now,
+-- never held EARLY_CITY_TARGET, not at war with a major, no city threatened.
+function Civ6Ai_Orders.EarlyOpen(owner)
+  local p = Players ~= nil and Players[owner] or nil
+  if p == nil or call(p, "IsMajor") ~= true then
+    return false, "not_major"
+  end
+  local peak, n = Civ6Ai_Orders.PeakCities(owner)
+  if n < 1 or peak >= Civ6Ai_Orders.EARLY_CITY_TARGET then
+    return false, "cities=" .. tostring(n) .. ":peak=" .. tostring(peak)
+  end
+  if Civ6Ai_Orders.AtWarWithMajor(owner) then
+    return false, "major_war"
+  end
+  local ok, threat = pcall(Civ6Ai_Orders.ThreatNear, owner)
+  if ok and threat == true then
+    return false, "city_threatened"
+  end
+  return true, ""
+end
+
 local mode_detail = ""
 function Civ6Ai_Orders.EarlyMode(owner)
   local turn = Game.GetCurrentGameTurn()
@@ -5592,8 +5643,8 @@ function Civ6Ai_Orders.EarlyMode(owner)
   local player = Players[owner]
   if player ~= nil and call(player, "IsMajor") == true and turn <= Civ6Ai_Orders.EARLY_TURN
       and #Civ6Ai_Orders.PriorityLevels(owner) > 0 then
-    local n = #sortedMembers(call(player, "GetCities"))
-    if n < Civ6Ai_Orders.EARLY_CITY_TARGET then
+    local peak, n = Civ6Ai_Orders.PeakCities(owner)
+    if n >= 1 and peak < Civ6Ai_Orders.EARLY_CITY_TARGET then
       local ok, threat, h, d = pcall(Civ6Ai_Orders.ThreatNear, owner)
       mode = (ok and threat == true) and "threat" or "expand"
       if ok then
@@ -5612,11 +5663,11 @@ end
 -- an AI major (not human) with 1 or 2 cities. Synced state only (city count).
 function Civ6Ai_Orders.EarlySettle(owner)
   local p = Players ~= nil and Players[owner] or nil
-  if p == nil or call(p, "IsHuman") == true or call(p, "IsMajor") ~= true then
+  if p == nil or call(p, "IsHuman") == true then
+    -- AI strategies only steer the game's own AI; a human seat has none.
     return false
   end
-  local n = #sortedMembers(call(p, "GetCities"))
-  return n >= 1 and n < Civ6Ai_Orders.EARLY_CITY_TARGET
+  return (Civ6Ai_Orders.EarlyOpen(owner)) == true
 end
 
 function Civ6Ai_Orders.RegisterEarlyStrategies()
@@ -5805,15 +5856,19 @@ Civ6Ai_Orders.EARLY_CITY_LIMIT = 3
 Civ6Ai_Orders.EARLY_SET = { peace = 1, expansion = 3, improvements = 1 }
 
 function Civ6Ai_Orders.ApplyEarlyLock(owner)
+  -- Every major, the host (human-flagged) seat included: the levels are the
+  -- seat's saved production weights and the prompt's preset facts.
   local p = Players ~= nil and Players[owner] or nil
-  if p == nil or call(p, "IsHuman") or call(p, "IsMajor") == false then
+  if p == nil or call(p, "IsMajor") == false then
     return false
   end
-  local cities = call(p, "GetCities")
-  local n = cities ~= nil and call(cities, "GetCount") or nil
-  if n == nil or n < 1 or n >= Civ6Ai_Orders.EARLY_CITY_LIMIT then
+  local open, why = Civ6Ai_Orders.EarlyOpen(owner)
+  -- The snapshot (UI) reads this so the prompt's preset facts match the rule.
+  Game:SetProperty("CIV6AI_EARLY_OPEN_" .. tostring(owner), open and 1 or 0)
+  if not open then
     return false
   end
+  local n = #sortedMembers(call(p, "GetCities"))
   local changed = 0
   for _, cat in ipairs(Civ6Ai_Orders.PRIORITY_IDS) do
     local want = Civ6Ai_Orders.EARLY_SET[cat.key] or 0

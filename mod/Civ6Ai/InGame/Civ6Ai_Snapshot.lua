@@ -2841,11 +2841,23 @@ function Civ6Ai_Snapshot._AddSettleFacts(unit)
           local okPath, path = pcall(function() return UnitManager.GetMoveToPath(unit, plot:GetIndex()) end)
           if revealed and (not okPath or (type(path) == "table" and #path > 0))
               and Civ6Ai_Snapshot._PlotCitySiteProblem(playerID, tx, ty) == nil then
-            table.insert(sites, {
+            local site = {
               x = tx, y = ty, dist = dist,
               coastal = Civ6Ai_Snapshot._PlotIsCoastal(tx, ty),
               fresh_water = Civ6Ai_Snapshot._PlotFreshWater(plot),
-            })
+            }
+            if okPath and type(path) == "table" then
+              -- The engine path: tiles walked (path includes the start plot).
+              site.path_tiles = math.max(0, #path - 1)
+            end
+            -- Turns to arrive, from the engine's own path preview when available.
+            if UnitManager ~= nil and UnitManager.GetMoveToPathEx ~= nil then
+              local okEx, _, turnsList = pcall(function() return UnitManager.GetMoveToPathEx(unit, plot:GetIndex()) end)
+              if okEx and type(turnsList) == "table" and #turnsList > 0 and tonumber(turnsList[#turnsList]) ~= nil then
+                site.turns = math.max(0, math.floor(tonumber(turnsList[#turnsList])))
+              end
+            end
+            table.insert(sites, site)
           end
         end
       end
@@ -2854,7 +2866,17 @@ function Civ6Ai_Snapshot._AddSettleFacts(unit)
       break
     end
   end
+  -- Nearest by the engine's walking path (turns, then tiles), not straight line:
+  -- a site 4 hexes away around water can be a 10-tile walk.
   table.sort(sites, function(a, b)
+    local at, bt = a.turns or a.path_tiles or a.dist, b.turns or b.path_tiles or b.dist
+    if at ~= bt then
+      return at < bt
+    end
+    local ap, bp = a.path_tiles or a.dist, b.path_tiles or b.dist
+    if ap ~= bp then
+      return ap < bp
+    end
     if a.dist ~= b.dist then
       return a.dist < b.dist
     end
@@ -5556,6 +5578,18 @@ function Civ6Ai_Snapshot.Build(playerID, options)
   -- sidecar offers the priorities command when this list is present. The local
   -- seat's empty queues are filled from them (FillEmptyQueuesWeighted).
   civ6Block.priorities = Civ6Ai_Snapshot._Priorities(playerID)
+  -- Early-expansion rule state from gameplay (Civ6Ai_Orders.EarlyOpen): open
+  -- while the seat never held 3 cities, has no major war, and no city threatened.
+  if Game ~= nil and Game.GetProperty ~= nil then
+    local okO, open = pcall(function() return Game:GetProperty("CIV6AI_EARLY_OPEN_" .. tostring(playerID)) end)
+    if okO and tonumber(open) ~= nil then
+      civ6Block.early_open = tonumber(open) == 1
+    end
+    local okP, peak = pcall(function() return Game:GetProperty("CIV6AI_PEAK_CITIES_" .. tostring(playerID)) end)
+    if okP and tonumber(peak) ~= nil then
+      civ6Block.peak_cities = math.floor(tonumber(peak))
+    end
+  end
   local okDiplo, civ6Diplomacy = pcall(Civ6Ai_Snapshot._BuildDiplomacy, playerID)
   if okDiplo and type(civ6Diplomacy) == "table" then
     civ6Block.diplomacy = civ6Diplomacy

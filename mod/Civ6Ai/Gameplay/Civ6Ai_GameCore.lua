@@ -633,6 +633,24 @@ function Civ6Ai_GameCore._LogStepRefusal(playerID, unit, x, y, before, tag)
       .. "|owner=" .. tostring(Civ6Ai_GameCore._Call(toPlot, "GetOwner"))
       .. "|moves=" .. tostring(before) .. ">" .. tostring(Civ6Ai_GameCore._Call(unit, "GetMovesRemaining")) .. "/" .. tostring(maxMoves)
       .. "|engine_path=" .. enginePath)
+    -- Why the engine refused (open question: settlers owned by a native AI
+    -- settle operation or escort formation). Read-only facts.
+    local others = {}
+    for _, o in ipairs((Units ~= nil and Units.GetUnitsInPlot ~= nil and Units.GetUnitsInPlot(toPlot)) or {}) do
+      local orow = GameInfo.Units[o:GetType()]
+      others[#others + 1] = tostring(o:GetOwner()) .. ":" .. tostring(orow ~= nil and orow.UnitType or o:GetType())
+    end
+    local owner = Players[playerID]
+    print("CIV6AI|gamecore|step_refused_detail|player=" .. tostring(playerID) .. "|unit=" .. tostring(unit:GetID())
+      .. "|human=" .. tostring(Civ6Ai_GameCore._Call(owner, "IsHuman"))
+      .. "|formation=" .. tostring(Civ6Ai_GameCore._Call(unit, "GetMilitaryFormation"))
+      .. "|formation_class=" .. tostring(row ~= nil and row.FormationClass or "?")
+      .. "|activity=" .. tostring(Civ6Ai_GameCore._Call(unit, "GetActivityType"))
+      .. "|can_move=" .. tostring(Civ6Ai_GameCore._Call(unit, "CanMove"))
+      .. "|embarked=" .. tostring(Civ6Ai_GameCore._Call(unit, "IsEmbarked"))
+      .. "|to_units=" .. (#others > 0 and table.concat(others, ";") or "none")
+      .. "|visible_to_owner=" .. tostring(PlayersVisibility ~= nil and PlayersVisibility[playerID] ~= nil
+        and Civ6Ai_GameCore._Call(PlayersVisibility[playerID], "IsVisible", toPlot:GetIndex())))
   end)
 end
 

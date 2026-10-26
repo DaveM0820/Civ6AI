@@ -282,6 +282,9 @@ def _append_civ6_city_situation_wire(
         city_id = city.get("city_id", "")
         extra = _city_extra(snapshot, str(city_id))
         is_capital = bool(city.get("is_capital"))
+        plot_id = city.get("plot_id")
+        if isinstance(plot_id, str) and plot_id.strip() and not (many_cities and not is_capital and not city_compact):
+            lines.append(pipeline._wire_line(f"{name}.position", pipeline._plot_coords_text(plot_id)))
         if city_compact:
             lines.append(pipeline._wire_line(f"{name}.population", int(city.get("population", 1))))
             if is_capital:
@@ -297,7 +300,8 @@ def _append_civ6_city_situation_wire(
             if item and str(item).upper() not in ("NONE", "NULL"):
                 lines.append(pipeline._wire_line(f"{name}.currentProduction", _production_label(item)))
             else:
-                lines.append(pipeline._wire_line(f"{name}.currentProduction", "NONE (queue empty)"))
+                lines.append(pipeline._wire_line(f"{name}.currentProduction", _empty_production_text(snapshot)))
+            _append_city_rate(lines, name, city)
             continue
         if many_cities and not is_capital:
             plot_id = city.get("plot_id")
@@ -309,10 +313,8 @@ def _append_civ6_city_situation_wire(
             production = city.get("production", {})
             item = production.get("item_id") if isinstance(production, dict) else None
             if not item or str(item).upper() in ("NONE", "NULL"):
-                lines.append(pipeline._wire_line(
-                    f"{name}.currentProduction",
-                    "NONE (queue empty)",
-                ))
+                lines.append(pipeline._wire_line(f"{name}.currentProduction", _empty_production_text(snapshot)))
+            _append_city_rate(lines, name, city)
             continue
         lines.append(pipeline._wire_line(f"{name}.population", int(city.get("population", 1))))
         if is_capital:
@@ -347,10 +349,33 @@ def _append_civ6_city_situation_wire(
             if not (many_cities and not is_capital):
                 lines.append(pipeline._wire_line(f"{name}.currentProduction", _production_label(item)))
         else:
-            lines.append(pipeline._wire_line(
-                f"{name}.currentProduction",
-                "NONE (queue empty)",
-            ))
+            lines.append(pipeline._wire_line(f"{name}.currentProduction", _empty_production_text(snapshot)))
+        _append_city_rate(lines, name, city)
+
+
+def _empty_production_text(snapshot: dict[str, Any]) -> str:
+    """An empty build slot. Only a seat that queues its own production has a truly empty queue;
+    for a seat whose builds the game's AI picks, the pick happens at its turn start."""
+    if _has_queue_production(snapshot):
+        return "NONE (queue empty)"
+    from sidecar.civ6_priorities import priorities_supported
+
+    if priorities_supported(snapshot):
+        return "NONE yet (the game picks from your build weights at your turn start)"
+    return "NONE (queue empty)"
+
+
+def _append_city_rate(lines: list[str], name: str, city: dict[str, Any]) -> None:
+    """Production per turn and current-build turns: facts for choosing where to build."""
+    production = city.get("production") if isinstance(city.get("production"), dict) else {}
+    rate = production.get("production_per_turn")
+    if isinstance(rate, (int, float)) and not isinstance(rate, bool):
+        text = f"{rate}/turn"
+        turns = production.get("estimated_turns_remaining")
+        item = production.get("item_id")
+        if isinstance(turns, int) and item and str(item).upper() not in ("NONE", "NULL"):
+            text += f", current build done in {turns} turns"
+        lines.append(pipeline._wire_line(f"{name}.production", text))
 
 
 def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None:

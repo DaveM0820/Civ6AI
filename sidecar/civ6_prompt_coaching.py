@@ -1029,8 +1029,7 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
                 bits.append("coastal")
             if site.get("fresh_water"):
                 bits.append("fresh water")
-            if dist is not None:
-                bits.append(f"dist {dist}")
+            bits.extend(command_wire._walk_bits(site))
             labels.append(", ".join(bits) if len(bits) > 1 else bits[0])
         if labels:
             lines.append(pipeline._wire_line(f"{prefix}.settle.nearby", "; ".join(labels)))

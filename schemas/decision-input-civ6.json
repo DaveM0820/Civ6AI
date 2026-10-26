@@ -111,6 +111,8 @@
         "session_id": {"type": "string"},
         "research_tech": {"type": ["string", "null"]},
         "experiment_city_id": {"type": ["string", "null"]},
+        "early_open": {"type": "boolean"},
+        "peak_cities": {"type": "integer", "minimum": 0},
         "experiment_build_id": {"type": ["string", "null"]},
         "research_civic": {
           "type": "object",

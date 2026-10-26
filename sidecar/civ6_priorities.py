@@ -482,8 +482,21 @@ def _city_count(snapshot: dict) -> int:
 
 
 def early_lock(snapshot: dict) -> bool:
-    """True while the seat owns fewer than EARLY_CITY_LIMIT cities."""
-    return priorities_supported(snapshot) and _city_count(snapshot) < EARLY_CITY_LIMIT
+    """True while the early-expansion rule is open for this seat.
+
+    The gameplay rule (Civ6Ai_Orders.EarlyOpen) reports civ6.early_open: the
+    seat never held EARLY_CITY_LIMIT cities, is not at war with a major, and no
+    city is threatened. Older builds without it fall back to the city count.
+    """
+    if not priorities_supported(snapshot):
+        return False
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    if isinstance(civ6.get("early_open"), bool):
+        return civ6["early_open"]
+    peak = civ6.get("peak_cities")
+    if isinstance(peak, int) and peak >= EARLY_CITY_LIMIT:
+        return False
+    return _city_count(snapshot) < EARLY_CITY_LIMIT
 
 
 def early_lock_packets(snapshot: dict) -> list[dict]:

@@ -52,38 +52,46 @@ empire.units.combat = 14
 empire.units.idle.detail = warrior_1 (needs orders), warrior_2 (needs orders), warrior_3 (needs orders), warrior_4 (needs orders), warrior_5 (needs orders), warrior_6 (needs orders), warrior_7 (needs orders), warrior_8 (needs orders), warrior_9 (needs orders), warrior_10 (needs orders), warrior_11 (needs orders), warrior_12 (needs orders), warrior_13 (needs orders), warrior_14 (needs orders)
 alert.military.0 = Cleopatra's army is inside move range of Polis1
 # == Cities ==
+Polis0.position = (20,12)
 Polis0.population = 4
 Polis0.capital = true
 Polis0.currentProduction = UNIT_WARRIOR
 Polis0.currentProduction.turnsLeft = 6
 
+Polis1.position = (21,12)
 Polis1.population = 5
 Polis1.hp = 80/200
 Polis1.currentProduction = BUILDING_WALLS
 Polis1.currentProduction.turnsLeft = 6
 
+Polis2.position = (22,12)
 Polis2.population = 6
 Polis2.loyalty = 40
 Polis2.currentProduction = UNIT_WARRIOR
 Polis2.currentProduction.turnsLeft = 6
 
+Polis3.position = (23,12)
 Polis3.population = 7
 Polis3.currentProduction = NONE (queue empty)
 ***Polis3.currentProduction = NONE***
 
+Polis4.position = (24,12)
 Polis4.population = 8
 Polis4.currentProduction = UNIT_WARRIOR
 Polis4.currentProduction.turnsLeft = 6
 Polis4.growth = STARVING, loses a citizen in 2 turns
 
+Polis5.position = (25,12)
 Polis5.population = 9
 Polis5.currentProduction = UNIT_WARRIOR
 Polis5.currentProduction.turnsLeft = 6
 
+Polis6.position = (26,12)
 Polis6.population = 10
 Polis6.currentProduction = UNIT_WARRIOR
 Polis6.currentProduction.turnsLeft = 6
 
+Polis7.position = (27,12)
 Polis7.population = 11
 Polis7.currentProduction = UNIT_WARRIOR
 Polis7.currentProduction.turnsLeft = 6

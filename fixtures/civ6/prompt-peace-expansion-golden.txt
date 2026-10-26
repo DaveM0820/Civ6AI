@@ -47,13 +47,17 @@ empire.units.settlers = 1
 empire.units.idle = 3
 alert.military.0 = Barbarian scout spotted east of Corinth
 # == Cities ==
+Athens.position = (15,23)
 Athens.population = 4
 Athens.capital = true
 Athens.loyalty = 100
 Athens.currentProduction = UNIT_SPEARMAN
+Athens.production = 0/turn
 
+Corinth.position = (16,24)
 Corinth.population = 3
 Corinth.currentProduction = BUILDING_GRANARY
+Corinth.production = 0/turn
 units.inventory = Scout 1, Settler 1, Spearman 1
 unit.ids = scout_1 | settler_1 | spearman_1
 # == Units — Military ==
