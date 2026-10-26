@@ -125,6 +125,27 @@ local function num(v)
   return tonumber(v)
 end
 
+-- Keys of a table in a fixed order (numbers, then strings), so synced code
+-- never depends on pairs() order, which can differ between machines.
+local function sortedKeys(t)
+  local keys = {}
+  for k in pairs(t or {}) do
+    keys[#keys + 1] = k
+  end
+  table.sort(keys, function(a, b)
+    local ta, tb = type(a), type(b)
+    if ta ~= tb then
+      return ta < tb
+    end
+    if ta == "number" or ta == "string" then
+      return a < b
+    end
+    return tostring(a) < tostring(b)
+  end)
+  return keys
+end
+Civ6Ai_Orders._SortedKeys = sortedKeys
+
 local function sortedMembers(coll)
   local list = {}
   if coll ~= nil and coll.Members ~= nil then
@@ -1467,8 +1488,9 @@ function Civ6Ai_Orders._PersistHandled(owner, handled)
   end
   local turn = Game.GetCurrentGameTurn()
   for _, class in ipairs({ "unit", "city", "strike" }) do
-    for id, yes in pairs(handled[class] or {}) do
-      if yes then
+    local set = handled[class] or {}
+    for _, id in ipairs(sortedKeys(set)) do
+      if set[id] then
         pcall(function()
           Game:SetProperty(Civ6Ai_Orders._HandledProp(owner, class, id), turn)
         end)
@@ -2576,7 +2598,7 @@ function Civ6Ai_Orders._NoteTurnStartError(owner, err)
   end
   local turn = Game.GetCurrentGameTurn()
   byTurn[turn] = trimErr(err)
-  for t, _ in pairs(byTurn) do
+  for _, t in ipairs(sortedKeys(byTurn)) do
     if type(t) == "number" and t < turn - 3 then
       byTurn[t] = nil
     end
@@ -3778,7 +3800,8 @@ function Gov.Deal(owner, other, gold, r1, a1, r2, a2, mode)
     end
   end
   mode = mode or 0
-  for bit, pact in pairs(PACTS) do
+  for _, bit in ipairs(sortedKeys(PACTS)) do
+    local pact = PACTS[bit]
     if math.floor(mode / bit) % 2 == 1 and not (knows(me, pact[3]) and knows(them, pact[3])) then
       return false, pact[2] .. " needs " .. tostring(pact[3]) .. " on both sides"
     end
@@ -5531,7 +5554,9 @@ function Civ6Ai_Orders.EarlyMode(owner)
 end
 
 function Civ6Ai_Orders.RegisterEarlyStrategies()
-  for fn, want in pairs({ Civ6AiEarlyExpand = "expand", Civ6AiEarlyThreat = "threat" }) do
+  local early = { Civ6AiEarlyExpand = "expand", Civ6AiEarlyThreat = "threat" }
+  for _, fn in ipairs(sortedKeys(early)) do
+    local want = early[fn]
     local ev = GameEvents[fn]
     if ev ~= nil and ev.Add ~= nil then
       ev.Add(function(owner, threshold)
