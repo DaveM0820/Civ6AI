@@ -82,3 +82,21 @@ INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES
 -- No favoured items: the early strategies only record the mode (early_mode
 -- log, threat facts). What gets built follows the model's production preset.
 
+
+-- Early settle levers: on while an AI major has 1-2 cities (Civ6AiEarlySettle in
+-- Gameplay/Civ6Ai_Orders.lua). Uses the game's own expansion settlement list
+-- (ExpansionSettlementBoost, the SettlementPreferences list of the vanilla
+-- STRATEGY_RAPID_EXPANSION: lower settle-spot bar, so the AI wants settlers) and
+-- a direct Units weight for the Settler (the vanilla UnitPriorityBoosts system).
+INSERT INTO Types (Type, Kind) VALUES ('CIV6AI_STRATEGY_EARLY_SETTLE', 'KIND_VICTORY_STRATEGY');
+INSERT INTO Strategies (StrategyType, VictoryType, NumConditionsNeeded) VALUES ('CIV6AI_STRATEGY_EARLY_SETTLE', NULL, 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, Disqualifier) VALUES
+('CIV6AI_STRATEGY_EARLY_SETTLE', 'Is Not Major', 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, StringValue, ThresholdValue) VALUES
+('CIV6AI_STRATEGY_EARLY_SETTLE', 'Call Lua Function', 'Civ6AiEarlySettle', 0);
+INSERT INTO AiListTypes (ListType) VALUES ('Civ6AiSettleUnits');
+INSERT INTO AiLists (ListType, System) VALUES ('Civ6AiSettleUnits', 'Units');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) VALUES ('Civ6AiSettleUnits', 'UNIT_SETTLER', 1, 300);
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES
+('CIV6AI_STRATEGY_EARLY_SETTLE', 'ExpansionSettlementBoost'),
+('CIV6AI_STRATEGY_EARLY_SETTLE', 'Civ6AiSettleUnits');

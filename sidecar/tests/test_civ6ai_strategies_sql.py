@@ -25,6 +25,8 @@ class StrategiesSqlTests(unittest.TestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(SCHEMA)
+        # Vanilla list the mod reuses (Base Victories.xml, STRATEGY_RAPID_EXPANSION).
+        self.db.execute("INSERT INTO AiListTypes (ListType) VALUES ('ExpansionSettlementBoost')")
         self.db.executescript((MOD / "Data" / "Civ6Ai_Strategies.sql").read_text())
 
     def test_each_strategy_has_one_single_item_list(self):
@@ -39,7 +41,7 @@ class StrategiesSqlTests(unittest.TestCase):
         lua = (MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text()
         names = [r[0] for r in self.db.execute(
             "SELECT StringValue FROM StrategyConditions WHERE ConditionFunction = 'Call Lua Function'")]
-        self.assertEqual(len(names), 5)
+        self.assertEqual(len(names), 6)
         for name in names:
             self.assertRegex(lua, r'(fn = "%s"|%s = ")' % (re.escape(name), re.escape(name)))
 
@@ -55,3 +57,18 @@ class StrategiesSqlTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EarlySettleSqlTests(unittest.TestCase):
+    def test_early_settle_uses_vanilla_expansion_list_and_settler_weight(self):
+        db = sqlite3.connect(":memory:")
+        db.execute("PRAGMA foreign_keys = ON")
+        db.executescript(SCHEMA)
+        db.execute("INSERT INTO AiListTypes (ListType) VALUES ('ExpansionSettlementBoost')")
+        db.executescript((MOD / "Data" / "Civ6Ai_Strategies.sql").read_text())
+        lists = {r[0] for r in db.execute(
+            "SELECT ListType FROM Strategy_Priorities WHERE StrategyType = 'CIV6AI_STRATEGY_EARLY_SETTLE'")}
+        self.assertEqual(lists, {"ExpansionSettlementBoost", "Civ6AiSettleUnits"})
+        row = db.execute("SELECT f.Item, f.Value, l.System FROM AiFavoredItems f JOIN AiLists l ON l.ListType = f.ListType "
+                         "WHERE f.ListType = 'Civ6AiSettleUnits'").fetchone()
+        self.assertEqual(row, ("UNIT_SETTLER", 300, "Units"))

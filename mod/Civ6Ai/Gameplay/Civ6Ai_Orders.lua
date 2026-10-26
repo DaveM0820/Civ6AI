@@ -5553,7 +5553,26 @@ function Civ6Ai_Orders.EarlyMode(owner)
   return mode ~= "" and mode or nil
 end
 
+-- Early settle levers (Data/Civ6Ai_Strategies.sql CIV6AI_STRATEGY_EARLY_SETTLE):
+-- an AI major (not human) with 1 or 2 cities. Synced state only (city count).
+function Civ6Ai_Orders.EarlySettle(owner)
+  local p = Players ~= nil and Players[owner] or nil
+  if p == nil or call(p, "IsHuman") == true or call(p, "IsMajor") ~= true then
+    return false
+  end
+  local n = #sortedMembers(call(p, "GetCities"))
+  return n >= 1 and n < Civ6Ai_Orders.EARLY_CITY_TARGET
+end
+
 function Civ6Ai_Orders.RegisterEarlyStrategies()
+  local fn = "Civ6AiEarlySettle"
+  local settleEv = GameEvents ~= nil and GameEvents[fn] or nil
+  if settleEv ~= nil and settleEv.Add ~= nil then
+    settleEv.Add(function(owner, threshold)
+      local ok, yes = pcall(Civ6Ai_Orders.EarlySettle, owner)
+      return ok and yes == true
+    end)
+  end
   local early = { Civ6AiEarlyExpand = "expand", Civ6AiEarlyThreat = "threat" }
   for _, fn in ipairs(sortedKeys(early)) do
     local want = early[fn]
