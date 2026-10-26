@@ -175,3 +175,43 @@ def test_escalation_off_profile_never_moves(tmp_path, monkeypatch):
     monkeypatch.setenv("CIV6AI_ESCALATION_PROFILE", "off")
     memory: dict = {}
     assert civ6_escalation.decide(_struggling(5, tmp_path), memory, None, ["r"])["rung"] == 0
+
+
+def _results(turn, tmp_path, rows):
+    snap = _snap(turn, session=tmp_path)
+    snap["history"]["command_results"] = [dict(r, turn=turn - 1, summary="s") for r in rows]
+    return snap
+
+
+def test_severe_fail_share_alone_steps_up(tmp_path, monkeypatch):
+    monkeypatch.delenv("CIV6AI_ESCALATION_PROFILE", raising=False)
+    bad = {"kind": results.KIND_FAILED, "reason": "plot_occupied_exhausted:1,1>2,2:impassable"}
+    snap = _results(5, tmp_path, [bad] * 5 + [{"kind": results.KIND_OK, "reason": ""}])  # 83%
+    esc = civ6_escalation.decide(snap, {}, None, [])
+    assert esc["signals"]["hits"] == ["fail_share"] and esc["signals"]["score"] == 2
+    assert esc["rung"] == 1 and esc["reason"] == "step_up"
+    mild = _results(5, tmp_path, [bad] * 2 + [{"kind": results.KIND_OK, "reason": ""}] * 2)  # 50%
+    assert civ6_escalation.decide(mild, {}, None, [])["rung"] == 0
+
+
+def test_pipeline_faults_and_pacing_drops_do_not_count(tmp_path, monkeypatch):
+    monkeypatch.delenv("CIV6AI_ESCALATION_PROFILE", raising=False)
+    rows = ([{"kind": results.KIND_FAILED, "reason": "queue_replaced:44"}] * 4
+            + [{"kind": results.KIND_FAILED, "reason": "no_result_from_gameplay"}] * 3
+            + [{"kind": results.KIND_OK, "reason": ""}] * 3)
+    drops = ["dropped: chat to PLAYER_5 came too soon (next free line on turn 50) and was not sent",
+             "dropped: public chat was a near-repeat of your own recent line and was not sent",
+             "dropped: deal.Shaka=peace: a peace proposal must include gold, gpt, or a resource"]
+    sig = civ6_escalation.signals(_results(5, tmp_path, rows), drops)
+    assert sig["fail_percent"] == 0 and sig["pipeline_faults"] == 7 and "fail_share" not in sig["hits"]
+
+
+def test_mild_failing_turn_is_not_clean(tmp_path, monkeypatch):
+    monkeypatch.delenv("CIV6AI_ESCALATION_PROFILE", raising=False)
+    monkeypatch.setenv("CIV6AI_ESCALATION_CLEAN_TURNS", "1")
+    memory: dict = {}
+    assert civ6_escalation.decide(_struggling(5, tmp_path), memory, None, ["r"])["rung"] == 1
+    bad = {"kind": results.KIND_FAILED, "reason": "impassable"}
+    mild = _results(6, tmp_path, [bad] * 2 + [{"kind": results.KIND_OK, "reason": ""}] * 2)
+    assert civ6_escalation.decide(mild, memory, None, [])["rung"] == 1  # one signal: hold, not step down
+    assert civ6_escalation.decide(_clean(7, tmp_path), memory, None)["reason"] == "step_down"

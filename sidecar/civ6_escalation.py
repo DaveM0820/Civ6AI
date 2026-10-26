@@ -9,6 +9,11 @@ Last turn's signals, one point each:
   stale        thought.situation repeated the turn before (civ6_turn_delta)
   oscillation  a unit turned back on its own path (civ6_turn_delta REVERSING)
 
+Pipeline faults (queue_replaced, no_result_from_gameplay) and chat/deal pacing
+drops are not the model's fault and never count. A fail share at or above
+CIV6AI_ESCALATION_SEVERE_FAIL_PERCENT counts as two points on its own. A turn
+with any signal is not clean, so a seat that keeps failing stays escalated.
+
 At CIV6AI_ESCALATION_SIGNALS points the seat steps up one rung of the ladder
 for the next call; after CIV6AI_ESCALATION_CLEAN_TURNS turns under that it
 steps back down one rung. Rung 0 is the seat's own model config (seat_models,
@@ -68,6 +73,20 @@ def ladder(cfg: Any = None) -> tuple[str, list[dict[str, str]]]:
     return name, list(profiles.get(name, []))
 
 
+PIPELINE_REASON_PREFIXES = ("queue_replaced", "no_result_from_gameplay")
+PACING_DROP_MARKERS = ("came too soon", "near-repeat", "chat to ", "public chat", "already sent",
+                       "deal.", "deal-status", "chat.")
+
+
+def _pipeline_fault(item: dict[str, Any]) -> bool:
+    return str(item.get("reason") or "").startswith(PIPELINE_REASON_PREFIXES)
+
+
+def _counts_as_drop(text: Any) -> bool:
+    t = str(text or "").strip()
+    return bool(t) and not any(m in t for m in PACING_DROP_MARKERS)
+
+
 def signals(snapshot: dict[str, Any], dropped: list[Any] | None = None) -> dict[str, Any]:
     """Last turn's struggle signals for this seat."""
     from sidecar import civ6_apply_results as results
@@ -78,15 +97,21 @@ def signals(snapshot: dict[str, Any], dropped: list[Any] | None = None) -> dict[
     current = [i for i in items if i.get("kind") in (results.KIND_OK, results.KIND_FAILED, results.KIND_NO_EFFECT)]
     last = max((int(i.get("turn") or 0) for i in current), default=None)
     sent = [i for i in current if int(i.get("turn") or 0) == last] if last is not None else []
+    pipeline_n = sum(1 for i in sent if _pipeline_fault(i))
+    sent = [i for i in sent if not _pipeline_fault(i)]
     bad = sum(1 for i in sent if i.get("kind") != results.KIND_OK)
-    dropped_n = len([d for d in (dropped or []) if str(d).strip()])
+    dropped_n = len([d for d in (dropped or []) if _counts_as_drop(d)])
     total = len(sent) + dropped_n
     failed = bad + dropped_n
     share = (100 * failed // total) if total else 0
-    out: dict[str, Any] = {"orders": total, "failed": failed, "fail_percent": share, "hits": []}
+    out: dict[str, Any] = {"orders": total, "failed": failed, "fail_percent": share, "hits": [],
+                           "pipeline_faults": pipeline_n}
+    weight = 0
     if total >= settings.get_int("CIV6AI_ESCALATION_MIN_ORDERS") and share >= settings.get_int(
             "CIV6AI_ESCALATION_FAIL_PERCENT"):
         out["hits"].append("fail_share")
+        if share >= settings.get_int("CIV6AI_ESCALATION_SEVERE_FAIL_PERCENT"):
+            weight = 1  # a severe fail share is worth two points by itself
     rows = [r for r in _lst(legality.load_state(snapshot).get("rejections")) if isinstance(r, dict)]
     turns_of = legality._rejection_turns(rows)
     repeat = any(
@@ -107,7 +132,7 @@ def signals(snapshot: dict[str, Any], dropped: list[Any] | None = None) -> dict[
         out["hits"].append("stale")
     if _lst(delta.get("reversing")):
         out["hits"].append("oscillation")
-    out["score"] = len(out["hits"])
+    out["score"] = len(out["hits"]) + weight
     return out
 
 
@@ -132,7 +157,7 @@ def decide(snapshot: dict[str, Any], memory: dict[str, Any] | None, cfg: Any = N
             reason = "step_up"
         else:
             reason = "at_top"
-    else:
+    elif sig["score"] == 0:
         clean += 1
         if rung > 0 and clean >= settings.get_int("CIV6AI_ESCALATION_CLEAN_TURNS"):
             rung -= 1

@@ -87,6 +87,8 @@ INT_DEFAULTS: dict[str, tuple[int, int, int]] = {
     # Per-seat model escalation (civ6_escalation). A struggle signal fires when at least
     # this percent of last turn's orders were rejected, failed or dropped.
     "CIV6AI_ESCALATION_FAIL_PERCENT": (40, 1, 100),
+    # At or above this share the fail-share signal counts two points (enough to step up alone).
+    "CIV6AI_ESCALATION_SEVERE_FAIL_PERCENT": (70, 1, 100),
     # Orders last turn below this count never fire the fail-share signal (too few to judge).
     "CIV6AI_ESCALATION_MIN_ORDERS": (3, 1, 100),
     # Units idle on the same tile for this many turns or more ...
