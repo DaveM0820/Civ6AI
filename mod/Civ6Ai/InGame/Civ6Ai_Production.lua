@@ -356,8 +356,21 @@ function Civ6Ai_Production.WeightVector(levels, halfWar)
   return acc
 end
 
+-- Mirrors sidecar civ6_priorities.EARLY_CITY_LIMIT / EARLY_SET: below three
+-- cities every seat uses the fixed early-expansion levels, not saved ones.
+Civ6Ai_Production.EARLY_CITY_LIMIT = 3
+Civ6Ai_Production.EARLY_SET = { peace = 1, expansion = 3, improvements = 1 }
+
 function Civ6Ai_Production.ComposeSituation(raw)
   raw = raw or {}
+  if raw.early == true then
+    local early = {}
+    for key, level in pairs(Civ6Ai_Production.EARLY_SET) do
+      local id = (Civ6Ai_Production.PRIORITY_KEY_ID or {})[key]
+      if id ~= nil then early[id] = level end
+    end
+    raw.saved = early
+  end
   local levels = {}
   local posture = false
   local militaryOn = false
@@ -1052,6 +1065,7 @@ function Civ6Ai_Production.SituationFor(playerID, city)
     for _ in cities:Members() do n = n + 1 end
   end
   raw.cities = n > 0 and n or 1
+  raw.early = n < Civ6Ai_Production.EARLY_CITY_LIMIT
   raw.pop = city ~= nil and call(city, "GetPopulation") or nil
   raw.turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or 0
   pcall(function()
@@ -1175,4 +1189,26 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
     end
   end
   return filled
+end
+
+
+-- Read-only log of every finished build (all seats), for measuring the
+-- settler share: production|completed|player=|turn=|item=.
+function Civ6Ai_Production.OnProductionCompleted(playerID, cityID, orderType, itemType, canceled)
+  if canceled == true then
+    return
+  end
+  local name = tostring(itemType)
+  pcall(function()
+    for _, t in ipairs({ "Units", "Buildings", "Districts", "Projects" }) do
+      local row = GameInfo[t] ~= nil and GameInfo[t][itemType] or nil
+      if row ~= nil then
+        name = row.UnitType or row.BuildingType or row.DistrictType or row.ProjectType or name
+        return
+      end
+    end
+  end)
+  local turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or -1
+  Civ6Ai_Util.Log("production|completed|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
+    .. "|city=" .. tostring(cityID) .. "|order=" .. tostring(orderType) .. "|item=" .. name)
 end

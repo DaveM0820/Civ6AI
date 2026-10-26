@@ -220,6 +220,10 @@ function Civ6Ai_InitializeInGame()
     if Events.LoadScreenClose ~= nil then
       Events.LoadScreenClose.Add(Civ6Ai_OnLoadScreenClose)
     end
+    if Events.CityProductionCompleted ~= nil and Civ6Ai_Production ~= nil
+        and Civ6Ai_Production.OnProductionCompleted ~= nil then
+      Events.CityProductionCompleted.Add(Civ6Ai_Production.OnProductionCompleted)
+    end
     Civ6Ai_InGame._hooks = true
   end
   Civ6Ai_Util.ProbeIo()

@@ -171,10 +171,11 @@ def unit_hints(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 
 def priority_hints(snapshot: dict[str, Any], commands: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Empty production: the priority packets the engine fills queues from."""
-    from sidecar.civ6_priorities import empty_queue_nudge
+    from sidecar.civ6_priorities import early_lock, early_lock_packets, empty_queue_nudge
 
     out = []
-    for packet in empty_queue_nudge(snapshot, commands):
+    packets = early_lock_packets(snapshot) if early_lock(snapshot) else empty_queue_nudge(snapshot, commands)
+    for packet in packets:
         args = _dct(packet.get("arguments"))
         out.append({
             "command_id": f"HINT_priority_{args.get('priority_id')}_{args.get('priority_level')}",

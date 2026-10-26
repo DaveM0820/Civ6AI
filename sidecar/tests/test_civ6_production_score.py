@@ -216,7 +216,7 @@ class ProductionScoreTests(unittest.TestCase):
         self.assertEqual(400, prio.item_score(walls["id"], walls["tags"], situation, walls["kind"]))
 
     def test_prompt_says_the_test_seat_uses_the_same_lists(self):
-        lines = "\n".join(prio.prompt_lines({"civ6": {"priorities": []}}))
+        lines = "\n".join(prio.prompt_lines({"civ6": {"priorities": []}, "your_cities": [{}, {}, {}]}))
         self.assertIn("An empty city queue is filled from the same weights", lines)
         queued = "\n".join(economy.attention_items({
             "your_cities": [{"city_id": "CITY_1", "name": "Utrecht", "production": {"item_id": "NONE"}}],

@@ -881,6 +881,8 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
         if low in ("priorities", "priority", "build_priorities", "legal.priorities", "legal.priority"):
             from sidecar import civ6_priorities as prio
 
+            if prio.early_lock(snapshot):
+                continue
             wanted, problems = prio.parse_reply(value)
             if wanted is not None:
                 from sidecar import civ6_combat_wire as combat_wire

@@ -462,6 +462,57 @@ _SPEED_PERCENT = {
     "GAMESPEED_MARATHON": 33,
 }
 THREAT_DISTANCE = 4
+
+# Until a seat owns EARLY_CITY_LIMIT cities the model gets no production choice:
+# every seat runs EARLY_SET (synced priorities for the engine AI, and the same
+# levels in the empty-queue fill). Tuned so about a third of builds are settlers.
+EARLY_CITY_LIMIT = 3
+EARLY_SET = "peace:1, expansion:3, improvements:1"
+# Competitive expansion pace at Online speed: (cities, turn).
+PACE_ONLINE = ((3, 25), (5, 35), (8, 50))
+
+
+def early_levels() -> dict[int, int]:
+    wanted, _ = parse_reply(EARLY_SET)
+    return dict(wanted or {})
+
+
+def _city_count(snapshot: dict) -> int:
+    return sum(1 for c in snapshot.get("your_cities") or [] if isinstance(c, dict))
+
+
+def early_lock(snapshot: dict) -> bool:
+    """True while the seat owns fewer than EARLY_CITY_LIMIT cities."""
+    return priorities_supported(snapshot) and _city_count(snapshot) < EARLY_CITY_LIMIT
+
+
+def early_lock_packets(snapshot: dict) -> list[dict]:
+    """Priority packets that move the seat's saved levels to EARLY_SET."""
+    if not early_lock(snapshot):
+        return []
+    current = current_levels(snapshot)
+    want = early_levels()
+    out = []
+    for cid in sorted(current):
+        if cid not in want:
+            out.append(_priority_packet(cid, 0))
+    for cid, level in want.items():
+        if current.get(cid) != level:
+            out.append(_priority_packet(cid, level))
+    return out
+
+
+def pace_turn(online_turn: int, speed: str | None) -> int:
+    num = _SPEED_PERCENT.get(str(speed or "GAMESPEED_ONLINE").upper(), 200)
+    return max(1, (int(online_turn) * 200 + num // 2) // num)
+
+
+def expansion_pace_line(snapshot: dict) -> str:
+    speed = _game_speed(snapshot)
+    marks = [(c, pace_turn(t, speed)) for c, t in PACE_ONLINE]
+    bench = ", ".join(f"{'8-9' if c == 8 else c} cities by turn {t}" for c, t in marks)
+    return (f"EXPANSION PACE: you own {_city_count(snapshot)} cities on turn {_game_turn(snapshot)}. "
+            f"Competitive pace at this game speed ({speed or 'GAMESPEED_ONLINE'}): {bench}.")
 _ERAS = {
     "ERA_ANCIENT": 0, "ERA_CLASSICAL": 1, "ERA_MEDIEVAL": 2, "ERA_RENAISSANCE": 3,
     "ERA_INDUSTRIAL": 4, "ERA_MODERN": 5, "ERA_ATOMIC": 6, "ERA_INFORMATION": 7,
@@ -533,9 +584,12 @@ def compose_situation(
     speed: str | None = None,
     builder_charges: int | None = None,
     open_tiles: int | None = None,
+    early: bool = False,
 ) -> dict:
     """Saved priorities, or peace:1 when the seat has no posture, plus the situation overlays."""
     levels: dict[int, int] = {}
+    if early:
+        saved = early_levels()
     for cid, level in (saved or {}).items():
         if cid in BY_ID and 1 <= int(level) <= 3:
             levels[int(cid)] = int(level)
@@ -963,6 +1017,7 @@ def situation_for_city(snapshot: dict, city: dict) -> dict:
         threatened=_city_threatened(snapshot, city),
         warlike=warlike,
         cities=cities or 1,
+        early=early_lock(snapshot),
         pop=_city_population(snapshot, city),
         land=not (snapshot.get("_settlers_no_walkable_site") or snapshot.get("_no_city_sites")),
         speed=_game_speed(snapshot),
@@ -980,6 +1035,13 @@ def prompt_lines(snapshot: dict) -> list[str]:
     """=== BUILD PRIORITIES === block for the prompt (empty when unsupported)."""
     if not priorities_supported(snapshot):
         return []
+    if early_lock(snapshot):
+        return [
+            "=== PRODUCTION PRESET ===",
+            f"Fixed until you own {EARLY_CITY_LIMIT} cities: early expansion ({EARLY_SET}); about a third of "
+            "production is settlers. Presets unlock at 3 cities; a priorities key is ignored until then.",
+            expansion_pace_line(snapshot),
+        ]
     current = current_levels(snapshot)
     name = matching_preset(current)
     lines = [
@@ -995,6 +1057,7 @@ def prompt_lines(snapshot: dict) -> list[str]:
     lines.append(
         f'To change it, add the optional key "{REPLY_KEY}" with one preset name, e.g. "{REPLY_KEY}": "expansion". '
         f'"{REPLY_KEY}": "none" returns to the neutral default. Omit the key to keep the current preset.')
+    lines.append(expansion_pace_line(snapshot))
     return lines
 
 

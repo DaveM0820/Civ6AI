@@ -13,10 +13,13 @@ ROOT = Path(__file__).resolve().parents[2]
 MINIMAL = ROOT / "fixtures" / "civ6" / "snapshot-turn-runtime-minimal.json"
 
 
-def _snapshot(levels=None):
+def _snapshot(levels=None, cities=None):
     raw = json.loads(MINIMAL.read_text(encoding="utf-8"))
     snap = civ6_adapter.upgrade_runtime_snapshot(raw)
     civ6_adapter.normalize_civ6_snapshot(snap)
+    if cities is not None:
+        base = (snap.get("your_cities") or [{}])[0]
+        snap["your_cities"] = [dict(base, city_id=f"CITY_{n}", name=f"C{n}") for n in range(cities)]
     if levels is not None:
         snap.setdefault("civ6", {})["priorities"] = [{"id": i, "level": l} for i, l in levels.items()]
     return snap
@@ -56,7 +59,7 @@ class PrioritiesModelTests(unittest.TestCase):
 
     def test_wire_binds_to_legal_commands(self):
         peace, war = prio.BY_KEY["peace"]["id"], prio.BY_KEY["war"]["id"]
-        snap = _snapshot({peace: 1})
+        snap = _snapshot({peace: 1}, cities=3)
         prio.inject_legal_commands(snap)
         lines = "\n".join(prio.prompt_lines(snap))
         self.assertIn("Current: custom (peace:1)", lines)
@@ -70,8 +73,28 @@ class PrioritiesModelTests(unittest.TestCase):
         ok = [c["command_id"] for c in validated["commands"]]
         self.assertIn(prio.command_id(war, 2), ok)
 
+    def test_early_lock_hides_presets_ignores_reply_and_sets_early_levels(self):
+        peace, war = prio.BY_KEY["peace"]["id"], prio.BY_KEY["war"]["id"]
+        snap = _snapshot({war: 2}, cities=2)
+        prio.inject_legal_commands(snap)
+        lines = "\n".join(prio.prompt_lines(snap))
+        self.assertIn("Fixed until you own 3 cities", lines)
+        self.assertIn("EXPANSION PACE: you own 2 cities", lines)
+        self.assertNotIn("Available presets", lines)
+        wire = civ6_command_wire.expand_civ6_command_wire(copy.deepcopy(snap), {"7.priorities": "war:3"})
+        self.assertFalse([v for k, v in wire.items() if k.startswith("cmd.") and "PRIO" in str(v)])
+        ids = [p["command_id"] for p in prio.early_lock_packets(snap)]
+        self.assertEqual(ids[0], prio.command_id(war, 0))
+        self.assertIn(prio.command_id(prio.BY_KEY["expansion"]["id"], 3), ids)
+        self.assertIn(prio.command_id(peace, 1), ids)
+        self.assertEqual([], prio.early_lock_packets(_snapshot({war: 2}, cities=3)))
+
+    def test_pace_scales_with_speed(self):
+        self.assertEqual(25, prio.pace_turn(25, "GAMESPEED_ONLINE"))
+        self.assertEqual(50, prio.pace_turn(25, "GAMESPEED_STANDARD"))
+
     def test_presets_are_era_gated_and_expand_to_priorities(self):
-        snap = _snapshot({})
+        snap = _snapshot({}, cities=3)
         ancient = "\n".join(prio.prompt_lines(snap))
         self.assertIn("- expansion:", ancient)
         self.assertNotIn("- wonder_push:", ancient)
