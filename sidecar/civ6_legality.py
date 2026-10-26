@@ -75,7 +75,10 @@ def is_mountain(plot: dict[str, Any] | None) -> bool:
 def can_embark(snapshot: dict[str, Any]) -> bool:
     research = _dct(_dct(snapshot.get("your_empire")).get("research"))
     known = {str(t) for t in _lst(research.get("known_tech_ids")) if t}
-    return "TECH_SHIPBUILDING" in known
+    if "TECH_SHIPBUILDING" in known:
+        return True
+    civ = str(_dct(snapshot.get("personality")).get("civilization_id") or "")
+    return civ == "CIVILIZATION_MAORI"  # Maori start able to embark
 
 
 def own_occupied_plots(snapshot: dict[str, Any]) -> dict[tuple[int, int], list[str]]:

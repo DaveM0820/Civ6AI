@@ -70,7 +70,8 @@ def civ6_game_primer() -> str:
 CIV6_SETTLER_MAP_ADVICE = (
     "Carefully observe the attached map to choose a settle location, and remember it for "
     "as many turns as the walk takes. Weigh strategic and luxury resources, choke points, "
-    "fresh water and coast access, and tile yields (food/production/gold)."
+    "fresh water and coast access, and tile yields (food/production/gold). "
+    "Coastal tiles (needed for a harbour and ships) and river tiles are better city sites when available."
 )
 
 CIV6_CHAT_VARIETY_COACHING = (
@@ -245,7 +246,25 @@ def civ6_map_axes_wrap_guidance(snapshot: dict[str, Any] | None = None) -> str:
         f"{wrap_clause} "
         "Mountains are impassable. Land units cannot enter water unless they can embark (embarking needs the tech). "
         "Gray cloudy areas on the map are unexplored fog that units can move into and explore."
+        + _water_and_embark_clause(snapshot)
     )
+
+
+def _water_and_embark_clause(snapshot: Any) -> str:
+    """Plain facts: share of water on the explored map; embarking once it is possible."""
+    if not isinstance(snapshot, dict):
+        return ""
+    text = ""
+    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    plots = [p for p in known.get("plots") or [] if isinstance(p, dict)]
+    if plots:
+        water = sum(1 for p in plots if p.get("water"))
+        text += f" {round(100 * water / len(plots))}% of the explored map is water."
+    from sidecar import civ6_legality
+
+    if civ6_legality.can_embark(snapshot):
+        text += " Land units can embark: move a land unit onto a water tile next to land."
+    return text
 
 
 def civ6_unit_health_percent(unit: dict[str, Any]) -> int | None:
@@ -427,7 +446,8 @@ def civ6_explored_fact_line(snapshot: dict[str, Any], explored: int) -> str | No
         seen = f"{explored}% of the map revealed"
     return (
         f"EXPLORATION: {seen}. Unrevealed land hides settle sites, rivals, city-states and tribal villages. "
-        "Explore by moving units toward the fog you can see on the map."
+        "Explore by moving units toward the fog you can see on the map. "
+        "Naval exploration is also encouraged once you can build ships."
     )
 
 
