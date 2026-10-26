@@ -905,7 +905,7 @@ function Civ6Ai_Orders._DoCommand(sender, o)
   elseif k == Civ6Ai_Orders.K.TRADE then
     return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, o.U, o.I)
   elseif k == Civ6Ai_Orders.K.EXPLORE then
-    return Civ6Ai_Orders.Gov.Explore(owner, o.U)
+    return false, "explore_removed"
   elseif k == Civ6Ai_Orders.K.ACTIVATE_GP then
     return Civ6Ai_Orders.Gov.ActivateGreatPerson(owner, o.U, o.V)
   elseif k == Civ6Ai_Orders.K.SPREAD then
@@ -934,7 +934,41 @@ function Civ6Ai_Orders._Attack(owner, o)
   if unit == nil then
     return false, "unit_not_found"
   end
-  return Civ6Ai_Orders._ResolveAttack(unit, o.X, o.Y)
+  local tx, ty = o.X, o.Y
+  local city = Cities ~= nil and Cities.GetCityInPlot ~= nil and Cities.GetCityInPlot(tx, ty) or nil
+  if Civ6Ai_Orders._Defender(tx, ty, owner) == nil and (city == nil or city:GetOwner() == owner) then
+    -- The target moved off the tile: retarget to an at-war enemy next to it
+    -- that this unit can still hit this turn (fixed direction order).
+    local nx, ny = Civ6Ai_Orders._RetargetAdjacent(unit, tx, ty)
+    if nx ~= nil then
+      log("attack_retarget|player=" .. tostring(owner) .. "|unit=" .. tostring(o.U) .. "|from=" .. tostring(tx)
+        .. "," .. tostring(ty) .. "|to=" .. tostring(nx) .. "," .. tostring(ny))
+      local ok, why = Civ6Ai_Orders._ResolveAttack(unit, nx, ny)
+      return ok, "retarget:" .. tostring(nx) .. "," .. tostring(ny) .. ":" .. tostring(why)
+    end
+  end
+  return Civ6Ai_Orders._ResolveAttack(unit, tx, ty)
+end
+
+function Civ6Ai_Orders._RetargetAdjacent(unit, x, y)
+  if Map == nil or Map.GetAdjacentPlot == nil then
+    return nil
+  end
+  local owner = unit:GetOwner()
+  local ranged = Civ6Ai_Orders._IsRanged(unit)
+  local reach = ranged and (call(unit, "GetRange") or num(GameInfo.Units[unit:GetType()].Range) or 1) or 1
+  for dir = 0, 5 do
+    local ok, plot = pcall(Map.GetAdjacentPlot, x, y, dir)
+    if ok and plot ~= nil then
+      local px, py = plot:GetX(), plot:GetY()
+      local d = Map.GetPlotDistance(unit:GetX(), unit:GetY(), px, py)
+      local defender = Civ6Ai_Orders._Defender(px, py, owner)
+      if d >= 1 and d <= reach and defender ~= nil and Civ6Ai_Orders._AtWar(owner, defender:GetOwner()) then
+        return px, py
+      end
+    end
+  end
+  return nil
 end
 
 function Civ6Ai_Orders._IsRanged(unit)

@@ -451,6 +451,35 @@ def strike_lines(context: dict[str, Any]) -> list[str]:
     return lines
 
 
+def target_reach_lines(context: dict[str, Any]) -> list[str]:
+    """Per enemy target: which of your units can hit it this turn, now or after moving."""
+    wire_ids = _wire_ids(context)
+    targets: dict[tuple[int, int], dict[str, list[str]]] = {}
+    labels: dict[tuple[int, int], str] = {}
+    for row in _previews(context):
+        x, y = _int(row.get("target_x")), _int(row.get("target_y"))
+        if x is None or y is None:
+            continue
+        uid = str(row.get("unit_id"))
+        name = wire_ids.get(uid, uid)
+        slot = targets.setdefault((x, y), {"now": [], "move": []})
+        bucket = slot["move"] if row.get("needs_move") else slot["now"]
+        if name not in bucket:
+            bucket.append(name)
+        labels.setdefault((x, y), _target_text(context, row))
+    lines: list[str] = []
+    for (x, y), slot in sorted(targets.items(), key=lambda kv: (-(len(kv[1]["now"]) + len(kv[1]["move"])), kv[0])):
+        parts = []
+        if slot["now"]:
+            parts.append("can strike now: " + ", ".join(slot["now"]))
+        if slot["move"]:
+            parts.append("in reach after a move: " + ", ".join(slot["move"]))
+        n = len(slot["now"]) + len(slot["move"])
+        lines.append(pipeline._wire_line(
+            "war.target", f"({x},{y}) {labels[(x, y)]}: {n} unit{'s' if n != 1 else ''} this turn — " + "; ".join(parts)))
+    return lines[:MAX_STRIKE_LINES]
+
+
 def war_section_lines(context: dict[str, Any]) -> list[str]:
     """=== WAR === body (empty when nothing hostile is visible and no major war)."""
     if not war_active(context):
@@ -520,6 +549,10 @@ def war_section_lines(context: dict[str, Any]) -> list[str]:
     if strikes:
         lines.append("# == Attack previews (engine combat simulation, same as the in-game hover preview) ==")
         lines.extend(strikes)
+        reach = target_reach_lines(context)
+        if reach:
+            lines.append("# == Targets and the units that can reach them this turn (focus fire: several units on one target) ==")
+            lines.extend(reach)
     elif hostiles or _rows(block, "threats"):
         if enemies_within_their_reach(context):
             lines.append("# Enemies are within their move range of your units or cities, but none of your units can strike this turn.")
