@@ -31,7 +31,7 @@ def _snap(me="PLAYER_0", other="PLAYER_1", other_name="Cleopatra", session=None,
 class DiplomacyWireTests(unittest.TestCase):
     def test_optional_keys_list_war_and_deal(self):
         keys = dict(diplo.optional_key_hints(_snap()))
-        self.assertEqual(keys["legal.diplomacy.Cleopatra"], "DECLARE_WAR")
+        self.assertEqual(keys["legal.diplomacy.Cleopatra"], "NONE | DECLARE_WAR")
         self.assertIn("Cleopatra", keys["deal.<Leader>"])
         self.assertNotIn("peace,", keys["deal.<Leader>"])
 
@@ -39,7 +39,7 @@ class DiplomacyWireTests(unittest.TestCase):
         snap = _snap()
         snap["civ6"]["diplomacy"]["majors"][0]["can_make_peace"] = True
         keys = dict(diplo.optional_key_hints(snap))
-        self.assertEqual(keys["legal.diplomacy.Cleopatra"], "DECLARE_WAR")
+        self.assertEqual(keys["legal.diplomacy.Cleopatra"], "NONE | DECLARE_WAR")
         notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "PEACE_TREATY")[1]
         self.assertTrue(notes)
         self.assertIn("peace needs a war", notes[0])
@@ -153,7 +153,7 @@ class DiplomacyWireTests(unittest.TestCase):
             snap["civ6"]["diplomacy"]["majors"][0]["can_make_peace"] = True
             snap["civ6"]["diplomacy"]["majors"][0]["war_since_turn"] = 81
             keys = dict(diplo.optional_key_hints(snap))
-            self.assertEqual(keys["legal.diplomacy.Cleopatra"], "PEACE_TREATY")
+            self.assertEqual(keys["legal.diplomacy.Cleopatra"], "NONE | PEACE_TREATY")
             ids, notes = diplo.bind_reply(snap, "deal.Cleopatra", "give 50 gold for peace")
             self.assertEqual((ids, notes), ([], []))
             status = diplo.rival_status_line(snap, "PLAYER_1")
@@ -215,16 +215,43 @@ class DiplomacyWireTests(unittest.TestCase):
             )
             self.assertGreater(len(ids), 1)
 
-    def test_bare_peace_while_at_war_needs_something(self):
+    def test_bare_peace_while_at_war_is_a_legal_offer(self):
+        # Vanilla allows a plain peace treaty; the other side decides.
         with tempfile.TemporaryDirectory() as tmp:
             snap = _snap(session=tmp, turn=96)
             snap["civ6"]["diplomacy"]["majors"][0]["at_war"] = True
             snap["civ6"]["diplomacy"]["majors"][0]["can_declare_war"] = False
             snap["civ6"]["diplomacy"]["majors"][0]["can_make_peace"] = True
             notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "PEACE_TREATY")[1]
-            self.assertTrue(notes)
-            self.assertIn("must include", notes[0])
+            self.assertEqual(notes, [])
+            self.assertEqual(len(diplo.load_deals(snap)), 1)
+
+    def test_template_none_choice_is_a_no_op(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = _snap(session=tmp, turn=96)
+            for value in ("NONE | DECLARE_WAR", "NONE"):
+                ids, notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", value)
+                self.assertEqual((ids, notes), ([], []))
+
+    def test_peace_with_game_ai_seat_uses_game_deal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = _snap(session=tmp, turn=96)
+            major = snap["civ6"]["diplomacy"]["majors"][0]
+            major.update(at_war=True, can_declare_war=False, can_make_peace=True, deal_route="game")
+            ids, notes = diplo.bind_reply(snap, "legal.diplomacy.Cleopatra", "PEACE_TREATY")
+            self.assertEqual(notes, [])
+            self.assertEqual(len(ids), 1)
+            offer = [c for c in snap["legal_commands"] if c.get("command_id") == ids[0]][0]
+            self.assertEqual(offer["fixed_arguments"]["action_id"], "PROPOSE_PEACE_DEAL")
             self.assertEqual(diplo.load_deals(snap), [])
+
+    def test_ledger_deal_to_game_ai_seat_is_refused_with_reason(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            snap = _snap(session=tmp, turn=96)
+            snap["civ6"]["diplomacy"]["majors"][0]["deal_route"] = "none"
+            ids, notes = diplo.bind_reply(snap, "deal.Cleopatra", "give 50 gold for 1 RESOURCE_SILK")
+            self.assertEqual(ids, [])
+            self.assertIn("game's own AI", notes[0])
 
     def test_counter_replaces_the_open_offer(self):
         with tempfile.TemporaryDirectory() as tmp:

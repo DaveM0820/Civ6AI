@@ -2016,6 +2016,10 @@ function Civ6Ai_Snapshot._BuildDiplomacy(playerID)
       war_since_turn = facts.war_since_turn,
       can_declare_war = facts.can_declare_war == true,
       can_make_peace = facts.can_make_peace == true,
+      -- Who answers a deal: "model" = another model seat (deals ledger, answered
+      -- next turn); "game" = the game's own AI, through the vanilla deal screen
+      -- (only the local seat can send one); "none" = no route from this seat.
+      deal_route = Civ6Ai_Snapshot._DealRoute(playerID, otherID),
       denounced = facts.denounced,
       declared_friendship = facts.declared_friendship,
       alliance = facts.alliance,
@@ -4356,6 +4360,17 @@ function Civ6Ai_Snapshot._CityCenterDistrict(city)
 end
 
 -- Visible hostile units and cities (at war or barbarian) for this player.
+function Civ6Ai_Snapshot._DealRoute(playerID, otherID)
+  if Civ6Ai_Config ~= nil and Civ6Ai_Config.ShouldRunBridge ~= nil and Civ6Ai_Config.ShouldRunBridge(otherID) then
+    return "model"
+  end
+  if Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID
+      and DealManager ~= nil and DealManager.GetWorkingDeal ~= nil then
+    return "game"
+  end
+  return "none"
+end
+
 -- A unit at 0 HP (damage at its max) is dead: not a target, not a threat.
 function Civ6Ai_Snapshot._UnitDead(unit)
   if unit == nil then

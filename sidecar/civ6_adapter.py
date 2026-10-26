@@ -603,6 +603,8 @@ def normalize_civ6_diplomacy(snapshot: dict[str, Any]) -> None:
         since = _as_schema_int(row.get("war_since_turn"))
         if since is not None and since >= 0:
             major["war_since_turn"] = since
+        if row.get("deal_route") in ("model", "game", "none"):
+            major["deal_route"] = row["deal_route"]
         major["at_war_with"] = [p for p in _as_list(row.get("at_war_with")) if isinstance(p, str)]
         reasons = []
         for reason in _as_list(row.get("reasons")):

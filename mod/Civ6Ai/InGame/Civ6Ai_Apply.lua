@@ -185,7 +185,10 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   if Civ6Ai_Apply._IsNetworkMultiplayer() then
     local synced, here = {}, {}
     for _, c in ipairs(rest) do
-      table.insert(Civ6Ai_Apply.SYNCED_KINDS[c.kind] and synced or here, c)
+      -- A peace proposal to the game's AI is the local player's own deal-screen
+      -- action (DealManager), which the engine syncs itself; keep it local.
+      local peaceDeal = c.kind == "send_diplomatic_action" and Civ6Ai_Apply._IsPeaceDealAction(c)
+      table.insert((Civ6Ai_Apply.SYNCED_KINDS[c.kind] and not peaceDeal) and synced or here, c)
     end
     if #synced > 0 then
       Civ6Ai_OrderChannel.SendDecision(playerID, { commands = synced }, Game.GetCurrentGameTurn(), snapshotTurn)
@@ -1774,6 +1777,49 @@ end
 -- (DeclareWarOn / MakePeaceWith / InitUnit / SetOwner). Local seat in single
 -- player calls them through ExposedMembers; queued seats go through the order
 -- channel before this file.
+function Civ6Ai_Apply._IsPeaceDealAction(command)
+  local fixed = command.fixed_arguments or command.arguments or {}
+  return string.upper(tostring(fixed.action_id or "")) == "PROPOSE_PEACE_DEAL"
+end
+
+-- Peace with a seat the game's own AI plays: the vanilla deal-screen proposal
+-- (DiplomacyActionView MAKE_PEACE: a locked AGREEMENTS item of subtype
+-- MAKE_PEACE, sent with DealProposalAction.PROPOSED). The game's AI accepts or
+-- rejects it with its own rules. Only the local player can send a working deal.
+function Civ6Ai_Apply._ProposeGamePeace(playerID, other)
+  if Game.GetLocalPlayer() ~= playerID then
+    return false, "peace_deal_local_seat_only"
+  end
+  if DealManager == nil or DealManager.GetWorkingDeal == nil or DealManager.SendWorkingDeal == nil
+      or DealDirection == nil or DealItemTypes == nil or DealAgreementTypes == nil or DealProposalAction == nil then
+    return false, "deal_manager_unavailable"
+  end
+  local diplo = Players[playerID] ~= nil and Players[playerID]:GetDiplomacy() or nil
+  if diplo == nil or not diplo:IsAtWarWith(other) then
+    return false, "not_at_war"
+  end
+  local okCan, can = pcall(function() return diplo:CanMakePeaceWith(other) end)
+  if okCan and can == false then
+    return false, "peace_not_allowed_now"
+  end
+  local ok, err = pcall(function()
+    if DealManager.ClearWorkingDeal ~= nil then
+      DealManager.ClearWorkingDeal(DealDirection.OUTGOING, playerID, other)
+    end
+    local deal = DealManager.GetWorkingDeal(DealDirection.OUTGOING, playerID, other)
+    local item = deal:AddItemOfType(DealItemTypes.AGREEMENTS, playerID)
+    item:SetSubType(DealAgreementTypes.MAKE_PEACE)
+    item:SetLocked(true)
+    DealManager.SendWorkingDeal(DealProposalAction.PROPOSED, playerID, other)
+  end)
+  Civ6Ai_Util.Log("apply|peace_deal|player=" .. tostring(playerID) .. "|other=" .. tostring(other)
+    .. "|sent=" .. tostring(ok) .. (ok and "" or ("|err=" .. tostring(err))))
+  if not ok then
+    return false, "peace_deal_failed"
+  end
+  return true, "peace_proposed_to_game_ai"
+end
+
 function Civ6Ai_Apply._Deal(playerID, command, args)
   local kind = command.kind
   if kind == "send_diplomatic_action" then
@@ -1782,6 +1828,10 @@ function Civ6Ai_Apply._Deal(playerID, command, args)
       return false, "missing_target_player", args
     end
     local action = string.upper(tostring(args.action_id or ""))
+    if action == "PROPOSE_PEACE_DEAL" then
+      local ok, reason = Civ6Ai_Apply._ProposeGamePeace(playerID, other)
+      return ok, reason, args
+    end
     if string.find(action, "WAR", 1, true) == nil then
       return false, "only DECLARE_WAR can be applied", args
     end

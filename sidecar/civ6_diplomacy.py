@@ -100,6 +100,9 @@ def _targets(snapshot: dict) -> list[dict[str, Any]]:
             "at_war": row.get("at_war") is True,
             "can_declare_war": row.get("can_declare_war") is True,
             "can_make_peace": row.get("at_war") is True and row.get("can_make_peace") is True,
+            # model: another model seat answers via the deals ledger; game: the
+            # game's own AI answers a vanilla deal-screen proposal; none: no route.
+            "deal_route": str(row.get("deal_route") or "model"),
         })
     return out
 
@@ -247,10 +250,12 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
         from sidecar.civ6_legality import diplo_actions
 
         allowed = diplo_actions(snapshot, target["player_id"])
+        # Show the choice, never a bare live order: a pasted template line must
+        # not declare war or propose peace (T158: a copied row declared war).
         if "PEACE_TREATY" in allowed:
-            out.append((f"legal.diplomacy.{target['name']}", "PEACE_TREATY"))
+            out.append((f"legal.diplomacy.{target['name']}", "NONE | PEACE_TREATY"))
         elif "DECLARE_WAR" in allowed:
-            out.append((f"legal.diplomacy.{target['name']}", "DECLARE_WAR"))
+            out.append((f"legal.diplomacy.{target['name']}", "NONE | DECLARE_WAR"))
         if target["player_id"].startswith("PLAYER_") and target in _majors(snapshot):
             names.append(target["name"])
     if names:
@@ -260,8 +265,7 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
         out.append(("deal.<Leader>", "give <items> for <items>  (any number of items: <n> gold, <n> gpt, "
                     "<n> RESOURCE_X, or a pact that binds both sides: "
                     + pacts
-                    + "; a peace proposal must also include gold, gpt, "
-                    "or a resource; answered next turn with ACCEPT, REJECT, or COUNTER; "
+                    + "; answered next turn with ACCEPT, REJECT, or COUNTER; "
                     f"Leader = {' | '.join(names)})"))
         out.append(("cmd", "CMD_propose_* or CMD_accept_* copied from a DIPLOMACY deal-status line"))
     # Envoy token setters are not available in a gameplay script. Do not offer them.
@@ -546,12 +550,8 @@ def _has_transfer(items: list) -> bool:
 
 
 def _peace_substance_problem(give: list, want: list) -> str | None:
-    kinds = {i.get("kind") for i in give + want if isinstance(i, dict)}
-    if "peace" not in kinds:
-        return None
-    if _has_transfer(give) or _has_transfer(want):
-        return None
-    return "a peace proposal must include gold, gpt, or a resource"
+    """No extra rule: a plain peace treaty is legal in the game; the other side decides."""
+    return None
 
 
 def _cooldown_problem(snapshot: dict, frm: str, to: str, give: list, want: list) -> str | None:
@@ -769,6 +769,15 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
     if low.startswith("deal."):
         if text.lower() in ("", "none", "skip", "no"):
             return [], []
+        route = str(target.get("deal_route") or "model")
+        if route != "model":
+            # The other side is played by the game's own AI, which does not read
+            # the deals ledger. Peace goes through the game's deal screen.
+            if _norm(text) in {w.upper().replace("_", "") for w in PEACE_WORDS}:
+                return _game_peace(snapshot, key, target)
+            return [], [f"{key}={value}: {name} is played by the game's own AI and does not answer "
+                        "ledger deals; only a peace treaty can be proposed to them (legal.diplomacy."
+                        f"{name} = PEACE_TREATY)"]
         give_text, sep, want_text = re.sub(r"^\s*give\s+", "", text, flags=re.I).partition(" for ")
         if not sep:
             give_text, want_text = "", give_text
@@ -795,9 +804,14 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
                       "turn": _turn(snapshot), "status": "pending"})
         _save(snapshot, deals)
         return [], []
+    if str(text).strip().upper() in ("", "NONE", "SKIP", "NO", "NONE | PEACE_TREATY", "NONE | DECLARE_WAR"):
+        # The template row's no-op choice (or the whole template pasted back).
+        return [], []
     if _norm(text) in {w.upper().replace("_", "") for w in PEACE_WORDS} or str(text).strip().upper().replace(" ", "_") in {
         "PEACE", "PEACE_TREATY", "MAKE_PEACE",
     }:
+        if str(target.get("deal_route") or "model") != "model":
+            return _game_peace(snapshot, key, target)
         # Same offer as deal.<Leader> = peace. The other seat accepts it next turn.
         return bind_reply(snapshot, f"deal.{name}", "peace")
     raw = str(text).strip().upper().replace(" ", "_")
@@ -828,6 +842,25 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         snapshot, "send_diplomatic_action",
         {"target_player_id": pid, "action_id": action},
         f"declare war on {name}",
+    )], []
+
+
+def _game_peace(snapshot: dict, key: str, target: dict) -> tuple[list[str], list[str]]:
+    """Peace with a seat the game's own AI plays: a vanilla deal-screen proposal.
+
+    Only the local seat can send one (deal_route == "game"); the game's AI
+    accepts or rejects it with its own rules.
+    """
+    name = target["name"]
+    if not target.get("at_war"):
+        return [], [f"{key}: you are not at war with {name}"]
+    if str(target.get("deal_route")) != "game":
+        return [], [f"{key}: {name} is played by the game's own AI, and only the host seat can send it "
+                    "a peace proposal through the game's deal screen"]
+    return [_add_command(
+        snapshot, "send_diplomatic_action",
+        {"target_player_id": target["player_id"], "action_id": "PROPOSE_PEACE_DEAL"},
+        f"propose a peace treaty to {name} (the game's AI decides)",
     )], []
 
 

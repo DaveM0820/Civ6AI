@@ -186,8 +186,8 @@ Use only shapes listed here or on unit/city rows.
 Optional JSON keys:
 
   "11.legal.research.tech": "TECH_POTTERY",
-  "12.legal.diplomacy.Cleopatra": "PEACE_TREATY",
-  "13.deal.<Leader>": "give <items> for <items>  (any number of items: <n> gold, <n> gpt, <n> RESOURCE_X, or a pact that binds both sides: peace, friendship, alliance, open_borders, embassy, delegation; a peace proposal must also include gold, gpt, or a resource; answered next turn with ACCEPT, REJECT, or COUNTER; Leader = Cleopatra)",
+  "12.legal.diplomacy.Cleopatra": "NONE | PEACE_TREATY",
+  "13.deal.<Leader>": "give <items> for <items>  (any number of items: <n> gold, <n> gpt, <n> RESOURCE_X, or a pact that binds both sides: peace, friendship, alliance, open_borders, embassy, delegation; answered next turn with ACCEPT, REJECT, or COUNTER; Leader = Cleopatra)",
   "14.cmd": "CMD_propose_* or CMD_accept_* copied from a DIPLOMACY deal-status line",
   "15.chat": "chat.all | chat.Cleopatra",
   "16.map.viewport": "(x,y) to center image 2 next turn, or auto",
