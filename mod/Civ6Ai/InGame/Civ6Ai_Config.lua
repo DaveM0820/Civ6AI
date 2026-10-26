@@ -234,8 +234,10 @@ function Civ6Ai_Config.IsSidecarLive()
   return flag("SidecarLive")
 end
 
+-- 0 (the default) means no stop: the game runs to its end. A positive value
+-- stops the autotest at that turn (short tests only).
 function Civ6Ai_Config.AutotestStopTurn()
-  return tonumber(setting("AutotestStopTurn")) or 50
+  return tonumber(setting("AutotestStopTurn")) or 0
 end
 
 -- 0 off, 2 include a human seat whose orders already ride the gameplay script,

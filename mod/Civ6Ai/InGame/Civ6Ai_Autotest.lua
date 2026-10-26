@@ -71,6 +71,48 @@ function Civ6Ai_Autotest._EnsureSessionId()
   end
 end
 
+-- Turn timer check. The autotest needs turns to advance only when every seat's
+-- answer is in (the seat barrier). A game turn timer ends the host's turn on a
+-- clock instead. The CPL MP Helper "Smart Timer" (any value but 1 = None) sets
+-- TURNTIMER_STANDARD at every turn end, single player included. Returns a
+-- reason string when a timer is on, nil when off. Logged once per reason.
+function Civ6Ai_Autotest.TurnTimerProblem()
+  if GameConfiguration == nil then
+    return nil
+  end
+  local reason = nil
+  if GameConfiguration.GetValue ~= nil then
+    local okS, smart = pcall(GameConfiguration.GetValue, "CPL_SMARTTIMER")
+    if okS and smart ~= nil and tonumber(smart) ~= 1 then
+      reason = "cpl_smart_timer=" .. tostring(smart)
+    end
+  end
+  if reason == nil and GameConfiguration.GetTurnTimerType ~= nil then
+    local okT, timer = pcall(GameConfiguration.GetTurnTimerType)
+    local none = nil
+    if DB ~= nil and DB.MakeHash ~= nil then
+      none = DB.MakeHash("TURNTIMER_NONE")
+    end
+    if okT and timer ~= nil and none ~= nil and timer ~= none and timer ~= "TURNTIMER_NONE" then
+      local name = tostring(timer)
+      if GameInfo ~= nil and GameInfo.TurnTimers ~= nil and GameInfo.TurnTimers[timer] ~= nil then
+        name = tostring(GameInfo.TurnTimers[timer].TurnTimerType)
+      end
+      reason = "turn_timer=" .. name
+    end
+  end
+  if reason ~= nil and Civ6Ai_Autotest._timerLogged ~= reason then
+    Civ6Ai_Autotest._timerLogged = reason
+    Civ6Ai_Util.Log("autotest|refuse|turn_timer_on|" .. reason
+      .. "|fix=set Turn Timer None and MP Helper Smart Timer None in game setup")
+    if Civ6Ai_Chat ~= nil and Civ6Ai_Chat.PanelAdd ~= nil then
+      pcall(Civ6Ai_Chat.PanelAdd, "Civ6AI autotest is off: a turn timer is on (" .. reason
+        .. "). Set Turn Timer and Smart Timer to None.")
+    end
+  end
+  return reason
+end
+
 function Civ6Ai_Autotest.StopTurn()
   return Civ6Ai_Config.AutotestStopTurn()
 end
@@ -81,7 +123,8 @@ function Civ6Ai_Autotest.AfterPulse(playerID)
   end
   if Civ6Ai_Autotest._stopped then
     -- Resume when AutotestStopTurn was raised after a prior stop (no full restart).
-    if Game.GetCurrentGameTurn() < Civ6Ai_Autotest.StopTurn() then
+    local stopAt = Civ6Ai_Autotest.StopTurn()
+    if stopAt == nil or stopAt <= 0 or Game.GetCurrentGameTurn() < stopAt then
       Civ6Ai_Autotest._stopped = false
       Civ6Ai_Util.Log("autotest|resume|turn=" .. tostring(Game.GetCurrentGameTurn())
         .. "|stop_turn=" .. tostring(Civ6Ai_Autotest.StopTurn()))
@@ -120,7 +163,8 @@ function Civ6Ai_Autotest.AfterPulse(playerID)
   elseif p ~= nil and not (Civ6Ai_Apply._IsNetworkMultiplayer ~= nil and Civ6Ai_Apply._IsNetworkMultiplayer()) then
     Civ6Ai_Autotest._EndManagedTurn(playerID)
   end
-  if turn >= Civ6Ai_Autotest.StopTurn() then
+  local stopTurn = Civ6Ai_Autotest.StopTurn()
+  if stopTurn ~= nil and stopTurn > 0 and turn >= stopTurn then
     Civ6Ai_Autotest._WriteSessionSummary()
     Civ6Ai_Autotest._stopped = true
     Civ6Ai_Autotest._LogLine("stop|turn=" .. tostring(turn))

@@ -217,6 +217,45 @@ def _check_runtime_folders() -> Check:
     return check
 
 
+def last_run_turn_timer(lua_log_text: str) -> str | None:
+    """The turn-timer refusal from the most recent autotest boot in Lua.log, if any."""
+    start = lua_log_text.rfind("CIV6AI|autotest|enabled")
+    tail = lua_log_text[start:] if start >= 0 else lua_log_text
+    marker = "CIV6AI|autotest|refuse|turn_timer_on|"
+    at = tail.rfind(marker)
+    if at < 0:
+        return None
+    return tail[at + len(marker):].splitlines()[0].split("|")[0]
+
+
+def _check_turn_timer() -> Check:
+    """Civ6 keeps no readable setup file, so read the last run's in-game timer check.
+
+    The mod refuses to pulse while a turn timer (game setup Turn Timer, or the
+    CPL MP Helper Smart Timer) is on, because the clock ends turns before the
+    AI seats answer. Set both to None in the game setup.
+    """
+    check = Check("Turn timer off (last run)")
+    for logs in logs_dirs():
+        lua = Path(logs) / "Lua.log"
+        if not lua.is_file():
+            continue
+        try:
+            text = lua.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            check.fail(f"cannot read {lua}: {exc}")
+            return check
+        reason = last_run_turn_timer(text)
+        if reason:
+            check.fail(f"last run refused: {reason}. In game setup set Turn Timer = None and "
+                       "MP Helper Smart Timer = None, then relaunch")
+        else:
+            check.pass_(f"no timer refusal in {lua}")
+        return check
+    check.pass_("no Lua.log yet")
+    return check
+
+
 def _check_mod_installed() -> Check:
     check = Check("Civ6Ai mod installed + version match")
     repo_version = read_modinfo_version(ROOT / "mod" / "Civ6Ai" / "Civ6Ai.modinfo")
@@ -380,6 +419,7 @@ def main() -> int:
     checks.append(_check_mod_installed())
     checks.append(_check_live_config())
     checks.append(_check_circuit_breakers())
+    checks.append(_check_turn_timer())
 
     failed = 0
     for check in checks:
