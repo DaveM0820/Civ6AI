@@ -101,6 +101,9 @@ INT_DEFAULTS: dict[str, tuple[int, int, int]] = {
     "CIV6AI_ESCALATION_CLEAN_TURNS": (3, 1, 50),
     # Spend cap per seat per session on escalated turns, in US cents. Over it the seat stays on tier 0.
     "CIV6AI_ESCALATION_COST_CAP_CENTS": (200, 0, 100000),
+    # After an escalated call on turn T the seat stays on its tier-0 model until turn T+N,
+    # whatever the signals say. 0 turns the cooldown off.
+    "CIV6AI_ESCALATION_COOLDOWN_TURNS": (10, 0, 1000),
     # thought.situation token overlap (percent) with the previous turn that counts as a rewrite.
     "CIV6AI_STALE_SITUATION_PERCENT": (60, 1, 100),
     # Same-reason rejections of one order before the prompt lists that unit's legal moves.

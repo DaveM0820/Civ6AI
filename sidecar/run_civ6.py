@@ -778,10 +778,11 @@ def main() -> None:
         from sidecar.civ6_config import load_local_config as _load_cfg
 
         esc = civ6_escalation.decide(snapshot, thought_memory, _load_cfg(), prior_dropped
-                                     if isinstance(prior_dropped, list) else [])
+                                     if isinstance(prior_dropped, list) else [], journal_path=args.journal)
         if esc.get("rung") or esc.get("reason") != "steady":
             print(f"escalation {player_id}: rung {esc.get('rung')}/{esc.get('rungs')} {esc.get('reason')} "
-                  f"hits={esc['signals'].get('hits')} model={esc.get('model')} effort={esc.get('reasoning_effort')}",
+                  f"hits={esc['signals'].get('hits')} model={esc.get('model')} effort={esc.get('reasoning_effort')} "
+                  f"last_escalated={esc.get('last_escalated_turn')}",
                   file=sys.stderr)
     except Exception as error:  # never block a seat-turn on escalation
         print(f"escalation skipped: {error}", file=sys.stderr)

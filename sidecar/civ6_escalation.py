@@ -19,12 +19,18 @@ for the next call; after CIV6AI_ESCALATION_CLEAN_TURNS turns under that it
 steps back down one rung. Rung 0 is the seat's own model config (seat_models,
 env). The ladder is a profile from config "escalation" or env
 CIV6AI_ESCALATION_PROFILE. Escalated spend per seat is capped by
-CIV6AI_ESCALATION_COST_CAP_CENTS. The chosen rung rides on
+CIV6AI_ESCALATION_COST_CAP_CENTS. After an escalated call on turn T the seat
+uses tier 0 until turn T + CIV6AI_ESCALATION_COOLDOWN_TURNS (reason "cooldown";
+the ladder rung is kept, only the call is held back). The last escalated turn
+is kept in the escalation state and, when that is missing (fresh memory), read
+back from the seat's journal. The chosen rung rides on
 snapshot['_escalation'] and civ6_config.apply_seat_runtime applies it, so the
 normal provider path makes the call.
 """
 from __future__ import annotations
 
+import json
+import logging
 import os
 from typing import Any
 
@@ -52,6 +58,7 @@ DEFAULT_PROFILES: dict[str, list[dict[str, str]]] = {
     ],
 }
 DEFAULT_PROFILE = "test"
+log = logging.getLogger(__name__)
 
 
 def _turn(snapshot: dict[str, Any]) -> int:
@@ -136,8 +143,29 @@ def signals(snapshot: dict[str, Any], dropped: list[Any] | None = None) -> dict[
     return out
 
 
+def last_escalated_turn_from_journal(path: Any) -> int | None:
+    """Latest turn whose journal metrics show a call above tier 0, or None."""
+    if not path or not os.path.isfile(str(path)):
+        return None
+    best = None
+    try:
+        with open(str(path), encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                try:
+                    m = _dct(json.loads(line).get("metrics"))
+                except (ValueError, AttributeError):
+                    continue
+                if int(m.get("escalation_rung") or 0) > 0 and m.get("escalation_reason") != "cooldown":
+                    t = m.get("turn")
+                    if isinstance(t, int):
+                        best = t if best is None else max(best, t)
+    except OSError:
+        return None
+    return best
+
+
 def decide(snapshot: dict[str, Any], memory: dict[str, Any] | None, cfg: Any = None,
-           dropped: list[Any] | None = None) -> dict[str, Any]:
+           dropped: list[Any] | None = None, journal_path: Any = None) -> dict[str, Any]:
     """Pick this turn's rung, store state on memory, set snapshot['_escalation']."""
     memory = memory if isinstance(memory, dict) else {}
     turn = _turn(snapshot)
@@ -168,17 +196,31 @@ def decide(snapshot: dict[str, Any], memory: dict[str, Any] | None, cfg: Any = N
     cap = settings.get_int("CIV6AI_ESCALATION_COST_CAP_CENTS") / 100.0
     if rung > 0 and spent >= cap:
         rung, reason = 0, "cost_cap"
-    choice = dict(rungs[rung - 1]) if rung > 0 else {}
+    call_rung = rung
+    last = state.get("last_escalated_turn")
+    if last is None and "last_escalated_turn" not in state:
+        last = last_escalated_turn_from_journal(journal_path)
+    last = int(last) if isinstance(last, (int, float)) else None
+    cooldown = settings.get_int("CIV6AI_ESCALATION_COOLDOWN_TURNS")
+    if call_rung > 0 and cooldown > 0 and last is not None and last != turn and turn < last + cooldown:
+        log.info("escalation suppressed: seat cooldown, turn %s, last escalated %s, next allowed %s (rung %s, hits %s)",
+                 turn, last, last + cooldown, rung, sig["hits"])
+        call_rung, reason = 0, "cooldown"
+    if call_rung > 0:
+        last = turn
+    choice = dict(rungs[call_rung - 1]) if call_rung > 0 else {}
     out = {
-        "turn": turn, "profile": profile, "rung": rung, "rungs": len(rungs), "reason": reason,
+        "turn": turn, "profile": profile, "rung": call_rung, "ladder_rung": rung, "rungs": len(rungs), "reason": reason,
         "signals": sig, "model": choice.get("model"), "reasoning_effort": choice.get("reasoning_effort"),
-        "spent_usd": round(spent, 6), "cap_usd": cap,
+        "spent_usd": round(spent, 6), "cap_usd": cap, "last_escalated_turn": last,
+        "cooldown_turns": cooldown,
     }
     history = [h for h in _lst(state.get("history")) if isinstance(h, dict) and int(h.get("turn") or -1) != turn]
     if reason in ("step_up", "step_down", "cost_cap"):
         history.append({"turn": turn, "rung": rung, "reason": reason, "hits": sig["hits"]})
     memory[STATE_KEY] = {"turn": turn, "base": base, "rung": rung, "clean": clean,
-                         "spent_usd": spent, "history": history[-20:], "profile": profile}
+                         "spent_usd": spent, "history": history[-20:], "profile": profile,
+                         "last_escalated_turn": last}
     snapshot[SNAPSHOT_KEY] = out
     return out
 

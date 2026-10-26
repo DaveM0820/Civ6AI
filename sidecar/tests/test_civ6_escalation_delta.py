@@ -125,6 +125,7 @@ def _clean(turn, tmp_path):
 def test_escalation_ladder_up_down_and_model_override(tmp_path, monkeypatch):
     monkeypatch.delenv("CIV6AI_ESCALATION_PROFILE", raising=False)
     monkeypatch.setenv("CIV6AI_ESCALATION_CLEAN_TURNS", "2")
+    monkeypatch.setenv("CIV6AI_ESCALATION_COOLDOWN_TURNS", "0")  # ladder only; cooldown tested below
     cfg = Civ6AiLocalConfig(provider="openrouter", model="qwen/qwen3.7-flash", reasoning_effort="off",
                             seat_models={"0": {"model": "qwen/qwen3.7-flash", "reasoning_effort": "off"}},
                             escalation={"profile": "test"})
@@ -209,9 +210,63 @@ def test_pipeline_faults_and_pacing_drops_do_not_count(tmp_path, monkeypatch):
 def test_mild_failing_turn_is_not_clean(tmp_path, monkeypatch):
     monkeypatch.delenv("CIV6AI_ESCALATION_PROFILE", raising=False)
     monkeypatch.setenv("CIV6AI_ESCALATION_CLEAN_TURNS", "1")
+    monkeypatch.setenv("CIV6AI_ESCALATION_COOLDOWN_TURNS", "0")
     memory: dict = {}
     assert civ6_escalation.decide(_struggling(5, tmp_path), memory, None, ["r"])["rung"] == 1
     bad = {"kind": results.KIND_FAILED, "reason": "impassable"}
     mild = _results(6, tmp_path, [bad] * 2 + [{"kind": results.KIND_OK, "reason": ""}] * 2)
     assert civ6_escalation.decide(mild, memory, None, [])["rung"] == 1  # one signal: hold, not step down
     assert civ6_escalation.decide(_clean(7, tmp_path), memory, None)["reason"] == "step_down"
+
+
+def _cfg_test():
+    return Civ6AiLocalConfig(provider="openrouter", model="qwen/qwen3.7-flash", reasoning_effort="off",
+                             seat_models={"0": {"model": "qwen/qwen3.7-flash", "reasoning_effort": "off"}},
+                             escalation={"profile": "test"})
+
+
+def test_escalation_cooldown_holds_tier0_for_ten_turns(tmp_path, monkeypatch, caplog):
+    monkeypatch.delenv("CIV6AI_ESCALATION_PROFILE", raising=False)
+    monkeypatch.delenv("CIV6AI_ESCALATION_COOLDOWN_TURNS", raising=False)
+    cfg, memory = _cfg_test(), {}
+    s5 = _struggling(5, tmp_path)
+    assert civ6_escalation.decide(s5, memory, cfg, ["r"])["rung"] == 1
+    assert apply_seat_runtime(cfg, s5).model == civ6_escalation.HAIKU
+    assert civ6_escalation.decide(_struggling(5, tmp_path), memory, cfg, ["r"])["rung"] == 1  # same-turn rerun
+    caplog.set_level("INFO", logger="sidecar.civ6_escalation")
+    for t in range(6, 15):
+        s = _struggling(t, tmp_path)
+        esc = civ6_escalation.decide(s, memory, cfg, ["r"])
+        assert esc["rung"] == 0 and esc["reason"] == "cooldown" and esc["ladder_rung"] >= 1
+        assert apply_seat_runtime(cfg, s).model == "qwen/qwen3.7-flash"
+    assert "escalation suppressed" in caplog.text
+    s15 = _struggling(15, tmp_path)
+    assert civ6_escalation.decide(s15, memory, cfg, ["r"])["rung"] >= 1
+    assert apply_seat_runtime(cfg, s15).model == civ6_escalation.HAIKU
+    assert memory["escalation"]["last_escalated_turn"] == 15
+
+
+def test_escalation_cooldown_configurable_and_off(tmp_path, monkeypatch):
+    monkeypatch.delenv("CIV6AI_ESCALATION_PROFILE", raising=False)
+    monkeypatch.setenv("CIV6AI_ESCALATION_COOLDOWN_TURNS", "3")
+    cfg, memory = _cfg_test(), {}
+    assert civ6_escalation.decide(_struggling(5, tmp_path), memory, cfg, ["r"])["rung"] == 1
+    assert civ6_escalation.decide(_struggling(7, tmp_path), memory, cfg, ["r"])["reason"] == "cooldown"
+    assert civ6_escalation.decide(_struggling(8, tmp_path), memory, cfg, ["r"])["rung"] == 2
+    monkeypatch.setenv("CIV6AI_ESCALATION_COOLDOWN_TURNS", "0")
+    assert civ6_escalation.decide(_struggling(9, tmp_path), memory, cfg, ["r"])["reason"] == "at_top"
+
+
+def test_escalation_cooldown_survives_restart_via_journal(tmp_path, monkeypatch):
+    monkeypatch.delenv("CIV6AI_ESCALATION_PROFILE", raising=False)
+    monkeypatch.delenv("CIV6AI_ESCALATION_COOLDOWN_TURNS", raising=False)
+    journal = tmp_path / "journal.jsonl"
+    rows = [{"metrics": {"turn": 40, "escalation_rung": 1, "escalation_reason": "step_up"}},
+            {"metrics": {"turn": 44, "escalation_rung": 0, "escalation_reason": "cooldown"}}]
+    journal.write_text("\n".join(json.dumps(r) for r in rows) + "\nnot json\n", encoding="utf-8")
+    assert civ6_escalation.last_escalated_turn_from_journal(journal) == 40
+    cfg = _cfg_test()
+    esc = civ6_escalation.decide(_struggling(45, tmp_path), {}, cfg, ["r"], journal_path=journal)
+    assert esc["rung"] == 0 and esc["reason"] == "cooldown" and esc["last_escalated_turn"] == 40
+    esc = civ6_escalation.decide(_struggling(50, tmp_path), {}, cfg, ["r"], journal_path=journal)
+    assert esc["rung"] == 1
