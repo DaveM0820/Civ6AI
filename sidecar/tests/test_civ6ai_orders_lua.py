@@ -1123,6 +1123,22 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertEqual(self.rt.eval("#Players[1].units"), 1)
         self.assertEqual(self.rt.eval("Players[2].units[1].y"), 11)
 
+    def test_kill_runs_when_engine_already_reports_dead(self):
+        # IsDead() is true at max damage; the kill must still run (corpse bug).
+        self.rt.execute("Players[2].war = {[1]=true}; local e = MkUnit(1,3,10,11,0); e.dmg = 80;"
+                        " function e:IsDead() return self.dmg >= 100 end;"
+                        " table.insert(Players[1].units, e)")
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=13)
+        self.assertIn("killed=true", self.last()["reason"])
+        self.assertEqual(self.rt.eval("#Players[1].units"), 1)
+
+    def test_zero_hp_leftover_is_removed_not_targeted(self):
+        self.rt.execute("Players[2].war = {[1]=true}; local e = MkUnit(1,3,10,11,0); e.dmg = 100;"
+                        " table.insert(Players[1].units, e)")
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=13)
+        self.assertEqual(self.rt.eval("#Players[1].units"), 1)
+        self.assertNotIn("def_dmg=100>100", self.last()["reason"])
+
     def test_far_move_uses_path_route(self):
         self.rt.execute(
             "ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = function(p,u,x,y) "

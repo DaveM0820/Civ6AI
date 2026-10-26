@@ -1008,7 +1008,9 @@ function Civ6Ai_Orders._Defender(x, y, owner)
     return nil
   end
   for _, other in ipairs(Units.GetUnitsInPlot(plot) or {}) do
-    if other:GetOwner() ~= owner then
+    if other:GetOwner() ~= owner and Civ6Ai_Orders._RemoveDead(other) then
+      -- a 0 HP unit left over from an earlier scripted hit; it is gone now
+    elseif other:GetOwner() ~= owner then
       local row = GameInfo.Units[other:GetType()]
       local strength = row ~= nil and (num(row.Combat) or 0) or 0
       if strength > bestStrength then
@@ -1026,7 +1028,9 @@ function Civ6Ai_Orders._DefenderDamage(x, y, owner)
     return 0, 0
   end
   for _, other in ipairs(Units.GetUnitsInPlot(plot) or {}) do
-    if other:GetOwner() ~= owner then
+    if other:GetOwner() ~= owner and Civ6Ai_Orders._RemoveDead(other) then
+      -- removed: a dead unit does not defend
+    elseif other:GetOwner() ~= owner then
       total = total + (call(other, "GetDamage") or 0)
       count = count + 1
     end
@@ -1153,6 +1157,22 @@ function Civ6Ai_Orders._IsDead(target)
   return call(target, "IsDead") == true or (call(target, "GetDamage") or 0) >= max
 end
 
+-- A unit at 0 HP leaves the map, as in real combat. Damage set by script does
+-- not run the engine's death clean-up, and IsDead() is already true at max
+-- damage, so the kill is never gated on IsDead. Kill(unit, false) = no delay.
+function Civ6Ai_Orders._RemoveDead(target)
+  if target == nil or UnitManager == nil or UnitManager.Kill == nil then
+    return false
+  end
+  if not Civ6Ai_Orders._IsDead(target) then
+    return false
+  end
+  local ok = pcall(UnitManager.Kill, target, false)
+  log("combat|remove_dead|owner=" .. tostring(call(target, "GetOwner")) .. "|unit=" .. tostring(call(target, "GetID"))
+    .. "|ok=" .. tostring(ok))
+  return ok
+end
+
 Civ6Ai_Orders.ATTACK_XP = { melee = 3, ranged = 2, kill_bonus = 2 }
 
 -- Hit points left on one district defense layer. Damage at or past the max is 0.
@@ -1262,11 +1282,11 @@ function Civ6Ai_Orders._ResolveAttack(unit, x, y)
   if not killed and toDefender > 0 and defAfter == defBefore then
     return false, "no_effect:damage_not_applied:forecast=" .. tostring(toDefender)
   end
-  if killed and call(defender, "IsDead") ~= true then
-    pcall(UnitManager.Kill, defender)
+  if killed then
+    Civ6Ai_Orders._RemoveDead(defender)
   end
   if lost then
-    pcall(UnitManager.Kill, unit)
+    Civ6Ai_Orders._RemoveDead(unit)
   else
     local exp = call(unit, "GetExperience")
     local xp = (ranged and Civ6Ai_Orders.ATTACK_XP.ranged or Civ6Ai_Orders.ATTACK_XP.melee)
@@ -1326,6 +1346,7 @@ function Civ6Ai_Orders._AttackCity(unit, x, y, ranged)
   call(district, "ChangeDamage", garrison, toCity - w)
   if not ranged then
     Civ6Ai_Orders._ChangeDamage(unit, toAttacker)
+    Civ6Ai_Orders._RemoveDead(unit)
   end
   local after = Civ6Ai_Orders._CityHitPoints(district)
   if after >= before then

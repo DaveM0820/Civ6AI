@@ -2363,7 +2363,7 @@ function Civ6Ai_Snapshot._ThreatFacts(playerID)
       local land = Civ6Ai_Production ~= nil and Civ6Ai_Production.LandCombat(u)
       if o == playerID then
         if land then out.defenders = out.defenders + 1 end
-      elseif visible and land then
+      elseif visible and land and not Civ6Ai_Snapshot._UnitDead(u) then
         local kind = Civ6Ai_Snapshot._PlayerKind(o)
         local war = diplo ~= nil and Civ6Ai_Snapshot._Method(diplo, "IsAtWarWith", o) == true
         if kind == "barbarian" or war then
@@ -3470,7 +3470,8 @@ function Civ6Ai_Snapshot._EnemyAtPlot(playerID, plot)
   local unitsOk, units = pcall(function() return Units.GetUnitsInPlot(plot) end)
   if unitsOk and units ~= nil then
     for _, other in ipairs(units) do
-      if other ~= nil and Civ6Ai_Snapshot._IsEnemyOwner(playerID, other:GetOwner()) then
+      if other ~= nil and Civ6Ai_Snapshot._IsEnemyOwner(playerID, other:GetOwner())
+          and not Civ6Ai_Snapshot._UnitDead(other) then
         return "unit"
       end
     end
@@ -4355,6 +4356,21 @@ function Civ6Ai_Snapshot._CityCenterDistrict(city)
 end
 
 -- Visible hostile units and cities (at war or barbarian) for this player.
+-- A unit at 0 HP (damage at its max) is dead: not a target, not a threat.
+function Civ6Ai_Snapshot._UnitDead(unit)
+  if unit == nil then
+    return true
+  end
+  local ok, dead = pcall(function()
+    if unit.IsDead ~= nil and unit:IsDead() == true then
+      return true
+    end
+    local max = unit.GetMaxDamage ~= nil and unit:GetMaxDamage() or 100
+    return unit.GetDamage ~= nil and (unit:GetDamage() or 0) >= (max or 100)
+  end)
+  return ok and dead == true
+end
+
 function Civ6Ai_Snapshot._VisibleHostiles(playerID)
   local vis = PlayersVisibility ~= nil and PlayersVisibility[playerID] or nil
   local units, cities = {}, {}
@@ -4368,7 +4384,7 @@ function Civ6Ai_Snapshot._VisibleHostiles(playerID)
           local okV, visible = pcall(function()
             return unit:GetX() >= 0 and vis:IsVisible(Map.GetPlot(unit:GetX(), unit:GetY()):GetIndex())
           end)
-          if okV and visible then
+          if okV and visible and not Civ6Ai_Snapshot._UnitDead(unit) then
             local stats = Civ6Ai_Snapshot._CombatUnitStats(unit)
             stats.unit = unit
             stats.unit_id = "UNIT_" .. tostring(otherID) .. "_" .. tostring(unit:GetID())
