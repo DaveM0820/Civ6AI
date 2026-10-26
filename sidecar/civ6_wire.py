@@ -1036,6 +1036,15 @@ def _compact_city_alert_lines(snapshot: dict[str, Any], city: dict[str, Any], na
     return lines
 
 
+def _unit_idle_for(context: dict[str, Any], unit_id: str) -> int:
+    """Turns since this unit's last successful order or move (civ6_economy tracking)."""
+    tracking = ((context.get("civ6") or {}).get("economy") or {}).get("tracking") if isinstance(
+        context.get("civ6"), dict) else None
+    idle = tracking.get("idle_for") if isinstance(tracking, dict) else None
+    n = idle.get(unit_id) if isinstance(idle, dict) else None
+    return n if isinstance(n, int) and n > 0 else 0
+
+
 def _empire_section(
     context: dict[str, Any],
     *,
@@ -1150,6 +1159,10 @@ def _empire_section(
                     lines.append(pipeline._wire_line(f"{prefix}.hp", f"{pct}%"))
                 if unit.get("needs_orders"):
                     lines.append(f"***{prefix}.needsOrders = true***")
+                idle_n = _unit_idle_for(context, unit_id)
+                if idle_n:
+                    lines.append(pipeline._wire_line(
+                        f"{prefix}.idle", f"{idle_n} turn{'s' if idle_n != 1 else ''} since its last successful order or move"))
                 if not unit_compact and unit.get("promotion_ready"):
                     lines.append(pipeline._wire_line(f"{prefix}.promotionReady", True))
                 if not unit_compact:

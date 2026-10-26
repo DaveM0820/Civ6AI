@@ -126,7 +126,7 @@ class LegalityLayerTests(unittest.TestCase):
         self.assertEqual(hints["UNIT_W"]["role"], "defend")
         self.assertNotIn("target_x", hints["UNIT_W"])  # no threatened city: fortify in Lua
         self.assertEqual(hints["UNIT_B"]["role"], "improve")
-        self.assertEqual(hints["UNIT_S"]["role"], "explore")
+        self.assertNotIn("UNIT_S", hints)  # no explore fallback: the model moves scouts
         line = legal.idle_prompt_line(snap)
         self.assertIn("host default applied", line)
         self.assertIn("UNIT_WARRIOR", line)

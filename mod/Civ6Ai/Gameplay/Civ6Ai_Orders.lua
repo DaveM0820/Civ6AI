@@ -1565,7 +1565,6 @@ Civ6Ai_Orders.HINT_ROLE = { EXPLORE = 1, IMPROVE = 2, DEFEND = 3, SETTLE = 4, PR
 Civ6Ai_Orders.FALLBACKS = {
   { name = "combat", seat = "_AutoRanged", gated = true },
   { name = "goal", unit = "_FbGoal" },
-  { name = "explore", unit = "_FbExplore" },
   { name = "settle", unit = "_FbSettle" },
   { name = "improve", unit = "_FbImprove" },
   { name = "defend", unit = "_FbDefend" },
@@ -2376,11 +2375,58 @@ function Civ6Ai_Orders._DropUnplayedQueue(owner)
     Civ6Ai_Orders._Record(sender, o, false, "queue_replaced:" .. tostring(oldT))
   end
   Civ6Ai_Orders._LogAttackBatch(owner, oldT, 0, attacks, "queue_replaced")
-  log("queue_replaced|player=" .. tostring(owner) .. "|old_turn=" .. tostring(oldT) .. "|orders=" .. tostring(n))
+  log("queue_replaced|player=" .. tostring(owner) .. "|old_turn=" .. tostring(oldT) .. "|orders=" .. tostring(n)
+    .. "|started=" .. tostring(Civ6Ai_Orders._StartedTurn(owner)) .. "|game_turn=" .. tostring(Game.GetCurrentGameTurn())
+    .. "|active=" .. tostring(call(Players[owner], "IsTurnActive")))
+end
+
+-- Order identity inside one seat-turn queue: a later order for the same unit
+-- and kind (or the same empire-level kind and target) supersedes the earlier one.
+local function orderKey(o)
+  if o.U ~= nil and o.U >= 0 then
+    return "U" .. tostring(o.U) .. ":" .. tostring(o.K) .. ":" .. tostring(o.A or -1)
+  end
+  return "K" .. tostring(o.K) .. ":" .. tostring(o.I or -1) .. ":" .. tostring(o.A or -1)
+end
+Civ6Ai_Orders._OrderKey = orderKey
+
+-- One queue per seat per turn. A second batch for the same turn merges into
+-- the queued one (same unit and kind: the newer order wins), so nothing is
+-- dropped and the seat's turn still plays exactly one batch.
+function Civ6Ai_Orders._MergeQueued(owner, turn, orders)
+  local oldT = num(Game:GetProperty(qkey(owner, "T")))
+  if oldT == nil or oldT ~= turn then
+    return orders, false
+  end
+  local merged, at = {}, {}
+  for j = 1, num(Game:GetProperty(qkey(owner, "N"))) or 0 do
+    local o = { P = owner }
+    for _, f in ipairs(Civ6Ai_Orders.QUEUE_FIELDS) do
+      o[f] = num(Game:GetProperty(qkey(owner, j .. "_" .. f)))
+    end
+    merged[#merged + 1] = o
+    at[orderKey(o)] = #merged
+  end
+  for _, o in ipairs(orders) do
+    local k = orderKey(o)
+    if at[k] ~= nil then
+      merged[at[k]] = o
+    else
+      merged[#merged + 1] = o
+      at[k] = #merged
+    end
+  end
+  log("queue_merged|player=" .. tostring(owner) .. "|turn=" .. tostring(turn) .. "|orders=" .. #merged)
+  return merged, true
 end
 
 function Civ6Ai_Orders._Store(sender, owner, turn, orders, autoMode)
-  Civ6Ai_Orders._DropUnplayedQueue(owner)
+  local mergedOrders, merged = Civ6Ai_Orders._MergeQueued(owner, turn, orders)
+  if merged then
+    orders = mergedOrders
+  else
+    Civ6Ai_Orders._DropUnplayedQueue(owner)
+  end
   for j, o in ipairs(orders) do
     for _, f in ipairs(Civ6Ai_Orders.QUEUE_FIELDS) do
       Game:SetProperty(qkey(owner, j .. "_" .. f), o[f] or -1)

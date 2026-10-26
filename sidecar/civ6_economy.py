@@ -146,6 +146,19 @@ def update_tracking(snapshot: dict[str, Any], state_dir: Path | str | None) -> d
 
     new_units: dict[str, Any] = {}
     idle_turns: dict[str, int] = {}
+    idle_for: dict[str, int] = {}
+    ok_turn: dict[str, int] = {}  # unit id -> latest decision turn with a successful order
+    history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
+    for item in history.get("command_results") or []:
+        if not isinstance(item, dict) or item.get("kind") != "APPLY_OK":
+            continue
+        try:
+            t_ok = int(item.get("turn") or 0)
+        except (TypeError, ValueError):
+            continue
+        for ref in item.get("affected_ids") or []:
+            if isinstance(ref, str) and ref.startswith("UNIT_"):
+                ok_turn[ref] = max(ok_turn.get(ref, 0), t_ok)
     for unit in snapshot.get("your_units") or []:
         if not isinstance(unit, dict) or not isinstance(unit.get("unit_id"), str):
             continue
@@ -165,6 +178,17 @@ def update_tracking(snapshot: dict[str, Any], state_dir: Path | str | None) -> d
                     record["idle_since"] = prev_since
                 else:
                     record["idle_since"] = turn
+        if prev is not None and int(prev.get("turn", -1)) == turn and "last_active" in prev:
+            pass
+        else:
+            prev_active = prev.get("last_active") if prev is not None else None
+            moved = prev is None or prev.get("plot") != plot
+            active = turn if moved or not isinstance(prev_active, int) else prev_active
+            if unit_id in ok_turn:
+                active = max(active, ok_turn[unit_id])
+            record["last_active"] = active
+        if isinstance(record.get("last_active"), int):
+            idle_for[unit_id] = max(0, turn - int(record["last_active"]))
         new_units[unit_id] = record
         if needs and isinstance(record.get("idle_since"), int):
             idle_turns[unit_id] = max(0, turn - int(record["idle_since"]))
@@ -191,7 +215,8 @@ def update_tracking(snapshot: dict[str, Any], state_dir: Path | str | None) -> d
     if isinstance(civ6, dict):
         economy = civ6.setdefault("economy", {})
         if isinstance(economy, dict):
-            economy["tracking"] = {"turn": turn, "idle_turns": idle_turns, "notification_turns": note_turns}
+            economy["tracking"] = {"turn": turn, "idle_turns": idle_turns, "idle_for": idle_for,
+                                   "notification_turns": note_turns}
     return {"idle_turns": idle_turns, "notification_turns": note_turns}
 
 

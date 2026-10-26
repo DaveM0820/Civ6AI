@@ -548,6 +548,9 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
     return Civ6Ai_Apply._Deal(playerID, command, args)
   end
   if command.kind == "explore" then
+    return false, "explore_removed", args
+  end
+  if false then
     return Civ6Ai_Apply._Work(playerID, command, args)
   end
   if command.kind == "trade_route" then

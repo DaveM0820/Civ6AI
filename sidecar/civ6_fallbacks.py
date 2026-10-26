@@ -153,7 +153,7 @@ def unit_hints(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         action = legality.ROLE_DEFAULTS.get(legality.unit_role(unit) or "")
         if action == "explore":
-            out.append(_hint(uid, "explore", frontier_target(snapshot, unit)))
+            continue  # no explore fallback: the model orders scouts with move_unit
         elif action == "improve":
             target = improve_tile(snapshot, unit)
             if target is not None:

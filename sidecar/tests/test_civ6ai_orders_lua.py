@@ -776,9 +776,26 @@ class OrdersGameplayTests(unittest.TestCase):
             for line in logs
         ), logs)
 
-    def test_replaced_queue_records_the_attack_it_dropped(self):
+    def test_second_batch_same_turn_merges_into_one_queue(self):
+        # One queue per seat per turn: a second batch for the same turn merges, nothing is dropped.
         self.order(0, K=7, P=2, U=7, X=10, Y=11, S=1, B=1, J=1, N=1, T=6)
         self.order(0, K=2, P=2, I=4, S=2, B=2, J=1, N=1, T=6)
+        reasons = [r["reason"] for r in (self.results() or [])]
+        self.assertFalse(any(str(r).startswith("queue_replaced") for r in reasons), reasons)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_Q_2_N')"), 2)
+        logs = list(self.rt.eval("logs").values())
+        self.assertTrue(any("queue_merged|player=2|turn=6|orders=2" in line for line in logs), logs)
+
+    def test_same_unit_order_in_second_batch_supersedes(self):
+        self.order(0, K=1, P=2, U=7, X=10, Y=11, S=1, B=1, J=1, N=1, T=6)
+        self.order(0, K=1, P=2, U=7, X=12, Y=11, S=2, B=2, J=1, N=1, T=6)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_Q_2_N')"), 1)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_Q_2_1_X')"), 12)
+
+    def test_replaced_queue_records_the_attack_it_dropped(self):
+        self.order(0, K=7, P=2, U=7, X=10, Y=11, S=1, B=1, J=1, N=1, T=6)
+        self.rt.globals().SetTurn(6)
+        self.order(0, K=2, P=2, I=4, S=2, B=2, J=1, N=1, T=7)
         reasons = [r["reason"] for r in self.results()]
         self.assertIn("queue_replaced:6", reasons)
         logs = list(self.rt.eval("logs").values())

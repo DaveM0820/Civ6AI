@@ -4732,7 +4732,7 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
         Civ6Ai_Snapshot._AddPillageCommand(commands, unit, unitId)
         Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
         pcall(Civ6Ai_Snapshot._AddTradeRouteCommands, commands, playerID, unit, unitId)
-        pcall(Civ6Ai_Snapshot._AddExploreCommand, commands, unit, unitId)
+        -- No explore/automate-explore command: the model moves units itself (move_unit, embark).
         local okB, whyB = pcall(Civ6Ai_Snapshot._AddBuilderImproveCommands, commands, playerID, unit, unitId)
         if not okB then Civ6Ai_Util.Log("snapshot|improve_error|" .. tostring(whyB)) end
         pcall(Civ6Ai_Snapshot._AddActivateCommand, commands, playerID, unit, unitId)
