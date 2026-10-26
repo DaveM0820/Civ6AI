@@ -246,6 +246,28 @@ def _write_io_log(journal: Path, suffix: str, payload: dict) -> Path:
     return path
 
 
+def _archive_turn_io(journal: Path, player_id: object, snapshot: dict, wire_text: str, turn: object) -> Path | None:
+    """Keep every turn's full prompt and reply: prompts/P{n}_T{turn}.txt.gz beside the journal."""
+    try:
+        import gzip
+        import re
+
+        num = re.sub(r"\D", "", str(player_id)) or str(player_id)
+        t = int(snapshot.get("decision", {}).get("turn", 0))
+        out_dir = journal.parent / "prompts"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"P{num}_T{t}.txt.gz"
+        raw = getattr(turn, "raw_model_response", None)
+        reply = raw if isinstance(raw, str) else pipeline.canonical_json(raw if raw is not None else getattr(turn, "record", {}).get("response"))
+        body = f"=== PROMPT P{num} T{t} ===\n{wire_text}\n\n=== RESPONSE ===\n{reply}\n"
+        with gzip.open(path, "wt", encoding="utf-8") as fh:
+            fh.write(body)
+        return path
+    except Exception as error:  # archiving must never break a turn
+        print(f"prompt archive skipped: {error}", file=sys.stderr)
+        return None
+
+
 _load_circuit_breaker = runner_core.load_circuit_breaker
 
 _save_circuit_breaker = runner_core.save_circuit_breaker
@@ -904,6 +926,7 @@ def main() -> None:
         call=_call, build=_build, persist=_persist, write_io_log=_write_io_log,
     )
     record = turn.record
+    _archive_turn_io(args.journal, player_id, snapshot, wire_text, turn)
     llm_ms = turn.timings["llm_ms"]
     parse_ms = turn.timings["parse_ms"]
 
