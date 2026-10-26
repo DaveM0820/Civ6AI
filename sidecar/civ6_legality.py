@@ -479,7 +479,8 @@ def _move_rejection_text(snapshot: dict[str, Any], args: dict[str, Any], problem
     uid = str(args.get("unit_id") or "")
     units = [u for u in snapshot.get("your_units") or [] if isinstance(u, dict)]
     name = pipeline._build_unit_wire_id_map(units).get(uid, uid)
-    return civ6_apply_results.move_failure_text(snapshot, name, x, y, problem, "")
+    unit = next((u for u in units if str(u.get("unit_id")) == uid), {})
+    return civ6_apply_results.move_failure_text(snapshot, name, x, y, problem, "", str(unit.get("domain_id") or ""))
 
 
 def _legality_rule(snapshot: dict[str, Any], ctx: dict[str, Any]):

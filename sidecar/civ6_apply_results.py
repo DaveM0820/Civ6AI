@@ -537,15 +537,23 @@ _MOVE_TAIL = ("Try a different tile. Remember to check the map before issuing mo
               "to make sure it's a valid tile.")
 
 
-def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reason: str, pid: str) -> str:
+def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reason: str, pid: str,
+                      domain: str = "") -> str:
     """'You tried to move Warrior 1 to tile (x,y). Tile (x,y) is a mountain and is impassable. ...'"""
     facts = _plot_facts(snapshot, x, y, pid)
+    sea = domain == "DOMAIN_SEA"
+    known = "tile not explored" not in facts
     if reason in NO_EFFECT_REASONS:
         why = "the tile it was already on"
-    elif "mountain" in facts or reason == "impassable":
+    elif "mountain" in facts:
         why = "a mountain and is impassable"
-    elif "water" in facts:
+    elif sea and known and "water" not in facts:
+        why = "land; ships can't enter land tiles"
+    elif "water" in facts and not sea:
         why = "water (this unit cannot enter it)"
+    elif reason == "impassable":
+        why = ("not water; ships can't enter land tiles" if sea
+               else "impassable for this unit (mountain, or water it cannot enter)")
     elif any(f.startswith("occupied by") for f in facts):
         why = next(f for f in facts if f.startswith("occupied by")) + " (two units of the same kind cannot share a tile)"
     elif "tile not explored" in facts:
@@ -566,7 +574,9 @@ def tile_failure_text(snapshot: dict[str, Any], row: dict[str, Any], actor: str,
     action = TILE_ACTIONS[kind].format(actor=actor or "the unit", build=build or "it")
     pid = str(snapshot.get("player_id") or (snapshot.get("decision") or {}).get("player_id") or "")
     if kind == "move_unit":
-        return move_failure_text(snapshot, actor, x, y, reason, pid)
+        unit = next((u for u in snapshot.get("your_units") or [] if isinstance(u, dict)
+                     and str(u.get("unit_id")) == str(fixed.get("unit_id"))), {})
+        return move_failure_text(snapshot, actor, x, y, reason, pid, str(unit.get("domain_id") or ""))
     reasons = [r for r in [describe_reason(reason) or "the game rejected it"] + _plot_facts(snapshot, x, y, pid) if r]
     return f"Last turn you tried to {action} ({x},{y}) but it failed: " + " | ".join(dict.fromkeys(reasons))
 
