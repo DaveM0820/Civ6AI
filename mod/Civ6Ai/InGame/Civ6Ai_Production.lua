@@ -1195,9 +1195,6 @@ end
 -- Read-only log of every finished build (all seats), for measuring the
 -- settler share: production|completed|player=|turn=|item=.
 function Civ6Ai_Production.OnProductionCompleted(playerID, cityID, orderType, itemType, canceled)
-  if canceled == true then
-    return
-  end
   local name = tostring(itemType)
   pcall(function()
     for _, t in ipairs({ "Units", "Buildings", "Districts", "Projects" }) do
@@ -1210,5 +1207,5 @@ function Civ6Ai_Production.OnProductionCompleted(playerID, cityID, orderType, it
   end)
   local turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or -1
   Civ6Ai_Util.Log("production|completed|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
-    .. "|city=" .. tostring(cityID) .. "|order=" .. tostring(orderType) .. "|item=" .. name)
+    .. "|city=" .. tostring(cityID) .. "|order=" .. tostring(orderType) .. "|canceled=" .. tostring(canceled) .. "|item=" .. name)
 end

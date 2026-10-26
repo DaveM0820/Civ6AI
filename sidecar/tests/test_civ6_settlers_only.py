@@ -58,3 +58,45 @@ class SettlersOnlyWeightTest(unittest.TestCase):
         cat = P.BY_KEY["settlers_only"]
         self.assertEqual(P.scaled(cat["pseudo"]["PSEUDOYIELD_UNIT_SETTLER"], 3), 1000)
         self.assertEqual(P.scaled(cat["pseudo"]["PSEUDOYIELD_IMPROVEMENT"], 3), -100)
+
+
+try:
+    import lupa as _lupa
+except ImportError:  # pragma: no cover
+    _lupa = None
+
+
+@unittest.skipIf(_lupa is None, "lupa not installed")
+class EarlyLockGameplayTest(unittest.TestCase):
+    def _rt(self, cities, human=False):
+        from sidecar.tests import test_civ6ai_orders_lua as T
+        rt = _lupa.LuaRuntime(unpack_returned_tuples=True)
+        rt.execute(T.FAKE_ENV)
+        rt.execute((T.MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text())
+        rt.execute("""
+          Players[6] = { IsHuman = function() return %s end, IsMajor = function() return true end,
+            GetCities = function() return { GetCount = function() return %d end } end }
+        """ % ("true" if human else "false", cities))
+        return rt, rt.globals().Civ6Ai_Orders
+
+    def _levels(self, O):
+        ids = {c["key"]: c["id"] for c in P.CATEGORIES}
+        return {k: O.PriorityLevel(6, ids[k]) for k in ("peace", "expansion", "improvements", "war")}
+
+    def test_ai_seat_below_three_cities_gets_early_set(self):
+        rt, O = self._rt(2)
+        O.PriorityLevel  # exists
+        self.assertTrue(O.ApplyEarlyLock(6))
+        self.assertEqual(self._levels(O), {"peace": 1, "expansion": 3, "improvements": 1, "war": 0})
+
+    def test_three_cities_or_human_untouched(self):
+        for cities, human in ((3, False), (1, True)):
+            rt, O = self._rt(cities, human)
+            self.assertFalse(O.ApplyEarlyLock(6))
+            self.assertEqual(self._levels(O)["expansion"], 0)
+
+    def test_matches_sidecar_early_set(self):
+        rt, O = self._rt(1)
+        want = {P.BY_ID[c]["key"]: l for c, l in P.early_levels().items()}
+        got = {k: v for k, v in dict(O.EARLY_SET.items()).items()}
+        self.assertEqual(want, got)

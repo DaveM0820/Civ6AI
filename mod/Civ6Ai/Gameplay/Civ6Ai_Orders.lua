@@ -1676,6 +1676,8 @@ end
 
 -- Empty production: the sidecar's priority packets, unless the model set priorities.
 function Civ6Ai_Orders._FbPriority(sender, owner, handled, mode, hints)
+  log("fb_priority|player=" .. tostring(owner) .. "|hints=" .. tostring(#(hints.empire or {}))
+    .. "|handled=" .. tostring(Civ6Ai_Orders._WasHandled(handled, "empire", "priority")))
   if Civ6Ai_Orders._WasHandled(handled, "empire", "priority") then
     return
   end
@@ -2464,6 +2466,7 @@ function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
   local turn = Game.GetCurrentGameTurn()
   log("turn_start|player=" .. tostring(owner) .. "|turn=" .. tostring(turn))
   Game:SetProperty("CIV6AI_STARTED_" .. tostring(owner), turn)
+  pcall(Civ6Ai_Orders.ApplyEarlyLock, owner)
   local t, sender, orders, autoMode = Civ6Ai_Orders._Take(owner)
   if t == turn then
     log("queue_apply|player=" .. tostring(owner) .. "|turn=" .. turn .. "|orders=" .. #orders)
@@ -5642,3 +5645,35 @@ function Civ6Ai_Orders.Init()
 end
 
 Civ6Ai_Orders.Init()
+
+
+-- Below EARLY_CITY_LIMIT cities an AI seat runs the fixed EARLY_SET build
+-- priorities (mirrors sidecar civ6_priorities.EARLY_SET). Gameplay context at
+-- turn start, so every client sets the same synced properties; it does not
+-- depend on the sidecar's hint packets reaching the fallback pass.
+Civ6Ai_Orders.EARLY_CITY_LIMIT = 3
+Civ6Ai_Orders.EARLY_SET = { peace = 1, expansion = 3, improvements = 1 }
+
+function Civ6Ai_Orders.ApplyEarlyLock(owner)
+  local p = Players ~= nil and Players[owner] or nil
+  if p == nil or call(p, "IsHuman") or call(p, "IsMajor") == false then
+    return false
+  end
+  local cities = call(p, "GetCities")
+  local n = cities ~= nil and call(cities, "GetCount") or nil
+  if n == nil or n < 1 or n >= Civ6Ai_Orders.EARLY_CITY_LIMIT then
+    return false
+  end
+  local changed = 0
+  for _, cat in ipairs(Civ6Ai_Orders.PRIORITY_IDS) do
+    local want = Civ6Ai_Orders.EARLY_SET[cat.key] or 0
+    if Civ6Ai_Orders.PriorityLevel(owner, cat.id) ~= want then
+      setPrio(owner, cat.id, want)
+      changed = changed + 1
+    end
+  end
+  if changed > 0 then
+    log("early_lock|player=" .. tostring(owner) .. "|cities=" .. tostring(n) .. "|now=" .. prioText(owner))
+  end
+  return true
+end
