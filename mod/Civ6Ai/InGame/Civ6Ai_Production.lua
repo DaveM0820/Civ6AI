@@ -1164,6 +1164,15 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
       if pick ~= nil then
         local params = {}
         params[pick.param] = pick.hash
+        -- The vanilla production panel always sends an insert mode
+        -- (GetBuildInsertMode: REPLACE_AT slot 0 when the queue is closed).
+        -- Without it the request was accepted by the call but never landed in
+        -- the capital's queue (P0 Stirling empty T50-T61, a build "requested"
+        -- every turn).
+        if CityOperationTypes.PARAM_INSERT_MODE ~= nil and CityOperationTypes.VALUE_REPLACE_AT ~= nil then
+          params[CityOperationTypes.PARAM_INSERT_MODE] = CityOperationTypes.VALUE_REPLACE_AT
+          params[CityOperationTypes.PARAM_QUEUE_DESTINATION_LOCATION] = 0
+        end
         local ok = pcall(CityManager.RequestOperation, city, CityOperationTypes.BUILD, params)
         outcome = ok and "requested" or "request_error"
         if ok then

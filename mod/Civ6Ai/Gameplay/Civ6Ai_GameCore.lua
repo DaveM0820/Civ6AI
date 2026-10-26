@@ -518,6 +518,21 @@ function Civ6Ai_GameCore.CanMoveUnitToForPlayer(playerID, unitNumericId, x, y, p
   return true, ""
 end
 
+-- After a successful scripted step: leave the unit with before - cost moves
+-- (never more than it had, never below 0). Returns the moves now left.
+function Civ6Ai_GameCore._ChargeStep(unit, before, cost)
+  local now = Civ6Ai_GameCore._Call(unit, "GetMovesRemaining") or 0
+  if type(before) ~= "number" or type(cost) ~= "number" then
+    return now
+  end
+  local want = math.max(0, before - cost)
+  if now < want and UnitManager.ChangeMovesRemaining ~= nil then
+    pcall(function() UnitManager.ChangeMovesRemaining(unit, want - now) end)
+    now = Civ6Ai_GameCore._Call(unit, "GetMovesRemaining") or now
+  end
+  return now
+end
+
 -- Give back movement a failed order took. UnitManager.MoveUnit to a step the
 -- unit cannot finish this turn left it in place with 0 moves (P0 T25: the scout
 -- and warrior then failed their retries with no_moves_left).
@@ -584,6 +599,14 @@ function Civ6Ai_GameCore.MoveUnitForPlayer(playerID, unitNumericId, x, y)
     return false, "move_unit_error:" .. tostring(err)
   end
   if toX == x and toY == y then
+    if Civ6Ai_GameCore._IsAdjacent(fromX, fromY, x, y) == true then
+      local okCost, cost = pcall(function()
+        local row = GameInfo.Units[unit:GetType()]
+        return Civ6Ai_GameCore.StepCost(unit, row ~= nil and row.Domain or "DOMAIN_LAND", Map.GetPlot(fromX, fromY),
+          Map.GetPlot(x, y), Civ6Ai_GameCore._Call(unit, "GetMaxMoves") or 0)
+      end)
+      Civ6Ai_GameCore._ChargeStep(unit, before, okCost and cost or nil)
+    end
     return true, ""
   end
   if toX ~= fromX or toY ~= fromY then
@@ -766,6 +789,12 @@ function Civ6Ai_GameCore.MoveUnitAlongPathForPlayer(playerID, unitNumericId, x, 
       else
         local before = Civ6Ai_GameCore._Call(unit, "GetMovesRemaining")
         local bx, by = unit:GetX(), unit:GetY()
+        local fromStep = Map.GetPlot(bx, by)
+        local maxMoves = Civ6Ai_GameCore._Call(unit, "GetMaxMoves") or 0
+        local okRow, row = pcall(function() return GameInfo.Units[unit:GetType()] end)
+        row = okRow and row or nil
+        local okCost, cost = pcall(Civ6Ai_GameCore.StepCost, unit, row ~= nil and row.Domain or "DOMAIN_LAND", fromStep, plot, maxMoves)
+        cost = okCost and cost or nil
         pcall(function() UnitManager.MoveUnit(unit, px, py) end)
         if unit:GetX() == bx and unit:GetY() == by then
           Civ6Ai_GameCore._RestoreMoves(unit, before)
@@ -774,6 +803,11 @@ function Civ6Ai_GameCore.MoveUnitAlongPathForPlayer(playerID, unitNumericId, x, 
           break
         end
         steps = steps + 1
+        -- The scripted UnitManager.MoveUnit ends the unit's movement after one
+        -- step (every partial walk stopped at steps=1 with no_moves_left). Charge
+        -- the step its real movement cost instead, so the walk continues the way
+        -- the game's own move would: moves left = before - cost of this step.
+        Civ6Ai_GameCore._ChargeStep(unit, before, cost)
       end
     end
   end

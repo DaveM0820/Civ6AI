@@ -309,6 +309,61 @@ function Civ6Ai_Orders._GoalKey(owner, unitId, field)
   return "CIV6AI_GOAL_" .. tostring(owner) .. "_" .. tostring(unitId) .. "_" .. field
 end
 
+function Civ6Ai_Orders._HoldKey(owner, unitId)
+  return "CIV6AI_HOLD_" .. tostring(owner) .. "_" .. tostring(unitId)
+end
+
+function Civ6Ai_Orders.ClearHold(owner, unitId)
+  if owner ~= nil and unitId ~= nil and num(Game:GetProperty(Civ6Ai_Orders._HoldKey(owner, unitId))) ~= nil then
+    Game:SetProperty(Civ6Ai_Orders._HoldKey(owner, unitId), nil)
+  end
+end
+
+-- An enemy (at war) or barbarian unit on a neighbouring tile wakes a fortified unit.
+function Civ6Ai_Orders._EnemyAdjacent(owner, unit)
+  if Map == nil or Map.GetAdjacentPlot == nil or DirectionTypes == nil or Units == nil then
+    return false
+  end
+  for d = 0, (DirectionTypes.NUM_DIRECTION_TYPES or 6) - 1 do
+    local plot = Map.GetAdjacentPlot(unit:GetX(), unit:GetY(), d)
+    if plot ~= nil then
+      for _, other in ipairs(Units.GetUnitsInPlot(plot) or {}) do
+        local o = other:GetOwner()
+        if o ~= owner and (Civ6Ai_Orders._AtWar(owner, o) or call(Players[o], "IsBarbarian") == true) then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+-- Turn start: fortified units of this seat stay put (moves finished) unless an
+-- enemy is adjacent, which wakes them so the seat sees them again.
+function Civ6Ai_Orders.HoldFortified(owner)
+  local p = Players[owner]
+  if p == nil then
+    return 0
+  end
+  local held = 0
+  for _, u in ipairs(sortedMembers(call(p, "GetUnits"))) do
+    local key = Civ6Ai_Orders._HoldKey(owner, u:GetID())
+    if num(Game:GetProperty(key)) ~= nil then
+      if Civ6Ai_Orders._EnemyAdjacent(owner, u) then
+        Game:SetProperty(key, nil)
+        log("hold_wake|player=" .. tostring(owner) .. "|unit=" .. tostring(u:GetID()))
+      elseif (call(u, "GetMovesRemaining") or 0) > 0 then
+        pcall(UnitManager.FinishMoves, u)
+        held = held + 1
+      end
+    end
+  end
+  if held > 0 then
+    log("hold_fortified|player=" .. tostring(owner) .. "|units=" .. held)
+  end
+  return held
+end
+
 function Civ6Ai_Orders._ClearGoal(owner, unitId)
   if owner == nil or unitId == nil then
     return
@@ -877,6 +932,11 @@ function Civ6Ai_Orders._DoCommand(sender, o)
   if why ~= nil then
     return false, why
   end
+  -- Any other order for a fortified unit wakes it (vanilla: a new order cancels fortify).
+  if o.U ~= nil and o.U >= 0 and k ~= Civ6Ai_Orders.K.FORTIFY and k ~= Civ6Ai_Orders.K.RESEARCH
+      and k ~= Civ6Ai_Orders.K.CIVIC then
+    Civ6Ai_Orders.ClearHold(owner, o.U)
+  end
   if k == Civ6Ai_Orders.K.MOVE then
     return Civ6Ai_Orders._DoMove(sender, o)
   elseif k == Civ6Ai_Orders.K.RESEARCH then
@@ -894,6 +954,13 @@ function Civ6Ai_Orders._DoCommand(sender, o)
     local unit = Civ6Ai_Orders._Unit(owner, o.U)
     if unit == nil then
       return false, "stale_unit_id"
+    end
+    if k == Civ6Ai_Orders.K.FORTIFY then
+      -- Fortify holds until another order or an adjacent enemy (vanilla
+      -- fortify). The UI fortify operation does not sync for an AI seat, so
+      -- the hold is a synced Game property and the unit's moves are finished
+      -- at each of its turn starts (HoldFortified).
+      Game:SetProperty(Civ6Ai_Orders._HoldKey(owner, o.U), Game.GetCurrentGameTurn())
     end
     return Civ6Ai_Orders._Route("FinishMovesForPlayer", owner, o.U)
   elseif k == Civ6Ai_Orders.K.ATTACK then
@@ -2611,6 +2678,7 @@ function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
   else
     Civ6Ai_Orders._ContinueGoals(owner, nil)
   end
+  pcall(Civ6Ai_Orders.HoldFortified, owner)
 end
 
 -- Log-only (no game state): the seat's model-commanded units as the queue is

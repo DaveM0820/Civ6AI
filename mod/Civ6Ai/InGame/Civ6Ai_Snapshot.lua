@@ -2648,6 +2648,27 @@ function Civ6Ai_Snapshot._PlotImpassable(plot)
   return false
 end
 
+function Civ6Ai_Snapshot.IsFortified(unit)
+  local key = "CIV6AI_HOLD_" .. tostring(unit:GetOwner()) .. "_" .. tostring(unit:GetID())
+  if Game ~= nil and Game.GetProperty ~= nil and tonumber(Game:GetProperty(key)) ~= nil then
+    return true
+  end
+  local A = ActivityTypes
+  if A ~= nil and unit.GetActivityType ~= nil then
+    local ok, act = pcall(function() return unit:GetActivityType() end)
+    if ok and act ~= nil and (act == A.ACTIVITY_SLEEP or act == A.ACTIVITY_SENTRY) then
+      return true
+    end
+  end
+  if unit.GetFortifyTurns ~= nil then
+    local ok, t = pcall(function() return unit:GetFortifyTurns() end)
+    if ok and type(t) == "number" and t > 0 then
+      return true
+    end
+  end
+  return false
+end
+
 function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
   if unit == nil or unit:GetX() == -9999 then
     return false
@@ -2665,6 +2686,12 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
       .. "|xy=" .. tostring(goal.x) .. "," .. tostring(goal.y))
   end
   if Civ6Ai_Snapshot._UnitMoves(unit) <= 0 then
+    return false
+  end
+  -- Fortified: the seat's Fortify order holds (synced CIV6AI_HOLD_ property
+  -- for every seat, or the vanilla fortify/sleep activity for the local seat)
+  -- until another order or an adjacent enemy. A held unit needs no order.
+  if Civ6Ai_Snapshot.IsFortified(unit) then
     return false
   end
   -- Builders of AI seats stay with the game's own AI. Taking them after two

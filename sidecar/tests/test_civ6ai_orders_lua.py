@@ -1433,6 +1433,11 @@ function unit:GetX() return self.x end
 function unit:GetY() return self.y end
 function unit:GetMovesRemaining() return self.moves end
 function unit:GetID() return 7 end
+function unit:GetMaxMoves() return 3 end
+function unit:GetType() return 1 end
+GameInfo = { Units = { [1] = { Domain = "DOMAIN_LAND" } } }
+function Civ6Ai_GameCore.StepCost() return 1 end
+function Civ6Ai_GameCore._ChargeStep() end
 function Civ6Ai_GameCore._FindUnit(p, id) return nil, unit, "" end
 function Civ6Ai_GameCore._Call(o, n) return o[n](o) end
 restored = 0
