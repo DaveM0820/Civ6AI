@@ -424,8 +424,7 @@ def civ6_explored_fact_line(snapshot: dict[str, Any], explored: int) -> str | No
         seen = f"{explored}% of the map revealed"
     return (
         f"EXPLORATION: {seen}. Unrevealed land hides settle sites, rivals, city-states and tribal villages. "
-        "explore moves a unit toward the nearest fog it can reach and fails with explore_no_reveal when nothing new "
-        "is in reach; then give it a move_unit to a farther dark tile."
+        "Explore by moving units toward the fog you can see on the map."
     )
 
 

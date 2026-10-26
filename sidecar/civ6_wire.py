@@ -1959,8 +1959,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "thought.situation = what matters on the board this turn.",
         "thought.freethinking = optional extended inner monologue.",
         "thought.strategy = long-term path to victory and why — prose only, no wire keys here.",
-        "thought.plan = the turn plan: every command you issue this turn and its intention (see REQUIRED COMMANDS). "
-        "Keep last turn's plan going unless something changed, and say what changed when you alter it.",
+        "thought.plan = the turn plan: every command you issue this turn and its intention (see REQUIRED COMMANDS).",
         "Event.<Name>.log = required attention notes (see REQUIRED COMMANDS).",
         "remember = text plus duration; store deals, rival impressions, war aims, and multi-turn plans. opinion.* / history.* as needed.",
         *(

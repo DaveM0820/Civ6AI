@@ -64,5 +64,18 @@ class ChatOriginalityTests(unittest.TestCase):
         self.assertIn("Do not repeat or paraphrase what other players have said in chat", wire)
 
 
+class ExploreAndPlanLineTests(unittest.TestCase):
+    def test_exploration_line_points_at_map_fog_only(self):
+        line = coaching.civ6_explored_fact_line({}, 20)
+        self.assertIn("Explore by moving units toward the fog you can see on the map.", line)
+        self.assertNotIn("explore_no_reveal", line)
+
+    def test_no_keep_last_plan_line(self):
+        from sidecar import civ6_adapter
+
+        wire = civ6_wire.build_civ6_model_wire_text(civ6_adapter.build_classical_golden_snapshot())
+        self.assertNotIn("Keep last turn's plan going", wire)
+
+
 if __name__ == "__main__":
     unittest.main()
