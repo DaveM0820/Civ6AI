@@ -584,6 +584,13 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
   return false, "unsupported_kind", args
 end
 
+-- The UI player-operation table is PlayerOperations (Firaxis TechTree/CivicsTree);
+-- PlayerOperationTypes is nil in the UI context, which made every local research
+-- order return research_rejected.
+function Civ6Ai_Apply._PlayerOps()
+  return PlayerOperations or PlayerOperationTypes
+end
+
 function Civ6Ai_Apply._RequestPlayerOperation(playerID, opType, params)
   if UI == nil or UI.RequestPlayerOperation == nil then
     return false, "ui_unavailable"
@@ -614,12 +621,22 @@ function Civ6Ai_Apply._SetResearchTech(playerID, args)
     return false, gcReason or "research_rejected", args
   end
   local params = {}
-  if PlayerOperationTypes ~= nil then
-    -- Firaxis TechTree passes the tech Hash (not Index) and an insert mode.
-    params[PlayerOperationTypes.PARAM_TECH_TYPE] = hash.Hash
-    params[PlayerOperationTypes.PARAM_INSERT_MODE] = PlayerOperationTypes.VALUE_EXCLUSIVE
-    local ok, reason = Civ6Ai_Apply._RequestPlayerOperation(playerID, PlayerOperationTypes.RESEARCH, params)
+  local ops = Civ6Ai_Apply._PlayerOps()
+  if ops ~= nil and ops.RESEARCH ~= nil then
+    -- Firaxis TechTree: PlayerOperations.PARAM_TECH_TYPE = tech Hash (not Index),
+    -- PARAM_INSERT_MODE = VALUE_EXCLUSIVE, UI.RequestPlayerOperation(local, RESEARCH).
+    params[ops.PARAM_TECH_TYPE] = hash.Hash
+    params[ops.PARAM_INSERT_MODE] = ops.VALUE_EXCLUSIVE
+    local ok, reason = Civ6Ai_Apply._RequestPlayerOperation(playerID, ops.RESEARCH, params)
     if ok then
+      return true, "", args
+    end
+  end
+  if not Civ6Ai_Apply._IsNetworkMultiplayer() then
+    -- Single player: the same GameCore route the AI seats use.
+    local gcOk = Civ6Ai_Apply._GameCore("SetResearchForPlayer", playerID, hash.Index)
+    if gcOk then
+      Civ6Ai_Util.Log("apply|research|gamecore|player=" .. tostring(playerID) .. "|tech=" .. tostring(techId))
       return true, "", args
     end
   end
@@ -644,10 +661,11 @@ function Civ6Ai_Apply._SetResearchCivic(playerID, args)
     return false, gcReason or "civic_rejected", args
   end
   local params = {}
-  if PlayerOperationTypes ~= nil then
-    params[PlayerOperationTypes.PARAM_CIVIC_TYPE] = hash.Hash
-    params[PlayerOperationTypes.PARAM_INSERT_MODE] = PlayerOperationTypes.VALUE_EXCLUSIVE
-    local ok = Civ6Ai_Apply._RequestPlayerOperation(playerID, PlayerOperationTypes.PROGRESS_CIVIC, params)
+  local ops = Civ6Ai_Apply._PlayerOps()
+  if ops ~= nil and ops.PROGRESS_CIVIC ~= nil then
+    params[ops.PARAM_CIVIC_TYPE] = hash.Hash
+    params[ops.PARAM_INSERT_MODE] = ops.VALUE_EXCLUSIVE
+    local ok = Civ6Ai_Apply._RequestPlayerOperation(playerID, ops.PROGRESS_CIVIC, params)
     if ok then
       return true, "", args
     end
