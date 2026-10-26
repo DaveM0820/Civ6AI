@@ -331,10 +331,50 @@ def extract_promises(messages: list[dict[str, Any]]) -> list[str]:
     return out
 
 
-def _is_war_command(command: dict[str, Any]) -> bool:
+PROMISE_TTL_TURNS = 10
+
+
+def _target_owner_kind(snapshot: dict[str, Any] | None, command: dict[str, Any]) -> str:
+    """major | city-state | barbarians | free cities | unknown, for an attack's target tile."""
+    if not isinstance(snapshot, dict):
+        return "unknown"
+    from sidecar import civ6_combat_wire as cw
+    from sidecar import civ6_wire
+
+    args = {}
+    for key in ("fixed_arguments", "arguments"):
+        if isinstance(command.get(key), dict):
+            args.update(command[key])
+    try:
+        x, y = int(args.get("target_x")), int(args.get("target_y"))
+    except (TypeError, ValueError):
+        return "unknown"
+    owner = None
+    combat = cw._combat(snapshot)
+    for row in cw._rows(combat, "previews") + cw._rows(combat, "hostiles") + cw._rows(combat, "hostile_cities"):
+        if cw._int(row.get("target_x", row.get("x"))) == x and cw._int(row.get("target_y", row.get("y"))) == y:
+            owner = row.get("target_owner") or row.get("owner_player_id") or row.get("owner")
+            if owner:
+                break
+    if not owner:
+        return "unknown"
+    owner = str(owner)
+    rival = cw._players(snapshot).get(owner)
+    if rival is None:
+        if owner.endswith("_63"):
+            return "barbarians"
+        if owner.endswith("_62"):
+            return "free cities"
+        return "unknown"
+    return civ6_wire.civ6_player_kind(rival)
+
+
+def _is_war_command(command: dict[str, Any], snapshot: dict[str, Any] | None = None) -> bool:
+    """An order that breaks a peace promise: war declared, or an attack on a major
+    civ or a city-state. Fighting barbarians or free cities keeps the promise."""
     kind = str(command.get("kind") or "")
     if kind in ("attack_target", "city_attack"):
-        return True
+        return _target_owner_kind(snapshot, command) in ("major", "city-state")
     if kind == "send_diplomatic_action":
         action = str((command.get("arguments") or {}).get("action_id") or "")
         return "WAR" in action.upper()
@@ -350,10 +390,11 @@ def _is_peace_command(command: dict[str, Any]) -> bool:
         return False
 
 
-def contradiction_notes(promises: list[str], commands: list[dict[str, Any]]) -> list[str]:
+def contradiction_notes(promises: list[str], commands: list[dict[str, Any]],
+                        snapshot: dict[str, Any] | None = None) -> list[str]:
     """Chat that says peace while the orders attack, or the reverse."""
     notes: list[str] = []
-    war = any(_is_war_command(c) for c in commands if isinstance(c, dict))
+    war = any(_is_war_command(c, snapshot) for c in commands if isinstance(c, dict))
     peace = any(_is_peace_command(c) for c in commands if isinstance(c, dict))
     for raw in promises:
         low = raw.lower()

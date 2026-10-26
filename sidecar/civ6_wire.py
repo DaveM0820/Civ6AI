@@ -1268,7 +1268,9 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
     history = context.get("history", {})
     chat_lines: list[str] = []
     leaders = _leader_names(context)
-    seen_chat: set[str] = set()
+    seen_chat: set[tuple[str, str]] = set()
+    decision = context.get("decision") if isinstance(context.get("decision"), dict) else {}
+    self_id = str(decision.get("player_id") or "")
     if isinstance(history, dict):
         for index, event in enumerate(pipeline._recent_history_events(
                 history.get("public_events", []), pipeline.chat_history_max_messages())):
@@ -1280,10 +1282,17 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
             text = pipeline._format_public_chat_line(context, event)
             if text:
                 text = _PLAYER_RE.sub(lambda m: leaders.get(m.group(0), "an unmet leader"), text)
+                affected = event.get("affected_ids")
+                sender_id = str(affected[0]) if isinstance(affected, list) and affected else ""
+                if sender_id and sender_id == self_id:
+                    # Your own line: say so, so it is not read as a rival speaking.
+                    text = "You (" + text.split(":", 1)[0].strip() + "): " + text.split(":", 1)[-1].strip()
+                elif not sender_id:
+                    text = "Unknown speaker: " + text
                 body = text.split(":", 1)[-1].strip()[:120]
-                if body in seen_chat:
-                    continue  # same line echoed by another speaker or turn
-                seen_chat.add(body)
+                if (sender_id, body) in seen_chat:
+                    continue  # the same speaker's line echoed again
+                seen_chat.add((sender_id, body))
                 chat_lines.append(pipeline._wire_line(f"chat.public.t{int(event.get('turn', 0))}.{index}", text))
     diplomacy_block = context.get("diplomacy", {})
     inbox = diplomacy_block.get("private_inbox", []) if isinstance(diplomacy_block, dict) else []
@@ -1293,10 +1302,10 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
         text = pipeline.trim_chat_text(str(message.get("text", "")))
         if text:
             body = text.strip()[:120]
-            if body in seen_chat:
-                continue
-            seen_chat.add(body)
             from_id = str(message.get("from_player_id", ""))
+            if (from_id, body) in seen_chat:
+                continue
+            seen_chat.add((from_id, body))
             sender = pipeline._player_chat_name(context, from_id) if from_id else "Rival"
             chat_lines.append(pipeline._wire_line(
                 f"chat.private.t{int(message.get('turn', 0))}.{index}", f"{sender} (private): {text}"))
@@ -1837,16 +1846,27 @@ def _war_going_badly(context: dict[str, Any]) -> bool:
 
 
 def _advice_section(context: dict[str, Any]) -> list[str]:
-    if combat_wire.war_active(context) and combat_wire.enemies_within_their_reach(context):
+    # "At war" means a war with a major civ. Barbarians (always hostile) and
+    # free cities get their own line, not the war wording.
+    at_war = bool(combat_wire.major_wars(context))
+    in_reach = combat_wire.enemies_within_their_reach(context) if combat_wire.war_active(context) else False
+    if at_war and in_reach:
         opening = (
             "- You are at war and an enemy is within move range. Use the WAR section: "
             "strike enemies in range, garrison threatened cities, and build walls or military units "
             "where the city threat table shows an enemy within its move range."
         )
-    elif combat_wire.war_active(context):
+    elif at_war:
         opening = (
             "- You are at war, but no enemy unit is within move range of your army or cities. "
             "Do not strike or mass units for an assault this turn. Garrison and build as usual."
+        )
+    elif combat_wire.hostiles_visible(context):
+        opening = (
+            "- You are not at war with any civilization. Barbarians or other hostile units are in sight"
+            + (" and within move range: the WAR section lists strikes on them and your city threats."
+               if in_reach else "; none is within move range of your army or cities.")
+            + " Keep exploring and building otherwise."
         )
     else:
         opening = (

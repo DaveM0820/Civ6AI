@@ -284,8 +284,16 @@ def _civ6_post_bind(snapshot: dict, validated: dict, commands: list) -> tuple[di
     prior_promises: list[str] = []
     seat = snapshot.get("_seat_memory")
     if isinstance(seat, dict):
-        prior_promises = [str(row.get("text") or "") for row in seat.get("promises") or [] if isinstance(row, dict)]
-    contra_notes = civ6_seat_memory.contradiction_notes(prior_promises + new_promises, commands)
+        # A promise expires after PROMISE_TTL_TURNS: an old line is not a standing pledge.
+        now = snapshot.get("decision", {}).get("turn") if isinstance(snapshot.get("decision"), dict) else None
+        for row in seat.get("promises") or []:
+            if not isinstance(row, dict):
+                continue
+            made = row.get("turn")
+            if isinstance(now, int) and isinstance(made, int) and now - made > civ6_seat_memory.PROMISE_TTL_TURNS:
+                continue
+            prior_promises.append(str(row.get("text") or ""))
+    contra_notes = civ6_seat_memory.contradiction_notes(prior_promises + new_promises, commands, snapshot)
     snapshot["_new_promises"] = new_promises
     validated = copy.deepcopy(validated)
     validated["chat_messages"] = chats

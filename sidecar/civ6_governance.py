@@ -346,12 +346,24 @@ def attention_items(snapshot: dict) -> list[str]:
     gv = _dct(gov.get("governors"))
     if routes.get("governors", True) and gv.get("can_appoint"):
         out.append("A governor title is available: appoint a governor (\"governor.appoint\").")
+    if routes.get("governors", True):
+        for gid in _unplaced_governors(gv):
+            out.append(f"Governor {gid} is appointed but not in a city, so it does nothing: "
+                       f"assign it (\"governor.assign\" = {gid} @ CityName).")
     gp = _dct(gov.get("great_people"))
     ready = [_short(x.get("id"), "GREAT_PERSON_INDIVIDUAL_") for x in _lst(gp.get("available"))
              if isinstance(x, dict) and x.get("can_recruit")]
     if ready:
         out.append("You can recruit great person " + ", ".join(ready) + " (\"greatperson.recruit\").")
     return out
+
+
+def _unplaced_governors(gv: dict) -> list[str]:
+    """Appointed governors with no city (they give nothing until assigned)."""
+    if not gv.get("supported"):
+        return []
+    return [_short(a.get("id"), "GOVERNOR_") for a in _lst(gv.get("appointed"))
+            if isinstance(a, dict) and a.get("id") and not a.get("city")]
 
 
 def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
@@ -381,7 +393,9 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
             out.append(("governor.appoint", " | ".join(
                 _short(x.get("id"), "GOVERNOR_") for x in _lst(gv.get("candidates")) if isinstance(x, dict))))
         if _lst(gv.get("appointed")):
-            out.append(("governor.assign", "GOVERNOR_ID @ CityName"))
+            unplaced = _unplaced_governors(gv)
+            out.append(("governor.assign", " | ".join(f"{g} @ CityName" for g in unplaced)
+                        if unplaced else "GOVERNOR_ID @ CityName"))
             if any(isinstance(a, dict) and a.get("can_promote") for a in _lst(gv.get("appointed"))):
                 out.append(("governor.promote", "GOVERNOR_ID: PROMOTION_ID"))
     gp = _dct(gov.get("great_people"))

@@ -1326,17 +1326,20 @@ def filter_repeat_public_chat(
             continue
         text = str(message.get("text") or "")
         needle = text.strip()
+        # Chat is never blocked. A repeat or a line to your own leader is sent
+        # and noted, so the next turn's feedback shows it.
         if needle and any(needle.lower() == prior.lower() for prior in batch):
-            dropped.append("dropped: public chat repeated a line in this reply and was not sent")
-            continue
+            dropped.append("note: chat repeated a line from earlier in this reply (sent anyway)")
         key = chat_target_key(message)
         prior_rows = recent_map.get(key, []) + recent_map.get("all", [])
         prior_texts = list(dict.fromkeys(row[1] for row in prior_rows))
         leader = str(((snapshot.get("personality") or {}).get("leader_name")) or "").strip().lower()
         low = text.strip().lower()
         if leader and (low.startswith(f"friend {leader}") or low.startswith(leader + ",") or low.startswith(leader + ":")):
-            dropped.append("dropped: public chat addressed your own leader and was not sent")
-            continue
+            dropped.append("note: chat addressed your own leader by name (sent anyway); "
+                           "speak as yourself to the other leaders")
+        if needle and any(needle.lower() == str(row[1]).strip().lower() for row in prior_rows):
+            dropped.append("note: chat repeated a line you already sent on an earlier turn (sent anyway)")
         too_soon = chat_cadence_problem(snapshot, key, events, last_turns)
         if too_soon is None and key in spoken_to and chat_cooldown_turns(key) > 0 and not (
                 key.split(":", 1)[-1] in events or (key in ("all", "team") and events)):

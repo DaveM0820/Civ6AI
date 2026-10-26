@@ -783,6 +783,28 @@ def _best_purchase_labels(snapshot: dict[str, Any], limit: int = 3) -> list[str]
     return labels
 
 
+def _upgrade_labels(snapshot: dict[str, Any]) -> list[str]:
+    """`<unit>.upgrade (<new type>, <cost> gold)` for every legal upgrade order."""
+    from sidecar.civ6_combat_wire import _wire_ids
+
+    try:
+        wire_ids = _wire_ids(snapshot)
+    except Exception:  # noqa: BLE001 - labels are a hint
+        wire_ids = {}
+    out: list[str] = []
+    for command in snapshot.get("legal_commands") or []:
+        if not isinstance(command, dict) or command.get("kind") != "upgrade_unit":
+            continue
+        fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+        uid = str(fixed.get("unit_id") or "")
+        new = str(fixed.get("unit_type_id") or "").replace("UNIT_", "").replace("_", " ").title()
+        cost = _as_int(fixed.get("cost"))
+        label = f"{wire_ids.get(uid, uid)} to {new}" + (f" ({cost} gold)" if cost is not None else "")
+        if label not in out:
+            out.append(label)
+    return out
+
+
 def civ6_idle_resources(snapshot: dict[str, Any]) -> tuple[str | None, bool]:
     """(note, spends_gold). spends_gold is True when the note asks for a gold decision."""
     from sidecar.civ6_diplomacy import diplomacy
@@ -795,9 +817,18 @@ def civ6_idle_resources(snapshot: dict[str, Any]) -> tuple[str | None, bool]:
     gold_idle = gold is not None and (
         gold >= 300 or (gpt is not None and gpt > 0 and gold > 8 * gpt)
     )
+    # Gold is nagged about only when there is something real to spend it on:
+    # a unit upgrade the game allows now (listed first), or a purchase below.
+    upgrades = _upgrade_labels(snapshot)
+    gold_buys = [label for label in _best_purchase_labels(snapshot) if "gold" in label.lower()]
+    if gold_idle and not upgrades and not gold_buys:
+        gold_idle = False
     if gold_idle and gold is not None:
         extra = f", more than 8 turns of +{gpt}/turn" if gpt is not None and gpt > 0 and gold > 8 * gpt else ""
-        bits.append(f"{gold} gold unspent{extra}")
+        text = f"{gold} gold unspent{extra}"
+        if upgrades:
+            text += "; upgrade " + ", ".join(upgrades[:4])
+        bits.append(text)
     gov = governance(snapshot)
     religion = gov.get("religion") if isinstance(gov.get("religion"), dict) else {}
     faith = _as_int(religion.get("faith"))

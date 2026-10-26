@@ -422,13 +422,54 @@ def _staging_tile(context: dict[str, Any], cx: int, cy: int) -> tuple[int, int]:
     return (cx - 1, cy)
 
 
-def strike_lines(context: dict[str, Any]) -> list[str]:
+def _own_city_names(context: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for city in context.get("your_cities") or []:
+        if isinstance(city, dict) and city.get("city_id"):
+            out[str(city["city_id"])] = city
+    return out
+
+
+def _city_has_walls(city: dict[str, Any] | None) -> bool:
+    if not isinstance(city, dict):
+        return True  # no row to judge by: the snapshot offered it
+    defense = city.get("defense") if isinstance(city.get("defense"), dict) else {}
+    wall_max = _int(defense.get("wall_max_hp"))
+    if wall_max is not None:
+        return wall_max > 0
+    return any("WALL" in str(b).upper() for b in city.get("buildings") or [])
+
+
+def _striker_rows(context: dict[str, Any]) -> list[tuple[dict[str, Any], str, bool]]:
+    """(preview, actor name, is_city). A city strike row names the city (it has no
+    unit id) and is kept only when the city can strike: strength > 0, not refused,
+    and walls built (a city center needs walls for a ranged strike)."""
     wire_ids = _wire_ids(context)
+    cities = _own_city_names(context)
+    out: list[tuple[dict[str, Any], str, bool]] = []
+    for row in _previews(context):
+        city_id = row.get("city_id")
+        if city_id:
+            city = cities.get(str(city_id))
+            if row.get("can_strike") is False or not (_int(row.get("attacker_strength")) or 0):
+                continue
+            if not _city_has_walls(city):
+                continue
+            name = pipeline._city_prompt_name(city) if city else str(city_id)
+            out.append((row, name, True))
+            continue
+        unit_id = row.get("unit_id")
+        if unit_id is None or str(unit_id) in ("", "None"):
+            continue
+        out.append((row, wire_ids.get(str(unit_id), str(unit_id)), False))
+    return out
+
+
+def strike_lines(context: dict[str, Any]) -> list[str]:
     stats = _own_stats(context)
     lines: list[str] = []
-    for row in sorted(_previews(context), key=_strike_sort_key)[:MAX_STRIKE_LINES]:
+    for row, name, is_city in sorted(_striker_rows(context), key=lambda t: _strike_sort_key(t[0]))[:MAX_STRIKE_LINES]:
         unit_id = str(row.get("unit_id"))
-        name = wire_ids.get(unit_id, unit_id)
         x, y = _int(row.get("target_x")), _int(row.get("target_y"))
         if x is None or y is None:
             continue
@@ -438,7 +479,7 @@ def strike_lines(context: dict[str, Any]) -> list[str]:
             own_hp = _hp_text(stats[unit_id].get("hp"), stats[unit_id].get("max_hp"))
         if own_hp:
             own += f", {own_hp}"
-        verb = "rangedAttack" if row.get("ranged") else "attackTo"
+        verb = "rangeStrike" if is_city else ("rangedAttack" if row.get("ranged") else "attackTo")
         detail = f"vs {_target_text(context, row)} [{own}]: {outcome_text(row)}"
         if row.get("needs_move"):
             dist = _int(row.get("distance"))
@@ -453,15 +494,12 @@ def strike_lines(context: dict[str, Any]) -> list[str]:
 
 def target_reach_lines(context: dict[str, Any]) -> list[str]:
     """Per enemy target: which of your units can hit it this turn, now or after moving."""
-    wire_ids = _wire_ids(context)
     targets: dict[tuple[int, int], dict[str, list[str]]] = {}
     labels: dict[tuple[int, int], str] = {}
-    for row in _previews(context):
+    for row, name, _is_city in _striker_rows(context):
         x, y = _int(row.get("target_x")), _int(row.get("target_y"))
         if x is None or y is None:
             continue
-        uid = str(row.get("unit_id"))
-        name = wire_ids.get(uid, uid)
         slot = targets.setdefault((x, y), {"now": [], "move": []})
         bucket = slot["move"] if row.get("needs_move") else slot["now"]
         if name not in bucket:
@@ -813,19 +851,17 @@ def _focus_fire_line(context: dict[str, Any]) -> str | None:
 
     if coaching.civ6_focus_fire_attention(context):
         return None  # legal-command version already covers it
-    wire_ids = _wire_ids(context)
     targets: dict[tuple[int, int], list[str]] = {}
     names: dict[tuple[int, int], str] = {}
     dmg: dict[tuple[int, int], int] = {}
     hp: dict[tuple[int, int], int] = {}
-    for row in _previews(context):
+    for row, name, _is_city in _striker_rows(context):
         if row.get("needs_move") or str(row.get("prediction") or "").upper() == "INEFFECTIVE":
             continue
         x, y = _int(row.get("target_x")), _int(row.get("target_y"))
         if x is None or y is None:
             continue
         bucket = targets.setdefault((x, y), [])
-        name = wire_ids.get(str(row.get("unit_id")), str(row.get("unit_id")))
         if name not in bucket:
             bucket.append(name)
             dmg[(x, y)] = dmg.get((x, y), 0) + (_int(row.get("damage_to_defender")) or 0)

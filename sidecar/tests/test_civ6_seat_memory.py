@@ -191,11 +191,25 @@ class SeatMemoryTests(unittest.TestCase):
     def test_promises_and_contradictions(self):
         chats = [{"text": "I will not attack you."}, {"text": "I will not attack you."}]
         kept, dropped = results.filter_repeat_public_chat({"decision": {"player_id": "PLAYER_0", "turn": 3}, "history": {}}, chats)
-        self.assertEqual(1, len(kept))
-        self.assertTrue(dropped)
+        # Chat is never blocked: the repeat is sent and noted.
+        self.assertEqual(2, len(kept))
+        self.assertTrue(dropped and dropped[0].startswith("note:"))
         promises = memory.extract_promises(kept)
-        notes = memory.contradiction_notes(promises, [{"kind": "attack_target", "arguments": {}}])
+        snap = {
+            "known_players": [
+                {"player_id": "PLAYER_1", "leader_id": "LEADER_TRAJAN", "civilization_id": "CIVILIZATION_ROME"},
+                {"player_id": "PLAYER_63", "leader_id": "LEADER_BARBARIAN", "civilization_id": "CIVILIZATION_BARBARIAN"},
+            ],
+            "civ6": {"combat": {"previews": [
+                {"unit_id": "UNIT_1", "target_x": 3, "target_y": 4, "target_owner": "PLAYER_1"},
+                {"unit_id": "UNIT_1", "target_x": 5, "target_y": 6, "target_owner": "PLAYER_63"},
+            ]}},
+        }
+        attack = lambda x, y: [{"kind": "attack_target", "arguments": {"target_x": x, "target_y": y}}]
+        notes = memory.contradiction_notes(promises, attack(3, 4), snap)
         self.assertIn("promised peace", notes[0])
+        # Fighting barbarians does not break a peace promise.
+        self.assertEqual([], memory.contradiction_notes(promises, attack(5, 6), snap))
         notes = memory.contradiction_notes(
             ["I will attack at dawn."],
             [{"kind": "execute_deal", "arguments": {"mode": 1}}],
