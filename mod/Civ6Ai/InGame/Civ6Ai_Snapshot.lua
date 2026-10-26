@@ -2650,8 +2650,11 @@ end
 
 function Civ6Ai_Snapshot.IsFortified(unit)
   local key = "CIV6AI_HOLD_" .. tostring(unit:GetOwner()) .. "_" .. tostring(unit:GetID())
-  if Game ~= nil and Game.GetProperty ~= nil and tonumber(Game:GetProperty(key)) ~= nil then
-    return true
+  if Game ~= nil and Game.GetProperty ~= nil then
+    local held = Game:GetProperty(key)
+    if held ~= nil and tonumber(held) ~= nil then
+      return true
+    end
   end
   local A = ActivityTypes
   if A ~= nil and unit.GetActivityType ~= nil then
