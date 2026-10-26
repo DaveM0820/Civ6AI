@@ -567,6 +567,26 @@ class SnapshotLuaOffersTests(unittest.TestCase):
         self.assertEqual([], kinds_for(self.lua.globals().SCIENTIST, "UNIT_S", snap._AddActivateCommand))
         self.assertEqual([], kinds_for(self.lua.globals().GENERAL, "UNIT_N", snap._AddActivateCommand))
         self.assertEqual([], kinds_for(self.lua.globals().TRADER, "UNIT_T", snap._AddTradeRouteCommands))
+        # The local seat's own trader: the vanilla MAKE_TRADE_ROUTE request, every
+        # destination the game allows (other seats stay with the game's AI).
+        self.lua.execute(r"""
+            Game.GetLocalPlayer = function() return 1 end
+            TRADER.GetMovesRemaining = function() return 1 end
+            TRADER.GetID = function() return 7 end
+            GameInfo.Units[5].MakeTradeRoute = true
+            UnitOperationTypes = { MAKE_TRADE_ROUTE = 77, PARAM_X0 = "x0", PARAM_Y0 = "y0", PARAM_X1 = "x1", PARAM_Y1 = "y1" }
+            PlayerManager = PlayerManager or {}
+            PlayerManager.GetAliveIDs = function() return { 2 } end
+            Locale = Locale or { Lookup = function(s) return s end }
+            UnitManager = UnitManager or {}
+            UnitManager.CanStartOperation = function(u, op, _, p) return op == 77 and p.x0 ~= nil end
+            Map.GetPlotDistance = function() return 3 end
+        """)
+        routes = kinds_for(self.lua.globals().TRADER, "UNIT_T", snap._AddTradeRouteCommands)
+        self.assertTrue(routes and all(k == "trade_route" for k, _ in routes), routes)
+        self.assertEqual("PLAYER_2", routes[0][1]["destination_player_id"])
+        self.lua.execute("Game.GetLocalPlayer = function() return 0 end")
+        self.assertEqual([], kinds_for(self.lua.globals().TRADER, "UNIT_T", snap._AddTradeRouteCommands))
         self.lua.execute("SCIENTIST.GetGreatPerson = function() return {} end")
         self.assertEqual([], kinds_for(self.lua.globals().SCIENTIST, "UNIT_S", snap._AddActivateCommand))
 

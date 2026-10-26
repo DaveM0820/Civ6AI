@@ -258,6 +258,19 @@ class BlobSplitAcrossReadsTests(unittest.TestCase):
             self.assertEqual(1, record_failed_appends(root, chunk))
             self.assertEqual(payload + "\n", path.read_text(encoding="utf-8"))
 
+    def test_whole_file_mirror_replaces_the_file(self):
+        import base64
+
+        from civ6_lua_log_bridge import record_failed_appends
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "autotest" / "session_summary.json"
+            for body in ('{"final_turn":7}\n', '{"final_turn":9}\n'):
+                encoded = base64.b64encode(body.encode("utf-8")).decode("ascii")
+                self.assertEqual(1, record_failed_appends(root, f"CIV6AI|io|mirror_w|{path}|{encoded}\n"))
+            self.assertEqual('{"final_turn":9}\n', path.read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

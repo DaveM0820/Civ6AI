@@ -3617,10 +3617,67 @@ function Civ6Ai_Snapshot._AddPillageCommand(commands, unit, unitId)
   }))
 end
 
+-- Creating a route is a UI operation (vanilla TradeRouteChooser: MAKE_TRADE_ROUTE
+-- with PARAM_X0/Y0 = destination, PARAM_X1/Y1 = origin city). A host UI request
+-- does not sync for another seat (Gov.MakeTradeRoute), so traders of seats the
+-- game's AI plays stay with it. The local seat's own request is the player's
+-- normal action and the engine syncs it: offer every destination the game allows.
+Civ6Ai_Snapshot.TRADE_DEST_CAP = 8
+function Civ6Ai_Snapshot._TradeRouteParams(unit, destX, destY)
+  local U = UnitOperationTypes
+  local origin = Cities ~= nil and Cities.GetCityInPlot ~= nil and Cities.GetCityInPlot(unit:GetX(), unit:GetY()) or nil
+  if U == nil or U.MAKE_TRADE_ROUTE == nil or origin == nil then
+    return nil
+  end
+  return {
+    [U.PARAM_X0] = destX, [U.PARAM_Y0] = destY,
+    [U.PARAM_X1] = origin:GetX(), [U.PARAM_Y1] = origin:GetY(),
+  }
+end
+
 function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId)
-  -- Creating a route is a UI operation, and a host UI request does not sync
-  -- for an AI seat (Gov.MakeTradeRoute). Offering it failed on every send.
-  -- Traders stay with the game's own AI.
+  if Game.GetLocalPlayer == nil or Game.GetLocalPlayer() ~= playerID then
+    return
+  end
+  local row = GameInfo.Units[unit:GetType()]
+  if row == nil or row.MakeTradeRoute ~= true or (unit:GetMovesRemaining() or 0) <= 0 then
+    return
+  end
+  local U = UnitOperationTypes
+  local found = {}
+  for _, pid in ipairs(PlayerManager.GetAliveIDs()) do
+    local p = Players[pid]
+    local cities = p ~= nil and p:GetCities() or nil
+    if cities ~= nil then
+      for _, city in cities:Members() do
+        local params = Civ6Ai_Snapshot._TradeRouteParams(unit, city:GetX(), city:GetY())
+        if params ~= nil then
+          local ok, can = pcall(UnitManager.CanStartOperation, unit, U.MAKE_TRADE_ROUTE, nil, params)
+          if ok and can then
+            found[#found + 1] = {
+              city = city, owner = pid,
+              dist = Map.GetPlotDistance(unit:GetX(), unit:GetY(), city:GetX(), city:GetY()),
+            }
+          end
+        end
+      end
+    end
+  end
+  table.sort(found, function(a, b) return a.dist < b.dist end)
+  for i = 1, math.min(#found, Civ6Ai_Snapshot.TRADE_DEST_CAP) do
+    local f = found[i]
+    local cid = "CITY_" .. tostring(f.city:GetID())
+    local okName, cname = pcall(function() return Locale.Lookup(f.city:GetName()) end)
+    table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+      command_id = "CMD_trade_route_" .. unitId .. "_" .. tostring(f.owner) .. "_" .. tostring(f.city:GetID()),
+      kind = "trade_route",
+      fixed_arguments = {
+        unit_id = unitId, city_id = cid, city_name = okName and tostring(cname) or cid,
+        destination_player_id = "PLAYER_" .. tostring(f.owner),
+        target_x = f.city:GetX(), target_y = f.city:GetY(),
+      },
+    }))
+  end
 end
 
 -- Schema upgrade list: {} or {{unit_type_id, gold_cost}}.

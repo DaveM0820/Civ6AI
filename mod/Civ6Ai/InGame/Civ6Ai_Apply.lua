@@ -556,6 +556,9 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
   if false then
     return Civ6Ai_Apply._Work(playerID, command, args)
   end
+  if command.kind == "trade_route" and Game.GetLocalPlayer() == playerID then
+    return Civ6Ai_Apply._LocalTradeRoute(playerID, args)
+  end
   if command.kind == "trade_route" then
     local f, why = Civ6Ai_OrderChannel._Fields(playerID, command)
     if f == nil then
@@ -1777,6 +1780,31 @@ end
 -- (DeclareWarOn / MakePeaceWith / InitUnit / SetOwner). Local seat in single
 -- player calls them through ExposedMembers; queued seats go through the order
 -- channel before this file.
+-- The local seat's trader: the vanilla trade-route request (see
+-- Civ6Ai_Snapshot._AddTradeRouteCommands). The engine checks and syncs it.
+function Civ6Ai_Apply._LocalTradeRoute(playerID, args)
+  local unit = Civ6Ai_Apply._FindUnit(playerID, args.unit_id)
+  local x, y = tonumber(args.target_x), tonumber(args.target_y)
+  if unit == nil then
+    return false, "stale_unit_id", args
+  end
+  if x == nil or y == nil then
+    return false, "trade_route_missing_destination", args
+  end
+  local params = Civ6Ai_Snapshot._TradeRouteParams(unit, x, y)
+  local U = UnitOperationTypes
+  if params == nil then
+    return false, "cannot_start_trade_route:not_in_origin_city", args
+  end
+  if not UnitManager.CanStartOperation(unit, U.MAKE_TRADE_ROUTE, nil, params) then
+    return false, "cannot_start_trade_route:" .. tostring(x) .. "," .. tostring(y), args
+  end
+  UnitManager.RequestOperation(unit, U.MAKE_TRADE_ROUTE, params)
+  Civ6Ai_Util.Log("apply|trade_route|player=" .. tostring(playerID) .. "|unit=" .. tostring(args.unit_id)
+    .. "|to=" .. tostring(x) .. "," .. tostring(y))
+  return true, "requested", args
+end
+
 function Civ6Ai_Apply._IsPeaceDealAction(command)
   local fixed = command.fixed_arguments or command.arguments or {}
   return string.upper(tostring(fixed.action_id or "")) == "PROPOSE_PEACE_DEAL"

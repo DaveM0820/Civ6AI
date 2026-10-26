@@ -280,10 +280,13 @@ def record_failed_appends(civ6ai_root: Path, chunk: str) -> int:
     n = 0
     for raw in chunk.splitlines():
         body = None
-        for prefix, encoded in (("CIV6AI|io|mirror|", True), ("CIV6AI|io|append_failed|", False)):
+        replace = False
+        for prefix, encoded, whole in (("CIV6AI|io|mirror|", True, False), ("CIV6AI|io|mirror_w|", True, True),
+                                       ("CIV6AI|io|append_failed|", False, False)):
             _, sep, rest = raw.partition(prefix)
             if sep:
                 body = _mirror_body(rest, encoded)
+                replace = whole
                 break
         if body is None:
             continue
@@ -293,8 +296,12 @@ def record_failed_appends(civ6ai_root: Path, chunk: str) -> int:
             continue
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open("a", encoding="utf-8") as fh:
-                fh.write(line + "\n")
+            if replace:
+                # io|mirror_w: a whole-file write (stall journal, session summary).
+                target.write_text(line, encoding="utf-8")
+            else:
+                with target.open("a", encoding="utf-8") as fh:
+                    fh.write(line + "\n")
             n += 1
         except OSError as error:
             log.warning("mirrored append failed: %s", error)

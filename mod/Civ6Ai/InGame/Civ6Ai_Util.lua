@@ -177,8 +177,20 @@ function Civ6Ai_Util.WriteTextFile(path, content)
       return true
     end
   end
+  -- No file io in this context: the stall journal and the session summary go
+  -- out as one base64 io|mirror_w line that the bridge writes (replaces) on disk.
+  if Civ6Ai_Util._IsMirroredWrite(path) then
+    Civ6Ai_Util.Log("io|mirror_w|" .. tostring(path) .. "|" .. Civ6Ai_Util.Base64Encode(tostring(content or "")))
+    return false
+  end
   Civ6Ai_Util.Log("io|write_failed|" .. tostring(path))
   return false
+end
+
+function Civ6Ai_Util._IsMirroredWrite(path)
+  local text = tostring(path or "")
+  return string.find(text, "stall.txt", 1, true) ~= nil
+      or string.find(text, "session_summary.json", 1, true) ~= nil
 end
 
 function Civ6Ai_Util.ReadTextFile(path)

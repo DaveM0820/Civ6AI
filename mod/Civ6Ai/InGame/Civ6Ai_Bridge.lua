@@ -152,6 +152,10 @@ function Civ6Ai_Bridge._CanStartAutotestPulse(playerID)
   if not Civ6Ai_Bridge.IsLoadScreenClosed() then
     return false
   end
+  -- The game is over (victory, or the local seat defeated): nothing to play.
+  if Civ6Ai_Autotest ~= nil and Civ6Ai_Autotest.IsGameOver ~= nil and Civ6Ai_Autotest.IsGameOver() then
+    return false
+  end
   -- A turn timer (game setup or the CPL MP Helper Smart Timer) ends the host's
   -- turn on a clock and bypasses the seat barrier, so the autotest refuses to run.
   if Civ6Ai_Autotest ~= nil and Civ6Ai_Autotest.TurnTimerProblem ~= nil

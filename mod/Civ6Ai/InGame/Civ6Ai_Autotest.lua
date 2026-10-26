@@ -3,8 +3,58 @@ Civ6Ai_Autotest = Civ6Ai_Autotest or {}
 
 Civ6Ai_Autotest._stopped = false
 
+-- Game over: a team won (Events.TeamVictory), or the local seat was defeated
+-- (Events.PlayerDefeat / not alive). Logged once as autotest|game_over, the
+-- session summary is written, pulses stop and the stall watchdog ends, so a
+-- finished game is not reported as a stall at the defeat or victory screen.
+Civ6Ai_Autotest._gameOver = nil
+function Civ6Ai_Autotest._GameOver(reason)
+  if Civ6Ai_Autotest._gameOver ~= nil then
+    return
+  end
+  Civ6Ai_Autotest._gameOver = tostring(reason)
+  local turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or -1
+  Civ6Ai_Util.Log("autotest|game_over|turn=" .. tostring(turn) .. "|" .. tostring(reason))
+  pcall(Civ6Ai_Autotest._LogLine, "game_over|turn=" .. tostring(turn) .. "|" .. tostring(reason))
+  if Civ6Ai_Config.IsAutotest() then
+    pcall(Civ6Ai_Autotest._WriteSessionSummary)
+  end
+  Civ6Ai_Autotest._stopped = true
+end
+
+function Civ6Ai_Autotest.IsGameOver()
+  if Civ6Ai_Autotest._gameOver ~= nil then
+    return true
+  end
+  local localID = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or -1
+  local p = Players ~= nil and localID ~= nil and localID >= 0 and Players[localID] or nil
+  if p ~= nil and p.IsAlive ~= nil and p:IsAlive() == false then
+    Civ6Ai_Autotest._GameOver("local_defeated|player=" .. tostring(localID))
+    return true
+  end
+  return false
+end
+
+function Civ6Ai_Autotest._OnTeamVictory(team, victoryType)
+  Civ6Ai_Autotest._GameOver("victory|team=" .. tostring(team) .. "|type=" .. tostring(victoryType))
+end
+
+function Civ6Ai_Autotest._OnPlayerDefeat(playerID, defeatType)
+  local localID = Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() or -1
+  Civ6Ai_Util.Log("autotest|player_defeat|player=" .. tostring(playerID) .. "|type=" .. tostring(defeatType))
+  if playerID == localID then
+    Civ6Ai_Autotest._GameOver("local_defeated|player=" .. tostring(playerID))
+  end
+end
+
 function Civ6Ai_Autotest.Initialize()
   Civ6Ai_Autotest.StartStallWatchdog()
+  if Events ~= nil and Events.TeamVictory ~= nil then
+    Events.TeamVictory.Add(Civ6Ai_Autotest._OnTeamVictory)
+  end
+  if Events ~= nil and Events.PlayerDefeat ~= nil then
+    Events.PlayerDefeat.Add(Civ6Ai_Autotest._OnPlayerDefeat)
+  end
   if not Civ6Ai_Config.IsAutotest() then
     return
   end
@@ -119,6 +169,9 @@ end
 
 function Civ6Ai_Autotest.AfterPulse(playerID)
   if not Civ6Ai_Config.IsAutotest() then
+    return
+  end
+  if Civ6Ai_Autotest.IsGameOver() then
     return
   end
   if Civ6Ai_Autotest._stopped then
@@ -949,6 +1002,10 @@ function Civ6Ai_Autotest.StartStallWatchdog()
   Civ6Ai_Util.ScheduleTick(function()
     if Game == nil or Game.GetCurrentGameTurn == nil then
       return true
+    end
+    if Civ6Ai_Autotest.IsGameOver() then
+      Civ6Ai_Autotest._stallWatching = false
+      return false
     end
     local turn = Game.GetCurrentGameTurn()
     local now = Civ6Ai_Bridge ~= nil and Civ6Ai_Bridge._WallClock ~= nil and Civ6Ai_Bridge._WallClock() or nil
