@@ -5744,6 +5744,34 @@ local function queueProgress(bq, current)
   return nil, "none"
 end
 
+-- Log-only, once per load: the gameplay BuildQueue's methods and a few reads.
+function Civ6Ai_Orders._ProbeBuildQueue(bq)
+  if Civ6Ai_Orders._bqProbed or bq == nil then
+    return
+  end
+  Civ6Ai_Orders._bqProbed = true
+  local names = {}
+  pcall(function()
+    local mt = getmetatable(bq)
+    local idx = mt ~= nil and mt.__index or nil
+    if type(idx) == "table" then
+      for k in pairs(idx) do names[#names + 1] = tostring(k) end
+    end
+    if type(bq) == "table" then
+      for k in pairs(bq) do names[#names + 1] = tostring(k) end
+    end
+  end)
+  table.sort(names)
+  log("bq_methods|" .. table.concat(names, ","))
+  local reads = {}
+  for _, m in ipairs({ "CurrentlyBuilding", "GetTurnsLeft", "GetProductionYield", "GetSize",
+      "GetCurrentProductionTypeHash", "GetProductionProgress", "GetProgress" }) do
+    local ok, v = pcall(function() return bq[m](bq) end)
+    reads[#reads + 1] = m .. "=" .. (ok and tostring(v) or "err")
+  end
+  log("bq_reads|" .. table.concat(reads, "|"))
+end
+
 function Civ6Ai_Orders.DivertToSettlers(owner, p)
   local cities = call(p, "GetCities")
   if cities == nil or cities.Members == nil then
@@ -5759,6 +5787,7 @@ function Civ6Ai_Orders.DivertToSettlers(owner, p)
     local current = bq ~= nil and call(bq, "CurrentlyBuilding") or nil
     if cost ~= nil and bq ~= nil and pop >= 2 and current ~= "UNIT_SETTLER" and current ~= nil and current ~= "" and current ~= "NONE" then
       local prod = call(city, "GetYield", YieldTypes ~= nil and YieldTypes.PRODUCTION or 1) or 0
+      Civ6Ai_Orders._ProbeBuildQueue(bq)
       local take = math.floor(prod * Civ6Ai_Orders.SETTLER_DIVERT)
       local before, how = queueProgress(bq, current)
       local moved = 0
@@ -5768,6 +5797,13 @@ function Civ6Ai_Orders.DivertToSettlers(owner, p)
         if after ~= nil and after < before then
           moved = before - after
         end
+      elseif take > 0 and before == nil then
+        -- Fallback (approved): progress is unreadable from gameplay, so the
+        -- settler stock is credited a fixed share of this turn's production
+        -- yield (synced city data, same on every machine) without removing it
+        -- from the current item.
+        moved = take
+        how = "yield_share"
       end
       stock = stock + moved
       local trained = false

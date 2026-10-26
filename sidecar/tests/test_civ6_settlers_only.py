@@ -104,7 +104,7 @@ class EarlyLockGameplayTest(unittest.TestCase):
 
 @unittest.skipIf(_lupa is None, "lupa not installed")
 class SettlerDivertTest(unittest.TestCase):
-    def _run(self, pop, current, negative_ok=True, stock=0):
+    def _run(self, pop, current, negative_ok=True, stock=0, unreadable=False):
         from sidecar.tests import test_civ6ai_orders_lua as T
         rt = _lupa.LuaRuntime(unpack_returned_tuples=True)
         rt.execute(T.FAKE_ENV)
@@ -121,7 +121,7 @@ class SettlerDivertTest(unittest.TestCase):
             GetBuildQueue = function() return {
               CurrentlyBuilding = function() return "%s" end,
               GetUnitCost = function() return 20 end,
-              GetProductionProgress = function() return Progress end,
+              GetProductionProgress = function() if %s then return nil end return Progress end,
               AddProgress = function(self, n) if %s or n > 0 then Progress = Progress + n end end } end }
           Players[6] = { IsHuman = function() return false end, IsMajor = function() return true end,
             GetCities = function() return { GetCount = function() return 1 end,
@@ -129,7 +129,7 @@ class SettlerDivertTest(unittest.TestCase):
           UnitManager = UnitManager or {}
           UnitManager.InitUnit = function(o, t, x, y) Made[#Made + 1] = t; return {} end
           Game:SetProperty("CIV6AI_SETTLER_STOCK_6_1", %d)
-        """ % (pop, current, "true" if negative_ok else "false", stock))
+        """ % (pop, current, "true" if unreadable else "false", "true" if negative_ok else "false", stock))
         rt.globals().Civ6Ai_Orders.DivertToSettlers(6, rt.eval("Players[6]"))
         return (rt.eval("Progress"), rt.eval("Game:GetProperty('CIV6AI_SETTLER_STOCK_6_1')"),
                 rt.eval("#Made"), rt.eval("Pop"))
@@ -142,6 +142,9 @@ class SettlerDivertTest(unittest.TestCase):
 
     def test_no_credit_when_engine_refuses_negative(self):
         self.assertEqual(self._run(2, "UNIT_BUILDER", negative_ok=False), (30, 0, 0, 2))
+
+    def test_yield_share_when_progress_unreadable(self):
+        self.assertEqual(self._run(2, "UNIT_BUILDER", unreadable=True), (30, 5, 0, 2))
 
     def test_skips_pop_one_and_settler_builds(self):
         self.assertEqual(self._run(1, "UNIT_BUILDER")[1], 0)
