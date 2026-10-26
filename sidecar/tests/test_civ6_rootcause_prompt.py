@@ -55,5 +55,14 @@ class GovernorTests(unittest.TestCase):
         self.assertEqual(["PINGALA"], gov._unplaced_governors(gv))
 
 
+class ChatOriginalityTests(unittest.TestCase):
+    def test_prompt_asks_for_original_chat(self):
+        from sidecar import civ6_adapter
+
+        wire = civ6_wire.build_civ6_model_wire_text(civ6_adapter.build_classical_golden_snapshot())
+        self.assertIn("always make original statements unique to your own personality and situation", wire)
+        self.assertIn("Do not repeat or paraphrase what other players have said in chat", wire)
+
+
 if __name__ == "__main__":
     unittest.main()

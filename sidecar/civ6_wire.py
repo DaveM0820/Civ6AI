@@ -1251,6 +1251,8 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
         coaching.CIV6_LOBBY_CHAT_TONE,
         "chat.all is public. Send it only when you have something new to say (opening, taunt, deal, war); "
         f"silence is fine. Prefer {chat_dm_examples(context)} for targeted talk.",
+        "When chatting, always make original statements unique to your own personality and situation. "
+        "Do not repeat or paraphrase what other players have said in chat (lines marked You are your own).",
     ]
     roster = _player_roster_line(context)
     if roster:
