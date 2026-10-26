@@ -1315,7 +1315,8 @@ def _diplomacy_section(context: dict[str, Any]) -> list[str]:
     lines.extend(chat_lines or ["(no messages yet)"])
     lines.append(
         "Hint: actively use remember for deals, rival impressions, war aims, and multi-turn plans you will need "
-        "later; set a duration in turns, or forever only when it matters the whole game."
+        "later; set a duration in turns, or forever only when it matters the whole game. "
+        "Forever notes are for things you want to remember permanently; never use them for specific units or positions."
     )
     return lines
 
@@ -1961,7 +1962,9 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "thought.strategy = long-term path to victory and why — prose only, no wire keys here.",
         "thought.plan = the turn plan: every command you issue this turn and its intention (see REQUIRED COMMANDS).",
         "Event.<Name>.log = required attention notes (see REQUIRED COMMANDS).",
-        "remember = text plus duration; store deals, rival impressions, war aims, and multi-turn plans. opinion.* / history.* as needed.",
+        "remember = text plus duration; store deals, rival impressions, war aims, and multi-turn plans. "
+        "Forever notes are for things you want to remember permanently; never use them for specific units or positions. "
+        "opinion.* / history.* as needed.",
         *(
             ["plan.goal = victory type (science, culture, domination, diplomacy, religion, or score). "
              "plan.objective = attack|peace|improve|settle|research|defend, the aim, and by T<turn>. "

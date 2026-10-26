@@ -60,7 +60,7 @@ class T71AttentionTests(unittest.TestCase):
             "fixed_arguments": {"city_id": "CITY_1", "build_id": "UNIT_SETTLER"},
         }]
         text = coaching.civ6_expansion_attention(snap) or ""
-        self.assertIn("Capital.purchase = UNIT_SETTLER (320 gold, you have 400)", text)
+        self.assertNotIn(".purchase", text)  # no buying suggestions for now
         self.assertNotIn("faith", text.split("Settler due:", 1)[-1])
         self.assertIn("Capital.production = UNIT_SETTLER", text)
         self.assertIn('"priorities": "expansion:2"', text)
@@ -96,13 +96,11 @@ class T71AttentionTests(unittest.TestCase):
             "fixed_arguments": {"city_id": "CITY_1", "item_id": "UNIT_WARRIOR", "cost": 160},
         }]
         text = "\n".join(coaching.collect_civ6_attention_items(snap))
-        self.assertIn("480 gold unspent", text)
+        self.assertNotIn("480 gold unspent", text)  # no upgrade to spend it on
         self.assertIn("30 faith, enough for a pantheon (25)", text)
         self.assertIn("2 envoys unspent", text)
         self.assertIn("do not order envoy", text)
-        self.assertIn("UNIT_SETTLER in Capital (320 gold)", text)
-        self.assertIn("UNIT_BUILDER in Capital (200 gold)", text)
-        self.assertLess(text.index("UNIT_SETTLER"), text.index("UNIT_BUILDER"))
+        self.assertNotIn("Buy ", text)  # no buying suggestions for now
         self.assertNotIn("UNIT_SCOUT", text)
         self.assertNotIn("UNIT_WARRIOR", text)
         self.assertIn("1 empty policy slot", text)

@@ -24,7 +24,7 @@ CIV6_GAME_PRIMER = (
     "CIVILIZATION VI PRIMER. You are a high-elo, top-ranked competitive Civilization VI multiplayer player "
     "(Gathering Storm rules). Think in Civ VI mechanics, not generic game logic.\n"
     "- Tiles: a city's citizens (population) work tiles inside its borders automatically or by focus; units never "
-    "work, claim or secure a tile by standing on it. Borders grow by culture or by buying tiles with gold.\n"
+    "work, claim or secure a tile by standing on it. Borders grow by culture.\n"
     "- Builders: limited build charges; each improvement (farm, mine, pasture, plantation, camp, quarry, fishing boats, "
     "lumber mill) spends one charge and improves the resource/yield. Chopping (harvesting) forests, jungle and bonus "
     "resources gives a burst of production/food toward builds and wonders.\n"
@@ -142,7 +142,7 @@ def _civ6_attach_map_images(snapshot: dict[str, Any] | None) -> bool:
     return pipeline.map_image_attach_turn(snapshot)
 
 
-THOUGHT_PLAN_ROW = "thought.plan = one paragraph, the turn plan: every action you take this turn and its intention, unit by unit (e.g. 'Move warrior_1 east toward (20,14) to scout the coast; move settler_1 to (17,24) and found next turn; scout_2 keeps exploring the NE coast.'). Continue your last turn plan (T<n>.plan under THOUGHTS) unless something changed; rewrite it in full each turn, and say why when a unit changes its goal or direction"
+THOUGHT_PLAN_ROW = "thought.plan = one paragraph, the turn plan: every action you take this turn and its intention, unit by unit (e.g. 'Move warrior_1 east toward (20,14) to scout the coast; move settler_1 to (17,24) and found next turn; scout_2 keeps exploring the NE coast.'). Rewrite it in full each turn, and say why when a unit changes its goal or direction"
 
 
 def civ6_required_thought_rows(snapshot: dict[str, Any] | None) -> list[str]:
@@ -241,7 +241,9 @@ def civ6_map_axes_wrap_guidance(snapshot: dict[str, Any] | None = None) -> str:
     return (
         "Map axes on the strategic/tactical images: game-plot x increases east (right on the image); "
         f"{civ6_y_axis_phrase(snapshot)} — Civ6 hex grid, odd rows shifted half a hex east. "
-        f"{wrap_clause}"
+        f"{wrap_clause} "
+        "Mountains are impassable. Land units cannot enter water unless they can embark (embarking needs the tech). "
+        "Black areas on the map are fog that can be explored."
     )
 
 
@@ -605,10 +607,6 @@ def _settler_due_clause(snapshot: dict[str, Any], situation: dict[str, Any], tar
     city_n = len(cities)
     level = 2 if city_n + 2 < int(target) else 1
     parts: list[str] = []
-    purchase = _affordable_settler_purchase(snapshot)
-    if purchase is not None:
-        city, token, cost, yield_name, balance = purchase
-        parts.append(f"{city}.purchase = {token} ({cost} {yield_name}, you have {balance})")
     produced = _offered_settler_production(snapshot)
     if produced is not None:
         parts.append(f"{produced}.production = UNIT_SETTLER")
@@ -816,11 +814,10 @@ def civ6_idle_resources(snapshot: dict[str, Any]) -> tuple[str | None, bool]:
     gold_idle = gold is not None and (
         gold >= 300 or (gpt is not None and gpt > 0 and gold > 8 * gpt)
     )
-    # Gold is nagged about only when there is something real to spend it on:
-    # a unit upgrade the game allows now (listed first), or a purchase below.
+    # Gold is noted only when there is something real to spend it on: a unit
+    # upgrade the game allows now. Buying is not suggested (no purchase hints).
     upgrades = _upgrade_labels(snapshot)
-    gold_buys = [label for label in _best_purchase_labels(snapshot) if "gold" in label.lower()]
-    if gold_idle and not upgrades and not gold_buys:
+    if gold_idle and not upgrades:
         gold_idle = False
     if gold_idle and gold is not None:
         extra = f", more than 8 turns of +{gpt}/turn" if gpt is not None and gpt > 0 and gold > 8 * gpt else ""
@@ -850,11 +847,6 @@ def civ6_idle_resources(snapshot: dict[str, Any]) -> tuple[str | None, bool]:
     if envoys is not None and envoys > 0:
         bits.append(f"{envoys} envoys unspent (the game's own AI sends them; do not order envoy)")
     spends_gold = gold_idle
-    if gold_idle or faith_idle:
-        buys = _best_purchase_labels(snapshot)
-        if buys:
-            bits.append("Buy " + "; ".join(buys))
-            spends_gold = spends_gold or any("gold" in label.lower() for label in buys)
     if not bits:
         return None, False
     policies = gov.get("policies") if isinstance(gov.get("policies"), dict) else {}
