@@ -52,7 +52,7 @@ class BuilderWorkTests(unittest.TestCase):
     def test_attention_line(self):
         line = coaching.civ6_builder_work_attention(_snap(6, []))
         self.assertIn("6 builders with 18 charges", line)
-        self.assertIn("improvements off", line)
+        self.assertNotIn("improvements off", line)
         self.assertIsNone(coaching.civ6_builder_work_attention(_snap(1, [(1, 2), (2, 2), (3, 2)])))
         self.assertIn(line, civ6_attention.lines(_snap(6, [])))
 
@@ -66,7 +66,7 @@ class RepeatRejectionTests(unittest.TestCase):
             lines = legal.rejection_lines(snap)
             self.assertEqual(len(lines), 1)
             self.assertIn("rejected on 2 turns", lines[0])
-            self.assertIn("move the unit that stands there", lines[0])
+            self.assertNotIn("move the unit that stands there", lines[0])
 
     def test_single_rejection_has_no_note(self):
         with tempfile.TemporaryDirectory() as tmp:

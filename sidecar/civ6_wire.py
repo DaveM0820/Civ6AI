@@ -626,7 +626,7 @@ def city_strike_prompt_lines(snapshot: dict[str, Any]) -> list[str]:
     if not rows:
         return []
     return [
-        "CITY STRIKES — these are city attacks. Prefer one over a move.",
+        "CITY STRIKES — these are city attacks.",
         "Order CityName.rangeStrike = (x,y) with one coordinate from that city's line.",
         *rows,
         "",
@@ -935,8 +935,7 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
         "Geography is strategy: read islands vs continents, coastal pockets, narrow land bridges, mountain and "
         "river choke points, and who controls the straits before you found cities, route armies, or declare war.",
         coaching.civ6_map_axes_wrap_guidance(context),
-        "War is integral to civilization — keep a military, watch gold, science, culture, faith, and amenities, "
-        "and use theory of mind: play the other players, not just the board.",
+        "War, gold, science, culture, faith and amenities all matter; the other players are playing too.",
         "",
         pipeline._wire_line("player", pipeline._player_identity_phrase(leader, civ_label, player_id)),
         pipeline._wire_line("turn", int(decision.get("turn", 0))),
@@ -1856,20 +1855,18 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
         )
     elif at_war:
         opening = (
-            "- You are at war, but no enemy unit is within move range of your army or cities. "
-            "Do not strike or mass units for an assault this turn. Garrison and build as usual."
+            "- You are at war, but no enemy unit is within move range of your army or cities."
         )
     elif combat_wire.hostiles_visible(context):
         opening = (
             "- You are not at war with any civilization. Barbarians or other hostile units are in sight"
             + (" and within move range: the WAR section lists strikes on them."
                if in_reach else "; none is within move range of your army or cities.")
-            + " Keep exploring and building otherwise."
+            + ""
         )
     else:
         opening = (
-            "- In peacetime, scouts and warriors explore fog. Do not fortify the whole army, because units left "
-            "without orders stay where they are."
+            "- Units left without orders stay where they are."
         )
     lines = [
         opening,
@@ -1979,7 +1976,6 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
             if _has_queue_production(snapshot) else []
         ),
         f"legal.research.tech, legal.research.civic, chat.all, {chat_dm_examples(snapshot)} — see OPTIONAL COMMANDS.",
-        "Do not use Skip when another option is listed.",
         *(
             ["Automate(explore), when it is listed on that unit's row, walks a scout, soldier, or ship toward "
              "unrevealed tiles this turn. Order it again next turn to continue. Land units stop at the coast; "
@@ -2007,7 +2003,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         f"- {coaching.CIV6_MOVE_THEN_ATTACK_GUIDANCE}",
         *(
             ["- CITY STRIKES above are city attacks. Order CityName.rangeStrike = (x,y) "
-             "with one coordinate from that city's line. Prefer a listed strike over a move."]
+             "with one coordinate from that city's line."]
             if city_strike_prompt_lines(snapshot) else []
         ),
         "- Attacks: AttackTo(x,y) options appear on the unit's own row only when a visible enemy (a civ you are at "

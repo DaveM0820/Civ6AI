@@ -32,7 +32,7 @@ class Civ6WirePromptTests(unittest.TestCase):
         self.assertIn('"commands.required.count"', wire)
         self.assertIn('.spearman_1.command": "MoveTo(', wire)
         self.assertEqual(1, wire.count(coaching.CIV6_SETTLER_MAP_ADVICE))
-        self.assertIn("prefer it over a move", wire)
+        self.assertNotIn("prefer it over a move", wire)
         self.assertEqual(1, wire.count(coaching.CIV6_MOVE_THEN_ATTACK_GUIDANCE))
         # Only engine-supported unit command shapes are advertised.
         for unsupported in ("Alert", "Heal", "Sleep", "DISTRICT_*@", "legal.trade", "legal.alliance"):

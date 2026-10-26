@@ -693,8 +693,7 @@ def rejection_lines(snapshot: dict[str, Any]) -> list[str]:
         line = f"Rejected last turn: {order} - {reason_text(code)}"
         repeats = len(turns_of.get((order, code), ()))
         if repeats >= 2:
-            line += (f" (rejected on {repeats} turns for the same reason; stop ordering it: "
-                     f"{REPEAT_ADVICE.get(code, REPEAT_ADVICE_DEFAULT)})")
+            line += f" (rejected on {repeats} turns for the same reason)"
         if repeats >= settings.get_int("CIV6AI_REPEAT_LEGAL_MOVES_AFTER") and row.get("unit_id"):
             hint = legal_moves_text(snapshot, str(row.get("unit_id")))
             if hint:

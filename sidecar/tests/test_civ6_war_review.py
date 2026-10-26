@@ -107,7 +107,7 @@ class WarReviewTests(unittest.TestCase):
         self.assertNotIn("enemies within their move range", text)
         tactics = "\n".join(combat.tactics_advice_lines(ctx))
         self.assertNotIn("Mass 3+", tactics)
-        self.assertIn("do not mass units", tactics)
+        self.assertNotIn("do not mass units", tactics)
         advice = "\n".join(civ6_wire._advice_section(ctx))
         self.assertIn("no enemy unit is within move range", advice)
         self.assertNotIn("Mass 3+", advice)

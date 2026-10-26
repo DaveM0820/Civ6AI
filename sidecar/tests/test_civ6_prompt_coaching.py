@@ -54,7 +54,7 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         self.assertIsNotNone(note)
         assert note is not None
         self.assertIn("20% HP", note)
-        self.assertIn("retreat", note.lower())
+        self.assertNotIn("retreat", note.lower())
 
     def test_focus_fire_attention(self):
         snap = {
@@ -76,7 +76,7 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         note = coaching.civ6_focus_fire_attention(snap)
         self.assertIsNotNone(note)
         assert note is not None
-        self.assertIn("focus-fire", note.lower())
+        self.assertNotIn("focus-fire", note.lower())
 
     def test_attack_options_append_without_none(self):
         opts = coaching.append_attack_options_to_unit_line(

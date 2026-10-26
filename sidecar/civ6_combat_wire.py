@@ -37,11 +37,7 @@ LOW_HP_PCT = 30
 
 WAR_TACTICS_ADVICE = [
     "- War tactics: soften a target with ranged attacks first (no return damage), then finish it with melee.",
-    "- Do not take attacks previewed as Major Defeat or Decisive Defeat; a Stalemate only trades HP.",
-    "- Focus fire: kill one enemy per turn with several units instead of wounding many.",
-    "- Mass 3+ units (with ranged or siege support) before assaulting a city; walled cities shoot back.",
-    "- Pull units under ~30% HP back to heal (in your territory or fortified); a dead unit costs far more.",
-    "- Defend on hills, forest, or behind rivers (strength bonus), and keep civilians stacked with or behind military.",
+    "- Attack previews show the expected result; hills, forest and rivers give defenders a strength bonus; walled cities shoot back.",
 ]
 
 
@@ -681,51 +677,6 @@ def city_threat_lines(context: dict[str, Any]) -> list[str]:
     return [header] + rendered
 
 
-def _threat_lines(context: dict[str, Any]) -> list[str]:
-    wire_ids = _wire_ids(context)
-    own_units = {str(u.get("unit_id")): u for u in context.get("your_units", []) or [] if isinstance(u, dict)}
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in _rows(_combat(context), "threats"):
-        if row.get("source_type") == "city" and row.get("can_strike") is False:
-            continue
-        grouped.setdefault(str(row.get("unit_id")), []).append(row)
-    lines: list[str] = []
-    for unit_id, rows in grouped.items():
-        rows.sort(key=lambda r: (-(_int(r.get("damage_to_defender")) or 0), _int(r.get("distance")) or 99))
-        unit = own_units.get(unit_id, {})
-        name = wire_ids.get(unit_id, unit_id)
-        own = unit_strength_text(unit, context) or ""
-        pos = pipeline._plot_coords_text(unit.get("plot_id")) if unit.get("plot_id") else ""
-        sources: list[str] = []
-        civilian = any(r.get("civilian") for r in rows)
-        for r in rows[:3]:
-            who = f"{_owner_label(context, r.get('source_owner'))} {r.get('source_name') or 'unit'}"
-            if r.get("source_type") == "city":
-                who += " (city strike)"
-            sx, sy = _int(r.get("source_x")), _int(r.get("source_y"))
-            text = f"{who} ({_int(r.get('enemy_strength')) or 0} str) at ({sx},{sy}), {_tiles(r.get('distance'))}"
-            to_you = _int(r.get("damage_to_defender"))
-            if to_you is not None and not r.get("civilian"):
-                att_s, def_s = _int(r.get("attacker_strength")), _int(r.get("defender_strength"))
-                odds = f" ({att_s} vs your {def_s} defending)" if att_s is not None and def_s is not None else ""
-                text += f" — if it attacks{odds}: ~{to_you}dmg to you"
-                if not r.get("ranged"):
-                    text += f", ~{_int(r.get('damage_to_attacker')) or 0} to it"
-                own_hp = _int(r.get("own_hp"))
-                if own_hp is not None and to_you >= own_hp:
-                    text += " (KILLS you)"
-            sources.append(text)
-        advice = ("can be captured — move it away or stack it with a military unit" if civilian
-                  else "pull back, fortify on defensive terrain, or stack support nearby")
-        head = f"threat: {name}"
-        if own:
-            head += f" ({own})"
-        if pos:
-            head += f" at {pos}"
-        lines.append(f"{head} is in reach of {' | '.join(sources)} — {advice}")
-    return lines[:MAX_THREAT_LINES]
-
-
 def retain_runnable_attacks(snapshot: dict[str, Any]) -> None:
     """Drop attack offers the combat preview says the game cannot run.
 
@@ -924,4 +875,4 @@ def tactics_advice_lines(context: dict[str, Any]) -> list[str]:
         return []
     if enemies_within_their_reach(context) or strike_lines(context):
         return list(WAR_TACTICS_ADVICE)
-    return ["- War tactics: no enemy is within move range of your army or cities, so do not mass units or plan a strike this turn."]
+    return []

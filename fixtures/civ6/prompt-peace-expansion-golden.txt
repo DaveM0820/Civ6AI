@@ -5,7 +5,7 @@ Play Civilization VI (districts and adjacency, amenities, housing, loyalty, civi
 This is a race to develop: every turn is scarce. Move units aggressively into fog and toward objectives; advance exploration, expansion, tech, and civics without delay. Issue a command for every unit and city that needs orders — one idle turn compounds every turn after.
 Geography is strategy: read islands vs continents, coastal pockets, narrow land bridges, mountain and river choke points, and who controls the straits before you found cities, route armies, or declare war.
 Map axes on the strategic/tactical images: game-plot x increases east (right on the image); game-plot y increases north (up on the map image; north at top) — Civ6 hex grid, odd rows shifted half a hex east. This map does not wrap on X; treat left/right edges as map borders. Mountains are impassable. Land units cannot enter water unless they can embark (embarking needs the tech). Gray cloudy areas on the map are unexplored fog that units can move into and explore.
-War is integral to civilization — keep a military, watch gold, science, culture, faith, and amenities, and use theory of mind: play the other players, not just the board.
+War, gold, science, culture, faith and amenities all matter; the other players are playing too.
 
 player = Alexander playing as GREECE (PLAYER_0)
 turn = 18
@@ -101,14 +101,14 @@ rival.Cleopatra.score = 138
 rival.Cleopatra.attitude = ATTITUDE_CAUTIOUS
 
 === ATTENTION ===
-SETTLE: settler_1.command = MoveTo a site you pick, then FoundCity on arrival. Keep a military unit next to each Settler until it founds. Carefully observe the attached map to choose a settle location, and remember it for as many turns as the walk takes. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold). Coastal tiles (needed for a harbour and ships) and river tiles are better city sites when available.
+SETTLE: settler_1.command = MoveTo a site you pick, then FoundCity on arrival. Barbarians capture an unescorted Settler. Carefully observe the attached map to choose a settle location, and remember it for as many turns as the walk takes. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold). Coastal tiles (needed for a harbour and ships) and river tiles are better city sites when available.
 IDLE: 1 UNIT_SCOUT, 1 UNIT_SPEARMAN — host default applied
 
 === THOUGHTS ===
 history.memory = Expand to third city after Pottery; scout eastern coast.
 
 === ADVICE ===
-- In peacetime, scouts and warriors explore fog. Do not fortify the whole army, because units left without orders stay where they are.
+- Units left without orders stay where they are.
 - Before you finish: issue one command for each entry under REQUIRED COMMANDS.
 - Pick research and civics before they run out so science and culture are never wasted.
 - For legal.research.tech / legal.research.civic, pick only from the listed options — never re-pick a tech or civic you already finished.
@@ -135,7 +135,6 @@ Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):
 unitId.command = MoveTo(x,y) | AttackTo(x,y) | FoundCity | Improve(x,y,IMPROVEMENT_X) (builders) | Fortify | Skip (one option per unit from its row; MoveTo(x,y) = any destination tile, the unit walks toward it).
 cityName.production = UNIT_* | BUILDING_* | PROJECT_* from that city's listed options (only when currentProduction is NONE, or to switch on purpose).
 legal.research.tech, legal.research.civic, chat.all, chat.Cleopatra — see OPTIONAL COMMANDS.
-Do not use Skip when another option is listed.
 
 GOOD JSON (entire reply — row numbers on keys; host strips the prefix):
   {"commands.required.count":10, "1.strategicmap.read":"...", "2.tacticalmap.read":"...", "3.thought.situation":"...", "4.thought.strategy":"...", "5.thought.plan":"...", "6.Event.Idle.log":"...", "7.Event.Settle.log":"...", "8.scout_1.command":"MoveTo(x,y)", "9.settler_1.command":"MoveTo(x,y)", "10.spearman_1.command":"MoveTo(x,y)", "11.chat.all":"Hello rivals."}
@@ -145,7 +144,7 @@ Command rules:
 - Never MoveTo a mountain, a water tile this unit cannot enter, or a tile one of your own units already holds. The map marks a mountain with a white peak and water as impassable to land units until they can embark. A rejected move says impassable when the tile cannot be entered, and no_path when no route exists. The unit then takes one step toward that destination on a tile it can enter. Do not repeat a destination that stays blocked.
 - Coordinates: game-plot y increases north (up on the map image; north at top) and x increases east; see the GAME section for X-wrap.
 - Civ6 stacking: typically one military formation-class unit per tile, plus one civilian or support unit; two military units of the same formation class cannot share a tile. Use corps/armies and support units (e.g. battering ram, siege tower) intentionally.
-- When an attack is offered, prefer it over a move: AttackTo on a unit row (melee, ranged, or bombard) and rangeStrike on a city row (a city attack or city strike). Move instead only when you judge that attack the wrong fight. A unit with leftover movement can often still attack this turn after moving — do not treat "already moved" as "cannot attack" unless the unit has 0 moves left or the attack is otherwise illegal.
+- Attacks are AttackTo on a unit row (melee, ranged, or bombard) and rangeStrike on a city row (a city attack or city strike). A unit with leftover movement can often still attack this turn after moving — do not treat "already moved" as "cannot attack" unless the unit has 0 moves left or the attack is otherwise illegal.
 - Attacks: AttackTo(x,y) options appear on the unit's own row only when a visible enemy (a civ you are at war with, or barbarians) is in reach — adjacent for melee, within range for ranged units.
 - A city with currentProduction set: leave cityName.production out unless you really mean to switch.
 - Hybrid control: Units left without orders stay where they are; cities keep auto production unless you override.

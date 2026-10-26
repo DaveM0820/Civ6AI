@@ -49,8 +49,8 @@ CIV6_GAME_PRIMER = (
     "Victory paths: science, culture (tourism), domination, religious, diplomatic, score.\n"
     "- Concepts: movement: one military plus one civilian unit per tile, never two of one class; mountains "
     "impassable; rivers, hills, woods cost extra moves. City sites: fresh water or coast, hills, luxuries, room "
-    "for districts, 3-4 tiles apart, little overlap. Settlers and builders are captured on contact: escort them, "
-    "never end a civilian adjacent to barbarians or enemies. Early expansion is vital. Navy is vital, above all on "
+    "for districts, 3-4 tiles apart, little overlap. Settlers and builders are captured by an adjacent enemy or "
+    "barbarian. Navy matters most on "
     "island/archipelago maps: Sailing, Shipbuilding, Celestial Navigation, Cartography for ocean; galleys, "
     "quadriremes, Harbors; naval melee vs naval ranged; screen embarked units; coastal raids; control sea lanes; "
     "settle other islands. Explore aggressively with scouts and boats: goody huts, city-states, natural wonders, "
@@ -101,9 +101,8 @@ CIV6_DIPLOMACY_PSYCHOLOGY = (
 )
 
 CIV6_MOVE_THEN_ATTACK_GUIDANCE = (
-    "When an attack is offered, prefer it over a move: AttackTo on a unit row "
+    "Attacks are AttackTo on a unit row "
     "(melee, ranged, or bombard) and rangeStrike on a city row (a city attack or city strike). "
-    "Move instead only when you judge that attack the wrong fight. "
     "A unit with leftover movement can often still attack this turn after moving — "
     "do not treat \"already moved\" as \"cannot attack\" unless the unit has 0 moves left "
     "or the attack is otherwise illegal."
@@ -431,7 +430,7 @@ def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
     if newest_revealed >= 0 and baseline >= 0 and newest_revealed <= baseline:
         return (
             f"No new exploration in {CIV6_EXPLORE_STALL_TURNS}+ turns while map is only "
-            f"{explored}% explored — soft advice: send a scout or military unit into fog this turn."
+            f"{explored}% explored."
         )
     return civ6_explored_fact_line(snapshot, explored)
 
@@ -473,8 +472,7 @@ def civ6_low_hp_retreat_attention(snapshot: dict[str, Any]) -> str | None:
     joined = "; ".join(bits[:6])
     more = "" if len(bits) <= 6 else f" (+{len(bits) - 6} more)"
     return (
-        f"{joined}{more} — almost always better to retreat and heal "
-        "unless this is an intentional sacrifice"
+        f"{joined}{more}"
     )
 
 
@@ -522,7 +520,6 @@ def civ6_focus_fire_attention(snapshot: dict[str, Any]) -> str | None:
         return None
     return (
         " | ".join(bits[:3])
-        + " — soft advice: focus-fire the shared target rather than splitting strikes"
     )
 
 
@@ -540,12 +537,11 @@ def civ6_economy_attention(snapshot: dict[str, Any]) -> list[str]:
         gold_i, gpt_i = None, None
     if isinstance(gpt_i, int) and gpt_i < 0:
         out.append(
-            f"Gold per turn is {gpt_i} — soft advice: bankruptcy / negative GPT shrinks maintenance "
-            "headroom and can force unit or building losses; raise income or cut costs."
+            f"Gold per turn is {gpt_i}."
         )
     if isinstance(gold_i, int) and gold_i < 0:
         out.append(
-            f"Treasury is {gold_i} gold — soft advice: clear the deficit before expanding army size."
+            f"Treasury is {gold_i} gold."
         )
     amenities = empire.get("amenities")
     if isinstance(amenities, dict):
@@ -556,10 +552,7 @@ def civ6_economy_attention(snapshot: dict[str, Any]) -> list[str]:
             net_i = None
         if isinstance(net_i, int) and net_i < 0:
             out.append(
-                f"Empire amenities net {net_i} — soft advice: unhappy cities grow slower and revolt risk rises; "
-                "fix luxuries, entertainment, or policies. Builders: improve luxury resources in your borders "
-                "(plantation, camp, quarry, etc.) — each new luxury type gives amenities to several cities; "
-                "trade for a luxury you lack."
+                f"Empire amenities net {net_i}."
             )
     return out
 
@@ -582,8 +575,7 @@ def civ6_loyalty_attention(snapshot: dict[str, Any]) -> list[str]:
         per = extra.get("loyalty_per_turn")
         drift = f", {per:+g}/turn" if isinstance(per, (int, float)) and not isinstance(per, bool) else ""
         notes.append(
-            f"LOYALTY: {name} is at {loyalty}{drift}. A city near 0 rebels. "
-            "Raise amenities, keep a governor, or ease the nearby pressure before it flips."
+            f"LOYALTY: {name} is at {loyalty}{drift}. A city at 0 loyalty rebels."
         )
     return notes
 
@@ -1138,10 +1130,6 @@ def civ6_builder_work_attention(snapshot: dict[str, Any]) -> str | None:
         return None
     improve_on = prio.current_levels(snapshot).get(prio.BY_KEY["improvements"]["id"], 0) > 0
     text = (f"BUILDERS: {builders} builders with {charges} charges, but only {open_tiles} owned "
-            f"tile{'s' if open_tiles != 1 else ''} can be improved this turn. More builders add nothing until a "
-            "new city, border growth, or a tech opens tiles.")
-    if improve_on:
-        text += ' Switch improvements off in "priorities" (send your complete set without it).'
-    text += (" Keep spare builders safe inside your borders or walk one beside a settler to work "
-             "the next city's tiles.")
+            f"tile{'s' if open_tiles != 1 else ''} can be improved this turn.")
+    del improve_on
     return text
