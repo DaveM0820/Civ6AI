@@ -358,7 +358,7 @@ REASON_TEXT = {
     "illegal_dof": "no open friendship offer",
     "government_locked": "a government can only be changed on a turn when a civic completed",
     "city_strike_unavailable": "city_strike_unavailable",
-    "self_tile_move": "the unit is already on that tile; order FoundCity, Fortify or Skip instead",
+    "self_tile_move": "the unit was already on that tile, so it stayed there (Skip)",
     "off_map": "that tile is off the map",
     "improve_tile_not_offered": "no Improve is offered on that tile; use a listed Improve tile",
     "found_city_not_offered": "FoundCity is not offered for this settler here",

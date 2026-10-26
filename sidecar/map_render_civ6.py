@@ -24,6 +24,7 @@ SETTLE_HERE_LABEL = "settler tile"
 UNEXPLORED = map_render.UNEXPLORED_FILL
 # Tight Civ5 view is about 8x12. Twice that many cells uses axis labels only.
 HEX_AXIS_ONLY_MIN_CELLS = 8 * 12 * 2
+TILE_COORD_MAX_CELLS = 150  # zoomed views at or below this tile count label every tile
 # Screen Y grows down. Flat-top corners use angle π/6 + i·π/3, so:
 #   edge 5 = east, edge 0 = southeast, edge 1 = southwest.
 # Civ5MapImage uses 5/4/3 because it InvertY's the canvas first.
@@ -1867,7 +1868,9 @@ def render_civ6_map_png(
     # strategic overview keeps the area-based choice.
     zoomed = image_role in ("viewport", "focus")
     if zoomed:
-        show_axis, show_tile_coords = vw > 0 and vh > 0, False
+        # Small close-ups: (x,y) at the bottom of every tile; larger ones keep near-unit labels.
+        show_axis = vw > 0 and vh > 0
+        show_tile_coords = show_axis and vw * vh <= TILE_COORD_MAX_CELLS
     else:
         show_axis, show_tile_coords = _hex_coord_label_flags(vw, vh)
     tile_px = _tile_px_for_model_target(

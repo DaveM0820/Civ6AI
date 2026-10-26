@@ -746,8 +746,7 @@ class CommandWireVocabTests(unittest.TestCase):
             ],
         }
         command_wire.LAST_UNRESOLVED.clear()
-        self.assertIsNone(command_wire.resolve_unit_token(snap, "UNIT_SETTLER_1", "MoveTo(10,10)"))
-        self.assertEqual(1, len(snap["legal_commands"]))
+        self.assertEqual("CMD_UNIT_SETTLER_1_skip", command_wire.resolve_unit_token(snap, "UNIT_SETTLER_1", "MoveTo(10,10)"))
         self.assertTrue(any(n.startswith("Rejected last turn: MoveTo(10,10)") and "already on that tile" in n
                             for n in command_wire.LAST_UNRESOLVED))
 
@@ -759,8 +758,9 @@ class CommandWireVocabTests(unittest.TestCase):
                 "your_units": [{"unit_id": "UNIT_W", "unit_type_id": "UNIT_WARRIOR", "plot_id": "PLOT_10_10"}],
                 "legal_commands": list(legal),
             }
-            self.assertIsNone(command_wire.resolve_unit_token(snap, "UNIT_W", "MoveTo(10,10)"))
-            self.assertEqual(legal, snap["legal_commands"])
+            # Own-tile MoveTo holds the unit (vanilla Skip); no move offer is added.
+            self.assertEqual("CMD_UNIT_W_skip", command_wire.resolve_unit_token(snap, "UNIT_W", "MoveTo(10,10)"))
+            self.assertFalse(any(c.get("kind") == "move_unit" for c in snap["legal_commands"]))
 
     def test_improve_on_unoffered_tile_is_rejected(self):
         offer = {"command_id": "CMD_B_farm_3_4", "kind": "move_unit",

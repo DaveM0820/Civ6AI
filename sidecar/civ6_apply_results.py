@@ -533,6 +533,28 @@ def _plot_facts(snapshot: dict[str, Any], x: int, y: int, player_id: str) -> lis
     return facts
 
 
+_MOVE_TAIL = ("Try a different tile. Remember to check the map before issuing movement orders "
+              "to make sure it's a valid tile.")
+
+
+def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reason: str, pid: str) -> str:
+    """'You tried to move Warrior 1 to tile (x,y). Tile (x,y) is a mountain and is impassable. ...'"""
+    facts = _plot_facts(snapshot, x, y, pid)
+    if reason in NO_EFFECT_REASONS:
+        why = "the tile it was already on"
+    elif "mountain" in facts or reason == "impassable":
+        why = "a mountain and is impassable"
+    elif "water" in facts:
+        why = "water (this unit cannot enter it)"
+    elif any(f.startswith("occupied by") for f in facts):
+        why = next(f for f in facts if f.startswith("occupied by")) + " (two units of the same kind cannot share a tile)"
+    elif "tile not explored" in facts:
+        why = "not explored (no known path)"
+    else:
+        why = "not reachable: " + (describe_reason(reason) or "the game rejected it")
+    return (f"You tried to move {actor or 'the unit'} to tile ({x},{y}). Tile ({x},{y}) is {why}. " + _MOVE_TAIL)
+
+
 def tile_failure_text(snapshot: dict[str, Any], row: dict[str, Any], actor: str, reason: str) -> str | None:
     """'Last turn you tried to <action> (x,y) but it failed: <game reason> | <tile facts>' for tile orders."""
     kind = str(row.get("kind") or "")
@@ -543,6 +565,8 @@ def tile_failure_text(snapshot: dict[str, Any], row: dict[str, Any], actor: str,
     build = _readable(fixed.get("build_id") or fixed.get("improvement_id"), "DISTRICT_").replace("Improvement ", "")
     action = TILE_ACTIONS[kind].format(actor=actor or "the unit", build=build or "it")
     pid = str(snapshot.get("player_id") or (snapshot.get("decision") or {}).get("player_id") or "")
+    if kind == "move_unit":
+        return move_failure_text(snapshot, actor, x, y, reason, pid)
     reasons = [r for r in [describe_reason(reason) or "the game rejected it"] + _plot_facts(snapshot, x, y, pid) if r]
     return f"Last turn you tried to {action} ({x},{y}) but it failed: " + " | ".join(dict.fromkeys(reasons))
 
@@ -578,6 +602,11 @@ def build_command_results(snapshot: dict[str, Any], rows: list[dict[str, Any]], 
         summary = f"{actor} {order}: {outcome}" if actor else f"{order}: {outcome}"
         if wire_kind == KIND_FAILED:
             summary = tile_failure_text(snapshot, row, actor, reason) or summary
+        elif no_effect and str(row.get("kind") or "") == "move_unit":
+            fx = row.get("fixed_arguments") if isinstance(row.get("fixed_arguments"), dict) else {}
+            tx, ty = fx.get("target_x", row.get("x")), fx.get("target_y", row.get("y"))
+            if isinstance(tx, int) and isinstance(ty, int):
+                summary = move_failure_text(snapshot, actor, tx, ty, reason, "")
         affected: list[str] = []
         for value in (
             row.get("command_id"),
@@ -597,7 +626,7 @@ def build_command_results(snapshot: dict[str, Any], rows: list[dict[str, Any]], 
             "turn": max(0, int(decision_turn if decision_turn is not None else turn)),
             "apply_turn": apply_turn_i,
             "kind": wire_kind,
-            "summary": summary[:300],
+            "summary": summary[:360],
             "affected_ids": affected,
             "reason": reason,
             "order_kind": str(row.get("kind") or ""),

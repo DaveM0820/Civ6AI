@@ -113,6 +113,18 @@ def _walk_bits(site: dict[str, Any]) -> list[str]:
     return bits
 
 
+def _wrap_x(snapshot: dict[str, Any], x: int) -> int:
+    """Map wraps east-west: keep x inside 0..width-1 (e.g. -3 -> width-3)."""
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    try:
+        width = int(game.get("map_width") or 0)
+    except (TypeError, ValueError):
+        width = 0
+    if width > 0 and game.get("wrap_x") is not False:
+        return x % width
+    return x
+
+
 def labeled_settle_sites(snapshot: dict[str, Any], radius: int | None = None) -> list[dict[str, Any]]:
     """Stable S1..Sn labels for legal nearby settle tiles (unranked; overlay + prompt)."""
     if radius is None:
@@ -132,6 +144,8 @@ def labeled_settle_sites(snapshot: dict[str, Any], radius: int | None = None) ->
                 x, y = int(site["x"]), int(site["y"])
             except (KeyError, TypeError, ValueError):
                 continue
+            x = _wrap_x(snapshot, x)
+            site["x"] = x
             try:
                 dist = int(site.get("dist")) if site.get("dist") is not None else None
             except (TypeError, ValueError):
@@ -502,6 +516,8 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
         )
     if verb == "moveto" and coord:
         return _synthesize_far_move(snapshot, unit_id, int(coord.group(1)), int(coord.group(2)))
+    if verb == "skip" and not coord:
+        return _synthesize_skip(snapshot, unit_id)
     return None
 
 
@@ -671,8 +687,9 @@ def _synthesize_far_move(
     unit = _unit_row(snapshot, unit_id)
     here = _plot_xy(unit)
     if here == (x, y):
+        # The unit holds this turn (Skip) and the model is told why next turn.
         _reject(snapshot, f"MoveTo({x},{y}) for {unit_id}", "self_tile_move")
-        return None
+        return _synthesize_skip(snapshot, unit_id)
     if intent == INTENT_MOVE:
         attack = _legal_attack_at(snapshot, unit_id, x, y)
         if attack:
@@ -692,6 +709,28 @@ def _synthesize_far_move(
         "kind": "move_unit",
         "description": "Move toward destination",
         "fixed_arguments": fixed,
+        "parameter_domains": {},
+        "affected_ids": [unit_id],
+        "runtime_status": "tested",
+    })
+
+
+def _synthesize_skip(snapshot: dict[str, Any], unit_id: str) -> str | None:
+    """Vanilla Skip (end this unit's turn) for any unit, even when the game listed no Skip row."""
+    for command in snapshot.get("legal_commands", []) or []:
+        if isinstance(command, dict) and command.get("kind") == "unit_skip":
+            fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
+            if fixed.get("unit_id") == unit_id:
+                return str(command.get("command_id"))
+    if _unit_row(snapshot, unit_id) is None:
+        return None
+    from sidecar import civ6_legality as legality
+
+    return legality.add_offer(snapshot, {
+        "command_id": f"CMD_{unit_id}_skip",
+        "kind": "unit_skip",
+        "description": "Skip",
+        "fixed_arguments": {"unit_id": unit_id},
         "parameter_domains": {},
         "affected_ids": [unit_id],
         "runtime_status": "tested",

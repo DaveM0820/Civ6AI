@@ -578,7 +578,6 @@ def war_section_lines(context: dict[str, Any]) -> list[str]:
         lines.append(pipeline._wire_line(
             f"war.city.{c.get('name') or 'city'}",
             f"{_owner_label(context, c.get('owner_player_id'))} ({_int(c.get('x'))},{_int(c.get('y'))}) {', '.join(stat)}{stage}{capture}"))
-    lines.extend(city_threat_lines(context))
     siege = siege_guidance_line(context)
     if siege:
         lines.append(siege)
@@ -897,8 +896,7 @@ def attention_items(context: dict[str, Any]) -> list[str]:
     if not war_active(context):
         return []
     items: list[str] = []
-    items.extend(_threat_lines(context))
-    items.extend(_low_hp_threat_lines(context))
+    # No threat warnings (removed): the WAR section lists enemies and strikes as facts.
     focus = _focus_fire_line(context)
     if focus:
         items.append(focus)

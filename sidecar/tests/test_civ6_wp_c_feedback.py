@@ -58,7 +58,7 @@ class ApplyResultFeedbackTests(unittest.TestCase):
             "fixed_arguments": {"unit_id": "UNIT_WARRIOR_1", "target_x": 6, "target_y": 10},
         }], 36)
         self.assertEqual(items[0]["kind"], results.KIND_NO_EFFECT)
-        self.assertIn("no effect", items[0]["summary"])
+        self.assertIn("already on", items[0]["summary"])
 
     def test_unresolved_token_recorded_as_dropped(self):
         snap = _snap()

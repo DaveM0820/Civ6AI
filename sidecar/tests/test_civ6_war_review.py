@@ -93,9 +93,7 @@ class WarReviewTests(unittest.TestCase):
         text = "\n".join(combat.war_section_lines(ctx))
         self.assertNotIn("No enemy is within reach", text)
         self.assertIn("within their move range", text)
-        self.assertIn("war.city.Utrecht.threat", text)
-        self.assertIn("walls=no", text)
-        self.assertIn("nearby=", text)
+        self.assertNotIn("war.city.Utrecht.threat", text)  # threat warnings removed
         advice = "\n".join(civ6_wire._advice_section(ctx))
         self.assertNotIn("In peacetime", advice)
         self.assertIn("You are at war", advice)
@@ -106,7 +104,6 @@ class WarReviewTests(unittest.TestCase):
         ctx["civ6"]["combat"]["hostiles"][0]["max_moves"] = 2
         text = "\n".join(combat.war_section_lines(ctx))
         self.assertIn("No enemy is within reach of your military this turn.", text)
-        self.assertIn("no enemy is within move range", text)
         self.assertNotIn("enemies within their move range", text)
         tactics = "\n".join(combat.tactics_advice_lines(ctx))
         self.assertNotIn("Mass 3+", tactics)

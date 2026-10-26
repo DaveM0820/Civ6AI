@@ -36,7 +36,10 @@ def prune_settlers_without_sites(snapshot: dict[str, Any]) -> int:
 
     Zero walkable sites is not "settlers already cover every site". That case
     is a blocked settler (often an embark away from the next legal tile).
+
+    Disabled: settler production stays offered; the model decides (no pruning).
     """
+    return 0
     settlers = [u for u in snapshot.get("your_units") or [] if isinstance(u, dict) and u.get("unit_type_id") == "UNIT_SETTLER"]
     sites: set[tuple[Any, Any]] = set()
     for u in settlers:
@@ -65,16 +68,9 @@ def settler_offers_without_sites(snapshot: dict[str, Any], legal: list[Any]) -> 
 def no_city_sites_lines(context: dict[str, Any]) -> list[str]:
     if not isinstance(context, dict):
         return []
-    blocked = context.get("_settlers_no_walkable_site")
-    if blocked:
-        return [f"No walkable city site is in range of your {blocked} settler(s). "
-                "See settle.nearby for the nearest legal tile, including one that needs embarking. "
-                "Build no more settlers until a site is reachable."]
-    n = context.get("_no_city_sites")
-    if not n:
-        return []
-    return [f"No reachable city sites left: your {n} settler(s) already cover every legal site. "
-            "Build no more settlers; put production into districts, buildings and builders."]
+    # Removed: "no walkable / reachable site" and "build no more settlers".
+    # The map shows the land and fog; the model decides where to settle.
+    return []
 
 
 def _has_queue_production(snapshot: dict[str, Any] | None) -> bool:
@@ -1102,7 +1098,7 @@ def _empire_section(
                 index = counts.get(name, 0)
                 counts[name] = index + 1
                 lines.append(pipeline._wire_line(f"alert.{name}.{index}", text))
-        lines.extend(_expansion_threat_lines(summary))
+        lines.extend(_expansion_threat_lines(summary, threats=False))
     # Cities
     cities = [c for c in context.get("your_cities", []) if isinstance(c, dict)]
     if cities:
@@ -1856,8 +1852,7 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
     if at_war and in_reach:
         opening = (
             "- You are at war and an enemy is within move range. Use the WAR section: "
-            "strike enemies in range, garrison threatened cities, and build walls or military units "
-            "where the city threat table shows an enemy within its move range."
+            "strike enemies in range."
         )
     elif at_war:
         opening = (
@@ -1867,7 +1862,7 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
     elif combat_wire.hostiles_visible(context):
         opening = (
             "- You are not at war with any civilization. Barbarians or other hostile units are in sight"
-            + (" and within move range: the WAR section lists strikes on them and your city threats."
+            + (" and within move range: the WAR section lists strikes on them."
                if in_reach else "; none is within move range of your army or cities.")
             + " Keep exploring and building otherwise."
         )
@@ -2322,7 +2317,7 @@ def build_civ6_model_wire_text(snapshot: dict[str, Any], *, max_prompt_chars: in
     return text
 
 
-def _expansion_threat_lines(summary: dict[str, Any]) -> list[str]:
+def _expansion_threat_lines(summary: dict[str, Any], threats: bool = True) -> list[str]:
     """Plain facts from strategic_summary.expansion / .threat (no advice)."""
     out: list[str] = []
     exp = summary.get("expansion")
@@ -2334,7 +2329,7 @@ def _expansion_threat_lines(summary: dict[str, Any]) -> list[str]:
             f"you {exp.get('cities')}; met majors {peer_text}; settlers on map "
             f"{exp.get('settlers_on_map', 0)}; cities building a settler {exp.get('cities_building_settler', 0)}",
         ))
-    threat = summary.get("threat")
+    threat = summary.get("threat") if threats else None
     if isinstance(threat, dict):
         hostiles = [h for h in threat.get("hostiles") or [] if isinstance(h, dict)]
         camps = [c for c in threat.get("camps") or [] if isinstance(c, dict)]

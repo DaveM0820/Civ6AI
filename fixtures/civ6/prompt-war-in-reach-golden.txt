@@ -115,20 +115,17 @@ diplomacy.deals_in_force = no deal in force
 war.rivals = Cleopatra
 war.idle = 2 combat units have no orders: scout_1, spearman_1
 war.enemies.visible = Cleopatra unit (16,23) 0 str
-# == Your cities (garrison, walls, enemies within their move range) ==
-war.city.Athens.threat = garrison=none; walls=no; adjacent=Cleopatra unit (16,23) 1 tile; nearby=none
-war.city.Corinth.threat = garrison=none; walls=no; adjacent=Cleopatra unit (16,23) 1 tile; nearby=none
 # Enemies are within their move range of your units or cities, but none of your units can strike this turn.
 
 === ATTENTION ===
-SETTLE: settler_1.command = MoveTo a site you pick, then FoundCity on arrival. Do not trek more than about 3 tiles or park a Settler in a city. Keep a military unit next to each Settler until it founds. Carefully observe the attached map to choose a settle location, and remember it for as many turns as the walk takes. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold).
+SETTLE: settler_1.command = MoveTo a site you pick, then FoundCity on arrival. Keep a military unit next to each Settler until it founds. Carefully observe the attached map to choose a settle location, and remember it for as many turns as the walk takes. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold).
 IDLE: 1 UNIT_SCOUT, 1 UNIT_SPEARMAN — host default applied
 
 === THOUGHTS ===
 history.memory = Expand to third city after Pottery; scout eastern coast.
 
 === ADVICE ===
-- You are at war and an enemy is within move range. Use the WAR section: strike enemies in range, garrison threatened cities, and build walls or military units where the city threat table shows an enemy within its move range.
+- You are at war and an enemy is within move range. Use the WAR section: strike enemies in range.
 - Before you finish: issue one command for each entry under REQUIRED COMMANDS.
 - War tactics: soften a target with ranged attacks first (no return damage), then finish it with melee.
 - Do not take attacks previewed as Major Defeat or Decisive Defeat; a Stalemate only trades HP.

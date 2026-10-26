@@ -20,7 +20,9 @@ class TileFeedbackTests(unittest.TestCase):
 
     def test_move_failure_unexplored(self):
         row = {"kind": "move_unit", "ok": False, "reason": "x", "fixed_arguments": {"unit_id": "U", "target_x": 1, "target_y": 2}}
-        self.assertIn("tile not explored", results.build_command_results({}, [row], 5)[0]["summary"])
+        text = results.build_command_results({}, [row], 5)[0]["summary"]
+        self.assertIn("You tried to move", text)
+        self.assertIn("not explored", text)
 
 
 class SettlerAndDistrictTests(unittest.TestCase):
@@ -30,19 +32,17 @@ class SettlerAndDistrictTests(unittest.TestCase):
                                {"unit_id": "B", "unit_type_id": "UNIT_SETTLER", "settle": site}],
                 "legal_commands": [{"kind": "queue_production", "fixed_arguments": {"build_id": "UNIT_SETTLER"}},
                                    {"kind": "queue_production", "fixed_arguments": {"build_id": "UNIT_BUILDER"}}]}
-        self.assertEqual(civ6_wire.prune_settlers_without_sites(snap), 1)
-        self.assertEqual(len(snap["legal_commands"]), 1)
-        self.assertTrue(civ6_wire.no_city_sites_lines(snap))
+        # No pruning and no "build no more settlers" line any more.
+        self.assertEqual(civ6_wire.prune_settlers_without_sites(snap), 0)
+        self.assertEqual(len(snap["legal_commands"]), 2)
+        self.assertEqual(civ6_wire.no_city_sites_lines(snap), [])
 
     def test_zero_walkable_sites_are_not_described_as_already_covered(self):
         snap = {"your_units": [{"unit_id": "A", "unit_type_id": "UNIT_SETTLER", "settle": {"sites": []}}],
                 "legal_commands": [{"kind": "queue_production", "fixed_arguments": {"build_id": "UNIT_SETTLER"}},
                                    {"kind": "queue_production", "fixed_arguments": {"build_id": "UNIT_BUILDER"}}]}
-        self.assertEqual(civ6_wire.prune_settlers_without_sites(snap), 1)
-        text = "\n".join(civ6_wire.no_city_sites_lines(snap))
-        self.assertIn("No walkable city site", text)
-        self.assertIn("embarking", text)
-        self.assertNotIn("already cover", text)
+        self.assertEqual(civ6_wire.prune_settlers_without_sites(snap), 0)
+        self.assertEqual(civ6_wire.no_city_sites_lines(snap), [])
 
     def test_embark_site_names_the_nearest_other_landmass(self):
         unit = {

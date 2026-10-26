@@ -79,7 +79,7 @@ class PrioritiesModelTests(unittest.TestCase):
         prio.inject_legal_commands(snap)
         lines = "\n".join(prio.prompt_lines(snap))
         self.assertIn("Fixed until you own 3 cities", lines)
-        self.assertIn("EXPANSION PACE: you own 2 cities", lines)
+        self.assertNotIn("EXPANSION PACE", lines)
         self.assertNotIn("Available presets", lines)
         wire = civ6_command_wire.expand_civ6_command_wire(copy.deepcopy(snap), {"7.priorities": "war:3"})
         self.assertFalse([v for k, v in wire.items() if k.startswith("cmd.") and "PRIO" in str(v)])

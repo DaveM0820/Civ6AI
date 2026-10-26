@@ -506,7 +506,7 @@ class Civ6MapRenderTests(unittest.TestCase):
                 snapshot, Path(tmp) / "tac.png", viewport=viewport, target_size=1024, image_role="viewport",
             )
         self.assertTrue(meta["show_axis_labels"])
-        self.assertFalse(meta["show_tile_coords"])
+        self.assertTrue(meta["show_tile_coords"])  # 48 tiles: small enough for (x,y) on every tile
 
     def test_agent_viewport_survives_the_next_turn(self):
         from sidecar import map_situational

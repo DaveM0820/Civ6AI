@@ -95,8 +95,7 @@ def _settle(context: Any) -> list[Item]:
                 "unless a clearly better listed site is within about 3 tiles."
             )
         if walk:
-            bits.append("; ".join(walk) + ", then FoundCity on arrival. Do not trek more than about 3 tiles"
-                        + (" for a capital." if not has_city else " or park a Settler in a city."))
+            bits.append("; ".join(walk) + ", then FoundCity on arrival.")
         bits.append("Keep a military unit next to each Settler until it founds.")
         bits.append(coaching.CIV6_SETTLER_MAP_ADVICE)
         items.append(Item("settle", "SETTLE: " + " ".join(bits), "Settle", 0 if not has_city else 1, commands))

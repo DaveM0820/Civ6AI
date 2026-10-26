@@ -193,15 +193,6 @@ city.Foreign19 = owner Cleopatra, at (19,3), pop 6, last seen (fogged)
 === WAR ===
 war.rivals = Cleopatra
 war.idle = 14 combat units have no orders: warrior_1, warrior_2, warrior_3, warrior_4, warrior_5, warrior_6, warrior_7, warrior_8, warrior_9, warrior_10, warrior_11, warrior_12, warrior_13, warrior_14
-# == Your cities (garrison and walls; no enemy is within move range) ==
-war.city.Polis0.threat = garrison=none; walls=no; adjacent=none; nearby=none
-war.city.Polis1.threat = garrison=none; walls=no; adjacent=none; nearby=none
-war.city.Polis2.threat = garrison=none; walls=no; adjacent=none; nearby=none
-war.city.Polis3.threat = garrison=none; walls=no; adjacent=none; nearby=none
-war.city.Polis4.threat = garrison=none; walls=no; adjacent=none; nearby=none
-war.city.Polis5.threat = garrison=none; walls=no; adjacent=none; nearby=none
-war.city.Polis6.threat = garrison=none; walls=no; adjacent=none; nearby=none
-war.city.Polis7.threat = garrison=none; walls=no; adjacent=none; nearby=none
 
 === ATTENTION ===
 LETHARGY: Idle cities with nothing in production: Polis3.

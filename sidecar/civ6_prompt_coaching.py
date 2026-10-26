@@ -233,8 +233,9 @@ def civ6_map_axes_wrap_guidance(snapshot: dict[str, Any] | None = None) -> str:
             f"(10+10), not the long way around"
         )
     wrap_clause = (
-        f"The world wraps on X only (max X loops to 0); Y does not wrap. "
-        f"Distance across the X seam uses the short way: {seam_example}."
+        f"The map wraps east-west: x runs 0 to {width - 1 if width else 'width-1'} and x past the east or west "
+        f"edge continues on the other side (x={width - 1 if width else 'width-1'} is next to x=0). "
+        f"Y does not wrap."
         if wrap_x
         else "This map does not wrap on X; treat left/right edges as map borders."
     )
@@ -575,7 +576,8 @@ def _as_int(value: Any) -> int | None:
 
 
 def civ6_expansion_attention(snapshot: dict[str, Any]) -> str | None:
-    """City-count target for this turn, and settler due when a city can train one."""
+    """Removed from the prompt: no expansion pace targets (returns None)."""
+    return None
     from sidecar.civ6_priorities import ONLINE_AIM_TURN, _SPEED_PERCENT, _game_speed, situation_for_city
 
     cities = [city for city in snapshot.get("your_cities") or [] if isinstance(city, dict)]
@@ -1096,10 +1098,8 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
                     far.append((_odd_r_distance(origin, (x, y), width, wrap), x, y))
             far.sort()
             nearest = "; ".join(f"({x},{y}) path {dist}" for dist, x, y in far[:6])
-            lines.append(pipeline._wire_line(
-                f"{prefix}.settle.nearby",
-                f"none reachable from here; nearest legal sites: {nearest}" if nearest else "none reachable from here",
-            ))
+            if nearest:
+                lines.append(pipeline._wire_line(f"{prefix}.settle.nearby", f"nearest legal sites: {nearest}"))
     return lines
 
 

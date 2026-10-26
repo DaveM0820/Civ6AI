@@ -26,8 +26,8 @@ class Civ6PromptCoachingTests(unittest.TestCase):
     def test_map_axes_civ6_y_north_by_default(self):
         note = coaching.civ6_map_axes_wrap_guidance({"game": {"map_width": 80, "wrap_x": True}})
         self.assertIn("y increases north", note.lower())
-        self.assertIn("x=70", note)
-        self.assertIn("x=10", note)
+        self.assertIn("wraps east-west", note)
+        self.assertIn("x=79 is next to x=0", note)
 
     def test_map_axes_civ6_y_south_when_measured(self):
         note = coaching.civ6_map_axes_wrap_guidance({

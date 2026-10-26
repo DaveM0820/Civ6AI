@@ -1054,7 +1054,6 @@ def prompt_lines(snapshot: dict) -> list[str]:
             "=== PRODUCTION PRESET ===",
             f"Fixed until you own {EARLY_CITY_LIMIT} cities: early expansion ({EARLY_SET}); about a third of "
             "production is settlers. Presets unlock at 3 cities; a priorities key is ignored until then.",
-            expansion_pace_line(snapshot),
         ]
     current = current_levels(snapshot)
     name = matching_preset(current)
@@ -1071,7 +1070,6 @@ def prompt_lines(snapshot: dict) -> list[str]:
     lines.append(
         f'To change it, add the optional key "{REPLY_KEY}" with one preset name, e.g. "{REPLY_KEY}": "expansion". '
         f'"{REPLY_KEY}": "none" returns to the neutral default. Omit the key to keep the current preset.')
-    lines.append(expansion_pace_line(snapshot))
     return lines
 
 

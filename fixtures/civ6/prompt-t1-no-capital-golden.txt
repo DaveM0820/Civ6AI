@@ -88,7 +88,7 @@ rival.Cleopatra.score = 138
 rival.Cleopatra.attitude = ATTITUDE_CAUTIOUS
 
 === ATTENTION ===
-SETTLE: No capital yet: every turn without one costs all science, culture and production. settler_1.command = MoveTo a site you pick, then FoundCity on arrival. Do not trek more than about 3 tiles for a capital. Keep a military unit next to each Settler until it founds. Carefully observe the attached map to choose a settle location, and remember it for as many turns as the walk takes. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold).
+SETTLE: No capital yet: every turn without one costs all science, culture and production. settler_1.command = MoveTo a site you pick, then FoundCity on arrival. Keep a military unit next to each Settler until it founds. Carefully observe the attached map to choose a settle location, and remember it for as many turns as the walk takes. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold).
 IDLE: 1 UNIT_SCOUT, 1 UNIT_SPEARMAN — host default applied
 
 === THOUGHTS ===

@@ -28,7 +28,7 @@ def _snap(**extra):
 
 
 class T71AttentionTests(unittest.TestCase):
-    def test_expansion_line_names_the_turn_target_and_settler_due(self):
+    def test_no_expansion_pace_line(self):
         snap = _snap()
         snap["your_cities"] = [
             {"city_id": f"CITY_{i}", "name": f"City{i}", "population": 4, "plot_id": "PLOT_1_1",
@@ -36,38 +36,8 @@ class T71AttentionTests(unittest.TestCase):
             for i in range(4)
         ]
         text = "\n".join(coaching.collect_civ6_attention_items(snap))
-        self.assertIn("EXPANSION: 4 cities", text)
-        self.assertIn("aim for 6-8 cities by turn 70", text)
-        self.assertIn("this turn's target is 8", text)
-        self.assertIn("Settler due:", text)
-        self.assertIn('"priorities": "expansion:2"', text)
-        self.assertNotIn(".purchase", text)
-
-    def test_settler_due_names_an_affordable_purchase_and_skips_a_dear_one(self):
-        snap = _snap(your_empire={"gold": 400})
-        snap["civ6"]["governance"] = {"religion": {"faith": 40, "pantheon_cost": 25}}
-        snap["legal_commands"] = [{
-            "command_id": "CMD_buy_settler",
-            "kind": "purchase_item",
-            "fixed_arguments": {"city_id": "CITY_1", "item_id": "UNIT_SETTLER", "cost": 320},
-        }, {
-            "command_id": "CMD_buy_faith",
-            "kind": "purchase_item",
-            "fixed_arguments": {"city_id": "CITY_1", "item_id": "UNIT_SETTLER", "cost": 200, "yield": "faith"},
-        }, {
-            "command_id": "CMD_train_settler",
-            "kind": "queue_production",
-            "fixed_arguments": {"city_id": "CITY_1", "build_id": "UNIT_SETTLER"},
-        }]
-        text = coaching.civ6_expansion_attention(snap) or ""
-        self.assertNotIn(".purchase", text)  # no buying suggestions for now
-        self.assertNotIn("faith", text.split("Settler due:", 1)[-1])
-        self.assertIn("Capital.production = UNIT_SETTLER", text)
-        self.assertIn('"priorities": "expansion:2"', text)
-        snap["your_empire"] = {"gold": 100}
-        poor = coaching.civ6_expansion_attention(snap) or ""
-        self.assertNotIn(".purchase", poor)
-        self.assertIn("Capital.production = UNIT_SETTLER", poor)
+        self.assertNotIn("EXPANSION:", text)
+        self.assertNotIn("aim for", text)
 
     def test_idle_stock_names_gold_faith_envoys_and_a_buy(self):
         snap = _snap(your_empire={"gold": 480, "gold_per_turn": 40})
