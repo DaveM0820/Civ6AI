@@ -100,3 +100,60 @@ class EarlyLockGameplayTest(unittest.TestCase):
         want = {P.BY_ID[c]["key"]: l for c, l in P.early_levels().items()}
         got = {k: v for k, v in dict(O.EARLY_SET.items()).items()}
         self.assertEqual(want, got)
+
+
+@unittest.skipIf(_lupa is None, "lupa not installed")
+class SettlerDivertTest(unittest.TestCase):
+    def _run(self, pop, current, negative_ok=True, stock=0):
+        from sidecar.tests import test_civ6ai_orders_lua as T
+        rt = _lupa.LuaRuntime(unpack_returned_tuples=True)
+        rt.execute(T.FAKE_ENV)
+        rt.execute((T.MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text())
+        rt.execute("""
+          Made = {}
+          GameInfo.Units = GameInfo.Units or {}
+          GameInfo.Units["UNIT_SETTLER"] = { Index = 3, Cost = 80, PopulationCost = 1, PrereqPopulation = 2 }
+          Progress = 30
+          Pop = %d
+          City = { GetID = function() return 1 end, GetX = function() return 4 end, GetY = function() return 5 end,
+            GetPopulation = function() return Pop end, ChangePopulation = function(self, d) Pop = Pop + d end,
+            GetYield = function() return 10 end,
+            GetBuildQueue = function() return {
+              CurrentlyBuilding = function() return "%s" end,
+              GetUnitCost = function() return 20 end,
+              GetProductionProgress = function() return Progress end,
+              AddProgress = function(self, n) if %s or n > 0 then Progress = Progress + n end end } end }
+          Players[6] = { IsHuman = function() return false end, IsMajor = function() return true end,
+            GetCities = function() return { GetCount = function() return 1 end,
+              Members = function() local d = false; return function() if d then return nil end; d = true; return 1, City end end } end }
+          UnitManager = UnitManager or {}
+          UnitManager.InitUnit = function(o, t, x, y) Made[#Made + 1] = t; return {} end
+          Game:SetProperty("CIV6AI_SETTLER_STOCK_6_1", %d)
+        """ % (pop, current, "true" if negative_ok else "false", stock))
+        rt.globals().Civ6Ai_Orders.DivertToSettlers(6, rt.eval("Players[6]"))
+        return (rt.eval("Progress"), rt.eval("Game:GetProperty('CIV6AI_SETTLER_STOCK_6_1')"),
+                rt.eval("#Made"), rt.eval("Pop"))
+
+    def test_moves_half_of_production_into_stock(self):
+        self.assertEqual(self._run(2, "UNIT_BUILDER"), (25, 5, 0, 2))
+
+    def test_trains_settler_when_stock_reaches_cost(self):
+        self.assertEqual(self._run(3, "UNIT_BUILDER", stock=18), (25, 3, 1, 2))
+
+    def test_no_credit_when_engine_refuses_negative(self):
+        self.assertEqual(self._run(2, "UNIT_BUILDER", negative_ok=False), (30, 0, 0, 2))
+
+    def test_skips_pop_one_and_settler_builds(self):
+        self.assertEqual(self._run(1, "UNIT_BUILDER")[1], 0)
+        self.assertEqual(self._run(2, "UNIT_SETTLER")[1], 0)
+
+
+class SettlerBuyFactTest(unittest.TestCase):
+    def test_states_gold_and_cheapest_cost(self):
+        snap = {"your_empire": {"gold": 120}, "your_cities": [{"city_id": "C1", "name": "Rome"}],
+                "legal_commands": [{"kind": "purchase_item", "fixed_arguments":
+                                    {"item_id": "UNIT_SETTLER", "cost": 230, "city_id": "C1"}}]}
+        text = P.settler_buy_fact(snap)
+        self.assertIn("Gold: 120.", text)
+        self.assertIn("A settler costs 230 gold in Rome", text)
+        self.assertIn("No city can buy", P.settler_buy_fact({"your_empire": {"gold": 5}}))

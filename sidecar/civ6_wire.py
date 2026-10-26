@@ -562,6 +562,8 @@ def _civ6_city_tokens(snapshot: dict[str, Any]) -> dict[str, dict[str, list[str]
         bucket = out.setdefault(city_id, {}).setdefault(prop, [])
         cap = 6 if prop == "purchase" else 4 if prop == "buyTile" else None
         if cap is not None and len(bucket) >= cap:
+            if prop == "purchase" and token.startswith("UNIT_SETTLER") and token not in bucket:
+                bucket[-1] = token
             continue
         if token not in bucket:
             bucket.append(token)
