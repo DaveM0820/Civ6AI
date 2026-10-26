@@ -539,9 +539,8 @@ def settler_buy_fact(snapshot: dict) -> str:
             best = (cost, names.get(str(fixed.get("city_id")), str(fixed.get("city_id") or "a city")))
     gold_txt = f"Gold: {int(gold)}." if isinstance(gold, (int, float)) and not isinstance(gold, bool) else "Gold: unknown."
     if best is None:
-        return gold_txt + " No city can buy a settler now (needs population 2)."
-    return (f"{gold_txt} A settler costs {best[0]} gold in {best[1]} ({best[1]}.purchase = UNIT_SETTLER; "
-            "buying one also costs 1 population).")
+        return gold_txt + " No city can buy a settler now."
+    return (f"{gold_txt} A settler costs {best[0]} gold in {best[1]} ({best[1]}.purchase = UNIT_SETTLER).")
 _ERAS = {
     "ERA_ANCIENT": 0, "ERA_CLASSICAL": 1, "ERA_MEDIEVAL": 2, "ERA_RENAISSANCE": 3,
     "ERA_INDUSTRIAL": 4, "ERA_MODERN": 5, "ERA_ATOMIC": 6, "ERA_INFORMATION": 7,

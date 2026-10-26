@@ -3831,14 +3831,6 @@ function Gov.PurchaseItem(owner, cityId, itemIndex, isBuilding, useFaith, cost)
   if type(cost) ~= "number" or cost <= 0 then
     return false, typeName .. " cannot be purchased with " .. (useFaith and "faith" or "gold") .. " in that city"
   end
-  local popCost = (not isBuilding) and tonumber(row.PopulationCost) or 0
-  if popCost ~= nil and popCost > 0 then
-    local need = math.max(tonumber(row.PrereqPopulation) or 0, popCost + 1)
-    local pop = call(city, "GetPopulation") or 0
-    if pop < need then
-      return false, typeName .. " needs population " .. need .. " in that city (it has " .. pop .. ")"
-    end
-  end
   local okPay, why = debit(owner, useFaith, cost)
   if not okPay then
     return false, why
@@ -3857,9 +3849,6 @@ function Gov.PurchaseItem(owner, cityId, itemIndex, isBuilding, useFaith, cost)
     local okU
     okU, unit = pcall(UnitManager.InitUnit, owner, typeName, city:GetX(), city:GetY())
     made = okU and unit ~= nil
-    if made and popCost ~= nil and popCost > 0 then
-      pcall(city.ChangePopulation, city, -popCost)
-    end
   end
   if not made then
     credit(owner, useFaith, cost)
@@ -5686,140 +5675,5 @@ function Civ6Ai_Orders.ApplyEarlyLock(owner)
   if changed > 0 then
     log("early_lock|player=" .. tostring(owner) .. "|cities=" .. tostring(n) .. "|now=" .. prioText(owner))
   end
-  pcall(Civ6Ai_Orders.DivertToSettlers, owner, p)
   return true
-end
-
--- Synced settler production for AI seats under the early lock. Gameplay Lua
--- has no call that enqueues a unit for an AI city, so at turn start (gameplay
--- context, synced data only, no randomness) each city with population 2+ that
--- is not already building a settler moves SETTLER_DIVERT of this turn's
--- production off its current item (BuildQueue:AddProgress(-n)) into a per-city
--- settler stock kept in a synced game property. When the stock reaches the
--- settler's cost the city trains it (UnitManager.InitUnit, population -1, the
--- same as a purchase). The removal is read back; if the engine does not take
--- the negative progress the stock is not credited, so nothing is free.
-Civ6Ai_Orders.SETTLER_DIVERT = 0.5
-
-local function settlerCost(city)
-  local row = GameInfo.Units ~= nil and GameInfo.Units["UNIT_SETTLER"] or nil
-  if row == nil then
-    return nil, nil
-  end
-  local bq = call(city, "GetBuildQueue")
-  local cost = bq ~= nil and call(bq, "GetUnitCost", row.Index) or nil
-  if type(cost) ~= "number" or cost <= 0 then
-    local mult = 100
-    pcall(function()
-      local speed = GameInfo.GameSpeeds[GameConfiguration.GetGameSpeedType()]
-      mult = speed and speed.CostMultiplier or 100
-    end)
-    cost = math.floor((row.Cost or 80) * mult / 100)
-  end
-  return cost, row
-end
-
--- BuildQueue:GetProgress takes the item hash (ProductionPanel uses
--- GetUnitProgress/GetBuildingProgress by index); try each form.
-local function queueProgress(bq, current)
-  local row
-  for _, t in ipairs({ "Units", "Buildings", "Districts", "Projects" }) do
-    row = row or (GameInfo[t] ~= nil and GameInfo[t][current] or nil)
-  end
-  local tries = {}
-  if row ~= nil then
-    tries = {
-      { "GetProgress", row.Hash },
-      { "GetUnitProgress", row.Index }, { "GetBuildingProgress", row.Index },
-      { "GetDistrictProgress", row.Index }, { "GetProjectProgress", row.Index },
-    }
-  end
-  tries[#tries + 1] = { "GetProductionProgress" }
-  for _, t in ipairs(tries) do
-    local v = call(bq, t[1], t[2])
-    if type(v) == "number" and v > 0 then
-      return v, t[1]
-    end
-  end
-  return nil, "none"
-end
-
--- Log-only, once per load: the gameplay BuildQueue's methods and a few reads.
-function Civ6Ai_Orders._ProbeBuildQueue(bq)
-  if Civ6Ai_Orders._bqProbed or bq == nil then
-    return
-  end
-  Civ6Ai_Orders._bqProbed = true
-  local names = {}
-  pcall(function()
-    local mt = getmetatable(bq)
-    local idx = mt ~= nil and mt.__index or nil
-    if type(idx) == "table" then
-      for k in pairs(idx) do names[#names + 1] = tostring(k) end
-    end
-    if type(bq) == "table" then
-      for k in pairs(bq) do names[#names + 1] = tostring(k) end
-    end
-  end)
-  table.sort(names)
-  log("bq_methods|" .. table.concat(names, ","))
-  local reads = {}
-  for _, m in ipairs({ "CurrentlyBuilding", "GetTurnsLeft", "GetProductionYield", "GetSize",
-      "GetCurrentProductionTypeHash", "GetProductionProgress", "GetProgress" }) do
-    local ok, v = pcall(function() return bq[m](bq) end)
-    reads[#reads + 1] = m .. "=" .. (ok and tostring(v) or "err")
-  end
-  log("bq_reads|" .. table.concat(reads, "|"))
-end
-
-function Civ6Ai_Orders.DivertToSettlers(owner, p)
-  local cities = call(p, "GetCities")
-  if cities == nil or cities.Members == nil then
-    return
-  end
-  for _, city in cities:Members() do
-    local cid = city:GetID()
-    local key = "CIV6AI_SETTLER_STOCK_" .. tostring(owner) .. "_" .. tostring(cid)
-    local stock = num(Game:GetProperty(key)) or 0
-    local cost, row = settlerCost(city)
-    local pop = call(city, "GetPopulation") or 0
-    local bq = call(city, "GetBuildQueue")
-    local current = bq ~= nil and call(bq, "CurrentlyBuilding") or nil
-    if cost ~= nil and bq ~= nil and pop >= 2 and current ~= "UNIT_SETTLER" and current ~= nil and current ~= "" and current ~= "NONE" then
-      local prod = call(city, "GetYield", YieldTypes ~= nil and YieldTypes.PRODUCTION or 1) or 0
-      Civ6Ai_Orders._ProbeBuildQueue(bq)
-      local take = math.floor(prod * Civ6Ai_Orders.SETTLER_DIVERT)
-      local before, how = queueProgress(bq, current)
-      local moved = 0
-      if take > 0 and before ~= nil and before >= take then
-        pcall(bq.AddProgress, bq, -take)
-        local after = queueProgress(bq, current)
-        if after ~= nil and after < before then
-          moved = before - after
-        end
-      elseif take > 0 and before == nil then
-        -- Fallback (approved): progress is unreadable from gameplay, so the
-        -- settler stock is credited a fixed share of this turn's production
-        -- yield (synced city data, same on every machine) without removing it
-        -- from the current item.
-        moved = take
-        how = "yield_share"
-      end
-      stock = stock + moved
-      local trained = false
-      if stock >= cost then
-        local ok, unit = pcall(UnitManager.InitUnit, owner, "UNIT_SETTLER", city:GetX(), city:GetY())
-        if ok and unit ~= nil then
-          pcall(city.ChangePopulation, city, -(tonumber(row.PopulationCost) or 1))
-          stock = stock - cost
-          trained = true
-        end
-      end
-      Game:SetProperty(key, stock)
-      log("settler_divert|player=" .. tostring(owner) .. "|city=" .. tostring(cid) .. "|current=" .. tostring(current)
-        .. "|prod=" .. tostring(prod) .. "|take=" .. tostring(take) .. "|before=" .. tostring(before) .. "|read=" .. tostring(how)
-        .. "|moved=" .. tostring(moved) .. "|stock=" .. tostring(stock) .. "/" .. tostring(cost)
-        .. "|trained=" .. tostring(trained))
-    end
-  end
 end
