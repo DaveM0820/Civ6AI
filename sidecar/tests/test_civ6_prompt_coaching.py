@@ -172,7 +172,7 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         self.assertIn("Automate(explore)", instructions)
         self.assertIn("Nothing assigns this for you", instructions)
         advice = "\n".join(civ6_wire._advice_section(snap))
-        self.assertIn("82% still black fog", advice)
+        self.assertIn("82% still unexplored gray fog", advice)
         self.assertIn("Automate(explore)", advice)
         self.assertIn("just as valid", advice)
         # 612 / (74*46) is the real visibility. The cached 18% stays on map.explored.

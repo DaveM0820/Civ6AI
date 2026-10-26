@@ -30,13 +30,17 @@ HEX_AXIS_ONLY_MIN_CELLS = 8 * 12 * 2
 CIV5_RIVER_EDGE_INDEX: dict[str, int] = {"E": 5, "SE": 0, "SW": 1}
 RIVER_TILE_LABEL = "river on this tile (edge unknown)"
 HILLS_LABEL = "hills (brown bumps)"
-PEAK_LABEL = "mountain (white peak, impassable)"
+PEAK_LABEL = "mountain (impassable)"
 WATER_LABEL = "water (blue, impassable to land units until embark)"
+FOG_LABEL = "gray fog = unexplored, units can move into it"
+# Unexplored tiles: soft gray clouds, not a black wall.
+FOG_BASE_GRAY = 128
+FOG_TEXTURE_SEED = 6
 NORTH_UP_ENV = "CIV6_MAP_NORTH_UP"
 FOREIGN_RING = (255, 64, 64)
 # Feature sprite (forest/jungle/marsh) drawn over the base terrain at this scale,
 # so the terrain/hills underneath stays visible as a ring.
-FEATURE_OVERLAY_SCALE = 0.66
+FEATURE_OVERLAY_SCALE = 1.0
 _BASE_LAYER_CACHE: dict[str, Any] = {}
 _BASE_LAYER_CACHE_LIMIT = 8
 _HEX_LAYER_CACHE: dict[tuple[Any, ...], Any] = {}
@@ -137,7 +141,7 @@ def _hex_neighbors_odd_r(x: int, y: int) -> list[tuple[int, int, int]]:
 # that one city tile. A delegation does not. A coloured ring on the black
 # neighbours reads as land the seat explored.
 LONE_CITY_LEGEND = (
-    "Lone city in black fog: an embassy or exchanging capitals revealed that tile only. "
+    "Lone city in gray fog: an embassy or exchanging capitals revealed that tile only. "
     "A delegation does not. Black neighbors were not explored."
 )
 
@@ -590,7 +594,9 @@ def _draw_river_network(
 
 def _hex_sprite_size(hex_radius: float) -> tuple[int, int]:
     """Flat-top hex bounding box — strategic sprites fill this area."""
-    scale = 1.15
+    # The Civ6 strategic crops carry a dark hex rim. Scale them so the rim
+    # falls outside the hex mask and the terrain fills the whole tile.
+    scale = 1.22
     width = max(8, int(math.sqrt(3) * hex_radius * scale))
     height = max(8, int(hex_radius * 2 * scale))
     return width, height
@@ -632,7 +638,7 @@ def _paste_hex_sprite_layers(
             if layer_index < len(scales):
                 layer_scale = scales[layer_index]
             else:
-                layer_scale = 0.72 if "mountain" in name else 1.0
+                layer_scale = 1.0
             layer_w = max(4, int(width * layer_scale))
             layer_h = max(4, int(height * layer_scale))
             map_render._paste_image_raster_fit(tile, sprite_path, tcx, tcy, layer_w, layer_h)
@@ -645,7 +651,8 @@ def _paste_hex_sprite_layers(
     mask = _HEX_MASK_CACHE.get(mask_key)
     if mask is None:
         tcx, tcy = width / 2, height / 2
-        corners = _flat_top_hex_corners(tcx, tcy, hex_radius)
+        # Half a pixel past the edge so neighbouring tiles meet without a seam.
+        corners = _flat_top_hex_corners(tcx, tcy, hex_radius + 0.6)
         mask = Image.new("L", (width, height), 0)
         ImageDraw.Draw(mask).polygon(corners, fill=255)
         _HEX_MASK_CACHE[mask_key] = mask
@@ -834,6 +841,149 @@ def _draw_river_tile_mark(draw: Any, cx: float, cy: float, hex_radius: float) ->
         t = i / steps
         points.append((x_start + t * hex_radius * 1.1, cy - hex_radius * 0.05 + amp * math.sin(t * 2 * math.pi)))
     draw.line(points, fill=map_render._rgb_tuple(RIVER_STROKE), width=width)
+
+
+_FOG_TEXTURE_CACHE: dict[tuple[int, int], Any] = {}
+
+
+def _fog_texture(width: int, height: int) -> Any:
+    """Soft gray cloud texture (deterministic) for unexplored tiles."""
+    from PIL import Image, ImageFilter
+    import random
+
+    key = (width, height)
+    cached = _FOG_TEXTURE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    rng = random.Random(FOG_TEXTURE_SEED)
+    layers = []
+    for cells, weight in ((6, 0.5), (14, 0.3), (40, 0.2)):
+        small = Image.new("L", (cells, max(2, int(cells * height / max(1, width)))))
+        small.putdata([rng.randint(0, 255) for _ in range(small.size[0] * small.size[1])])
+        layers.append((small.resize((width, height), Image.BICUBIC), weight))
+    noise = layers[0][0]
+    noise = Image.blend(noise, layers[1][0], 0.35)
+    noise = Image.blend(noise, layers[2][0], 0.2)
+    noise = noise.filter(ImageFilter.GaussianBlur(radius=max(2, width // 120)))
+    # Map noise 0..255 to a dark-to-light gray band around FOG_BASE_GRAY.
+    table = [max(0, min(255, int(FOG_BASE_GRAY - 40 + value * 80 / 255))) for value in range(256)]
+    gray = noise.point(table)
+    texture = Image.merge("RGBA", (gray, gray, gray.point(lambda v: min(255, v + 6)), Image.new("L", (width, height), 255)))
+    _FOG_TEXTURE_CACHE[key] = texture
+    if len(_FOG_TEXTURE_CACHE) > 8:
+        _FOG_TEXTURE_CACHE.pop(next(iter(_FOG_TEXTURE_CACHE)))
+    return texture
+
+
+def _paste_fog_hexes(canvas: Any, hexes: list[list[tuple[float, float]]], width: int, height: int) -> None:
+    """Fill every unexplored hex with the shared fog texture in one masked paste."""
+    if not hexes:
+        return
+    from PIL import Image, ImageDraw
+
+    mask = Image.new("L", (width, height), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    for corners in hexes:
+        mask_draw.polygon(corners, fill=255)
+    canvas.paste(_fog_texture(width, height), (0, 0), mask)
+
+
+def _draw_fog_swatch(canvas: Any, cx: float, cy: float, radius: float) -> None:
+    from PIL import Image, ImageDraw
+
+    size = max(4, int(radius * 2 + 2))
+    tex = _fog_texture(240, 240).resize((size, size))
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).polygon(_flat_top_hex_corners(size / 2, size / 2, radius), fill=255)
+    canvas.paste(tex, (int(cx - size / 2), int(cy - size / 2)), mask)
+
+
+def _draw_city_glyph(
+    draw: Any, cx: float, cy: float, size: float, roof_rgb: tuple[int, int, int] = (176, 64, 48),
+) -> None:
+    """Small drawn town: three houses and a tower (Civ6's own city-centre icon is a star)."""
+    s = size / 2
+    wall = (236, 226, 204)
+    edge = (30, 26, 22)
+    lw = max(1, int(size / 28))
+    base = cy + s * 0.62
+    # (left, width, height) as fractions of s; the tower is tallest, in the middle.
+    houses = ((-0.92, 0.62, 0.62), (0.30, 0.62, 0.70), (-0.34, 0.66, 1.05))
+    for left, w, h in houses:
+        x1, x2 = cx + left * s, cx + (left + w) * s
+        top = base - h * s
+        draw.rectangle((x1, top, x2, base), fill=wall, outline=edge, width=lw)
+        roof_h = w * s * 0.62
+        draw.polygon(
+            [(x1 - lw, top), ((x1 + x2) / 2, top - roof_h), (x2 + lw, top)],
+            fill=roof_rgb, outline=edge,
+        )
+        door_w = w * s * 0.26
+        draw.rectangle(((x1 + x2) / 2 - door_w / 2, base - h * s * 0.38, (x1 + x2) / 2 + door_w / 2, base), fill=edge)
+    draw.line((cx - s * 0.98, base, cx + s * 0.98, base), fill=edge, width=max(1, lw + 1))
+
+
+def _improvement_glyph_kind(improvement_id: str) -> str | None:
+    token = str(improvement_id or "").upper()
+    for key in ("FISHING_BOATS", "FARM", "MINE", "PASTURE", "PLANTATION", "QUARRY", "CAMP", "LUMBER_MILL", "FORT"):
+        if token.endswith(key) or ("_" + key + "_") in token + "_":
+            return key
+    return None
+
+
+def _draw_improvement_glyph(
+    draw: Any, cx: float, cy: float, px: float, kind: str, pillaged: bool = False,
+) -> None:
+    """Small pictogram on a dark disc (no letters): farm field, pickaxe, fence, boat..."""
+    r = max(7.0, px * 0.5)
+    outline = (220, 64, 48) if pillaged else (236, 236, 236)
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(32, 34, 30), outline=outline, width=max(1, int(r / 8)))
+    s = r * 0.62
+    lw = max(1, int(r / 7))
+    if kind == "FARM":
+        draw.polygon([(cx - s, cy + s * 0.7), (cx - s * 0.55, cy - s * 0.6), (cx + s * 0.55, cy - s * 0.6), (cx + s, cy + s * 0.7)],
+                     fill=(214, 182, 64), outline=(90, 70, 20))
+        for t in (-0.3, 0.05, 0.4):
+            y = cy + s * t
+            draw.line((cx - s * (0.62 + t * 0.3), y, cx + s * (0.62 + t * 0.3), y), fill=(120, 150, 40), width=lw)
+    elif kind == "MINE":
+        draw.line((cx - s * 0.7, cy + s * 0.8, cx + s * 0.5, cy - s * 0.5), fill=(160, 110, 60), width=lw + 1)
+        draw.arc((cx - s * 0.5, cy - s * 1.0, cx + s * 1.1, cy + s * 0.2), 200, 340, fill=(200, 200, 210), width=lw + 1)
+    elif kind == "PASTURE":
+        for x in (-0.7, 0.0, 0.7):
+            draw.line((cx + s * x, cy - s * 0.6, cx + s * x, cy + s * 0.7), fill=(190, 140, 80), width=lw + 1)
+        for y in (-0.25, 0.3):
+            draw.line((cx - s * 0.9, cy + s * y, cx + s * 0.9, cy + s * y), fill=(190, 140, 80), width=lw)
+    elif kind == "PLANTATION":
+        draw.line((cx, cy + s * 0.9, cx, cy - s * 0.1), fill=(130, 90, 50), width=lw + 1)
+        draw.ellipse((cx - s * 0.7, cy - s * 0.9, cx + s * 0.7, cy + s * 0.1), fill=(70, 160, 60))
+    elif kind == "QUARRY":
+        for bx, by in ((-0.6, 0.1), (0.05, 0.1), (-0.28, -0.5)):
+            draw.rectangle((cx + s * bx, cy + s * by, cx + s * (bx + 0.55), cy + s * (by + 0.5)), fill=(186, 186, 176), outline=(60, 60, 60))
+    elif kind == "CAMP":
+        draw.polygon([(cx - s * 0.85, cy + s * 0.7), (cx, cy - s * 0.85), (cx + s * 0.85, cy + s * 0.7)], fill=(170, 120, 70), outline=(60, 40, 20))
+        draw.polygon([(cx - s * 0.2, cy + s * 0.7), (cx, cy), (cx + s * 0.2, cy + s * 0.7)], fill=(40, 28, 16))
+    elif kind == "FISHING_BOATS":
+        draw.polygon([(cx - s * 0.9, cy + s * 0.2), (cx + s * 0.9, cy + s * 0.2), (cx + s * 0.55, cy + s * 0.7), (cx - s * 0.55, cy + s * 0.7)], fill=(150, 100, 60))
+        draw.line((cx, cy + s * 0.2, cx, cy - s * 0.9), fill=(220, 220, 220), width=lw)
+        draw.polygon([(cx + lw, cy - s * 0.8), (cx + s * 0.7, cy + s * 0.05), (cx + lw, cy + s * 0.05)], fill=(240, 240, 240))
+    elif kind == "LUMBER_MILL":
+        draw.ellipse((cx - s * 0.8, cy - s * 0.8, cx + s * 0.8, cy + s * 0.8), outline=(200, 160, 100), width=lw + 1)
+        draw.line((cx - s * 0.8, cy, cx + s * 0.8, cy), fill=(200, 160, 100), width=lw)
+    elif kind == "FORT":
+        draw.rectangle((cx - s * 0.75, cy - s * 0.3, cx + s * 0.75, cy + s * 0.75), fill=(150, 150, 150), outline=(50, 50, 50))
+        for bx in (-0.75, -0.15, 0.45):
+            draw.rectangle((cx + s * bx, cy - s * 0.65, cx + s * (bx + 0.3), cy - s * 0.3), fill=(150, 150, 150), outline=(50, 50, 50))
+    if pillaged:
+        draw.line((cx - r * 0.7, cy - r * 0.7, cx + r * 0.7, cy + r * 0.7), fill=outline, width=max(2, lw))
+
+
+def _mountain_sprite_path() -> Path | None:
+    for name in ("StrategicView_Terrain_Grass_Mountain.crop.png", "StrategicView_Terrain_Mountain.crop.png"):
+        path = civ6_assets.STRATEGIC_CACHE_DIR / name
+        if path.is_file():
+            return path
+    return None
 
 
 _CITY_HP_GREEN = (72, 210, 74)
@@ -1194,11 +1344,17 @@ def _paste_tile_marks(
     icon_px = max(16 if stacked else 14, int(tile_px * (0.46 if stacked else 0.40)))
     mark_y = cy if stacked else cy + hex_radius * 0.28
     if improvement is not None:
-        _paste_mark(
-            canvas, draw, map_icons.improvement_icon_slug(improvement[0]), improvement[2],
-            cx - hex_radius * 0.55, mark_y, icon_px,
-            pillaged=bool(isinstance(plot, dict) and plot.get("improvement_pillaged")),
-        )
+        imp_slug = map_icons.improvement_icon_slug(improvement[0])
+        glyph = _improvement_glyph_kind(improvement[0])
+        pillaged = bool(isinstance(plot, dict) and plot.get("improvement_pillaged"))
+        if _icon_file(imp_slug) is None and glyph is not None:
+            _draw_improvement_glyph(draw, cx - hex_radius * 0.55, mark_y, icon_px, glyph, pillaged)
+        else:
+            _paste_mark(
+                canvas, draw, imp_slug, improvement[2],
+                cx - hex_radius * 0.55, mark_y, icon_px,
+                pillaged=pillaged,
+            )
     if district is not None:
         _paste_mark(
             canvas, draw, map_icons.district_icon_slug(district[0]), district[2],
@@ -1225,13 +1381,17 @@ def _viewport_mark_legend(
                 if kind == "improvement":
                     improvements += 1
                     slug = map_icons.improvement_icon_slug(mark[0])
+                    glyph = _improvement_glyph_kind(mark[0])
+                    if not _icon_file(slug) and glyph is not None:
+                        slug = f"__imp:{glyph}"
                 else:
                     districts += 1
                     slug = map_icons.district_icon_slug(mark[0])
                 if mark[1] in seen_ids:
                     continue
                 seen_ids.add(mark[1])
-                seen.append((mark[1], "#888888", slug if _icon_file(slug) else f"__mk:{mark[2]}"))
+                legend_slug = slug if (slug.startswith("__imp:") or _icon_file(slug)) else f"__mk:{mark[2]}"
+                seen.append((mark[1], "#888888", legend_slug))
     return [(label, color) for label, color, _slug in seen], [slug for _label, _color, slug in seen], improvements, districts
 
 
@@ -1531,14 +1691,13 @@ def _draw_civ6_tile_markers(
             outline=ring,
             width=max(2, tile_px // 10),
         )
-        slug = map_icons.city_icon_slug(bool(marker.get("is_capital")))
-        map_render._paste_icon_raster(canvas, slug, int(cx - icon_px / 2), int(cy - icon_px / 2), icon_px)
+        _draw_city_glyph(draw, cx, cy + r * 0.05, r * 1.55)
         name = str(marker.get("name") or "City")
         civ = _owner_short_label(snapshot, owner) if foreign else ""
         label = _compact_city_label(name, marker.get("population"), civ)
         if marker.get("is_capital") and not foreign and len(label) <= 12:
             label = f"{label}*"
-        font = map_render._load_bitmap_font(max(8, min(11, tile_px // 5)))
+        font = map_render._load_bitmap_font(max(12, min(30, tile_px // 5)))
         label_y = cy + hex_radius * 0.55 if confine_label else cy - hex_radius * 0.92
         city_hp = city_bars.get("city") if isinstance(city_bars, dict) else None
         wall_hp = city_bars.get("wall") if isinstance(city_bars, dict) else None
@@ -1617,6 +1776,7 @@ def _civ6_marker_legend_entries(
         entries.append(("__peak__", PEAK_LABEL))
     if any(_plot_is_water(plot) for plot in in_view):
         entries.append(("__water__", WATER_LABEL))
+    entries.append(("__fog__", FOG_LABEL))
     return entries
 
 
@@ -1641,16 +1801,19 @@ def _draw_legend_special(
         ring = (244, 192, 64) if slug == "__city_own__" else foreign_rgb
         r = size / 2
         draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(40, 40, 40), outline=ring, width=max(2, size // 8))
-        icon = max(6, int(size * 0.8))
-        map_render._paste_icon_raster(
-            canvas, map_icons.city_icon_slug(False), int(cx - icon / 2), int(cy - icon / 2), icon,
-        )
+        _draw_city_glyph(draw, cx, cy, size * 0.8)
     elif slug == "__hills__":
         _draw_hills_glyph(draw, cx + size * 0.1, cy - size * 0.3, size * 0.6)
     elif slug == "__peak__":
-        _draw_peak_glyph(draw, cx, cy, size * 0.55)
+        mountain = _mountain_sprite_path()
+        if mountain is None or not _paste_hex_sprite_layers(canvas, [mountain], cx, cy, size * 0.55):
+            _draw_peak_glyph(draw, cx, cy, size * 0.55)
     elif slug == "__water__":
-        _draw_water_mark(draw, cx, cy, size * 0.7)
+        draw.polygon(_flat_top_hex_corners(cx, cy, size * 0.55), fill=(34, 62, 104), outline=(20, 36, 64))
+    elif slug == "__fog__":
+        _draw_fog_swatch(canvas, cx, cy, size * 0.55)
+    elif slug.startswith("__imp:"):
+        _draw_improvement_glyph(draw, cx, cy, size, slug.split(":", 1)[1])
 
 
 def render_civ6_map_png(
@@ -1802,12 +1965,16 @@ def render_civ6_map_png(
         territory_items, territory_strip_h = [], 0
         river_items, river_strip_h = [], 0
         settle_items, settle_strip_h = [], 0
-        resource_rows = [(label, "#888888") for _, label in resource_legend]
+        # Marker rows (cities, units, hills, impassable mountain/water, fog)
+        # stay: they are what tells the model where it cannot walk.
+        resource_rows = [(label, "#888888") for _, label in marker_entries]
+        resource_rows.extend((label, "#888888") for _, label in resource_legend)
         resource_rows.extend(mark_rows)
         icon_items, icon_strip_h = map_render._layout_legend_items(
             resource_rows, map_w, legend_font, legend_icon, legend_font_pil,
         ) if resource_rows else ([], 0)
-        icon_slugs_for_draw = (
+        icon_slugs_for_draw = [slug for slug, _ in marker_entries]
+        icon_slugs_for_draw.extend(
             ["_" for _ in resource_legend] if prefer_civ5_sprites
             else [slug for slug, _ in resource_legend]
         )
@@ -1817,14 +1984,13 @@ def render_civ6_map_png(
     if prefer_civ5_sprites:
         header_text = f"viewport x0={x0} y0={y0} {vw}x{vh} flat-top odd-r hex"
     else:
-        direction = "north up (y grows up)" if flip_y else "y grows down"
         owned = (
             "improvement left, district right, resource center"
             if zoomed else
             "improvement lower-left, district lower-right (blank = unimproved)"
         )
         header_text = (
-            f"x {x0}-{x0 + vw - 1}, y {y0}-{y0 + vh - 1} | {direction} | odd rows shifted right | {owned}"
+            f"x {x0}-{x0 + vw - 1}, y {y0}-{y0 + vh - 1} | {owned}"
         )
     header_lines = _wrap_legend_line(header_text, font, map_w - 8)
     note_lines = _wrap_legend_line(legend_note, font, map_w - 8, max_lines=6) if legend_note else []
@@ -1920,6 +2086,7 @@ def render_civ6_map_png(
     if not used_base_cache:
         grid_overlay = Image.new("RGBA", (map_w, map_h), (0, 0, 0, 0))
         grid_draw = ImageDraw.Draw(grid_overlay)
+        fog_hexes: list[list[tuple[float, float]]] = []
         for vy in range(vh):
             wy = y0 + vy
             for vx in range(vw):
@@ -1955,8 +2122,12 @@ def render_civ6_map_png(
                     # Civ5 sprite tiles never drew a per-tile stroke; keep that.
                     if not used_sprite or not prefer_civ5_sprites:
                         grid_draw.polygon(corners, outline=HEX_GRID_OUTLINE)
-                else:
+                elif prefer_civ5_sprites:
                     draw.polygon(corners, fill=map_render._rgb_tuple(fill))
+                else:
+                    fog_hexes.append(_flat_top_hex_corners(cx, cy, hex_radius))
+        _paste_fog_hexes(canvas, fog_hexes, map_w, map_h)
+        draw = ImageDraw.Draw(canvas)
         # Faint grid under icons. PIL's polygon outline replaces pixels, so the
         # stroke is composited from a clear layer instead of punched into the art.
         map_region = Image.alpha_composite(canvas.crop((0, 0, map_w, map_h)), grid_overlay)
@@ -1977,14 +2148,12 @@ def render_civ6_map_png(
                 if state != "revealed":
                     continue
                 cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
-                if _plot_is_peak(plot):
-                    # On top of the terrain sprite. A pale mountain tile otherwise
-                    # reads as grass, and the model walks units onto it.
-                    _draw_peak_glyph(draw, cx, cy, hex_radius)
-                elif _plot_is_water(plot):
-                    _draw_water_mark(draw, cx, cy, hex_radius)
                 if prefer_civ5_sprites:
+                    if _plot_is_peak(plot):
+                        _draw_peak_glyph(draw, cx, cy, hex_radius)
                     continue
+                # Civ6 sprites: the mountain art and the plain blue water read on
+                # their own; the legend names both as impassable.
                 if _plot_is_hills(plot):
                     _draw_hills_glyph(draw, cx, cy, hex_radius)
                 if not rivers_trusted and isinstance(plot, dict) and plot.get("river_edges"):
@@ -2126,6 +2295,27 @@ def render_civ6_map_png(
                     f"{wx},{wy}",
                     map_render._coord_label_font(coord_font),
                 )
+    elif zoomed and not prefer_civ5_sprites:
+        # Close-up: label the tiles around your own units (and the unit tile)
+        # so a MoveTo target can be read off the picture without counting.
+        near: set[tuple[int, int]] = set()
+        for (mvx, mvy), group in tile_markers.items():
+            if not any(m.get("kind") in ("unit", "stack") and not m.get("foreign") for m in group):
+                continue
+            ux, uy = x0 + mvx, y0 + mvy
+            near.add((ux, uy))
+            for nx, ny, _edge in _hex_neighbors_odd_r(ux, uy):
+                near.add((nx, ny))
+        for wx, wy in sorted(near):
+            if not (x0 <= wx < x0 + vw and y0 <= wy < y0 + vh):
+                continue
+            cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
+            _draw_outlined_text(
+                draw,
+                (cx, cy + hex_radius * 0.72),
+                f"{wx},{wy}",
+                map_render._coord_label_font(max(12, tile_px // 7)),
+            )
     for plate in civ5_nameplates:
         _draw_city_nameplate(draw, *plate)
     for plate in nameplates:

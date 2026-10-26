@@ -243,7 +243,7 @@ def civ6_map_axes_wrap_guidance(snapshot: dict[str, Any] | None = None) -> str:
         f"{civ6_y_axis_phrase(snapshot)} — Civ6 hex grid, odd rows shifted half a hex east. "
         f"{wrap_clause} "
         "Mountains are impassable. Land units cannot enter water unless they can embark (embarking needs the tech). "
-        "Black areas on the map are fog that can be explored."
+        "Gray cloudy areas on the map are unexplored fog that units can move into and explore."
     )
 
 

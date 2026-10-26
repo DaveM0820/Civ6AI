@@ -649,7 +649,7 @@ class LoneRevealedCapitalTests(unittest.TestCase):
             "legal_commands": [],
         }
 
-    def test_fog_neighbors_stay_black_and_legend_names_embassy(self):
+    def test_fog_neighbors_stay_fog_and_legend_names_embassy(self):
         import io
         from unittest import mock
         from PIL import Image
@@ -714,9 +714,14 @@ class LoneRevealedCapitalTests(unittest.TestCase):
                             flip_y=bool(meta.get("north_up")), vh=7,
                         )
                         pixel = image.getpixel((int(ncx), int(ncy)))
-                        self.assertLess(distance(pixel, (0, 0, 0)), 500, pixel)
-                        self.assertLess(distance(pixel, (0, 0, 0)), distance(pixel, player))
-                        self.assertLess(distance(pixel, (0, 0, 0)), distance(pixel, plains))
+                        # Civ5 sprites keep black fog; Civ6 fog is a neutral gray cloud.
+                        fog = (0, 0, 0) if sprites else (pixel[0], pixel[0], pixel[0])
+                        if not sprites:
+                            self.assertTrue(70 <= pixel[0] <= 200, pixel)
+                            self.assertLess(abs(pixel[0] - pixel[1]) + abs(pixel[1] - pixel[2]), 16, pixel)
+                        self.assertLess(distance(pixel, fog), 500, pixel)
+                        self.assertLess(distance(pixel, fog), distance(pixel, player))
+                        self.assertLess(distance(pixel, fog), distance(pixel, plains))
                     del radius
 
     def test_a_revealed_neighbor_is_not_an_embassy_tile(self):
@@ -856,3 +861,49 @@ class CityHealthBarTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MapImageClarityTests(unittest.TestCase):
+    def test_header_has_no_axis_direction_text_and_legend_names_impassable_and_fog(self):
+        import io
+        from unittest import mock
+
+        from sidecar.map_render_civ6 import (
+            FOG_LABEL, PEAK_LABEL, _BASE_LAYER_CACHE, _civ6_marker_legend_entries, render_civ6_map_png,
+        )
+
+        def keep_source(image, **_kwargs):
+            buf = io.BytesIO()
+            image.save(buf, format="PNG")
+            return buf.getvalue(), "image/png"
+
+        snapshot = civ6_adapter.load_golden_snapshot(GOLDEN)
+        _BASE_LAYER_CACHE.clear()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "m.png"
+            with mock.patch("sidecar.map_render.encode_model_image_bytes", keep_source):
+                meta = render_civ6_map_png(
+                    snapshot, path, viewport={"x0": 0, "y0": 0, "width": 6, "height": 4},
+                    target_size=256, image_role="viewport",
+                )
+        self.assertTrue(meta["legend_has_markers"])
+        self.assertIn("impassable", PEAK_LABEL)
+        self.assertIn("unexplored", FOG_LABEL)
+        entries = _civ6_marker_legend_entries({}, snapshot, {}, {"x0": 0, "y0": 0, "width": 1, "height": 1})
+        self.assertIn(("__fog__", FOG_LABEL), entries)
+
+    def test_improvement_glyph_kinds(self):
+        from sidecar.map_render_civ6 import _improvement_glyph_kind
+
+        self.assertEqual("FARM", _improvement_glyph_kind("IMPROVEMENT_FARM"))
+        self.assertEqual("FISHING_BOATS", _improvement_glyph_kind("IMPROVEMENT_FISHING_BOATS"))
+        self.assertEqual("MINE", _improvement_glyph_kind("IMPROVEMENT_MINE"))
+        self.assertIsNone(_improvement_glyph_kind("IMPROVEMENT_GOODY_HUT_X"))
+
+    def test_fog_texture_is_gray_not_black(self):
+        from sidecar.map_render_civ6 import _fog_texture
+
+        tex = _fog_texture(64, 64).convert("RGB")
+        values = [tex.getpixel((x, y))[0] for x in range(0, 64, 8) for y in range(0, 64, 8)]
+        self.assertGreater(min(values), 60)
+        self.assertLess(max(values), 220)

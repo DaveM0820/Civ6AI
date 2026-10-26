@@ -973,11 +973,11 @@ def _game_section(context: dict[str, Any], map_stats: list[str] | None) -> list[
         map_lines.append(pipeline._wire_line("map.explored", f"{explored}%"))
         map_lines.append(pipeline._wire_line("map.unexplored", f"{unexplored}%"))
         map_lines.append(
-            f"Whole world: {explored}% revealed, {unexplored}% still black fog. "
+            f"Whole world: {explored}% revealed, {unexplored}% still unexplored gray fog. "
             "The percent in map.strategic.window, and on the strategic image banner, is how much of the "
             "world that picture shows, not how much you have explored. "
-            "A city sitting alone in black fog is one revealed tile — an embassy, or capitals exchanged "
-            "when you first met. A delegation does not reveal the map, and the black hexes around that "
+            "A city sitting alone in gray fog is one revealed tile — an embassy, or capitals exchanged "
+            "when you first met. A delegation does not reveal the map, and the gray fog hexes around that "
             "city were not explored."
         )
         true_map = coaching.civ6_true_explored(context)
@@ -1896,7 +1896,7 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
                 "Land units stop at the coast; ships explore water. MoveTo a tile you chose is just as valid."
             )
         lines.append(
-            f"- The world map is {explored}% explored and {100 - explored}% still black fog.{command}"
+            f"- The world map is {explored}% explored and {100 - explored}% still unexplored gray fog.{command}"
         )
     lines.append("- Pick research and civics before they run out so science and culture are never wasted.")
     lines.append(
