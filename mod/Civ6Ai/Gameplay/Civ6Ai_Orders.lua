@@ -5719,12 +5719,29 @@ local function settlerCost(city)
   return cost, row
 end
 
-local function queueProgress(bq)
-  local v = call(bq, "GetProductionProgress")
-  if type(v) ~= "number" then
-    v = call(bq, "GetProgress")
+-- BuildQueue:GetProgress takes the item hash (ProductionPanel uses
+-- GetUnitProgress/GetBuildingProgress by index); try each form.
+local function queueProgress(bq, current)
+  local row
+  for _, t in ipairs({ "Units", "Buildings", "Districts", "Projects" }) do
+    row = row or (GameInfo[t] ~= nil and GameInfo[t][current] or nil)
   end
-  return type(v) == "number" and v or nil
+  local tries = {}
+  if row ~= nil then
+    tries = {
+      { "GetProgress", row.Hash },
+      { "GetUnitProgress", row.Index }, { "GetBuildingProgress", row.Index },
+      { "GetDistrictProgress", row.Index }, { "GetProjectProgress", row.Index },
+    }
+  end
+  tries[#tries + 1] = { "GetProductionProgress" }
+  for _, t in ipairs(tries) do
+    local v = call(bq, t[1], t[2])
+    if type(v) == "number" and v > 0 then
+      return v, t[1]
+    end
+  end
+  return nil, "none"
 end
 
 function Civ6Ai_Orders.DivertToSettlers(owner, p)
@@ -5740,14 +5757,14 @@ function Civ6Ai_Orders.DivertToSettlers(owner, p)
     local pop = call(city, "GetPopulation") or 0
     local bq = call(city, "GetBuildQueue")
     local current = bq ~= nil and call(bq, "CurrentlyBuilding") or nil
-    if cost ~= nil and bq ~= nil and pop >= 2 and current ~= "UNIT_SETTLER" and current ~= nil and current ~= "" then
+    if cost ~= nil and bq ~= nil and pop >= 2 and current ~= "UNIT_SETTLER" and current ~= nil and current ~= "" and current ~= "NONE" then
       local prod = call(city, "GetYield", YieldTypes ~= nil and YieldTypes.PRODUCTION or 1) or 0
       local take = math.floor(prod * Civ6Ai_Orders.SETTLER_DIVERT)
-      local before = queueProgress(bq)
+      local before, how = queueProgress(bq, current)
       local moved = 0
       if take > 0 and before ~= nil and before >= take then
         pcall(bq.AddProgress, bq, -take)
-        local after = queueProgress(bq)
+        local after = queueProgress(bq, current)
         if after ~= nil and after < before then
           moved = before - after
         end
@@ -5764,7 +5781,7 @@ function Civ6Ai_Orders.DivertToSettlers(owner, p)
       end
       Game:SetProperty(key, stock)
       log("settler_divert|player=" .. tostring(owner) .. "|city=" .. tostring(cid) .. "|current=" .. tostring(current)
-        .. "|prod=" .. tostring(prod) .. "|take=" .. tostring(take) .. "|before=" .. tostring(before)
+        .. "|prod=" .. tostring(prod) .. "|take=" .. tostring(take) .. "|before=" .. tostring(before) .. "|read=" .. tostring(how)
         .. "|moved=" .. tostring(moved) .. "|stock=" .. tostring(stock) .. "/" .. tostring(cost)
         .. "|trained=" .. tostring(trained))
     end
