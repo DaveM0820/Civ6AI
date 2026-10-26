@@ -1563,7 +1563,7 @@ class PriorityOrderTests(unittest.TestCase):
 
     def test_every_category_and_level_registered(self):
         ids = _vals(self.O.PRIORITY_IDS)
-        self.assertEqual(len(ids), 25)
+        self.assertEqual(len(ids), 26)
         for cat in ids:
             for level in (1, 2, 3):
                 self.assertEqual(len(_vals(self.rt.eval("GameEvents['Civ6AiPrio_%d_%d'].fns" % (cat.id, level)))), 1)

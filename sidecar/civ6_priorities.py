@@ -200,6 +200,11 @@ CATEGORIES: list[dict] = [
          desc="scouts and exploring the map",
          pseudo={"PSEUDOYIELD_UNIT_EXPLORER": 100},
          classes={"PROMOTION_CLASS_RECON": 30}),
+    dict(id=26, key="naval", group="focus",
+         desc="ships, harbours and lighthouses (sea exploration, escorts, crossing to other islands)",
+         pseudo={"PSEUDOYIELD_UNIT_NAVAL_COMBAT": 80, "PSEUDOYIELD_GPP_ADMIRAL": 20},
+         classes={"PROMOTION_CLASS_NAVAL_MELEE": 20},
+         districts={"DISTRICT_HARBOR": 80}),
     # Exclusive: the empty-queue fill builds only settlers while this is on and
     # falls back to the normal weighted fill when a city cannot start one.
     dict(id=25, key="settlers_only", group="focus",
@@ -1045,6 +1050,15 @@ def situation_for_city(snapshot: dict, city: dict) -> dict:
     )
 
 
+def _explored_water_percent(snapshot: dict) -> int | None:
+    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    plots = [p for p in known.get("plots") or [] if isinstance(p, dict)]
+    if plots:
+        return round(100 * sum(1 for p in plots if p.get("water")) / len(plots))
+    pct = known.get("water_percent")
+    return pct if isinstance(pct, int) else None
+
+
 def prompt_lines(snapshot: dict) -> list[str]:
     """=== BUILD PRIORITIES === block for the prompt (empty when unsupported)."""
     if not priorities_supported(snapshot):
@@ -1063,6 +1077,11 @@ def prompt_lines(snapshot: dict) -> list[str]:
         "weights for your whole empire (all cities) and stays on until you change it. An empty city queue is "
         "filled from the same weights.",
         f"Current: {name or 'custom'} ({_fmt(current)})" if current else "Current: none (neutral game default)",
+    ]
+    water = _explored_water_percent(snapshot)
+    if water is not None:
+        lines.append(f"{water}% of the explored map is water.")
+    lines += [
         "Available presets:",
     ]
     for preset in available_presets(snapshot):

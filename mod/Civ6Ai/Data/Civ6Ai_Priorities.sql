@@ -1788,6 +1788,66 @@ INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_EXPLORATION_ALL_IN_U
 INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_EXPLORATION_ALL_IN', 'CIV6AI_PRIO_EXPLORATION_ALL_IN_UnitBuilds');
 INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_EXPLORATION_ALL_IN_UnitBuilds', PromotionClassType, 1, 120 FROM UnitPromotionClasses WHERE PromotionClassType = 'PROMOTION_CLASS_RECON';
 
+-- naval (light): ships, harbours and lighthouses (sea exploration, escorts, crossing to other islands)
+INSERT INTO Types (Type, Kind) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT', 'KIND_VICTORY_STRATEGY');
+INSERT INTO Strategies (StrategyType, VictoryType, NumConditionsNeeded) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT', NULL, 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, Disqualifier) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT', 'Is Not Major', 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, StringValue, ThresholdValue) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT', 'Call Lua Function', 'Civ6AiPrio_26_1', 0);
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT_PseudoYields');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT_PseudoYields', 'PseudoYields');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT', 'CIV6AI_PRIO_NAVAL_LIGHT_PseudoYields');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_LIGHT_PseudoYields', PseudoYieldType, 1, 80 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_NAVAL_COMBAT';
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_LIGHT_PseudoYields', PseudoYieldType, 1, 20 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_GPP_ADMIRAL';
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT_UnitBuilds');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT_UnitBuilds', 'UnitPromotionClasses');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT', 'CIV6AI_PRIO_NAVAL_LIGHT_UnitBuilds');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_LIGHT_UnitBuilds', PromotionClassType, 1, 20 FROM UnitPromotionClasses WHERE PromotionClassType = 'PROMOTION_CLASS_NAVAL_MELEE';
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT_Districts');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT_Districts', 'Districts');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_NAVAL_LIGHT', 'CIV6AI_PRIO_NAVAL_LIGHT_Districts');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_LIGHT_Districts', DistrictType, 1, 80 FROM Districts WHERE DistrictType = 'DISTRICT_HARBOR';
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_LIGHT_Districts', CivUniqueDistrictType, 1, 80 FROM DistrictReplaces WHERE ReplacesDistrictType = 'DISTRICT_HARBOR';
+
+-- naval (strong): ships, harbours and lighthouses (sea exploration, escorts, crossing to other islands)
+INSERT INTO Types (Type, Kind) VALUES ('CIV6AI_PRIO_NAVAL_STRONG', 'KIND_VICTORY_STRATEGY');
+INSERT INTO Strategies (StrategyType, VictoryType, NumConditionsNeeded) VALUES ('CIV6AI_PRIO_NAVAL_STRONG', NULL, 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, Disqualifier) VALUES ('CIV6AI_PRIO_NAVAL_STRONG', 'Is Not Major', 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, StringValue, ThresholdValue) VALUES ('CIV6AI_PRIO_NAVAL_STRONG', 'Call Lua Function', 'Civ6AiPrio_26_2', 0);
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_NAVAL_STRONG_PseudoYields');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_NAVAL_STRONG_PseudoYields', 'PseudoYields');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_NAVAL_STRONG', 'CIV6AI_PRIO_NAVAL_STRONG_PseudoYields');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_STRONG_PseudoYields', PseudoYieldType, 1, 160 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_NAVAL_COMBAT';
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_STRONG_PseudoYields', PseudoYieldType, 1, 40 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_GPP_ADMIRAL';
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_NAVAL_STRONG_UnitBuilds');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_NAVAL_STRONG_UnitBuilds', 'UnitPromotionClasses');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_NAVAL_STRONG', 'CIV6AI_PRIO_NAVAL_STRONG_UnitBuilds');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_STRONG_UnitBuilds', PromotionClassType, 1, 40 FROM UnitPromotionClasses WHERE PromotionClassType = 'PROMOTION_CLASS_NAVAL_MELEE';
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_NAVAL_STRONG_Districts');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_NAVAL_STRONG_Districts', 'Districts');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_NAVAL_STRONG', 'CIV6AI_PRIO_NAVAL_STRONG_Districts');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_STRONG_Districts', DistrictType, 1, 160 FROM Districts WHERE DistrictType = 'DISTRICT_HARBOR';
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_STRONG_Districts', CivUniqueDistrictType, 1, 160 FROM DistrictReplaces WHERE ReplacesDistrictType = 'DISTRICT_HARBOR';
+
+-- naval (all_in): ships, harbours and lighthouses (sea exploration, escorts, crossing to other islands)
+INSERT INTO Types (Type, Kind) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN', 'KIND_VICTORY_STRATEGY');
+INSERT INTO Strategies (StrategyType, VictoryType, NumConditionsNeeded) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN', NULL, 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, Disqualifier) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN', 'Is Not Major', 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, StringValue, ThresholdValue) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN', 'Call Lua Function', 'Civ6AiPrio_26_3', 0);
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN_PseudoYields');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN_PseudoYields', 'PseudoYields');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN', 'CIV6AI_PRIO_NAVAL_ALL_IN_PseudoYields');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_ALL_IN_PseudoYields', PseudoYieldType, 1, 320 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_NAVAL_COMBAT';
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_ALL_IN_PseudoYields', PseudoYieldType, 1, 80 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_GPP_ADMIRAL';
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN_UnitBuilds');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN_UnitBuilds', 'UnitPromotionClasses');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN', 'CIV6AI_PRIO_NAVAL_ALL_IN_UnitBuilds');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_ALL_IN_UnitBuilds', PromotionClassType, 1, 80 FROM UnitPromotionClasses WHERE PromotionClassType = 'PROMOTION_CLASS_NAVAL_MELEE';
+INSERT INTO AiListTypes (ListType) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN_Districts');
+INSERT INTO AiLists (ListType, System) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN_Districts', 'Districts');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_PRIO_NAVAL_ALL_IN', 'CIV6AI_PRIO_NAVAL_ALL_IN_Districts');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_ALL_IN_Districts', DistrictType, 1, 320 FROM Districts WHERE DistrictType = 'DISTRICT_HARBOR';
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) SELECT 'CIV6AI_PRIO_NAVAL_ALL_IN_Districts', CivUniqueDistrictType, 1, 320 FROM DistrictReplaces WHERE ReplacesDistrictType = 'DISTRICT_HARBOR';
+
 -- settlers_only (light): settlers only: every city builds settlers to found new cities fast
 INSERT INTO Types (Type, Kind) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_LIGHT', 'KIND_VICTORY_STRATEGY');
 INSERT INTO Strategies (StrategyType, VictoryType, NumConditionsNeeded) VALUES ('CIV6AI_PRIO_SETTLERS_ONLY_LIGHT', NULL, 1);
