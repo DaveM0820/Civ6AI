@@ -100,15 +100,3 @@ class EarlyLockGameplayTest(unittest.TestCase):
         want = {P.BY_ID[c]["key"]: l for c, l in P.early_levels().items()}
         got = {k: v for k, v in dict(O.EARLY_SET.items()).items()}
         self.assertEqual(want, got)
-
-
-@unittest.skipIf(_lupa is None, "lupa not installed")
-class SettlerBuyFactTest(unittest.TestCase):
-    def test_states_gold_and_cheapest_cost(self):
-        snap = {"your_empire": {"gold": 120}, "your_cities": [{"city_id": "C1", "name": "Rome"}],
-                "legal_commands": [{"kind": "purchase_item", "fixed_arguments":
-                                    {"item_id": "UNIT_SETTLER", "cost": 230, "city_id": "C1"}}]}
-        text = P.settler_buy_fact(snap)
-        self.assertIn("Gold: 120.", text)
-        self.assertIn("A settler costs 230 gold in Rome", text)
-        self.assertIn("No city can buy", P.settler_buy_fact({"your_empire": {"gold": 5}}))

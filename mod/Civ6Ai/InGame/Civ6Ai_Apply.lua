@@ -1784,6 +1784,9 @@ function Civ6Ai_Apply._Deal(playerID, command, args)
     return ok, reason, args
   end
   if kind == "purchase_item" then
+    if true then
+      return false, "purchase_item is not available (no vanilla synced purchase for scripted seats)", args
+    end
     local cityNum = Civ6Ai_Apply._CityNum(args.city_id)
     local item = args.item_id
     local unitRow = item ~= nil and GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[item] or nil

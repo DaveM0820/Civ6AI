@@ -45,7 +45,7 @@ CIV6_GAME_PRIMER = (
     "(hills, woods, rivers); promotions; walls and city strikes; embarking makes land units vulnerable at sea; "
     "clear barbarian camps early before they spawn raiders; scouts explore for goody huts, city-states and eurekas.\n"
     "- Strategy: early expansion (scout, slinger/warrior, settlers, builders, Monument) and snowballing; "
-    "tall vs wide; production and gold to buy key items; defend before rushing; plan multi-turn and finish plans. "
+    "tall vs wide; production for key items; defend before rushing; plan multi-turn and finish plans. "
     "Victory paths: science, culture (tourism), domination, religious, diplomatic, score.\n"
     "- Concepts: movement: one military plus one civilian unit per tile, never two of one class; mountains "
     "impassable; rivers, hills, woods cost extra moves. City sites: fresh water or coast, hills, luxuries, room "

@@ -3334,6 +3334,11 @@ function Civ6Ai_Snapshot._AddPurchaseCommands(commands, playerID)
       added = added + 1
     end
     local function tryItem(itemId, hash, isUnit)
+      -- Item purchases are not offered: gameplay Lua has no synced purchase
+      -- operation for AI seats (CityManager.RequestCommand PURCHASE is the
+      -- UI-side local-player request), and a scripted debit+spawn would replace
+      -- the game's purchase mechanic. The native AI still buys on its own.
+      if true then return end
       if added >= Civ6Ai_Snapshot.PURCHASE_PER_CITY_CAP then
         return
       end

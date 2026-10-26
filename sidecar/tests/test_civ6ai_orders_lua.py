@@ -1745,7 +1745,7 @@ class WpAApplyCoreTests(unittest.TestCase):
         """)
         self.rt.execute("Players[2]:GetTreasury()")
         self.order(0, K=19, P=2, U=0, X=131072, Y=0, I=0, V=40, S=99)
-        self.assertTrue(self.last()["ok"], self.last()["reason"])
+        self.assertFalse(self.last()["ok"])  # item purchase disabled (vanilla-only)
 
     def _install_explore_map(self, *, sea=False, reveal_on_move=False, move=True):
         # (2,1) unit, same landmass fog edge at revealed (1,1) beside fog (0,1).
@@ -2312,15 +2312,15 @@ class DealOrdersTests(unittest.TestCase):
         self.order(0, K=17, P=2, I=1, S=3)
         self.assertEqual(self.last()["reason"], "you are already at war with them")
 
-    def test_buy_unit_debits_gold_and_spawns(self):
+    def test_buy_unit_is_disabled(self):
         self._add_city()
         self.rt.execute("Players[2]:GetTreasury()")
         before = self.rt.eval("#Players[2].units")
         gold = self.rt.eval("Players[2].gold")
         self.order(0, K=19, P=2, U=0, X=3, Y=0, I=0, V=40, S=4)
-        self.assertTrue(self.last()["ok"], self.last()["reason"])
-        self.assertEqual(self.rt.eval("#Players[2].units"), before + 1)
-        self.assertEqual(self.rt.eval("Players[2].gold"), gold - 40)
+        self.assertFalse(self.last()["ok"])
+        self.assertEqual(self.rt.eval("#Players[2].units"), before)
+        self.assertEqual(self.rt.eval("Players[2].gold"), gold)
 
     def test_buy_tile_sets_owner(self):
         self._add_city()

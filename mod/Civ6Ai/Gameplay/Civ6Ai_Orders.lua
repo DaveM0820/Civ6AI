@@ -3805,6 +3805,11 @@ end
 -- Firaxis scenarios and this file's own MP tests) or complete the building
 -- (BuildQueue:CreateIncompleteBuilding at 100%, TunerCityPanel.lua).
 function Gov.PurchaseItem(owner, cityId, itemIndex, isBuilding, useFaith, cost)
+  -- Disabled: vanilla-only mechanics. There is no gameplay-side purchase call,
+  -- and debit + InitUnit/CreateIncompleteBuilding replaces the game's purchase.
+  if true then
+    return false, "item purchase is not available"
+  end
   local city = cityById(owner, cityId)
   if city == nil then
     return false, "stale_city_id:" .. tostring(cityId)

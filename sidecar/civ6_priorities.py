@@ -512,35 +512,8 @@ def expansion_pace_line(snapshot: dict) -> str:
     marks = [(c, pace_turn(t, speed)) for c, t in PACE_ONLINE]
     bench = ", ".join(f"{'8-9' if c == 8 else c} cities by turn {t}" for c, t in marks)
     return (f"EXPANSION PACE: you own {_city_count(snapshot)} cities on turn {_game_turn(snapshot)}. "
-            f"Competitive pace at this game speed ({speed or 'GAMESPEED_ONLINE'}): {bench}. "
-            + settler_buy_fact(snapshot))
+            f"Competitive pace at this game speed ({speed or 'GAMESPEED_ONLINE'}): {bench}.")
 
-
-def settler_buy_fact(snapshot: dict) -> str:
-    """Gold on hand and the cheapest settler purchase offer, affordable or not."""
-    empire = snapshot.get("your_empire") if isinstance(snapshot.get("your_empire"), dict) else {}
-    gold = empire.get("gold")
-    names = {str(c.get("city_id")): str(c.get("name") or c.get("city_id"))
-             for c in snapshot.get("your_cities") or [] if isinstance(c, dict)}
-    best = None
-    for cmd in snapshot.get("legal_commands") or []:
-        if not isinstance(cmd, dict) or cmd.get("kind") != "purchase_item":
-            continue
-        fixed = cmd.get("fixed_arguments") if isinstance(cmd.get("fixed_arguments"), dict) else {}
-        if "SETTLER" not in str(fixed.get("item_id") or "").upper():
-            continue
-        if str(fixed.get("yield") or "gold").lower() == "faith":
-            continue
-        try:
-            cost = int(fixed.get("cost"))
-        except (TypeError, ValueError):
-            continue
-        if best is None or cost < best[0]:
-            best = (cost, names.get(str(fixed.get("city_id")), str(fixed.get("city_id") or "a city")))
-    gold_txt = f"Gold: {int(gold)}." if isinstance(gold, (int, float)) and not isinstance(gold, bool) else "Gold: unknown."
-    if best is None:
-        return gold_txt + " No city can buy a settler now."
-    return (f"{gold_txt} A settler costs {best[0]} gold in {best[1]} ({best[1]}.purchase = UNIT_SETTLER).")
 _ERAS = {
     "ERA_ANCIENT": 0, "ERA_CLASSICAL": 1, "ERA_MEDIEVAL": 2, "ERA_RENAISSANCE": 3,
     "ERA_INDUSTRIAL": 4, "ERA_MODERN": 5, "ERA_ATOMIC": 6, "ERA_INFORMATION": 7,
