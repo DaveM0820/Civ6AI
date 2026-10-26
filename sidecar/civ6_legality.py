@@ -465,6 +465,20 @@ def order_problem(snapshot: dict[str, Any], command: dict[str, Any]) -> str | No
     return None
 
 
+def _move_rejection_text(snapshot: dict[str, Any], args: dict[str, Any], problem: str) -> str | None:
+    """Plain 'You tried to move <unit> to tile (x,y). Tile (x,y) is ...' line."""
+    try:
+        x, y = int(args.get("target_x")), int(args.get("target_y"))
+    except (TypeError, ValueError):
+        return None
+    from sidecar import civ6_apply_results, pipeline_v2 as pipeline
+
+    uid = str(args.get("unit_id") or "")
+    units = [u for u in snapshot.get("your_units") or [] if isinstance(u, dict)]
+    name = pipeline._build_unit_wire_id_map(units).get(uid, uid)
+    return civ6_apply_results.move_failure_text(snapshot, name, x, y, problem, "")
+
+
 def _legality_rule(snapshot: dict[str, Any], ctx: dict[str, Any]):
     def check(command: dict[str, Any]):
         problem = order_problem(snapshot, command)
@@ -472,6 +486,8 @@ def _legality_rule(snapshot: dict[str, Any], ctx: dict[str, Any]):
             return None
         line = f"Rejected last turn: {order_label(command)} - {reason_text(problem)}"
         args = _dct(command.get("arguments") or command.get("fixed_arguments"))
+        if str(command.get("kind") or "") == "move_unit":
+            line = _move_rejection_text(snapshot, args, problem) or line
         row = {"order": order_label(command), "reason": problem, "turn": _turn(snapshot)}
         if args.get("unit_id"):
             row["unit_id"] = str(args.get("unit_id"))
