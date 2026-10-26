@@ -2218,6 +2218,9 @@ def build_civ6_playable_context(snapshot: dict[str, Any]) -> dict[str, Any]:
                 xy = coaching._unit_xy(unit)
                 if xy is not None:
                     unit["improve_sites"] = coaching.builder_improve_sites(snapshot, *xy)
+        plots = [p for p in known_map.get("plots") or [] if isinstance(p, dict)]
+        if plots:
+            known_map["water_percent"] = round(100 * sum(1 for p in plots if p.get("water")) / len(plots))
         known_map.pop("plots", None)
         image = known_map.get("image")
         if isinstance(image, dict):

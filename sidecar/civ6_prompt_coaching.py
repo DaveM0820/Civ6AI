@@ -257,9 +257,11 @@ def _water_and_embark_clause(snapshot: Any) -> str:
     text = ""
     known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
     plots = [p for p in known.get("plots") or [] if isinstance(p, dict)]
+    pct = known.get("water_percent")
     if plots:
-        water = sum(1 for p in plots if p.get("water"))
-        text += f" {round(100 * water / len(plots))}% of the explored map is water."
+        pct = round(100 * sum(1 for p in plots if p.get("water")) / len(plots))
+    if isinstance(pct, int):
+        text += f" {pct}% of the explored map is water."
     from sidecar import civ6_legality
 
     if civ6_legality.can_embark(snapshot):
