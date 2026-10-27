@@ -709,6 +709,32 @@ def _earlier_failed_items(snapshot: dict[str, Any], rows: list[dict[str, Any]], 
     return items
 
 
+_FOUND_GOAL_RE = re.compile(r"^CMD_(UNIT_\d+)_(?:found|settle)_(-?\d+)_(-?\d+)$")
+
+
+def found_arrivals(snapshot: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+    """Settlers whose last-turn move-to-site order has them standing on that site now.
+
+    The move ends with no moves left, so the game cannot found that turn; the
+    found is owed at the start of this one.
+    """
+    here: dict[str, str] = {}
+    for unit in snapshot.get("your_units") or []:
+        if isinstance(unit, dict) and isinstance(unit.get("plot_id"), str):
+            here[str(unit.get("unit_id"))] = unit["plot_id"]
+    out: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("ok") is not True:
+            continue
+        match = _FOUND_GOAL_RE.match(str(row.get("command_id") or ""))
+        if not match:
+            continue
+        uid, x, y = match.group(1), int(match.group(2)), int(match.group(3))
+        if here.get(uid) == f"PLOT_{x}_{y}" and uid not in out:
+            out.append(uid)
+    return out
+
+
 def inject_command_results(snapshot: dict[str, Any], session_dir: Path | None) -> int:
     """Fill history.command_results from snapshot (WP-B) or apply-results.jsonl. Returns rows kept."""
     decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
@@ -727,6 +753,7 @@ def inject_command_results(snapshot: dict[str, Any], session_dir: Path | None) -
         if isinstance(existing, list):
             return len([i for i in existing if isinstance(i, dict)])
         return 0
+    snapshot["_found_arrivals"] = found_arrivals(snapshot, rows)
     items = build_command_results(snapshot, rows, turn)
     items.extend(_earlier_failed_items(snapshot, all_rows, player_id, turn, rows))
     _annotate_repeat_failures(items, all_rows, player_id)

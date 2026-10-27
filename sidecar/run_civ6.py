@@ -301,6 +301,7 @@ def _civ6_post_bind(snapshot: dict, validated: dict, commands: list) -> tuple[di
 
     # After every filter: hints are targets only. Lua's single fallback pass
     # uses one only for an entity no successful model order handled.
+    commands = found_on_arrival(snapshot, commands)
     commands.extend(civ6_fallbacks.plan(snapshot, commands))
     commands = [civ6_command_wire.pack_apply_command(snapshot, item) for item in commands]
     unresolved = civ6_command_wire.take_unresolved()
@@ -317,6 +318,30 @@ def _civ6_post_bind(snapshot: dict, validated: dict, commands: list) -> tuple[di
             dropped.append(unresolved_order_note(token))
     civ6_apply_results.record_dropped(snapshot, dropped)
     return validated, commands, dropped
+
+
+def found_on_arrival(snapshot: dict, commands: list) -> list:
+    """A settler that reached its move-to-site target founds there now (vanilla FoundCity)."""
+    arrived = set(snapshot.get("_found_arrivals") or [])
+    if not arrived:
+        return commands
+    found: dict[str, str] = {}
+    for row in snapshot.get("legal_commands") or []:
+        fixed = row.get("fixed_arguments") if isinstance(row, dict) else None
+        if row.get("kind") == "found_city" and isinstance(fixed, dict) and fixed.get("unit_id") in arrived:
+            found[str(fixed["unit_id"])] = str(row.get("command_id"))
+    if not found:
+        return commands
+    by_id = {str(row.get("command_id")): row for row in snapshot.get("legal_commands") or [] if isinstance(row, dict)}
+
+    def unit_of(item: dict) -> str | None:
+        row = by_id.get(str(item.get("command_id") or "")) or {}
+        fixed = row.get("fixed_arguments") if isinstance(row.get("fixed_arguments"), dict) else {}
+        return fixed.get("unit_id") or (row.get("affected_ids") or [None])[0]
+
+    kept = [c for c in commands if not (isinstance(c, dict) and unit_of(c) in found)]
+    kept.extend({"command_id": cmd, "arguments": {}} for cmd in found.values())
+    return kept
 
 
 _VERB_UNITS = {"improve": "Builders", "foundcity": "Settlers", "found": "Settlers", "settle": "Settlers"}
