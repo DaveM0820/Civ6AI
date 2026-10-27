@@ -753,12 +753,16 @@ def inject_command_results(snapshot: dict[str, Any], session_dir: Path | None) -
         return 0
     existing = history.get("command_results")
     all_rows = load_apply_results(session_dir)
+    newest = [r for r in all_rows if isinstance(r, dict) and str(r.get("player_id") or player_id) == player_id
+              and _row_decision_turn(r) == current_turn]
     turn, rows = latest_turn_rows(all_rows, player_id, current_turn)
+    # Apply rows are labelled with the turn they ran: last decision's orders
+    # carry this turn's number, which latest_turn_rows (turn < current) skips.
+    snapshot["_found_arrivals"] = found_arrivals(snapshot, newest or rows)
     if turn is None or not rows:
         if isinstance(existing, list):
             return len([i for i in existing if isinstance(i, dict)])
         return 0
-    snapshot["_found_arrivals"] = found_arrivals(snapshot, rows)
     items = build_command_results(snapshot, rows, turn)
     items.extend(_earlier_failed_items(snapshot, all_rows, player_id, turn, rows))
     _annotate_repeat_failures(items, all_rows, player_id)
