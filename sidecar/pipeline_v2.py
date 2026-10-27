@@ -6,6 +6,7 @@ output and never lets an adapter exception escape into Civ IV.
 """
 from __future__ import annotations
 
+import logging
 import copy
 import hashlib
 import json
@@ -5051,12 +5052,35 @@ def call_model(
         cfg = load_local_config()
         if timeout_seconds and timeout_seconds > cfg.timeout_seconds:
             cfg.timeout_seconds = int(timeout_seconds)
-        result, metadata = lmstudio_client.call_lmstudio_chat(
-            snapshot,
-            cfg=cfg,
-            image_data_url=image_data_url,
-            opener=opener,
-        )
+        def _call(snap: dict[str, Any], image: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+            return lmstudio_client.call_lmstudio_chat(snap, cfg=cfg, image_data_url=image, opener=opener)
+
+        def _filtered(error: BoundaryError) -> bool:
+            return error.category == "content_filter" or lmstudio_client.is_content_filter_text(str(error))
+
+        try:
+            return _call(snapshot, image_data_url)
+        except BoundaryError as error:
+            if not _filtered(error):
+                raise
+            logging.getLogger(__name__).warning("content filter rejected the model call; retrying without the image: %s", error)
+        # Provider content filter: same call once without the image (text map info only).
+        try:
+            result, metadata = _call(snapshot, None)
+            metadata["content_filter_fallback"] = "no_image"
+            return result, metadata
+        except BoundaryError as error:
+            if not _filtered(error):
+                raise
+            logging.getLogger(__name__).warning("content filter rejected the text-only call; using the escalation model: %s", error)
+        from sidecar import civ6_escalation
+
+        rungs = civ6_escalation.ladder(cfg)[1]
+        model = next((str(r["model"]) for r in rungs if r.get("model")), civ6_escalation.HAIKU)
+        escalated = dict(snapshot)
+        escalated["_escalation"] = {"rung": 1, "model": model, "reasoning_effort": "off"}
+        result, metadata = _call(escalated, None)
+        metadata["content_filter_fallback"] = "escalation_model"
         return result, metadata
 
     gemini_key = (gemini_api_key or resolve_gemini_api_key()).strip()
@@ -5825,6 +5849,8 @@ class CircuitBreaker:
         if category == "response_schema" and "decision_summary" in message:
             return
         if category == "response_schema" and "thought/" in message:
+            return
+        if category == "content_filter":
             return
         self.record(player_id, False)
 

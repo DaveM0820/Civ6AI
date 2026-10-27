@@ -183,6 +183,15 @@ def build_chat_completions_body(
     return body
 
 
+CONTENT_FILTER_MARKERS = ("data_inspection_failed", "inappropriate content")
+
+
+def is_content_filter_text(text: str) -> bool:
+    """Provider content-filter rejection (e.g. Alibaba data_inspection_failed)."""
+    hay = (text or "").lower()
+    return any(marker in hay for marker in CONTENT_FILTER_MARKERS)
+
+
 def _is_model_unloaded_error(status: int, detail: str) -> bool:
     if status != 400 and status != 404:
         return False
@@ -351,6 +360,11 @@ def call_lmstudio_chat(
                     last_error = error
                     time.sleep(2 * (attempt + 1))
                     continue
+                if is_content_filter_text(detail):
+                    raise pipeline.BoundaryError(
+                        "content_filter",
+                        f"{label} HTTP {error.code}: {detail[:500]}",
+                    ) from error
                 raise pipeline.BoundaryError(
                     pipeline._http_error_category(error.code)
                     if hasattr(pipeline, "_http_error_category")
