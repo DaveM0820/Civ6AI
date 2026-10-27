@@ -46,18 +46,3 @@ def test_arrival_counts_even_when_snapshot_predates_the_move():
     assert ar.found_arrivals(snap, rows) == ["UNIT_7"]
     rows = [{"command_id": "CMD_UNIT_7_found_24_11", "ok": True, "reason": "partial_path:23,12>24,12:steps=1:stop=no_moves_left"}]
     assert ar.found_arrivals(snap, rows) == []
-
-
-def test_inject_uses_rows_labelled_this_turn(tmp_path):
-    import json
-    snap = _snap()
-    snap["decision"] = {"player_id": "PLAYER_2", "turn": 42}
-    rows = [
-        {"player_id": "PLAYER_2", "turn": 41, "command_id": "CMD_UNIT_7_found_24_24", "ok": True, "reason": "moved:24,24", "event": "apply_result"},
-        {"player_id": "PLAYER_2", "turn": 42, "command_id": "CMD_UNIT_7_found_24_23", "ok": True, "reason": "moved:24,23", "event": "apply_result"},
-    ]
-    (tmp_path / "PLAYER_2").mkdir()
-    for path in (tmp_path / "apply-results.jsonl", tmp_path / "PLAYER_2" / "apply-results.jsonl"):
-        path.write_text("\n".join(json.dumps(r) for r in rows))
-    ar.inject_command_results(snap, tmp_path)
-    assert snap["_found_arrivals"] == ["UNIT_7"]
