@@ -873,9 +873,7 @@ class CommandWireVocabTests(unittest.TestCase):
         self.assertIn("settler_1.settle.here", lines)
         self.assertIn("coastal", lines)
         self.assertIn("too_close_to_city", lines)
-        self.assertIn("settler_1.settle.sites", lines)
-        self.assertIn("S1 (20,19)", lines)
-        self.assertIn("dist 2", lines)
+        self.assertNotIn("settler_1.settle.sites", lines)  # no settle-site suggestions
         prompt = civ6_wire._append_civ6_unit_situation_wire
         buf: list[str] = []
         prompt(buf, snap)

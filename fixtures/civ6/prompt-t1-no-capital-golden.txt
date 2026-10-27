@@ -88,7 +88,7 @@ rival.Cleopatra.score = 138
 rival.Cleopatra.attitude = ATTITUDE_CAUTIOUS
 
 === ATTENTION ===
-SETTLE: No capital yet: every turn without one costs all science, culture and production. settler_1.command = MoveTo a site you pick, then FoundCity there. Barbarians capture an unescorted Settler. Use the attached map to choose a settle location. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold). Coastal tiles (needed for a harbour and ships) and river tiles are better city sites when available.
+SETTLE: No capital yet: every turn without one costs all science, culture and production. A Settler can MoveTo(x,y) any land tile, then FoundCity on its own tile. Barbarians capture an unescorted Settler. Military and civilian units can share a tile; sharing does not block movement or founding. Use the attached map to choose a settle location. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold). Coastal tiles (needed for a harbour and ships) and river tiles are better city sites when available.
 IDLE: 1 UNIT_SCOUT, 1 UNIT_SPEARMAN — host default applied
 
 === THOUGHTS ===
@@ -128,7 +128,7 @@ GOOD JSON (entire reply — row numbers on keys; host strips the prefix):
 
 Command rules:
 - Movement: unitId.command = MoveTo(x,y) with any destination. One MoveTo spends the unit's remaining moves (unitId.moves of unitId.maxMovement) along the game's route; pick a destination at least that far on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, except that a unit that has not moved this turn can always enter one adjacent tile, however rough (that uses all its movement).
-- Never MoveTo a mountain, a water tile this unit cannot enter, or a tile one of your own units already holds. The map marks a mountain with a white peak and water as impassable to land units until they can embark. A rejected move says impassable when the tile cannot be entered, and no_path when no route exists. The unit then takes one step toward that destination on a tile it can enter. Do not repeat a destination that stays blocked.
+- Never MoveTo a mountain, a water tile this unit cannot enter, or a tile another of your units of the same kind (military or civilian) already holds. Mountains are impassable; water is impassable to land units until they can embark. A rejected move says impassable when the tile cannot be entered, and no_path when no route exists. The unit then takes one step toward that destination on a tile it can enter. Do not repeat a destination that stays blocked.
 - Coordinates: game-plot y increases north (up on the map image; north at top) and x increases east; see the GAME section for X-wrap.
 - Civ6 stacking: typically one military formation-class unit per tile, plus one civilian or support unit; two military units of the same formation class cannot share a tile. Use corps/armies and support units (e.g. battering ram, siege tower) intentionally.
 - Attacks are AttackTo on a unit row (melee, ranged, or bombard) and rangeStrike on a city row (a city attack or city strike). A unit with leftover movement can often still attack this turn after moving — do not treat "already moved" as "cannot attack" unless the unit has 0 moves left or the attack is otherwise illegal.

@@ -55,10 +55,9 @@ def _blocked(context: Any) -> list[Item]:
 
 
 def _settle(context: Any) -> list[Item]:
-    """The one settle/expansion owner: found now, walk to a listed site, or train/buy a Settler."""
+    """The one settle/expansion owner: FoundCity where legal, or MoveTo then FoundCity."""
     from sidecar import pipeline_v2 as pipeline
     from sidecar import civ6_prompt_coaching as coaching
-    from sidecar.civ6_command_wire import labeled_settle_sites
     from sidecar.civ6_wire import no_city_sites_lines
 
     snap = context if isinstance(context, dict) else {}
@@ -73,29 +72,17 @@ def _settle(context: Any) -> list[Item]:
             for c in snap.get("legal_commands") or []
             if isinstance(c, dict) and c.get("kind") == "found_city"
         }
-        sites = labeled_settle_sites(snap)
-        found_now: list[str] = []
-        walk: list[str] = []
-        for unit in settlers[:4]:
-            uid = str(unit.get("unit_id") or "")
-            name = wire.get(uid, uid)
-            if uid in legal:
-                found_now.append(name)
-                continue
-            own = [f"({s['x']},{s['y']})" for s in sites if s.get("unit_id") == uid][:4]
-            walk.append(f"{name}.command = MoveTo one of {', '.join(own)}" if own else f"{name}.command = MoveTo a site you pick")
-        commands = tuple(f"{n}.command = FoundCity" for n in found_now) + tuple(walk)
+        found_now = [wire.get(str(u.get("unit_id") or ""), "settler") for u in settlers[:4]
+                     if str(u.get("unit_id") or "") in legal]
+        commands = tuple(f"{n}.command = FoundCity" for n in found_now)
         bits: list[str] = []
         if not has_city:
             bits.append("No capital yet: every turn without one costs all science, culture and production.")
         if found_now:
-            target = "the capital" if not has_city else "a city"
-            bits.append(
-                f"Found {target} this turn: {'; '.join(c for c in commands if c.endswith('FoundCity'))}."
-            )
-        if walk:
-            bits.append("; ".join(walk) + ", then FoundCity there.")
+            bits.append(f"FoundCity is legal on the tile of {', '.join(found_now)}.")
+        bits.append("A Settler can MoveTo(x,y) any land tile, then FoundCity on its own tile.")
         bits.append("Barbarians capture an unescorted Settler.")
+        bits.append("Military and civilian units can share a tile; sharing does not block movement or founding.")
         bits.append(coaching.CIV6_SETTLER_MAP_ADVICE)
         items.append(Item("settle", "SETTLE: " + " ".join(bits), "Settle", 0 if not has_city else 1, commands))
     expansion = coaching.civ6_expansion_attention(snap)

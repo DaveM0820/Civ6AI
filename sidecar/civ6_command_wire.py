@@ -127,6 +127,7 @@ def _wrap_x(snapshot: dict[str, Any], x: int) -> int:
 
 def labeled_settle_sites(snapshot: dict[str, Any], radius: int | None = None) -> list[dict[str, Any]]:
     """Stable S1..Sn labels for legal nearby settle tiles (unranked; overlay + prompt)."""
+    return []  # settle-site suggestions removed (prompt and map); the model picks tiles
     if radius is None:
         radius = settle_marker_radius()
     units = [u for u in snapshot.get("your_units", []) or [] if isinstance(u, dict)]
@@ -1123,8 +1124,8 @@ def sitrep_offer_lines(snapshot: dict[str, Any]) -> list[str]:
         lines.append(pipeline_mod._wire_line(f"{prefix}.settle.here", f"{coords} {' '.join(here_bits)}".strip()))
         if not here_ok and reason:
             lines.append(pipeline_mod._wire_line(f"{prefix}.settle.cannotFound", str(reason)))
-        sites = [s for s in (settle.get("sites") or []) if isinstance(s, dict)]
-        labeled = {(row["x"], row["y"]): row["label"] for row in labeled_settle_sites(snapshot)}
+        sites: list[dict[str, Any]] = []  # settle-site suggestions removed
+        labeled: dict[tuple[int, int], str] = {}
         if sites:
             site_bits = []
             for site in sites:

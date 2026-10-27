@@ -1171,8 +1171,8 @@ def _paste_resource_icon(
     if not isinstance(resource_id, str) or not resource_id.strip():
         return
     slug = map_icons.resource_icon_slug(resource_id)
-    if not slug:
-        return
+    if not slug or not map_icons.icon_path(slug).is_file():
+        return  # no icon file: draw nothing rather than an empty dark badge
     icon_px = max(10, int(tile_px * (0.32 if centered else 0.46)))
     if centered:
         ox = int(cx - icon_px // 2)
@@ -1570,6 +1570,8 @@ def _owner_rgb(owner_player_id: str) -> tuple[int, int, int]:
 
 
 def _owner_short_label(snapshot: dict[str, Any], owner_player_id: str) -> str:
+    if owner_player_id and map_render.city_state_name(snapshot, owner_player_id):
+        return "city-state"
     label = map_render._player_label(snapshot, owner_player_id) if owner_player_id else "?"
     label = label.removeprefix("CIVILIZATION_").replace("_", " ").title()
     return label[:14]

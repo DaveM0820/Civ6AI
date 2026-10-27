@@ -227,25 +227,7 @@ class Civ6MapRenderTests(unittest.TestCase):
         ]
         from sidecar.map_render_civ6 import _BASE_LAYER_CACHE, collect_settle_markers, render_civ6_map_png
         _BASE_LAYER_CACHE.clear()
-        markers = collect_settle_markers(snapshot)
-        labels = {row["label"] for row in markers}
-        coords = {(row["x"], row["y"]) for row in markers}
-        self.assertIn("S1", labels)
-        self.assertIn((16, 23), coords)
-        self.assertNotIn((18, 23), coords)
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "settle.png"
-            meta = render_civ6_map_png(snapshot, path)
-            self.assertGreaterEqual(meta.get("settle_rings_drawn", 0), 1)
-            self.assertIn("S1", meta.get("settle_labels") or [])
-            from PIL import Image
-            img = Image.open(path)
-            pixels = list(img.getdata())
-            yellow = sum(1 for px in pixels if px[0] > 200 and 140 < px[1] < 230 and px[2] < 120)
-            self.assertGreater(yellow, 20)
-            overview = render_civ6_map_png(snapshot, Path(tmp) / "overview.png", image_role="overview")
-            self.assertEqual(0, overview.get("settle_rings_drawn", 0))
-            self.assertEqual([], overview.get("settle_labels") or [])
+        self.assertEqual(collect_settle_markers(snapshot), [])  # settle-site overlay removed
 
     def test_settle_overlay_skipped_when_vision_off(self):
         from unittest import mock

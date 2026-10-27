@@ -1043,10 +1043,9 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
         bits.append("inland")
     if bits:
         lines.append(pipeline._wire_line(f"{prefix}.settle.here", ", ".join(bits)))
+    # No settle-site suggestions: the settler gets MoveTo(x,y) and FoundCity on its own tile.
+    return lines
     sites = settle.get("sites") if settle else None
-    # Legal here: the other sites only invite walking away from a good tile.
-    if here_ok is True:
-        sites = None
     if isinstance(sites, list) or (settle.get("no_reachable_site") and here_ok is not True):
         from sidecar import civ6_command_wire as command_wire
 

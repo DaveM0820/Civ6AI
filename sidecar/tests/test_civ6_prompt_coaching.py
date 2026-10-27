@@ -240,7 +240,7 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         settle = [i for i in civ6_attention.collect(snap) if i.topic == "settle"]
         self.assertEqual(1, sum(i.text.startswith("SETTLE:") for i in settle))
         self.assertEqual(("settler_1.command = FoundCity",), settle[0].commands)
-        self.assertIn("Found a city this turn: settler_1.command = FoundCity", settle[0].text)
+        self.assertIn("FoundCity is legal on the tile of settler_1", settle[0].text)
         self.assertNotIn("Settler", "\n".join(civ6_wire._advice_section(snap)))
 
 

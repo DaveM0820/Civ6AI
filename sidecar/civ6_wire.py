@@ -2004,8 +2004,8 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, "
         "except that a unit that has not moved this turn can always enter one adjacent tile, however rough "
         "(that uses all its movement).",
-        "- Never MoveTo a mountain, a water tile this unit cannot enter, or a tile one of your own units already holds. "
-        "The map marks a mountain with a white peak and water as impassable to land units until they can embark. "
+        "- Never MoveTo a mountain, a water tile this unit cannot enter, or a tile another of your units of the same kind "
+        "(military or civilian) already holds. Mountains are impassable; water is impassable to land units until they can embark. "
         "A rejected move says impassable when the tile cannot be entered, and no_path when no route exists. "
         "The unit then takes one step toward that destination on a tile it can enter. Do not repeat a destination that stays blocked.",
         f"- Coordinates: {coaching.civ6_y_axis_phrase(snapshot)} and x increases east; see the GAME "

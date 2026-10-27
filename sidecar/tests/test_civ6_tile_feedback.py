@@ -57,9 +57,7 @@ class SettlerAndDistrictTests(unittest.TestCase):
             "game": {"map_width": 40, "wrap_x": True}, "known_map": {"plots": []},
         }))
         self.assertIn("FoundCity illegal here", blob)
-        self.assertIn("(22,10)", blob)
-        self.assertIn("another landmass", blob)
-        self.assertIn("cannot embark yet", blob)
+        self.assertNotIn("(22,10)", blob)  # no settle-site suggestions
 
     def test_city_lists_districts_even_when_the_map_image_is_attached(self):
         snap = {

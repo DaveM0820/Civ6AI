@@ -365,7 +365,7 @@ REASON_TEXT = {
     "off_map": "that tile is off the map",
     "improve_tile_not_offered": "no Improve is offered on that tile; use a listed Improve tile",
     "found_city_not_offered": "FoundCity is not offered for this settler here",
-    "not_a_legal_site": "not a legal city site (too close to a city, or not land); use a listed settle site",
+    "not_a_legal_site": "not a legal city site (too close to a city, or not land)",
 }
 
 

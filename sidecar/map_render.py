@@ -631,6 +631,17 @@ def _named_player_label(player: dict[str, Any]) -> str:
     return "Rival"
 
 
+def city_state_name(snapshot: dict[str, Any], player_id: str) -> str | None:
+    """Name of a city-state player (civ6.diplomacy.city_states), else None."""
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    diplomacy = civ6.get("diplomacy") if isinstance(civ6.get("diplomacy"), dict) else {}
+    for row in diplomacy.get("city_states") or []:
+        if isinstance(row, dict) and str(row.get("player_id") or "") == player_id:
+            name = row.get("name") or str(row.get("city_state_type") or "").title()
+            return str(name) if name else "City-state"
+    return None
+
+
 def _player_label(snapshot: dict[str, Any], player_id: str) -> str:
     decision_player = str(snapshot.get("decision", {}).get("player_id", ""))
     if player_id == decision_player:
@@ -643,6 +654,9 @@ def _player_label(snapshot: dict[str, Any], player_id: str) -> str:
     for player in snapshot.get("known_players", []):
         if isinstance(player, dict) and str(player.get("player_id", "")) == player_id:
             return _named_player_label(player)
+    city_state = city_state_name(snapshot, player_id)
+    if city_state:
+        return f"{city_state} (city-state)"
     if player_id == _FREE_CITY_SLOT:
         return "Free Cities"
     if player_id == _BARBARIAN_SLOT:

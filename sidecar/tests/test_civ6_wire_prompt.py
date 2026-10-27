@@ -127,7 +127,7 @@ class Civ6WirePromptTests(unittest.TestCase):
         self.assertNotIn("must include", wire)
         self.assertNotIn("FoundCity is optional", wire)
         full = civ6_wire.build_civ6_model_wire_text(snapshot)
-        self.assertIn("Found the capital this turn: settler_1.command = FoundCity", full)
+        self.assertIn("FoundCity is legal on the tile of settler_1", full)
 
     def test_capital_distance_hint_only_without_cities(self):
         snapshot = civ6_adapter.build_classical_golden_snapshot()
@@ -142,7 +142,7 @@ class Civ6WirePromptTests(unittest.TestCase):
         })
         self.assertTrue(snapshot["your_cities"])
         wire = civ6_wire.build_civ6_model_wire_text(snapshot)
-        self.assertIn("Found a city this turn: settler_1.command = FoundCity", wire)
+        self.assertIn("FoundCity is legal on the tile of settler_1", wire)
         self.assertNotIn("No capital yet", wire)
 
 
