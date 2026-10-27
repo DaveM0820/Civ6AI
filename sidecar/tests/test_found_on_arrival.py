@@ -36,3 +36,13 @@ def test_no_legal_found_keeps_orders():
     snap["_found_arrivals"] = ["UNIT_7"]
     cmds = [{"command_id": "CMD_UNIT_7_found_24_24", "arguments": {}}]
     assert run_civ6.found_on_arrival(snap, cmds) == cmds
+
+
+def test_arrival_counts_even_when_snapshot_predates_the_move():
+    snap = _snap()  # snapshot still shows (24,23)
+    rows = [{"command_id": "CMD_UNIT_7_found_24_24", "ok": True, "reason": "moved:24,24"}]
+    assert ar.found_arrivals(snap, rows) == ["UNIT_7"]
+    rows = [{"command_id": "CMD_UNIT_7_found_49_17", "ok": True, "reason": "path:50,15>49,17:steps=2:len=3:stop=arrived"}]
+    assert ar.found_arrivals(snap, rows) == ["UNIT_7"]
+    rows = [{"command_id": "CMD_UNIT_7_found_24_11", "ok": True, "reason": "partial_path:23,12>24,12:steps=1:stop=no_moves_left"}]
+    assert ar.found_arrivals(snap, rows) == []

@@ -713,7 +713,7 @@ _FOUND_GOAL_RE = re.compile(r"^CMD_(UNIT_\d+)_(?:found|settle)_(-?\d+)_(-?\d+)$"
 
 
 def found_arrivals(snapshot: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
-    """Settlers whose last-turn move-to-site order has them standing on that site now.
+    """Settlers whose last-turn move-to-site order reached that site.
 
     The move ends with no moves left, so the game cannot found that turn; the
     found is owed at the start of this one.
@@ -730,7 +730,12 @@ def found_arrivals(snapshot: dict[str, Any], rows: list[dict[str, Any]]) -> list
         if not match:
             continue
         uid, x, y = match.group(1), int(match.group(2)), int(match.group(3))
-        if here.get(uid) == f"PLOT_{x}_{y}" and uid not in out:
+        reason = str(row.get("reason") or "")
+        # The seat's snapshot can be taken before last turn's move applied, so
+        # the move result itself counts: "moved:x,y" or a path that "arrived".
+        reached = (reason.split(":")[:2] == ["moved", f"{x},{y}"] or "stop=arrived" in reason
+                   or here.get(uid) == f"PLOT_{x}_{y}")
+        if reached and uid not in out:
             out.append(uid)
     return out
 
