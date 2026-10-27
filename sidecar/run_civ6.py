@@ -314,9 +314,30 @@ def _civ6_post_bind(snapshot: dict, validated: dict, commands: list) -> tuple[di
         elif ": " in token:
             dropped.append(f"dropped: {token}")
         else:
-            dropped.append(f"dropped: unresolved token {token}")
+            dropped.append(unresolved_order_note(token))
     civ6_apply_results.record_dropped(snapshot, dropped)
     return validated, commands, dropped
+
+
+_VERB_UNITS = {"improve": "Builders", "foundcity": "Settlers", "found": "Settlers", "settle": "Settlers"}
+
+
+def unresolved_order_note(token: str) -> str:
+    """Plain rejection naming the unit and its type: 'warrior_1 is a Warrior; only Builders can Improve'."""
+    import re
+
+    match = re.match(r"^([a-z_]+?)_(\d+)\.command=([A-Za-z]+)(.*)$", token.strip())
+    if not match:
+        return f"dropped: unresolved token {token}"
+    kind, num, verb, rest = match.groups()
+    unit = f"{kind}_{num}"
+    label = kind.replace("_", " ").title()
+    article = "an" if label[:1] in "AEIOU" else "a"
+    note = f"dropped: {unit}.command={verb}{rest}: {unit} is {article} {label}"
+    only = _VERB_UNITS.get(verb.lower())
+    if only and not label.lower().startswith(only.lower()[:-1]):
+        return f"{note}; only {only} can {verb}. Use a command from the {label.upper()} legalCommands line."
+    return f"{note}; {verb} is not one of its legal commands this turn. Use a command from the {label.upper()} legalCommands line."
 
 
 def _build_approved_record(
