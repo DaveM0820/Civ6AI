@@ -2431,7 +2431,7 @@ function Civ6Ai_Snapshot._DeriveStrategicSummary(playerID, yourCities, yourUnits
         table.insert(summary.city_alerts, Civ6Ai_Snapshot._MakeAlert(
           "city", "critical",
           wireId .. " cannot found a city on its tile (" .. why
-            .. "). See that settler's settle.here / settle.sites facts (legal tiles only, unranked).",
+            .. ").",
           { wireId }))
       end
       local goal = Civ6Ai_Snapshot._UnitGoal(playerID, unit:GetID())

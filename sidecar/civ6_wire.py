@@ -1085,7 +1085,9 @@ def _empire_section(
             for alert in summary.get(section, [])[:6]:
                 if not (isinstance(alert, dict) and alert.get("text")):
                     continue
-                text = str(alert["text"])[:200]
+                text = str(alert["text"]).replace(
+                    " See that settler's settle.here / settle.sites facts (legal tiles only, unranked).", ""
+                )[:200]
                 if text in seen_alerts:
                     continue
                 seen_alerts.add(text)
