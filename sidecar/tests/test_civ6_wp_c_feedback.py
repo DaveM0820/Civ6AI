@@ -267,7 +267,7 @@ class PromptBoundAndSettleTests(unittest.TestCase):
         self.assertIn("coast", blob)
         self.assertIn("fresh water", blob)
         self.assertIn("FoundCity legal here", blob)
-        self.assertIn("(19,15)", blob)
+        self.assertNotIn("settle.nearby", blob)  # legal here: no other sites listed
         wire = civ6_wire.build_civ6_model_wire_text(snap)
         self.assertIn("SETTLE: No capital yet", wire)
         self.assertNotIn("chat.LeaderName", wire)

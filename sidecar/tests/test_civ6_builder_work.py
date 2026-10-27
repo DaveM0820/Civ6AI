@@ -11,7 +11,7 @@ from sidecar import civ6_prompt_coaching as coaching
 
 
 def _builder(uid, charges=3):
-    return {"unit_id": uid, "unit_type_id": "UNIT_BUILDER", "build_charges": charges, "plot_id": "PLOT_1_1"}
+    return {"unit_id": uid, "unit_type_id": "UNIT_BUILDER", "build_charges": charges, "plot_id": "PLOT_1_1", "needs_orders": True}
 
 
 def _improve(uid, x, y):
@@ -77,3 +77,17 @@ class RepeatRejectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GameAiBuilderTests(unittest.TestCase):
+    def test_no_attention_when_game_ai_runs_builders(self):
+        snap = _snap()
+        for unit in snap["your_units"]:
+            unit["needs_orders"] = False
+            unit["can_act"] = False
+        self.assertIsNone(coaching.civ6_builder_work_attention(snap))
+
+    def test_game_ai_builder_flag(self):
+        from sidecar import civ6_wire
+        self.assertTrue(civ6_wire._game_ai_builder({"build_charges": 2, "needs_orders": False, "can_act": False}))
+        self.assertFalse(civ6_wire._game_ai_builder({"build_charges": 2, "needs_orders": True, "can_act": True}))

@@ -1158,6 +1158,8 @@ def _empire_section(
                         shape = token
                     if shape not in kinds:
                         kinds.append(shape)
+                if _game_ai_builder(unit):
+                    kinds = []
                 bucket = seen_types.setdefault(_unit_type_label(unit), [])
                 for shape in kinds:
                     if shape not in bucket:
@@ -1179,6 +1181,9 @@ def _empire_section(
                     lines.append(pipeline._wire_line(f"{prefix}.hp", f"{pct}%"))
                 if unit.get("needs_orders"):
                     lines.append(f"***{prefix}.needsOrders = true***")
+                if _game_ai_builder(unit):
+                    lines.append(pipeline._wire_line(
+                        f"{prefix}.control", "the game's own builder AI improves tiles with this builder; no order needed"))
                 idle_n = _unit_idle_for(context, unit_id)
                 if idle_n:
                     lines.append(pipeline._wire_line(
@@ -1218,6 +1223,12 @@ def _empire_section(
             if lines[-1] == "":
                 lines.pop()
     return lines
+
+
+def _game_ai_builder(unit: dict[str, Any]) -> bool:
+    """AI-seat builder the mod leaves to the game's builder AI (charges, never needs orders)."""
+    return (int(unit.get("build_charges") or 0) > 0 and not unit.get("needs_orders")
+            and unit.get("can_act") is False)
 
 
 _CIV6_DEAL_KINDS = frozenset({"form_alliance", "propose_trade", "propose_peace", "respond_to_trade",

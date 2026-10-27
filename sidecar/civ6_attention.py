@@ -91,8 +91,7 @@ def _settle(context: Any) -> list[Item]:
         if found_now:
             target = "the capital" if not has_city else "a city"
             bits.append(
-                f"Found {target} this turn: {'; '.join(c for c in commands if c.endswith('FoundCity'))}, "
-                "unless a clearly better listed site is within about 3 tiles."
+                f"Found {target} this turn: {'; '.join(c for c in commands if c.endswith('FoundCity'))}."
             )
         if walk:
             bits.append("; ".join(walk) + ", then FoundCity on arrival.")

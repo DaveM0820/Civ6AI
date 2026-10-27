@@ -1045,7 +1045,10 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
     if bits:
         lines.append(pipeline._wire_line(f"{prefix}.settle.here", ", ".join(bits)))
     sites = settle.get("sites") if settle else None
-    if isinstance(sites, list) or settle.get("no_reachable_site"):
+    # Legal here: the other sites only invite walking away from a good tile.
+    if here_ok is True:
+        sites = None
+    if isinstance(sites, list) or (settle.get("no_reachable_site") and here_ok is not True):
         from sidecar import civ6_command_wire as command_wire
 
         labeled = {
@@ -1124,6 +1127,9 @@ def civ6_builder_work_attention(snapshot: dict[str, Any]) -> str | None:
     from sidecar import civ6_priorities as prio
 
     builders, charges, open_tiles = prio.builder_work(snapshot)
+    if not any(isinstance(u, dict) and u.get("needs_orders") and int(u.get("build_charges") or 0) > 0
+               for u in snapshot.get("your_units") or []):
+        return None  # the game's builder AI runs every builder
     if not builders or open_tiles is None or charges <= open_tiles:
         return None
     if builders < 2 and open_tiles > 0:
