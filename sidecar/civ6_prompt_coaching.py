@@ -68,8 +68,7 @@ def civ6_game_primer() -> str:
 
 
 CIV6_SETTLER_MAP_ADVICE = (
-    "Carefully observe the attached map to choose a settle location, and remember it for "
-    "as many turns as the walk takes. Weigh strategic and luxury resources, choke points, "
+    "Use the attached map to choose a settle location. Weigh strategic and luxury resources, choke points, "
     "fresh water and coast access, and tile yields (food/production/gold). "
     "Coastal tiles (needed for a harbour and ships) and river tiles are better city sites when available."
 )

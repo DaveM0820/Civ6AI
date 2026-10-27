@@ -578,6 +578,9 @@ INTENT_A_CODES = {
 def _arrival_fields(intent: str = INTENT_MOVE, a: int | None = None) -> dict[str, Any]:
     """WP-A batch: G = persistent goal, A = arrival intent (N is batch length)."""
     persist = 1
+    if intent == INTENT_FOUND:
+        # No found-on-arrival: a settler walks there, then the model sends FoundCity.
+        intent, a = INTENT_MOVE, None
     code = INTENT_A_CODES.get(intent, 0) if a is None else int(a)
     return {
         "G": persist,
@@ -694,8 +697,6 @@ def _synthesize_far_move(
         attack = _legal_attack_at(snapshot, unit_id, x, y)
         if attack:
             return attack
-    if intent == INTENT_MOVE and _is_listed_settle_site(snapshot, unit, x, y):
-        intent = INTENT_FOUND
     cmd_id = f"CMD_{unit_id}_moveto_{x}_{y}"
     if intent != "move":
         cmd_id = f"CMD_{unit_id}_{intent}_{x}_{y}"
@@ -842,8 +843,10 @@ def pack_apply_command(snapshot: dict[str, Any] | None, command: dict[str, Any])
     args = dict(command.get("arguments") or {})
     kind = str(command.get("kind") or "")
     intent = args.get("intent")
-    if args.get("found") is True:
-        intent = INTENT_FOUND
+    if args.get("found") is True or intent == INTENT_FOUND:
+        intent = INTENT_MOVE  # no found-on-arrival
+        args.pop("found", None)
+        args["A"] = 0
     if intent in INTENT_A_CODES:
         args["intent"] = intent
         args["goal"] = True

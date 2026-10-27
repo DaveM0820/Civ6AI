@@ -1707,12 +1707,12 @@ class WpAApplyCoreTests(unittest.TestCase):
         self.assertEqual(self.rt.eval("path_n"), 2)
         self.assertEqual(self.rt.eval("Players[2].units[1].x"), 12)
 
-    def test_found_on_arrival_at_target(self):
+    def test_no_found_on_arrival(self):
         self.rt.execute("GameInfo.Units[0].FoundCity = true")
         self.order(0, K=1, P=2, U=7, X=10, Y=11, G=1, A=1, S=96)
         self.assertTrue(self.last()["ok"], self.last())
-        self.assertIn("found_on_arrival", self.last()["reason"])
-        self.assertEqual(self.rt.eval("Players[2].founded.y"), 11)
+        self.assertNotIn("found_on_arrival", self.last()["reason"])
+        self.assertIsNone(self.rt.eval("Players[2].founded"))
 
     def test_self_target_settler_founds_when_legal(self):
         self.rt.execute("GameInfo.Units[0].FoundCity = true")

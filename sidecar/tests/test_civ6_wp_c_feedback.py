@@ -332,7 +332,7 @@ class WpAPackingAndResultsTests(unittest.TestCase):
         self.assertEqual(packed["arguments"]["target_x"], 30)
         self.assertEqual(packed["arguments"]["target_y"], 12)
         self.assertTrue(packed["arguments"]["goal"])
-        self.assertEqual(packed["arguments"]["intent"], "found")
+        self.assertEqual(packed["arguments"]["intent"], "move")
         self.assertNotIn("N", packed["arguments"])
         self.assertEqual(wire.INTENT_A_CODES["found"], 1)
 
@@ -344,7 +344,7 @@ class WpAPackingAndResultsTests(unittest.TestCase):
         out = wire.expand_civ6_command_wire(snap, {"settler_1.settle": "(18,16)"})
         self.assertTrue(any(str(k).startswith("cmd.") for k in out))
         command = snap["legal_commands"][0]
-        self.assertEqual(command["fixed_arguments"]["intent"], "found")
+        self.assertEqual(command["fixed_arguments"]["intent"], "move")
         self.assertTrue(command["fixed_arguments"]["goal"])
 
     def test_new_result_codes_are_readable(self):

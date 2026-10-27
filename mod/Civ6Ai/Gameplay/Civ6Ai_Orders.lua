@@ -615,11 +615,8 @@ end
 function Civ6Ai_Orders._ArrivalAction(owner, unit, intent, extra, sender)
   extra = extra or {}
   if intent == Civ6Ai_Orders.INTENT.FOUND then
-    local ok, reason = Civ6Ai_Orders._Route("FoundCityForPlayer", owner, unit:GetID())
-    if not ok then
-      return false, "site_no_longer_legal:" .. tostring(reason)
-    end
-    return true, "found_on_arrival:" .. tostring(reason)
+    -- No found-on-arrival: the settler arrives; FoundCity is its own order.
+    return true, "arrived"
   elseif intent == Civ6Ai_Orders.INTENT.RELIGION then
     -- Belief indices live in I/V/W. X/Y on a MOVE are the plot, never beliefs.
     return Civ6Ai_Orders.Gov.FoundReligion(owner, extra.I, unit:GetID(), extra.V, extra.W)

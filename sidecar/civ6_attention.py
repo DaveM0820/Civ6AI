@@ -94,7 +94,7 @@ def _settle(context: Any) -> list[Item]:
                 f"Found {target} this turn: {'; '.join(c for c in commands if c.endswith('FoundCity'))}."
             )
         if walk:
-            bits.append("; ".join(walk) + ", then FoundCity on arrival.")
+            bits.append("; ".join(walk) + ", then FoundCity there.")
         bits.append("Barbarians capture an unescorted Settler.")
         bits.append(coaching.CIV6_SETTLER_MAP_ADVICE)
         items.append(Item("settle", "SETTLE: " + " ".join(bits), "Settle", 0 if not has_city else 1, commands))

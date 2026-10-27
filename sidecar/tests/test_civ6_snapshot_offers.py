@@ -727,8 +727,8 @@ class CommandWireVocabTests(unittest.TestCase):
         }
         cmd = command_wire.resolve_unit_token(snap, "UNIT_SETTLER_1", "MoveTo(12,11)")
         extra = next(c for c in snap["legal_commands"] if c["command_id"] == cmd)
-        self.assertEqual("found", extra["fixed_arguments"]["intent"])
-        self.assertEqual(1, extra["fixed_arguments"]["A"])
+        self.assertEqual("move", extra["fixed_arguments"]["intent"])
+        self.assertEqual(0, extra["fixed_arguments"]["A"])
         lines = "\n".join(command_wire.sitrep_offer_lines(snap))
         self.assertIn("founding here is legal", lines)
         self.assertIn("coastal", lines)
@@ -830,8 +830,8 @@ class CommandWireVocabTests(unittest.TestCase):
         out = command_wire.expand_civ6_command_wire(snap, {"settler_1.settle": "(18,18)"})
         self.assertTrue(str(out.get("cmd.0", "")).startswith("CMD_"))
         extra = next(c for c in snap["legal_commands"] if c["command_id"] == out["cmd.0"])
-        self.assertEqual("found", extra["fixed_arguments"]["intent"])
-        self.assertEqual(1, extra["fixed_arguments"]["A"])
+        self.assertEqual("move", extra["fixed_arguments"]["intent"])
+        self.assertEqual(0, extra["fixed_arguments"]["A"])
         self.assertEqual(1, extra["fixed_arguments"]["G"])
 
     def test_trade_route_listed_destination(self):
