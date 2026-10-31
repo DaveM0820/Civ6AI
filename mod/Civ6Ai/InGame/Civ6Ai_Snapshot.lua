@@ -643,6 +643,21 @@ function Civ6Ai_Snapshot._BuildPlotRecord(plot, playerID, turn, vis)
       rec.improvement_pillaged = true
     end
   end
+  return Civ6Ai_Snapshot._CompactPlot(rec)
+end
+
+-- Plot records are most of the snapshot (~480 KB at T156, written in one
+-- frame when Civ hung). Drop null, false, empty and constant fields; the
+-- sidecar puts the defaults back (civ6_adapter._fill_plot_defaults).
+Civ6Ai_Snapshot.PLOT_CONSTANT = { plot_id = true, area_id = true, route_id = true, worked_by_city_id = true,
+  yields = true, defense_percent = true, visible_stack_ids = true }
+function Civ6Ai_Snapshot._CompactPlot(rec)
+  for key, value in pairs(rec) do
+    if Civ6Ai_Snapshot.PLOT_CONSTANT[key] or value == false or Civ6Ai_Util._IsJsonNull(value)
+        or (type(value) == "table" and next(value) == nil) then
+      rec[key] = nil
+    end
+  end
   return rec
 end
 

@@ -522,11 +522,35 @@ def _normalize_wire_shapes(snapshot: dict[str, Any]) -> None:
         _normalize_decision_wire(decision)
 
 
+_PLOT_DEFAULTS = {
+    "area_id": "AREA_0", "last_seen_turn": None, "water": False, "hills": False, "peak": False,
+    "fresh_water": False, "river_edges": {}, "revealed_owner_id": None, "feature_id": None,
+    "improvement_id": None, "district_id": None, "route_id": None, "resource_id": None,
+    "defense_percent": 0, "city_id": None, "worked_by_city_id": None, "visible_stack_ids": [],
+}
+
+
+def _fill_plot_defaults(snapshot: dict[str, Any]) -> None:
+    """Put back the fields the mod drops from compact plot records."""
+    known = snapshot.get("known_map")
+    if not isinstance(known, dict) or not isinstance(known.get("plots"), list):
+        return
+    for plot in known["plots"]:
+        if not isinstance(plot, dict) or not isinstance(plot.get("x"), int) or not isinstance(plot.get("y"), int):
+            continue
+        plot.setdefault("plot_id", f"PLOT_{plot['x']}_{plot['y']}")
+        plot.setdefault("yields", {"food": 0, "production": 0, "commerce": 0})
+        for key, value in _PLOT_DEFAULTS.items():
+            if key not in plot:
+                plot[key] = value.copy() if isinstance(value, (dict, list)) else value
+
+
 def normalize_civ6_snapshot(snapshot: dict[str, Any]) -> None:
     coerced = coerce_lua_empty_arrays(snapshot)
     if coerced is not snapshot:
         snapshot.clear()
         snapshot.update(coerced)
+    _fill_plot_defaults(snapshot)
     _normalize_empire_numbers(snapshot)
     _normalize_wire_shapes(snapshot)
     civ6_visibility.filter_snapshot_resources(snapshot)

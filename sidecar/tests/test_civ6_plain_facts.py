@@ -80,3 +80,28 @@ def test_host_envoy_binds_to_city_state(monkeypatch):
     assert len(ids) == 1 and notes
     monkeypatch.setattr(fb, "is_local_seat", lambda s: False)
     assert d._bind_envoy(snap, "envoy.send", "Cardiff")[0] == []
+
+
+def test_compact_plots_get_defaults_back():
+    from sidecar import civ6_adapter
+    snap = {"known_map": {"plots": [{"x": 2, "y": 3, "terrain_id": "TERRAIN_COAST", "water": True, "knowledge": "visible"}]}}
+    civ6_adapter._fill_plot_defaults(snap)
+    p = snap["known_map"]["plots"][0]
+    assert p["plot_id"] == "PLOT_2_3" and p["hills"] is False and p["city_id"] is None and p["water"] is True
+
+
+def test_lua_compact_plot_drops_empty_fields():
+    import lupa
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[2] / "mod" / "Civ6Ai" / "InGame"
+    lua = lupa.LuaRuntime()
+    lua.execute("Civ6Ai_Util = {}\n" + "function Civ6Ai_Util.JsonNull() return setmetatable({}, {__json_null=true}) end\n"
+                + "function Civ6Ai_Util._IsJsonNull(v) local m = type(v)=='table' and getmetatable(v); return m and m.__json_null == true or false end\n"
+                + "Civ6Ai_Snapshot = {}\n")
+    src = (root / "Civ6Ai_Snapshot.lua").read_text(encoding="utf-8", errors="replace")
+    start = src.index("Civ6Ai_Snapshot.PLOT_CONSTANT")
+    end = src.index("\nend\n", src.index("function Civ6Ai_Snapshot._CompactPlot")) + 5
+    lua.execute(src[start:end])
+    rec = lua.eval("Civ6Ai_Snapshot._CompactPlot({x=1, y=2, water=false, hills=true, area_id='AREA_0', "
+                   "city_id=Civ6Ai_Util.JsonNull(), visible_stack_ids={}, terrain_id='TERRAIN_PLAINS'})")
+    assert sorted(rec.keys()) == ["hills", "terrain_id", "x", "y"]
