@@ -519,7 +519,9 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
     if improves and verb == "improve":
         picked = _pick_improve(improves, value, coord)
         if picked is None:
-            _reject(snapshot, f"{value} for {unit_id}", "improve_tile_not_offered")
+            offered = sorted({f"({xy[0]},{xy[1]})" for xy in (_improve_xy(t) for t, _c in improves) if xy})
+            _reject(snapshot, f"{value} for {unit_id} (Improve is offered this turn only at {', '.join(offered)})",
+                    "improve_tile_not_offered")
         return picked
     for token, cmd_id in candidates:
         if _verb(token) != verb:
