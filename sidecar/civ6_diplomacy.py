@@ -214,6 +214,8 @@ def _usable_problem(snapshot: dict, items: list[dict[str, Any]]) -> str | None:
 def _items_text(items: list[dict[str, Any]]) -> str:
     bits = []
     for i in items:
+        if any(k in i and not i[k] for k in ("gold", "gpt", "n")):
+            continue  # a zero amount is no term at all ('0 gold')
         if "kind" in i:
             bits.append(i["kind"])
         elif "gold" in i:
@@ -719,7 +721,9 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         deals = load_deals(snapshot)
         offer = next((d for d in reversed(deals) if d in _open_offers_to_me(snapshot) and d.get("from") == pid), None)
         if offer is None:
-            return [], [f"{key}: no open offer from {name}"]
+            # A copied reply to an offer already answered or expired: nothing to do,
+            # and not a failed order (53 of 95 deal drops at T150 were these).
+            return [], []
         if text.upper().startswith("COUNTER"):
             rest = text[len("COUNTER"):].strip().lstrip(":").strip()
             if not rest:
