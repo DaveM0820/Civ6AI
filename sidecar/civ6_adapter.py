@@ -524,7 +524,7 @@ def _normalize_wire_shapes(snapshot: dict[str, Any]) -> None:
 
 _PLOT_DEFAULTS = {
     "area_id": "AREA_0", "last_seen_turn": None, "water": False, "hills": False, "peak": False,
-    "fresh_water": False, "river_edges": {}, "revealed_owner_id": None, "feature_id": None,
+    "fresh_water": False, "river_edges": [], "revealed_owner_id": None, "feature_id": None,
     "improvement_id": None, "district_id": None, "route_id": None, "resource_id": None,
     "defense_percent": 0, "city_id": None, "worked_by_city_id": None, "visible_stack_ids": [],
 }

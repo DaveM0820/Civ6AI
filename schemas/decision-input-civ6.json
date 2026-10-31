@@ -226,6 +226,7 @@
             "envoys_to_give": {"type": ["integer", "null"]}
           }
         },
+        "settle_recommended": {"description": "Optional. Game-recommended settle sites (GrandStrategicAI:GetSettlementRecommendations), sent only while the seat has a settler.", "type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["x", "y"], "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}}}},
         "city_extra": {
           "type": "object",
           "additionalProperties": {
