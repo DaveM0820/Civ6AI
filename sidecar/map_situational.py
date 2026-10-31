@@ -165,8 +165,10 @@ def _map_dimensions(snapshot: dict[str, Any]) -> tuple[int, int]:
 
 
 def max_tactical_viewport_size_with_coords() -> int:
-    """Largest square viewport that still shows (x,y) labels on each hex."""
-    return max(6, int(math.isqrt(HEX_AXIS_ONLY_MIN_CELLS - 1)))
+    """Square tactical viewport size; every hex in it carries its (x,y)."""
+    from sidecar.civ6_tactical_view import TACTICAL_TILES
+
+    return TACTICAL_TILES
 
 
 def clamp_map_viewport(
@@ -754,13 +756,24 @@ def _render_role(
     tactical_banner: str = TACTICAL_MAP_BANNER,
     focus_banner: str = FOCUS_TACTICAL_MAP_BANNER,
 ) -> dict[str, Any]:
+    render_snapshot, render_viewport, shift = snapshot, viewport, 0
+    map_width, _ = _map_dimensions(snapshot)
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    if game.get("wrap_x") and int(viewport.get("x0", 0)) + int(viewport.get("width", 0)) > map_width:
+        # Window crosses the east-west seam: draw it from a rotated copy.
+        from sidecar.civ6_tactical_view import rotate_snapshot_x
+
+        shift = int(viewport["x0"])
+        render_snapshot = rotate_snapshot_x(snapshot, shift)
+        render_viewport = {**viewport, "x0": 0}
     meta = render_civ6_map_png(
-        snapshot,
+        render_snapshot,
         path,
         prefer_civ5_sprites=prefer_civ5_sprites,
-        viewport=viewport,
+        viewport=render_viewport,
         target_size=target_size,
         image_role=role,
+        x_label_shift=shift,
     )
     if role == "overview":
         map_width, map_height = _map_dimensions(snapshot)
@@ -794,6 +807,7 @@ def prepare_civ5_situational_maps(
     strategic_banner: str = STRATEGIC_MAP_BANNER,
     tactical_banner: str = TACTICAL_MAP_BANNER,
     focus_banner: str = FOCUS_TACTICAL_MAP_BANNER,
+    tactical_frame: tuple[dict[str, int], str] | None = None,
 ) -> dict[str, Any]:
     """Render overview, main tactical viewport, and optional low-res 6x6 focus.
 
@@ -857,6 +871,8 @@ def prepare_civ5_situational_maps(
                 f"({tactical_rect['x0'] + tactical_rect['width'] // 2},"
                 f"{tactical_rect['y0'] + tactical_rect['height'] // 2})"
             )
+    if tactical_frame is not None:
+        tactical_rect, tactical_label = tactical_frame
     if tactical_rect is None:
         focus = pick_auto_focus_tile({}, snapshot)
         tactical_rect = viewport_focused_on_tile(focus[0], focus[1], map_width, map_height)
@@ -993,7 +1009,21 @@ def prepare_civ6_situational_maps(
     focus_size: int | None = None,
     omit_focus: bool | None = True,
 ) -> dict[str, Any]:
-    """Civ6 strategic/tactical map windows (same layout as Civ5, Civ6 sprites/banners)."""
+    """Civ6 strategic/tactical map windows (same layout as Civ5, Civ6 sprites/banners).
+
+    The tactical window is a seat's own map.viewport pin when it set one;
+    otherwise civ6_tactical_view frames home territory, fighting, or the war front.
+    """
+    from sidecar import civ6_tactical_view as tv
+
+    frame = None
+    damage = tv.update_damage(snapshot, journal_dir) if attach else []
+    pinned = isinstance(map_viewport, dict) and map_viewport.get("auto") is False
+    if attach and not pinned:
+        rect, why = tv.pick_tactical_frame(snapshot, at_war=at_war, damage=damage)
+        w, _ = _map_dimensions(snapshot)
+        x1 = (rect["x0"] + rect["width"] - 1) % w
+        frame = (rect, f"{why}: x {rect['x0']}-{x1}, y {rect['y0']}-{rect['y0'] + rect['height'] - 1}")
     return prepare_civ5_situational_maps(
         snapshot,
         journal_dir,
@@ -1009,6 +1039,7 @@ def prepare_civ6_situational_maps(
         strategic_banner=CIV6_STRATEGIC_MAP_BANNER,
         tactical_banner=CIV6_TACTICAL_MAP_BANNER,
         focus_banner=CIV6_FOCUS_TACTICAL_MAP_BANNER,
+        tactical_frame=frame,
     )
 
 

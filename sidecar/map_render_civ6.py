@@ -1530,8 +1530,12 @@ def _draw_outlined_text(
     fill: str = "#f2f2f2",
     outline: str = "#101010",
     anchor: str = "mm",
+    stroke: int = 0,
 ) -> None:
     x, y = xy
+    if stroke > 0:
+        draw.text((x, y), text, fill=fill, font=font, anchor=anchor, stroke_width=stroke, stroke_fill=outline)
+        return
     for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)):
         draw.text((x + dx, y + dy), text, fill=outline, font=font, anchor=anchor)
     draw.text((x, y), text, fill=fill, font=font, anchor=anchor)
@@ -1827,7 +1831,10 @@ def render_civ6_map_png(
     viewport: dict[str, int] | None = None,
     target_size: int | None = None,
     image_role: str | None = None,
+    x_label_shift: int = 0,
 ) -> dict[str, Any]:
+    """x_label_shift: the snapshot was rotated left by this many columns so a
+    window across the east-west seam draws as one block; labels add it back."""
     from PIL import Image, ImageDraw
 
     map_icons.set_render_context(prefer_civ5=prefer_civ5_sprites)
@@ -1855,6 +1862,9 @@ def render_civ6_map_png(
     game = snapshot.get("game", {})
     map_width = int(game.get("map_width"))
     map_height = int(game.get("map_height"))
+
+    def gx(value: int) -> int:
+        return (value + x_label_shift) % map_width if x_label_shift else value
     x0, y0 = viewport["x0"], viewport["y0"]
     vw, vh = viewport["width"], viewport["height"]
     tile_px = map_render._effective_tile_px(tile_px_base, vw, vh)
@@ -1872,7 +1882,9 @@ def render_civ6_map_png(
     if zoomed:
         # Small close-ups: (x,y) at the bottom of every tile; larger ones keep near-unit labels.
         show_axis = vw > 0 and vh > 0
-        show_tile_coords = show_axis and vw * vh <= TILE_COORD_MAX_CELLS
+        show_tile_coords = show_axis and (
+            image_role == "viewport" or vw * vh <= TILE_COORD_MAX_CELLS
+        )
     else:
         show_axis, show_tile_coords = _hex_coord_label_flags(vw, vh)
     tile_px = _tile_px_for_model_target(
@@ -1995,7 +2007,7 @@ def render_civ6_map_png(
             "improvement lower-left, district lower-right (blank = unimproved)"
         )
         header_text = (
-            f"x {x0}-{x0 + vw - 1}, y {y0}-{y0 + vh - 1} | {owned}"
+            f"x {gx(x0)}-{gx(x0 + vw - 1)}, y {y0}-{y0 + vh - 1} | {owned}"
         )
     header_lines = _wrap_legend_line(header_text, font, map_w - 8)
     note_lines = _wrap_legend_line(legend_note, font, map_w - 8, max_lines=6) if legend_note else []
@@ -2036,7 +2048,7 @@ def render_civ6_map_png(
     grid_blob = "".join(normalized) if isinstance(normalized, list) else ""
     hasher = hashlib.sha1()
     hasher.update(
-        f"{map_w}x{map_h}:{tile_px}:{int(flip_y)}:{int(prefer_civ5_sprites)}:{int(zoomed)}:{x0},{y0},{vw},{vh}:{grid_blob}".encode()
+        f"{map_w}x{map_h}:{tile_px}:{int(flip_y)}:{int(prefer_civ5_sprites)}:{int(zoomed)}:{x0},{y0},{vw},{vh}:{x_label_shift}:{grid_blob}".encode()
     )
     revealed_in_view = 0
     for vy in range(vh):
@@ -2082,7 +2094,7 @@ def render_civ6_map_png(
             cx, _, _, _ = _odd_r_cell_center(
                 wx, y_even, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh,
             )
-            draw.text((cx, label_y), str(wx), fill="#9a9a9a", font=axis_label_font, anchor="mm")
+            draw.text((cx, label_y), str(gx(wx)), fill="#9a9a9a", font=axis_label_font, anchor="mm")
         for vy in range(vh):
             wy = y0 + vy
             _, cy, _, _ = _odd_r_cell_center(x0, y0 + vy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
@@ -2294,11 +2306,15 @@ def render_civ6_map_png(
                 wx = x0 + vx
                 cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
                 coord_font = map_render._coord_font_size(tile_px, wx, wy)
+                if image_role == "viewport":
+                    # Tactical close-up: big enough to read after the provider downscales.
+                    coord_font = max(coord_font, tile_px // 5)
                 _draw_outlined_text(
                     draw,
-                    (cx, cy + hex_radius * 0.52),
-                    f"{wx},{wy}",
+                    (cx, cy + hex_radius * 0.62),
+                    f"{gx(wx)},{wy}",
                     map_render._coord_label_font(coord_font),
+                    stroke=max(2, coord_font // 8) if image_role == "viewport" else 0,
                 )
     elif zoomed and not prefer_civ5_sprites:
         # Close-up: label the tiles around your own units (and the unit tile)
@@ -2318,7 +2334,7 @@ def render_civ6_map_png(
             _draw_outlined_text(
                 draw,
                 (cx, cy + hex_radius * 0.72),
-                f"{wx},{wy}",
+                f"{gx(wx)},{wy}",
                 map_render._coord_label_font(max(12, tile_px // 7)),
             )
     for plate in civ5_nameplates:

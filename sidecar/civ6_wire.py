@@ -859,6 +859,9 @@ def _tactical_image_where(snapshot: dict[str, Any]) -> str:
             try:
                 x0, y0 = int(rect["x0"]), int(rect["y0"])
                 x1 = x0 + int(rect["width"]) - 1
+                map_w = int((snapshot.get("game") or {}).get("map_width") or 0)
+                if map_w > 0:
+                    x1 %= map_w  # east-west wrap: show the game's x
                 y1 = y0 + int(rect["height"]) - 1
                 window = f"tiles x {x0}-{x1}, y {y0}-{y1}"
             except (KeyError, TypeError, ValueError):
@@ -918,7 +921,7 @@ def build_civ6_role_instruction(snapshot: dict[str, Any]) -> str:
             "or map.viewport = auto. "
             "On the tactical close-up a military unit sits at the top of the hex, the resource icon in the center, "
             "a civilian unit at the bottom, an improvement on the left and a district on the right. "
-            "A health bar under a unit is its hit points. Edge numbers are the (x,y) axes. "
+            "A health bar under a unit is its hit points. Each hex on the close-up has its (x,y) written at the bottom. "
             "Write every word of your reply in English. "
         )
     else:
