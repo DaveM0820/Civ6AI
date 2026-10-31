@@ -5934,6 +5934,12 @@ function Civ6Ai_Orders.ApplyEarlyLock(owner)
   if not open then
     return false
   end
+  -- The early set is only the starting default: once the seat has levels (this
+  -- default or a preset it picked) its choice stands, so a seat can pick
+  -- islands or coastal_expansion with 1-2 cities.
+  if #Civ6Ai_Orders.PriorityLevels(owner) > 0 then
+    return true
+  end
   local n = #sortedMembers(call(p, "GetCities"))
   local changed = 0
   for _, cat in ipairs(Civ6Ai_Orders.PRIORITY_IDS) do

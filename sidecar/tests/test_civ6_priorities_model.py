@@ -73,21 +73,19 @@ class PrioritiesModelTests(unittest.TestCase):
         ok = [c["command_id"] for c in validated["commands"]]
         self.assertIn(prio.command_id(war, 2), ok)
 
-    def test_early_lock_hides_presets_ignores_reply_and_sets_early_levels(self):
+    def test_early_set_is_default_not_lock(self):
         peace, war = prio.BY_KEY["peace"]["id"], prio.BY_KEY["war"]["id"]
-        snap = _snapshot({war: 2}, cities=2)
-        prio.inject_legal_commands(snap)
-        lines = "\n".join(prio.prompt_lines(snap))
-        self.assertIn("Fixed until you own 3 cities", lines)
-        self.assertNotIn("EXPANSION PACE", lines)
-        self.assertNotIn("Available presets", lines)
-        wire = civ6_command_wire.expand_civ6_command_wire(copy.deepcopy(snap), {"7.priorities": "war:3"})
-        self.assertFalse([v for k, v in wire.items() if k.startswith("cmd.") and "PRIO" in str(v)])
-        ids = [p["command_id"] for p in prio.early_lock_packets(snap)]
-        self.assertEqual(ids[0], prio.command_id(war, 0))
+        fresh = _snapshot({}, cities=1)
+        prio.inject_legal_commands(fresh)
+        self.assertIn("Starting default", "\n".join(prio.prompt_lines(fresh)))
+        ids = [p["command_id"] for p in prio.early_lock_packets(fresh)]
         self.assertIn(prio.command_id(prio.BY_KEY["expansion"]["id"], 3), ids)
         self.assertIn(prio.command_id(peace, 1), ids)
-        self.assertEqual([], prio.early_lock_packets(_snapshot({war: 2}, cities=3)))
+        chosen = _snapshot({war: 2}, cities=2)
+        prio.inject_legal_commands(chosen)
+        self.assertFalse(prio.early_lock(chosen))
+        self.assertIn("Available presets", "\n".join(prio.prompt_lines(chosen)))
+        self.assertEqual([], prio.early_lock_packets(chosen))
 
     def test_pace_scales_with_speed(self):
         self.assertEqual(25, prio.pace_turn(25, "GAMESPEED_ONLINE"))

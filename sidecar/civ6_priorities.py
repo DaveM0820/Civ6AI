@@ -495,6 +495,10 @@ def early_lock(snapshot: dict) -> bool:
     """
     if not priorities_supported(snapshot):
         return False
+    # The early set is a starting default, not a lock: once the seat has levels
+    # it may pick any available preset (islands, coastal_expansion, ...).
+    if current_levels(snapshot):
+        return False
     civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
     if isinstance(civ6.get("early_open"), bool):
         return civ6["early_open"]
@@ -1066,8 +1070,8 @@ def prompt_lines(snapshot: dict) -> list[str]:
     if early_lock(snapshot):
         return [
             "=== PRODUCTION PRESET ===",
-            f"Fixed until you own {EARLY_CITY_LIMIT} cities: early expansion ({EARLY_SET}); about a third of "
-            "production is settlers. Presets unlock at 3 cities; a priorities key is ignored until then.",
+            f"Starting default: early expansion ({EARLY_SET}); about a third of production is settlers. "
+            "You can pick another preset from next turn.",
         ]
     current = current_levels(snapshot)
     name = matching_preset(current)

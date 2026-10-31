@@ -832,6 +832,12 @@ function Civ6Ai_Production.BuildOptions(city, situation)
     local paramKey = CityOperationTypes[paramName]
     eachRow(tableName, function(row)
       local id = row[field]
+      -- A wonder needs a placement plot; a request without one is accepted and
+      -- never lands (P0 Wanuku: Temple of Artemis T56, then empty T57-T156 with
+      -- a build "requested" every turn). Wonders stay a model/UI choice.
+      if id ~= nil and tableName == "Buildings" and row.IsWonder == true then
+        id = nil
+      end
       if id ~= nil and can(row, paramKey) then
         local tags, kind = Civ6Ai_Production._TagsFor(id)
         out[#out + 1] = {
@@ -1068,7 +1074,8 @@ function Civ6Ai_Production.SituationFor(playerID, city)
     for _ in cities:Members() do n = n + 1 end
   end
   raw.cities = n > 0 and n or 1
-  raw.early = n < Civ6Ai_Production.EARLY_CITY_LIMIT
+  -- Early levels only stand in until the seat has saved levels of its own.
+  raw.early = n < Civ6Ai_Production.EARLY_CITY_LIMIT and next(raw.saved or {}) == nil
   raw.pop = city ~= nil and call(city, "GetPopulation") or nil
   raw.turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or 0
   pcall(function()
