@@ -1034,6 +1034,19 @@ function Civ6Ai_Snapshot._IsMilitaryInfo(info)
   return (info.combat or 0) > 0 or (info.ranged or 0) > 0
 end
 
+-- A fortified (held) military unit, scout or ship with moves left: it needs no
+-- order, but its commands stay offered so the seat can wake it (the sidecar
+-- makes it a required row once it has been idle for several turns).
+function Civ6Ai_Snapshot._HeldMilitary(unit)
+  if unit == nil or unit:GetX() == -9999 or Civ6Ai_Snapshot._UnitMoves(unit) <= 0 then
+    return false
+  end
+  if not Civ6Ai_Snapshot.IsFortified(unit) then
+    return false
+  end
+  return Civ6Ai_Snapshot._IsMilitaryInfo(Civ6Ai_Snapshot._UnitInfo(unit))
+end
+
 function Civ6Ai_Snapshot._BuildUnitCounts(playerID)
   local player = Players[playerID]
   local counts = {
@@ -4870,7 +4883,7 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
   local player = Players[playerID]
   if player ~= nil then
     for _, unit in ipairs(Civ6Ai_Snapshot._IterateUnits(player:GetUnits())) do
-      if Civ6Ai_Snapshot._UnitNeedsOrders(unit) then
+      if Civ6Ai_Snapshot._UnitNeedsOrders(unit) or Civ6Ai_Snapshot._HeldMilitary(unit) then
         local unitId = Civ6Ai_Snapshot._UnitWireId(unit)
         table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
           command_id = "CMD_skip_" .. unitId,

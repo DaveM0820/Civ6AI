@@ -699,6 +699,15 @@ def _is_civilian(unit: dict[str, Any]) -> bool:
     return False
 
 
+IDLE_REQUIRED_TURNS = 5
+_MILITARY_CLASSES = ("FORMATION_CLASS_LAND_COMBAT", "FORMATION_CLASS_NAVAL")
+
+
+def _military_unit(unit: dict[str, Any]) -> bool:
+    """Combat units, scouts and ships (land-combat or naval formation)."""
+    return str(unit.get("unit_class_id") or "") in _MILITARY_CLASSES
+
+
 def _required_unit_options(tokens: list[str]) -> list[str]:
     """Required-row options: drop Skip when anything else is legal (Civ5 parity)."""
     options = [t for t in tokens if t != "Skip"] or list(tokens)
@@ -769,9 +778,13 @@ def _civ6_required_rows(snapshot: dict[str, Any]) -> list[tuple[str, str]]:
         options = _required_unit_options(unit_tokens.get(unit_id, []))
         has_attack = any(str(option).startswith("AttackTo(") for option in options)
         needs = unit.get("needs_orders") is True or unit.get("promotion_ready") or has_attack
+        idle = _unit_idle_for(snapshot, unit_id) if _military_unit(unit) else 0
+        if idle >= IDLE_REQUIRED_TURNS:
+            needs = True
         if not needs or not options:
             continue
-        rows.append((f"{wire_ids.get(unit_id, unit_id)}.command", " | ".join(options)))
+        hint = " | ".join(options) + (f" (idle {idle} turns)" if idle >= IDLE_REQUIRED_TURNS else "")
+        rows.append((f"{wire_ids.get(unit_id, unit_id)}.command", hint))
     for city_name, options in _required_city_rows(snapshot):
         rows.append((f"{city_name}.production", " | ".join(options)))
     from sidecar import civ6_diplomacy as diplomacy_wire

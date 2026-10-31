@@ -56,3 +56,14 @@ def test_upgrade_and_used_great_person_are_not_lost():
     now = {"units": {"U3": {"type": "UNIT_MUSKETMAN", "label": "musketman_1", "plot": "5,5"}}}
     text = " | ".join(td.diff(prev, now))
     assert "LOST" not in text and "UPGRADED man_at_arms_1" in text and "used" in text
+
+
+def test_idle_military_becomes_required_with_idle_count(monkeypatch):
+    snap = {"your_units": [{"unit_id": "UNIT_9", "unit_type_id": "UNIT_ARCHER", "unit_class_id": "FORMATION_CLASS_LAND_COMBAT",
+                            "plot_id": "3,3", "needs_orders": False}],
+            "civ6": {"economy": {"tracking": {"idle_for": {"UNIT_9": 7}}}}}
+    monkeypatch.setattr(civ6_wire, "_civ6_unit_tokens", lambda s: {"UNIT_9": ["MoveTo(4,3)", "Fortify"]})
+    monkeypatch.setattr(civ6_wire, "_required_unit_options", lambda t: t)
+    rows = dict(civ6_wire._civ6_required_rows(snap))
+    hint = next(v for k, v in rows.items() if k.endswith(".command"))
+    assert "idle 7 turns" in hint
