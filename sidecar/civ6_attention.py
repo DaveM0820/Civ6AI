@@ -81,6 +81,12 @@ def _settle(context: Any) -> list[Item]:
         if found_now:
             bits.append(f"FoundCity is legal on the tile of {', '.join(found_now)}.")
         bits.append("A Settler can MoveTo(x,y) any land tile, then FoundCity on its own tile.")
+        from sidecar.civ6_command_wire import game_settle_recommendations
+
+        recs = game_settle_recommendations(snap)
+        if recs:
+            bits.append("The game's recommended city sites: "
+                        + ", ".join(f"({r['x']},{r['y']})" for r in recs) + " (marked S1.. on the map).")
         bits.append("Barbarians capture an unescorted Settler.")
         bits.append("Military and civilian units can share a tile; sharing does not block movement or founding.")
         bits.append(coaching.CIV6_SETTLER_MAP_ADVICE)

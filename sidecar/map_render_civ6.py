@@ -1421,7 +1421,7 @@ def collect_settle_markers(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         return []
     from sidecar import civ6_command_wire as command_wire
 
-    return command_wire.labeled_settle_sites(snapshot)
+    return command_wire.game_settle_recommendations(snapshot)
 
 
 def _hex_coord_label_flags(vw: int, vh: int) -> tuple[bool, bool]:

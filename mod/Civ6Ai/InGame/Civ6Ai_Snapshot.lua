@@ -2,6 +2,27 @@
 Civ6Ai_Snapshot = Civ6Ai_Snapshot or {}
 
 -- Active build priorities (synced game properties set by Civ6Ai_Orders).
+function Civ6Ai_Snapshot._SettleRecommendations(playerID)
+  local player = Players ~= nil and Players[playerID] or nil
+  if player == nil or player.GetUnits == nil then return nil end
+  local hasSettler = false
+  for _, unit in player:GetUnits():Members() do
+    local row = GameInfo.Units[unit:GetType()]
+    if row ~= nil and row.FoundCity == true then hasSettler = true break end
+  end
+  if not hasSettler or player.GetGrandStrategicAI == nil then return nil end
+  local ai = player:GetGrandStrategicAI()
+  if ai == nil or ai.GetSettlementRecommendations == nil then return nil end
+  local out = {}
+  for _, rec in pairs(ai:GetSettlementRecommendations(5) or {}) do
+    local plot = rec ~= nil and rec.SettlingLocation ~= nil and Map.GetPlotByIndex(rec.SettlingLocation) or nil
+    if plot ~= nil then
+      out[#out + 1] = { x = plot:GetX(), y = plot:GetY() }
+    end
+  end
+  return out
+end
+
 function Civ6Ai_Snapshot._Priorities(playerID)
   local out = Civ6Ai_Util.JsonArrayList()
   for id = 1, 24 do
@@ -5676,6 +5697,15 @@ function Civ6Ai_Snapshot.Build(playerID, options)
     if okP and tonumber(peak) ~= nil then
       civ6Block.peak_cities = math.floor(tonumber(peak))
     end
+  end
+  -- The game's own settler recommendations (the base-game settler lens icons:
+  -- WorldViewIconsManager AddSettlementRecommendations). Read-only; only while
+  -- the seat has a settler.
+  local okR, recs = pcall(Civ6Ai_Snapshot._SettleRecommendations, playerID)
+  if okR and recs ~= nil and #recs > 0 then
+    civ6Block.settle_recommended = recs
+  elseif not okR then
+    Civ6Ai_Util.Log("snapshot|settle_recs_failed|" .. tostring(recs))
   end
   local okDiplo, civ6Diplomacy = pcall(Civ6Ai_Snapshot._BuildDiplomacy, playerID)
   if okDiplo and type(civ6Diplomacy) == "table" then

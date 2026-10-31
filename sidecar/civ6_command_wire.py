@@ -182,6 +182,26 @@ def labeled_settle_sites(snapshot: dict[str, Any], radius: int | None = None) ->
     return collected
 
 
+def game_settle_recommendations(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """The game's own recommended city sites (base-game settler lens), labeled S1..Sn."""
+    civ6 = snapshot.get("civ6") if isinstance(snapshot.get("civ6"), dict) else {}
+    rows = civ6.get("settle_recommended")
+    if isinstance(rows, dict):
+        rows = list(rows.values())
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[int, int]] = set()
+    for row in rows if isinstance(rows, list) else []:
+        try:
+            x, y = _wrap_x(snapshot, int(row["x"])), int(row["y"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (x, y) in seen:
+            continue
+        seen.add((x, y))
+        out.append({"x": x, "y": y, "label": f"S{len(out) + 1}"})
+    return out
+
+
 def extract_map_viewport(response: dict[str, Any]) -> Any:
     """The model's map.viewport reply, if this turn set one."""
     if not isinstance(response, dict):
