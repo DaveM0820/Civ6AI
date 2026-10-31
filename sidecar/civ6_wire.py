@@ -5,6 +5,7 @@ import re
 import copy
 from typing import Any
 
+from sidecar import civ6_unit_trail
 from sidecar import pipeline_v2 as pipeline
 from sidecar import civ6_economy as economy_wire
 from sidecar import civ6_gs_wire as gs_wire
@@ -1211,6 +1212,9 @@ def _empire_section(
                 plot_id = unit.get("plot_id")
                 if isinstance(plot_id, str) and plot_id.strip():
                     lines.append(pipeline._wire_line(f"{prefix}.position", pipeline._plot_coords_text(plot_id)))
+                trail = civ6_unit_trail.text_for(context, unit_id)
+                if trail:
+                    lines.append(pipeline._wire_line(f"{prefix}.previous", trail))
                 embarked = coaching.embarked_text(unit, context)
                 if embarked:
                     lines.append(pipeline._wire_line(f"{prefix}.terrain", embarked))
@@ -1466,6 +1470,9 @@ def _other_player_lines(context: dict[str, Any]) -> list[str]:
             used_keys[base] = used_keys.get(base, 0) + 1
             key = base if used_keys[base] == 1 else f"{base}_{used_keys[base]}"
             lines.append(pipeline._wire_line(f"{key}.position", pipeline._plot_coords_text(unit.get("plot_id"))))
+            trail = civ6_unit_trail.text_for(context, unit.get("unit_id"))
+            if trail:
+                lines.append(pipeline._wire_line(f"{key}.previous", trail))
             if isinstance(unit.get("visible_strength"), int) and unit["visible_strength"] > 0:
                 lines.append(pipeline._wire_line(f"{key}.strength", unit["visible_strength"]))
             if isinstance(unit.get("health_percent"), int) and unit["health_percent"] < 100:

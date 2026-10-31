@@ -786,6 +786,11 @@ def main() -> None:
         civ6_economy.update_tracking(snapshot, args.session_dir)
     except Exception:
         pass
+    try:  # previous known tile per visible unit ("was at (x,y) on T12")
+        from sidecar import civ6_unit_trail
+        civ6_unit_trail.update(snapshot, args.session_dir)
+    except Exception:
+        pass
     try:
         from sidecar import civ6_seat_memory
 
