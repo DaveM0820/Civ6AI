@@ -38,3 +38,12 @@ def test_found_alert_uses_unit_name():
     snap = _snap()
     out = civ6_wire._plain_found_alert(snap, "UNIT_7 cannot found a city on its tile (too_close_to_city).")
     assert "UNIT_7" not in out and "Qusqu" in out
+
+
+def test_move_failure_names_blocker_and_stack_rule():
+    from sidecar import civ6_apply_results as ar
+    snap = _snap()
+    text = ar.move_failure_text(snap, "warrior_1", 12, 10, "plot_occupied", "PLAYER_0")
+    assert "UNIT_7" not in text and "Settler" in text and "can share" in text
+    own = ar.move_failure_text(snap, "warrior_1", 12, 10, "already_there", "PLAYER_0")
+    assert "already on (12,10)" in own

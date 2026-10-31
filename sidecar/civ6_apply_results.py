@@ -509,6 +509,23 @@ TILE_ACTIONS = {
 }
 
 
+def _unit_label(snapshot: dict[str, Any], unit_id: str) -> str:
+    """'your settler_2 (Settler)' rather than a raw UNIT_ id."""
+    from sidecar import pipeline_v2 as pipeline
+
+    units = [u for u in snapshot.get("your_units") or [] if isinstance(u, dict)]
+    unit = next((u for u in units if u.get("unit_id") == unit_id), None)
+    if unit is None:
+        return "another of your units"
+    name = pipeline._build_unit_wire_id_map(units).get(unit_id, unit_id)
+    kind = _readable(unit.get("unit_type_id"), "UNIT_")
+    return f"your {name} ({kind})"
+
+
+_STACK_RULE = ("one military unit and one civilian unit (settler, builder, trader, religious unit) can share "
+               "a tile; two military or two civilian units cannot")
+
+
 def _plot_facts(snapshot: dict[str, Any], x: int, y: int, player_id: str) -> list[str]:
     """Tile problems the snapshot can see (water, mountain, owner, city, improvement)."""
     known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
@@ -522,7 +539,7 @@ def _plot_facts(snapshot: dict[str, Any], x: int, y: int, player_id: str) -> lis
         facts.append("mountain")
     occupied = legality.own_occupied_plots(snapshot)
     if (x, y) in occupied:
-        facts.append(f"occupied by {occupied[(x, y)][0]}")
+        facts.append(f"occupied by {_unit_label(snapshot, occupied[(x, y)][0])}")
     owner = plot.get("revealed_owner_id")
     if owner and owner != player_id:
         facts.append(f"owned by {owner}")
@@ -543,19 +560,23 @@ def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reas
     facts = _plot_facts(snapshot, x, y, pid)
     sea = domain == "DOMAIN_SEA"
     known = "tile not explored" not in facts
+    occupied = next((f for f in facts if f.startswith("occupied by")), None)
     if reason in NO_EFFECT_REASONS:
-        why = "the tile it was already on"
+        return (f"{actor or 'The unit'} is already on ({x},{y}); a MoveTo to its own tile does nothing. "
+                "Give it a different tile, or Skip.")
     elif "mountain" in facts:
         why = "a mountain and is impassable"
     elif sea and known and "water" not in facts:
         why = "land; ships can't enter land tiles"
+    elif "water" in facts and not sea and occupied:
+        why = f"water {occupied.replace('occupied by', 'with')} embarked on it ({_STACK_RULE})"
     elif "water" in facts and not sea:
         why = "water (this unit cannot enter it)"
     elif reason == "impassable":
         why = ("not water; ships can't enter land tiles" if sea
                else "impassable for this unit (mountain, or water it cannot enter)")
     elif any(f.startswith("occupied by") for f in facts):
-        why = next(f for f in facts if f.startswith("occupied by")) + " (two units of the same kind cannot share a tile)"
+        why = f"{occupied} ({_STACK_RULE})"
     elif "tile not explored" in facts:
         why = "not explored (no known path)"
     else:
