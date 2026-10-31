@@ -47,3 +47,12 @@ def test_move_failure_names_blocker_and_stack_rule():
     assert "UNIT_7" not in text and "Settler" in text and "can share" in text
     own = ar.move_failure_text(snap, "warrior_1", 12, 10, "already_there", "PLAYER_0")
     assert "already on (12,10)" in own
+
+
+def test_upgrade_and_used_great_person_are_not_lost():
+    from sidecar import civ6_turn_delta as td
+    prev = {"units": {"U1": {"type": "UNIT_MAN_AT_ARMS", "label": "man_at_arms_1", "plot": "5,5"},
+                      "U2": {"type": "UNIT_GREAT_MERCHANT", "label": "great_merchant_1", "plot": "6,6"}}}
+    now = {"units": {"U3": {"type": "UNIT_MUSKETMAN", "label": "musketman_1", "plot": "5,5"}}}
+    text = " | ".join(td.diff(prev, now))
+    assert "LOST" not in text and "UPGRADED man_at_arms_1" in text and "used" in text

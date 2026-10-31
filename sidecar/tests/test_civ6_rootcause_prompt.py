@@ -21,7 +21,12 @@ class CityStrikeTests(unittest.TestCase):
             {"city_id": "CITY_2", "unit_id": None, "target_x": 3, "target_y": 5, "attacker_strength": 20, "defender_strength": 10, "ranged": True},
             {"city_id": "CITY_1", "unit_id": None, "target_x": 3, "target_y": 6, "attacker_strength": 0, "defender_strength": 10, "ranged": True},
         ]
-        text = "\n".join(cw.strike_lines(_ctx(rows, [walled, bare])))
+        self.assertEqual("", "\n".join(cw.strike_lines(_ctx(rows, [walled, bare]))))  # not orderable: not shown
+        from unittest import mock
+        tokens = {"CITY_1": {"rangeStrike": ["(3,4)"]}, "CITY_2": {"rangeStrike": ["(3,5)"]}}
+        with mock.patch("sidecar.civ6_legality.city_strike_available", return_value=True), \
+                mock.patch("sidecar.civ6_wire._civ6_city_tokens", return_value=tokens):
+            text = "\n".join(cw.strike_lines(_ctx(rows, [walled, bare])))
         self.assertNotIn("None", text)
         self.assertIn("rangeStrike(3,4)", text)
         self.assertNotIn("(3,5)", text)

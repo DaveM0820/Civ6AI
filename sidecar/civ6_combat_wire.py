@@ -443,11 +443,21 @@ def _striker_rows(context: dict[str, Any]) -> list[tuple[dict[str, Any], str, bo
     wire_ids = _wire_ids(context)
     cities = _own_city_names(context)
     out: list[tuple[dict[str, Any], str, bool]] = []
+    strike_tokens: dict[str, Any] | None = None
     for row in _previews(context):
         city_id = row.get("city_id")
         if city_id:
             city = cities.get(str(city_id))
             if row.get("can_strike") is False or not (_int(row.get("attacker_strength")) or 0):
+                continue
+            # Preview a city strike only when the seat can order it (a rangeStrike
+            # key for that city); otherwise it was shown but could not be sent.
+            if strike_tokens is None:
+                from sidecar import civ6_wire
+                from sidecar.civ6_legality import city_strike_available
+
+                strike_tokens = civ6_wire._civ6_city_tokens(context) if city_strike_available(context) else {}
+            if not (strike_tokens.get(str(city_id)) or {}).get("rangeStrike"):
                 continue
             if not _city_has_walls(city):
                 continue

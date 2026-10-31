@@ -102,13 +102,32 @@ def diff(prev: dict[str, Any], now: dict[str, Any]) -> list[str]:
                 _near(unit.get("plot"), city.get("plot")) for city in new_cities):
             founders.add(uid)
     lost = [(uid, u) for uid, u in gone if uid not in founders]
+    # An upgrade replaces the unit with a new one on the same tile; a great
+    # person is consumed when used. Neither is a loss.
+    gained_now = {uid: u for uid, u in n_units.items() if uid not in p_units}
+    upgraded = set()
+    for uid, unit in lost:
+        typ = str(unit.get("type") or "").upper()
+        if "GREAT_" in typ:
+            bits.append(f"used {_type_name(unit.get('type'))} {unit.get('label') or uid}")
+            upgraded.add(uid)
+            continue
+        twin = next((g for gid, g in gained_now.items() if g.get("plot") == unit.get("plot")
+                     and gid not in upgraded and "GREAT_" not in str(g.get("type") or "").upper()), None)
+        if twin is not None:
+            twin_id = next(gid for gid, g in gained_now.items() if g is twin)
+            upgraded.add(twin_id)
+            upgraded.add(uid)
+            bits.append(f"UPGRADED {unit.get('label') or uid} to {_type_name(twin.get('type'))} "
+                        f"{twin.get('label') or twin_id} at {_xy(unit.get('plot'))}")
+    lost = [(uid, u) for uid, u in lost if uid not in upgraded]
     lost.sort(key=lambda row: 0 if "SETTLER" in str(row[1].get("type") or "").upper() else 1)
     for uid, unit in lost[:LIST_CAP]:
         bits.append(f"LOST {_type_name(unit.get('type'))} {unit.get('label') or uid} last at "
                     f"{_xy(unit.get('plot'))} (killed, captured or disbanded; it no longer exists)")
     if len(lost) > LIST_CAP:
         bits.append(f"{len(lost) - LIST_CAP} more units lost")
-    gained = [(uid, u) for uid, u in n_units.items() if uid not in p_units]
+    gained = [(uid, u) for uid, u in n_units.items() if uid not in p_units and uid not in upgraded]
     gained.sort(key=lambda row: 0 if "SETTLER" in str(row[1].get("type") or "").upper() else 1)
     for uid, unit in gained[:LIST_CAP]:
         bits.append(f"new {_type_name(unit.get('type'))} {unit.get('label') or uid} at {_xy(unit.get('plot'))}")
