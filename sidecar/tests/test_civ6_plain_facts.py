@@ -67,3 +67,16 @@ def test_idle_military_becomes_required_with_idle_count(monkeypatch):
     rows = dict(civ6_wire._civ6_required_rows(snap))
     hint = next(v for k, v in rows.items() if k.endswith(".command"))
     assert "idle 7 turns" in hint
+
+
+def test_host_envoy_binds_to_city_state(monkeypatch):
+    from sidecar import civ6_diplomacy as d
+    import sidecar.civ6_fallbacks as fb
+    snap = {"legal_commands": [], "diplomacy": {"envoys_to_give": 1, "city_states": [
+        {"player_id": "PLAYER_20", "name": "Cardiff", "at_war": False}]}}
+    monkeypatch.setattr(d, "diplomacy", lambda s: s["diplomacy"])
+    monkeypatch.setattr(fb, "is_local_seat", lambda s: True)
+    ids, notes = d._bind_envoy(snap, "envoy.send", "Cardiff, Brussels")
+    assert len(ids) == 1 and notes
+    monkeypatch.setattr(fb, "is_local_seat", lambda s: False)
+    assert d._bind_envoy(snap, "envoy.send", "Cardiff")[0] == []

@@ -188,7 +188,10 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
       -- A peace proposal to the game's AI is the local player's own deal-screen
       -- action (DealManager), which the engine syncs itself; keep it local.
       local peaceDeal = c.kind == "send_diplomatic_action" and Civ6Ai_Apply._IsPeaceDealAction(c)
-      table.insert((Civ6Ai_Apply.SYNCED_KINDS[c.kind] and not peaceDeal) and synced or here, c)
+      -- The host's own envoys go through the City-States screen request, which
+      -- the engine syncs itself (gameplay has no envoy setter).
+      local hostEnvoy = c.kind == "send_envoy" and playerID == Game.GetLocalPlayer()
+      table.insert((Civ6Ai_Apply.SYNCED_KINDS[c.kind] and not peaceDeal and not hostEnvoy) and synced or here, c)
     end
     if #synced > 0 then
       Civ6Ai_OrderChannel.SendDecision(playerID, { commands = synced }, Game.GetCurrentGameTurn(), snapshotTurn)
@@ -1870,6 +1873,21 @@ function Civ6Ai_Apply._Deal(playerID, command, args)
     local other = Civ6Ai_Apply._PlayerNum(args.target_player_id or args.city_state_id)
     if other == nil then
       return false, "missing_target_player", args
+    end
+    if playerID == Game.GetLocalPlayer() and UI ~= nil and UI.RequestPlayerOperation ~= nil
+        and PlayerOperations ~= nil and PlayerOperations.GIVE_INFLUENCE_TOKEN ~= nil then
+      -- Same request as the base game's City-States screen (OnConfirmPlacement).
+      local influence = Players[playerID] ~= nil and Players[playerID]:GetInfluence() or nil
+      if influence ~= nil and (influence:GetTokensToGive() or 0) <= 0 then
+        return false, "no_envoys_left", args
+      end
+      if influence ~= nil and influence.CanGiveTokensToPlayer ~= nil and not influence:CanGiveTokensToPlayer(other) then
+        return false, "cannot_send_envoy_there", args
+      end
+      local params = {}
+      params[PlayerOperations.PARAM_PLAYER_ONE] = other
+      local ok = pcall(UI.RequestPlayerOperation, playerID, PlayerOperations.GIVE_INFLUENCE_TOKEN, params)
+      return ok, ok and "envoy_requested" or "envoy_request_error", args
     end
     local ok, reason = Civ6Ai_Apply._GovRoute("SendEnvoy", playerID, other)
     return ok, reason, args

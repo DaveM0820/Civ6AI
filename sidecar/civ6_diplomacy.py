@@ -409,10 +409,37 @@ def _usable_mark(snapshot: dict, res_id: str) -> str:
 
 
 def _bind_envoy(snapshot: dict, key: str, text: str) -> tuple[list[str], list[str]]:
-    # Every live send failed: the token setters are not in the gameplay script.
+    """envoy = <city-state name>[, <city-state name> ...]: host seat only.
+
+    The host (local) seat sends envoys the way the base game's City-States screen
+    does (UI.RequestPlayerOperation GIVE_INFLUENCE_TOKEN), which the engine syncs.
+    Other seats have no such path; the game's own AI sends theirs."""
+    from sidecar.civ6_fallbacks import is_local_seat
+
     if text.lower() in ("", "0", "none", "skip", "no"):
         return [], []
-    return [], [f"{key}: envoys are not offered; the game sends them"]
+    if not is_local_seat(snapshot):
+        return [], [f"{key}: envoys are not offered; the game sends them"]
+    diplo = diplomacy(snapshot)
+    have = diplo.get("envoys_to_give") if isinstance(diplo.get("envoys_to_give"), int) else 0
+    rows = [r for r in _lst(diplo.get("city_states")) if isinstance(r, dict)]
+    ids: list[str] = []
+    notes: list[str] = []
+    for part in re.split(r"[,;|]", text):
+        name = part.strip()
+        if not name:
+            continue
+        if len(ids) >= have:
+            notes.append(f"{key}: no envoys left for {name}")
+            continue
+        row = next((r for r in rows if _norm(r.get("name")) == _norm(name)
+                    or str(r.get("player_id")) == name), None)
+        if row is None or row.get("at_war"):
+            notes.append(f"{key}: {name} is not a met city-state at peace with you")
+            continue
+        ids.append(_add_command(snapshot, "send_envoy", {"target_player_id": str(row.get("player_id"))},
+                                f"send an envoy to {row.get('name')}"))
+    return ids, notes
 
 
 def _bind_civ5_command(snapshot: dict, text: str) -> tuple[list[str], list[str]]:

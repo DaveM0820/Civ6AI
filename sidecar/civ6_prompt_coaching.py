@@ -923,7 +923,7 @@ def civ6_idle_resources(snapshot: dict[str, Any]) -> tuple[str | None, bool]:
         from sidecar.civ6_fallbacks import is_local_seat
 
         if is_local_seat(snapshot):
-            bits.append(f"{envoys} envoys unspent (no order can send envoys on this seat yet)")
+            bits.append(f"{envoys} envoys unspent (send with envoy.send = CityStateName, comma-separated for several)")
         else:
             bits.append(f"{envoys} envoys unspent (the game's own AI sends them; do not order envoy)")
     spends_gold = gold_idle
