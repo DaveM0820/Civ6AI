@@ -2737,6 +2737,16 @@ function Civ6Ai_Snapshot._UnitNeedsOrders(unit)
     if owner ~= nil and owner.IsHuman ~= nil and owner:IsHuman() == true then return true end
     return false
   end
+  -- Traders and religious units of AI seats stay with the game's own AI, like
+  -- builders: their only model verbs were MoveTo/Skip (routes and spreading are
+  -- UI-only for another seat), and as required rows they crowded out the army.
+  local trader = row ~= nil and row.MakeTradeRoute == true
+  local religious = row ~= nil and (tonumber(row.ReligiousStrength) or 0) > 0
+  if trader or religious then
+    local owner = Players[unit:GetOwner()]
+    if owner ~= nil and owner.IsHuman ~= nil and owner:IsHuman() == true then return true end
+    return false
+  end
   return true
 end
 

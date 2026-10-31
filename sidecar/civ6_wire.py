@@ -1211,6 +1211,9 @@ def _empire_section(
                 if _game_ai_builder(unit):
                     lines.append(pipeline._wire_line(
                         f"{prefix}.control", "the game's own builder AI improves tiles with this builder; no order needed"))
+                elif _game_ai_civilian(unit):
+                    lines.append(pipeline._wire_line(
+                        f"{prefix}.control", "the game's own AI moves this unit (trade routes, spreading religion); no order needed"))
                 idle_n = _unit_idle_for(context, unit_id)
                 if idle_n:
                     lines.append(pipeline._wire_line(
@@ -1256,6 +1259,17 @@ def _game_ai_builder(unit: dict[str, Any]) -> bool:
     """AI-seat builder the mod leaves to the game's builder AI (charges, never needs orders)."""
     return (int(unit.get("build_charges") or 0) > 0 and not unit.get("needs_orders")
             and unit.get("can_act") is False)
+
+
+_GAME_AI_CIVILIAN_TAGS = ("TRADER", "MISSIONARY", "APOSTLE", "INQUISITOR", "GURU")
+
+
+def _game_ai_civilian(unit: dict[str, Any]) -> bool:
+    """AI-seat trader or religious unit with moves left that the mod leaves to the game's AI."""
+    typ = str(unit.get("unit_type_id") or "").upper()
+    move = unit.get("movement") if isinstance(unit.get("movement"), dict) else {}
+    return (any(tag in typ for tag in _GAME_AI_CIVILIAN_TAGS) and not unit.get("needs_orders")
+            and unit.get("can_act") is False and (move.get("current") or 0) > 0)
 
 
 _CIV6_DEAL_KINDS = frozenset({"form_alliance", "propose_trade", "propose_peace", "respond_to_trade",
