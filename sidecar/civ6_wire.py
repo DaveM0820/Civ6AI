@@ -189,6 +189,24 @@ def _civ6_empire_wire_value(command: dict[str, Any]) -> tuple[str, str] | None:
     return wire_key, str(value)
 
 
+_FOUND_ALERT_RE = re.compile(r"^(UNIT_\d+) cannot found a city on its tile \(([^)]*)\)\.?")
+
+
+def _plain_found_alert(context: dict[str, Any], text: str) -> str:
+    """'settler_1 at (x,y) cannot found a city: too close: Qusqu is 2 tiles away; ...' (unit name, not raw id)."""
+    match = _FOUND_ALERT_RE.match(text)
+    if not match:
+        return text
+    units = [u for u in context.get("your_units", []) or [] if isinstance(u, dict)]
+    unit = next((u for u in units if u.get("unit_id") == match.group(1)), None)
+    if unit is None:
+        return text
+    name = pipeline._build_unit_wire_id_map(units).get(match.group(1), match.group(1))
+    where = pipeline._plot_coords_text(unit.get("plot_id")) if unit.get("plot_id") else ""
+    why = coaching.found_block_text(context, unit, match.group(2))
+    return f"{name}{' at ' + where if where else ''} cannot found a city on its tile: {why}."
+
+
 def _append_civ6_unit_situation_wire(lines: list[str], snapshot: dict[str, Any]) -> None:
     units = [unit for unit in snapshot.get("your_units", []) if isinstance(unit, dict)]
     wire_ids = pipeline._build_unit_wire_id_map(units)
@@ -201,6 +219,9 @@ def _append_civ6_unit_situation_wire(lines: list[str], snapshot: dict[str, Any])
         plot_id = unit.get("plot_id")
         if isinstance(plot_id, str) and plot_id.strip():
             lines.append(pipeline._wire_line(f"{prefix}.position", pipeline._plot_coords_text(plot_id)))
+        embarked = coaching.embarked_text(unit, snapshot)
+        if embarked:
+            lines.append(pipeline._wire_line(f"{prefix}.terrain", embarked))
         health = unit.get("health", {})
         if isinstance(health, dict):
             current = health.get("current")
@@ -1088,6 +1109,7 @@ def _empire_section(
                 text = str(alert["text"]).replace(
                     " See that settler's settle.here / settle.sites facts (legal tiles only, unranked).", ""
                 )[:200]
+                text = _plain_found_alert(context, text)
                 if text in seen_alerts:
                     continue
                 seen_alerts.add(text)
@@ -1176,6 +1198,9 @@ def _empire_section(
                 plot_id = unit.get("plot_id")
                 if isinstance(plot_id, str) and plot_id.strip():
                     lines.append(pipeline._wire_line(f"{prefix}.position", pipeline._plot_coords_text(plot_id)))
+                embarked = coaching.embarked_text(unit, context)
+                if embarked:
+                    lines.append(pipeline._wire_line(f"{prefix}.terrain", embarked))
                 if not unit_compact:
                     lines.extend(combat_wire.unit_row_lines(prefix, unit, context))
                 pct = coaching.civ6_unit_health_percent(unit)

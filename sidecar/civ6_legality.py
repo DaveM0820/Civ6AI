@@ -81,6 +81,11 @@ def can_embark(snapshot: dict[str, Any]) -> bool:
     return civ == "CIVILIZATION_MAORI"  # Maori start able to embark
 
 
+def knows_tech(snapshot: dict[str, Any], tech: str) -> bool:
+    research = _dct(_dct(snapshot.get("your_empire")).get("research"))
+    return tech in {str(t) for t in _lst(research.get("known_tech_ids")) if t}
+
+
 def own_occupied_plots(snapshot: dict[str, Any]) -> dict[tuple[int, int], list[str]]:
     held: dict[tuple[int, int], list[str]] = {}
     for unit in _lst(snapshot.get("your_units")):

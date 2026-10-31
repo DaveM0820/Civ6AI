@@ -264,7 +264,67 @@ def _water_and_embark_clause(snapshot: Any) -> str:
 
     if civ6_legality.can_embark(snapshot):
         text += " Land units can embark: move a land unit onto a water tile next to land."
+        if civ6_legality.knows_tech(snapshot, "TECH_CARTOGRAPHY"):
+            text += " With Cartography, ships and embarked units can cross ocean."
+        else:
+            text += (" Shipbuilding lets units embark onto coast (shallow water) only;"
+                     " ocean (deep water) needs Cartography, for ships too.")
     return text
+
+
+def nearest_city(snapshot: dict[str, Any], x: int, y: int) -> tuple[str, int] | None:
+    """(name, hex distance) of the closest known city centre to (x,y)."""
+    from sidecar import civ6_command_wire as command_wire
+    from sidecar import civ6_wire
+
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    best: tuple[str, int] | None = None
+    for city in list(snapshot.get("your_cities") or []) + list(snapshot.get("known_other_cities") or []):
+        coords = command_wire._city_plot_coords(city) if isinstance(city, dict) else None
+        if coords is None:
+            continue
+        d = civ6_wire._odd_r_distance((x, y), coords, game.get("map_width"), game.get("wrap_x") is not False)
+        name = str(city.get("name") or "a city").removeprefix("LOC_CITY_NAME_").replace("_", " ").title()
+        if best is None or d < best[1]:
+            best = (name, d)
+    return best
+
+
+def found_block_text(snapshot: dict[str, Any], unit: dict[str, Any] | None, reason: str) -> str:
+    """Plain reason a settler cannot found on its tile (no site suggestion)."""
+    from sidecar import civ6_legality
+
+    reason = str(reason or "")
+    if isinstance(unit, dict):
+        embarked = embarked_text(unit, snapshot)
+        if embarked:
+            return embarked
+        xy = civ6_legality.plot_xy(unit)
+        if reason == "too_close_to_city" and xy is not None:
+            near = nearest_city(snapshot, *xy)
+            if near is not None:
+                return (f"too close: {near[0]} is {near[1]} tiles away; "
+                        "city centres must be at least 4 tiles apart")
+    if reason == "too_close_to_city":
+        return "too close to a city; city centres must be at least 4 tiles apart"
+    return reason.replace("_", " ")
+
+
+def embarked_text(unit: dict[str, Any], snapshot: dict[str, Any]) -> str | None:
+    """'embarked on ocean' / 'embarked on coast' for a land unit standing on water."""
+    from sidecar import civ6_legality
+
+    if str(unit.get("domain_id") or "DOMAIN_LAND") != "DOMAIN_LAND":
+        return None
+    xy = civ6_legality.plot_xy(unit)
+    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    for p in known.get("plots") or []:
+        if isinstance(p, dict) and (p.get("x"), p.get("y")) == xy:
+            if not p.get("water"):
+                return None
+            ocean = str(p.get("terrain_id") or "") == "TERRAIN_OCEAN"
+            return "embarked on " + ("ocean" if ocean else "coast") + " (cities are founded on land)"
+    return None
 
 
 def civ6_unit_health_percent(unit: dict[str, Any]) -> int | None:
@@ -1030,7 +1090,7 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
     if here_ok is True:
         bits.append("FoundCity legal here")
     elif here_ok is False:
-        bits.append("FoundCity illegal here" + (f" ({here_reason})" if here_reason else ""))
+        bits.append("FoundCity illegal here" + (f" ({found_block_text(snapshot, unit, here_reason)})" if here_reason else ""))
     elif here_reason:
         bits.append(str(here_reason))
     if fresh is True:
