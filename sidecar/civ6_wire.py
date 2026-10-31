@@ -1766,36 +1766,18 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
                 + (f"; {top}" if top else ""),
             ))
             lines.extend(importance.journal_rules_lines(float(scored.get("adjusted") or 0)))
+        # Compact memory: last turn's plan in one line, plus one line per unit
+        # (position, standing destination). Older paragraphs were copied back
+        # verbatim (27-34k chars, ~70% plan copies).
         thought_rows = [entry for entry in history.get("thought_memory", []) if isinstance(entry, dict)]
-        # Newest first under the budget, so the latest plans survive; printed oldest first.
-        thought_rows.sort(key=lambda entry: int(entry.get("turn") or 0), reverse=True)
-        kept_chunks: list[list[str]] = []
-        kept_thoughts: list[str] = []
-        for entry in thought_rows:
-            turn = int(entry.get("turn", 0))
-            older = turn <= current - recent_n
-            adj = entry.get("importance_adjusted", entry.get("importance_score"))
-            tag = f" (importance {adj})" if older and adj not in (None, "") else ""
-            chunk: list[str] = []
-            for field, label in (("situation", "situation"), ("strategy", "strategy"), ("decision", "plan")):
-                text = entry.get(field)
-                if isinstance(text, str) and text.strip():
-                    chunk.append(pipeline._wire_line(f"T{turn}.{label}", pipeline._clip_thought(text) + tag))
-                    tag = ""
-            remember = entry.get("remember")
-            if isinstance(remember, str) and remember.strip():
-                chunk.append(pipeline._wire_line(f"T{turn}.remember.i", remember.strip()))
-            note = entry.get("orders_note")
-            if isinstance(note, str) and note.strip():
-                chunk.append(pipeline._wire_line(f"T{turn}.strategy.vs.orders", note.strip()))
-            extra = sum(len(row) + 1 for row in chunk)
-            if used + extra > budget and kept_chunks:
-                break
-            kept_chunks.append(chunk)
-            used += extra
-        for chunk in reversed(kept_chunks):
-            kept_thoughts.extend(chunk)
-        lines.extend(kept_thoughts)
+        last = max(thought_rows, key=lambda entry: int(entry.get("turn") or 0), default=None)
+        if last is not None:
+            turn = int(last.get("turn") or 0)
+            for field, label, cap in (("strategy", "strategy", 240), ("decision", "plan", 600)):
+                text = re.sub(r"\s+", " ", str(last.get(field) or "")).strip()
+                if text:
+                    lines.append(pipeline._wire_line(f"T{turn}.{label}", _clip_sentence(text, cap)))
+        lines.extend(_unit_memory_lines(context))
         remembered = [note for note in history.get("remembered", []) if isinstance(note, dict)]
         remember_n = int(cfg.get("remember_prompt") or 12)
         for note in remembered[-remember_n:]:
@@ -1813,6 +1795,25 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _unit_memory_lines(context: dict[str, Any]) -> list[str]:
+    """One line per own unit: where it is and the destination it is still walking to."""
+    units = [u for u in context.get("your_units", []) or [] if isinstance(u, dict)]
+    names = pipeline._build_unit_wire_id_map(units)
+    out: list[str] = []
+    for unit in units[:40]:
+        uid = str(unit.get("unit_id") or "")
+        if not uid or not unit.get("plot_id"):
+            continue
+        text = "at " + pipeline._plot_coords_text(unit.get("plot_id"))
+        goal = unit.get("goal") if isinstance(unit.get("goal"), dict) else None
+        if goal and goal.get("x") is not None and goal.get("y") is not None:
+            text += f"; heading to ({goal['x']},{goal['y']})"
+            if goal.get("set_turn") not in (None, ""):
+                text += f" since T{goal['set_turn']}"
+        out.append(pipeline._wire_line(f"unit.{names.get(uid, uid)}", text))
+    return out
+
+
 def _memory_section(context: dict[str, Any]) -> list[str]:
     """Long-term journal: older thought turns, situation log, remembered notes."""
     from sidecar import civ6_turn_importance as importance
@@ -1825,7 +1826,7 @@ def _memory_section(context: dict[str, Any]) -> list[str]:
     except (TypeError, ValueError):
         current = 0
     recent_n = int(importance.load_config().get("recent_full_turns") or 3)
-    for entry in history.get("thought_memory") or []:
+    for entry in []:  # old plan paragraphs are no longer replayed (compact memory)
         if not isinstance(entry, dict):
             continue
         try:
@@ -1850,7 +1851,7 @@ def _memory_section(context: dict[str, Any]) -> list[str]:
     seat = context.get("_seat_memory") if isinstance(context.get("_seat_memory"), dict) else {}
     hist_log = history.get("situation_log") if isinstance(history.get("situation_log"), list) else None
     log_rows = hist_log if hist_log is not None else importance.situation_log_rows(seat, current)
-    prompt_n = int(importance.load_config().get("situation_log_prompt") or 12)
+    prompt_n = min(6, int(importance.load_config().get("situation_log_prompt") or 12))
     for row in log_rows[-prompt_n:]:
         turn = int(row.get("turn") or 0)
         text = str(row.get("text") or "").strip()

@@ -175,7 +175,7 @@ class PromptBudgetTests(unittest.TestCase):
         snap = _late_snapshot()
         text = civ6_wire.build_civ6_model_wire_text(snap, max_prompt_chars=30000)
         report = snap["advciv"]["prompt_budget"]
-        self.assertGreaterEqual(report["before_chars"], 43000)
+        self.assertGreaterEqual(report["before_chars"], 35000)
         self.assertLessEqual(report["after_chars"], 30000)
         self.assertLess(report["after_chars"], report["before_chars"])
         self.assertEqual(len(text), report["after_chars"])

@@ -123,6 +123,9 @@ IDLE: 1 UNIT_SCOUT, 1 UNIT_SPEARMAN — host default applied
 
 === THOUGHTS ===
 history.memory = Expand to third city after Pottery; scout eastern coast.
+unit.scout_1 = at (14,22)
+unit.settler_1 = at (16,24)
+unit.spearman_1 = at (15,23)
 
 === ADVICE ===
 - You are at war and an enemy is within move range. Use the WAR section: strike enemies in range.

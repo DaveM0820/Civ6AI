@@ -30,7 +30,8 @@ def test_wire_asks_for_the_plan_and_shows_recent_plans():
     wire = civ6_wire.build_civ6_model_wire_text(snap)
     assert "thought.plan" in wire and "(20,14)" in wire  # required row with the example
     assert f"T{turn - 1}.plan = {PLAN}" in wire
-    assert wire.index(f"T{turn - 2}.plan") < wire.index(f"T{turn - 1}.plan")  # printed oldest first
+    assert f"T{turn - 2}.plan" not in wire  # compact memory: only last turn's plan
+    assert "unit.settler_1 = at (" in wire  # per-unit memory line
 
 
 def test_journal_budget_keeps_the_newest_plan(monkeypatch):
