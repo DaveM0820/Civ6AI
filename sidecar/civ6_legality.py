@@ -792,4 +792,7 @@ def idle_prompt_line(snapshot: dict[str, Any]) -> str | None:
     if not counts:
         return None
     bits = [f"{n} {typ}" for typ, n in sorted(counts.items())]
-    return "IDLE: " + ", ".join(bits) + " — host default applied"
+    from sidecar.civ6_fallbacks import is_local_seat
+
+    tail = " — they act only on your orders" if is_local_seat(snapshot) else " — host default applied"
+    return "IDLE: " + ", ".join(bits) + tail

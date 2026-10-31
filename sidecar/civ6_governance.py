@@ -358,6 +358,17 @@ def attention_items(snapshot: dict) -> list[str]:
     return out
 
 
+def _gov_entry_city(appointed: list, gid: str | None) -> str | None:
+    entry = next((a for a in appointed if a.get("id") == gid), None)
+    city = (entry or {}).get("city_id")
+    return str(city) if city not in (None, "") else None
+
+
+def _gov_establishing(appointed: list, gid: str | None) -> bool:
+    entry = next((a for a in appointed if a.get("id") == gid), None) or {}
+    return bool(entry.get("city_id")) and not entry.get("established") and bool(entry.get("turns_to_establish"))
+
+
 def _unplaced_governors(gv: dict) -> list[str]:
     """Appointed governors with no city (they give nothing until assigned)."""
     if not gv.get("supported"):
@@ -644,6 +655,10 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
                 notes.append(f"{key}={value}: governor not appointed")
             elif city_id is None:
                 notes.append(f"{key}={value}: city {city_text} is not yours")
+            elif _gov_entry_city(appointed, gid) == city_id:
+                notes.append(f"{key}={value}: {gid} is already assigned there; no order needed (moving it restarts establishing)")
+            elif _gov_establishing(appointed, gid):
+                notes.append(f"{key}={value}: {gid} is still establishing in its city; moving it now restarts that, so it was kept")
             else:
                 ids.append(_add_command(snapshot, "assign_governor", {"governor_id": gid, "city_id": city_id},
                                         f"assign {gid} to {city_text}"))
