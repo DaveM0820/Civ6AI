@@ -70,7 +70,8 @@ def civ6_game_primer() -> str:
 CIV6_SETTLER_MAP_ADVICE = (
     "Use the attached map to choose a settle location. Weigh strategic and luxury resources, choke points, "
     "fresh water and coast access, and tile yields (food/production/gold). "
-    "Coastal tiles (needed for a harbour and ships) and river tiles are better city sites when available."
+    "Sea-coast tiles (next to sea or ocean, not just a lake: only those cities get a harbour and ships that reach other land) "
+    "and river tiles are better city sites when available."
 )
 
 CIV6_CHAT_VARIETY_COACHING = (

@@ -104,7 +104,7 @@ _SIMPLE_REASONS = {
     "land": "naval units cannot enter land tiles",
     "impassable": "impassable: that tile is a mountain or natural wonder; do not move there. Do not order that destination again.",
     "occupied_foreign": "another civilization's unit is standing on that tile",
-    "stack_limit": "one of your own military units already holds that tile (one military unit per tile)",
+    "stack_limit": "one of your own units of the same kind already holds that tile (one military and one civilian unit per tile)",
     "not_adjacent": "the tile is not next to the unit",
     "no_moves_left": "the unit had no movement left",
     "unit_not_found": "that unit no longer exists",
@@ -575,7 +575,7 @@ def _hex_dist(a: tuple[int, int], b: tuple[int, int]) -> int:
 
 
 def nearest_reachable_land(snapshot: dict[str, Any], unit: dict[str, Any] | None,
-                           tx: int, ty: int, limit: int = 3) -> list[tuple[int, int]]:
+                           tx: int, ty: int, limit: int = 3, water: bool = False) -> list[tuple[int, int]]:
     """Known land tiles a land unit can walk to from where it stands, nearest to (tx,ty) first.
 
     Walks only known land (no water, no mountain); tiles held by your own units are
@@ -596,7 +596,10 @@ def nearest_reachable_land(snapshot: dict[str, Any], unit: dict[str, Any] | None
     for p in known.get("plots") or []:
         if not isinstance(p, dict) or not isinstance(p.get("x"), int) or not isinstance(p.get("y"), int):
             continue
-        if p.get("water") or p.get("peak") or legality.is_mountain(p):
+        if water:
+            if not p.get("water") or legality.ocean_blocked(snapshot, p):
+                continue
+        elif p.get("water") or p.get("peak") or legality.is_mountain(p):
             continue
         land.add((p["x"], p["y"]))
     occupied = set(legality.own_occupied_plots(snapshot))
@@ -635,6 +638,15 @@ def _land_hint(snapshot: dict[str, Any], unit: dict[str, Any] | None, x: int, y:
     return f" Nearest reachable land toward it: {joined}. The unit did not move."
 
 
+def _water_hint(snapshot: dict[str, Any], unit: dict[str, Any] | None, x: int, y: int) -> str:
+    tiles = nearest_reachable_land(snapshot, unit, x, y, water=True)
+    if not tiles:
+        return ""
+    names = [f"({a},{b})" for a, b in tiles]
+    joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+    return f" Nearest reachable water toward it: {joined}. The unit did not move."
+
+
 _MOVE_TAIL = ("Try a different tile. Remember to check the map before issuing movement orders "
               "to make sure it's a valid tile.")
 
@@ -671,6 +683,8 @@ def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reas
     hint = ""
     if not sea and ("water" in facts or "mountain" in facts or reason == "impassable"):
         hint = _land_hint(snapshot, unit, x, y)
+    elif sea and why.startswith(("land;", "not water;")):
+        hint = _water_hint(snapshot, unit, x, y)
     return (f"You tried to move {actor or 'the unit'} to tile ({x},{y}). Tile ({x},{y}) is {why}.{hint} " + _MOVE_TAIL)
 
 

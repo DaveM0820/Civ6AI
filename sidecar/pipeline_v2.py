@@ -3376,9 +3376,17 @@ def _append_map_wire_stats(lines: list[str], context: dict[str, Any], map_stats:
     game = context.get("game", {})
     if isinstance(game, dict):
         _append_id_wire(lines, "map.script", game.get("map_script"))
-    coastal = sum(1 for city in context.get("your_cities", []) if isinstance(city, dict) and city.get("is_coastal"))
+    raw = context.get("_raw_snapshot") if isinstance(context.get("_raw_snapshot"), dict) else context
+    lake_only = 0
+    if isinstance(raw.get("civ6"), dict) and isinstance(raw.get("known_map"), dict) and raw["known_map"].get("plots"):
+        from sidecar import civ6_water
+        coastal, lake_only = civ6_water.city_shore_counts(raw)
+    else:
+        coastal = sum(1 for city in context.get("your_cities", []) if isinstance(city, dict) and city.get("is_coastal"))
     if coastal:
         lines.append(_wire_line("empire.coastal_cities", coastal))
+    if lake_only:
+        lines.append(_wire_line("empire.lake_only_cities", f"{lake_only} (next to a lake only: no harbour, ships cannot leave)"))
     image_attached = False
     known_map = context.get("known_map", {})
     if isinstance(known_map, dict):

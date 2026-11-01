@@ -101,7 +101,7 @@ rival.Cleopatra.score = 138
 rival.Cleopatra.attitude = ATTITUDE_CAUTIOUS
 
 === ATTENTION ===
-SETTLE: A Settler can MoveTo(x,y) any land tile, then FoundCity on its own tile. Barbarians capture an unescorted Settler. Military and civilian units can share a tile; sharing does not block movement or founding. Use the attached map to choose a settle location. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold). Coastal tiles (needed for a harbour and ships) and river tiles are better city sites when available.
+SETTLE: A Settler can MoveTo(x,y) any land tile, then FoundCity on its own tile. Barbarians capture an unescorted Settler. Military and civilian units can share a tile; sharing does not block movement or founding. Use the attached map to choose a settle location. Weigh strategic and luxury resources, choke points, fresh water and coast access, and tile yields (food/production/gold). Sea-coast tiles (next to sea or ocean, not just a lake: only those cities get a harbour and ships that reach other land) and river tiles are better city sites when available.
 IDLE: 1 UNIT_SCOUT, 1 UNIT_SPEARMAN — host default applied
 
 === THOUGHTS ===

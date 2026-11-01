@@ -85,9 +85,7 @@ def _neighbors(x: int, y: int, width: int, wrap: bool) -> list[tuple[int, int]]:
 def _can_reach_other_land(snapshot: dict[str, Any]) -> bool:
     research = (snapshot.get("your_empire") or {}).get("research") or {}
     known = research.get("known_tech_ids") if isinstance(research, dict) else None
-    if isinstance(known, list) and "TECH_SHIPBUILDING" in known:
-        return True
-    return any(isinstance(u, dict) and u.get("domain_id") == "DOMAIN_SEA" for u in snapshot.get("your_units") or [])
+    return isinstance(known, list) and "TECH_SHIPBUILDING" in known
 
 
 def landmass_line(snapshot: dict[str, Any]) -> str | None:
@@ -123,5 +121,5 @@ def landmass_line(snapshot: dict[str, Any]) -> str | None:
         fog = "unrevealed land on it: none"
     line = f"{len(region)} known land tiles; {fog}"
     if not _can_reach_other_land(snapshot):
-        line += "; reaching other land needs Shipbuilding (embark) or a ship"
+        line += "; land units reach other land only after Shipbuilding (embark); ships can scout it"
     return line

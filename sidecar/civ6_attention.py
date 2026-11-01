@@ -83,10 +83,20 @@ def _settle(context: Any) -> list[Item]:
         bits.append("A Settler can MoveTo(x,y) any land tile, then FoundCity on its own tile.")
         from sidecar.civ6_command_wire import game_settle_recommendations
 
-        recs = game_settle_recommendations(snap)
+        raw = snap.get("_raw_snapshot") if isinstance(snap.get("_raw_snapshot"), dict) else snap
+        recs = game_settle_recommendations(raw)
         if recs:
             bits.append("The game's recommended city sites: "
                         + ", ".join(f"({r['x']},{r['y']})" for r in recs) + " (marked S1.. on the map).")
+            try:
+                from sidecar import civ6_water
+                from sidecar.civ6_common import plot_xy
+                lakes = civ6_water.lake_tiles(raw)
+                own = [(wire.get(str(u.get("unit_id") or ""), "settler"), plot_xy(u)) for u in settlers]
+                own = [(n, xy) for n, xy in own if xy is not None]
+                bits.append(" | ".join(civ6_water.site_fact(raw, r, own, lakes) for r in recs) + ".")
+            except Exception:
+                pass
         bits.append("Barbarians capture an unescorted Settler.")
         bits.append("Military and civilian units can share a tile; sharing does not block movement or founding.")
         bits.append(coaching.CIV6_SETTLER_MAP_ADVICE)

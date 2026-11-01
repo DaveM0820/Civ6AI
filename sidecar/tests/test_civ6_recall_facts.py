@@ -25,6 +25,8 @@ def test_landmass_line_flood_fill():
     assert line.startswith("3 known land tiles; unrevealed land on it: may continue past (2,4)")
     assert "Shipbuilding" in line
     snap["your_units"] = [{"domain_id": "DOMAIN_SEA"}]
+    assert "Shipbuilding" in r.landmass_line(snap)
+    snap["your_empire"] = {"research": {"known_tech_ids": ["TECH_SHIPBUILDING"]}}
     assert "Shipbuilding" not in r.landmass_line(snap)
     # fully ringed by known water: none
     ring = [{"x": x, "y": y, "water": True} for x in range(0, 6) for y in range(2, 7) if (x, y) != (3, 4)]
