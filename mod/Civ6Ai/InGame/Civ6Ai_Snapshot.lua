@@ -2165,7 +2165,7 @@ function Civ6Ai_Snapshot._BuildGameBlock()
     climate_id = "CLIMATE_TEMPERATE",
     sea_level_id = "SEALEVEL_MEDIUM",
     start_era_id = "ERA_UNKNOWN",
-    map_script = "Unknown",
+    map_script = Civ6Ai_Snapshot._MapScript(),
     max_turns = Civ6Ai_Util.JsonNull(),
     network_multiplayer = Civ6Ai_Snapshot._IsNetworkMultiplayer(),
     options = {},
@@ -2174,6 +2174,19 @@ function Civ6Ai_Snapshot._BuildGameBlock()
     game_seed = gameSeed,
     start_turn = startTurn,
   }
+end
+
+-- Map script file name (e.g. "Island_Plates.lua") from the game setup. Read-only.
+function Civ6Ai_Snapshot._MapScript()
+  if MapConfiguration ~= nil and MapConfiguration.GetScript ~= nil then
+    local ok, v = pcall(MapConfiguration.GetScript)
+    if ok and type(v) == "string" and v ~= "" then return v end
+  end
+  if MapConfiguration ~= nil and MapConfiguration.GetValue ~= nil then
+    local ok, v = pcall(MapConfiguration.GetValue, "MAP_SCRIPT")
+    if ok and type(v) == "string" and v ~= "" then return v end
+  end
+  return "Unknown"
 end
 
 function Civ6Ai_Snapshot._EmptyStrategicSummary()
