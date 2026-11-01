@@ -1907,7 +1907,7 @@ def render_civ6_map_png(
     rivers_trusted = prefer_civ5_sprites or civ6_river_edges_trusted(snapshot)
     # S1..Sn settle labels belong on the tactical close-up and in the prompt.
     # The strategic overview is the whole front; a dozen S-labels hide the land.
-    show_settle_labels = image_role != "overview"
+    show_settle_labels = True  # strategic and tactical images both mark S1.. sites
     # Close-ups used to stamp (x,y) on every hex. Edge ticks stay readable; the
     # strategic overview keeps the area-based choice.
     zoomed = image_role in ("viewport", "focus")

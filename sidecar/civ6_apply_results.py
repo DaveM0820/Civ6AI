@@ -597,7 +597,7 @@ def nearest_reachable_land(snapshot: dict[str, Any], unit: dict[str, Any] | None
         if not isinstance(p, dict) or not isinstance(p.get("x"), int) or not isinstance(p.get("y"), int):
             continue
         if water:
-            if not p.get("water") or legality.ocean_blocked(snapshot, p):
+            if legality.ocean_blocked(snapshot, p) or not legality.sea_enterable(snapshot, p, (p["x"], p["y"])):
                 continue
         elif p.get("water") or p.get("peak") or legality.is_mountain(p):
             continue
@@ -665,8 +665,8 @@ def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reas
         why = "a mountain and is impassable"
     elif reason in ("ocean_needs_cartography", "water_no_ocean_embark"):
         why = "ocean (deep water); ships and embarked units can enter ocean only after Cartography, coast is fine"
-    elif sea and known and "water" not in facts:
-        why = "land; ships can't enter land tiles"
+    elif sea and known and "water" not in facts and (x, y) not in legality.own_coastal_city_tiles(snapshot):
+        why = "land; ships can't enter land tiles (your own coastal cities are fine)"
     elif "water" in facts and not sea and occupied:
         why = f"water {occupied.replace('occupied by', 'with')} embarked on it ({_STACK_RULE})"
     elif "water" in facts and not sea:
@@ -1688,6 +1688,20 @@ def _result_fingerprint(item: dict[str, Any]) -> tuple[str, str, Any, Any] | Non
 
 _CMD_TARGET_RE = re.compile(r"_(-?\d+)_(-?\d+)$")
 
+REPEAT_FAILURE_TTL = 3
+
+
+def _snapshot_turn(snapshot: dict[str, Any]) -> int:
+    for src in (snapshot.get("decision"), snapshot.get("game"), snapshot):
+        if isinstance(src, dict):
+            try:
+                value = int(src.get("turn") or 0)
+            except (TypeError, ValueError):
+                value = 0
+            if value:
+                return value
+    return 0
+
 
 def _failure_matcher(snapshot: dict[str, Any], located: bool = False):
     """One repeat-failure fingerprint check shared by offers and orders.
@@ -1705,9 +1719,27 @@ def _failure_matcher(snapshot: dict[str, Any], located: bool = False):
     units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
     wire_ids = pipeline._build_unit_wire_id_map(units)
     reverse = {v: k for k, v in wire_ids.items()}
+    now = _snapshot_turn(snapshot)
+    since_map = snapshot.get("_unit_since") if isinstance(snapshot.get("_unit_since"), dict) else {}
+
+    def _since(unit: str) -> int | None:
+        for uid in (unit, reverse.get(unit)):
+            if uid and isinstance(since_map.get(uid), int):
+                return since_map[uid]
+        return None
+
+    def live(fail_turn: int, unit: str) -> bool:
+        # A failure counts only from the same origin (the unit has not moved since)
+        # and for REPEAT_FAILURE_TTL turns.
+        if now and fail_turn and now - fail_turn > REPEAT_FAILURE_TTL:
+            return False
+        arrived = _since(unit)
+        return arrived is None or fail_turn >= arrived
 
     def match(order: str, unit: str, x: Any, y: Any):
         for fail in fails:
+            if not live(fail[1], unit):
+                continue
             fail_unit = fail[0][1]
             unit_ok = (
                 fail_unit == unit

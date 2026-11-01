@@ -137,6 +137,25 @@ def unit_role(unit: dict[str, Any]) -> str | None:
     return None
 
 
+def own_coastal_city_tiles(snapshot: dict[str, Any]) -> set[tuple[int, int]]:
+    """Your city tiles next to water: ships may enter and leave them (Civ 6 rule)."""
+    plots = known_plots(snapshot)
+    out: set[tuple[int, int]] = set()
+    for city in _lst(snapshot.get("your_cities")):
+        if not isinstance(city, dict):
+            continue
+        xy = plot_xy(city)
+        if xy is None and isinstance(city.get("x"), int) and isinstance(city.get("y"), int):
+            xy = (city["x"], city["y"])
+        if xy is not None and any((plots.get(n) or {}).get("water") for n in hex_neighbors(*xy)):
+            out.add(xy)
+    return out
+
+
+def sea_enterable(snapshot: dict[str, Any], plot: dict[str, Any] | None, xy: tuple[int, int]) -> bool:
+    return bool((plot or {}).get("water")) or xy in own_coastal_city_tiles(snapshot)
+
+
 def tile_passable(snapshot: dict[str, Any], unit: dict[str, Any], x: int, y: int) -> str | None:
     """None if this unit may stand on (x,y). Otherwise a reason code."""
     plots = known_plots(snapshot)
@@ -149,7 +168,7 @@ def tile_passable(snapshot: dict[str, Any], unit: dict[str, Any], x: int, y: int
     water = bool(plot.get("water"))
     if domain != "DOMAIN_SEA" and water and not can_embark(snapshot):
         return "impassable"
-    if domain == "DOMAIN_SEA" and not water:
+    if domain == "DOMAIN_SEA" and not water and (x, y) not in own_coastal_city_tiles(snapshot):
         return "impassable"
     if ocean_blocked(snapshot, plot) and plot_xy(unit) != (x, y):
         return "ocean_needs_cartography"
@@ -217,7 +236,7 @@ def reachable(snapshot: dict[str, Any], unit: dict[str, Any], dest: tuple[int, i
             domain = str(unit.get("domain_id") or "DOMAIN_LAND")
             if domain != "DOMAIN_SEA" and water and not can_embark(snapshot):
                 continue
-            if domain == "DOMAIN_SEA" and not water:
+            if domain == "DOMAIN_SEA" and not water and (nx, ny) not in own_coastal_city_tiles(snapshot):
                 continue
             if ocean_blocked(snapshot, plot):
                 continue

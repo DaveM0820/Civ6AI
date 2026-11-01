@@ -35,6 +35,7 @@ def update(snapshot: dict[str, Any], state_dir: Path | str | None) -> dict[str, 
         except (OSError, ValueError):
             state = {}
     out: dict[str, str] = {}
+    since: dict[str, int] = {}
     units = list(snapshot.get("your_units") or []) + list(snapshot.get("visible_other_units") or [])
     for unit in units:
         if not isinstance(unit, dict) or not isinstance(unit.get("unit_id"), str):
@@ -53,6 +54,8 @@ def update(snapshot: dict[str, Any], state_dir: Path | str | None) -> dict[str, 
         else:
             rec = dict(prev, turn=turn)
         state[uid] = rec
+        if isinstance(rec.get("since"), int):
+            since[uid] = rec["since"]
         prev_xy = _coords(rec.get("prev_plot"))
         if rec.get("since") == turn and prev_xy and isinstance(rec.get("prev_turn"), int):
             out[uid] = f"was at {prev_xy} on T{rec['prev_turn']}"
@@ -65,6 +68,7 @@ def update(snapshot: dict[str, Any], state_dir: Path | str | None) -> dict[str, 
         except OSError:
             pass
     snapshot["_unit_trail"] = out
+    snapshot["_unit_since"] = since
     return out
 
 

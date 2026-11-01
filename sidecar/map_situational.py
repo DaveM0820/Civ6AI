@@ -93,6 +93,8 @@ def format_strategic_window(viewport: dict[str, Any], map_width: int, map_height
     width = max(1, int(viewport.get("width") or 1))
     height = max(1, int(viewport.get("height") or 1))
     x1 = x0 + width - 1
+    if map_width and x1 >= int(map_width):
+        x1 %= int(map_width)  # window crosses the east-west seam
     y1 = y0 + height - 1
     total = max(1, int(map_width) * int(map_height))
     pct = max(1, min(100, int(round(100.0 * (width * height) / total))))
@@ -753,7 +755,39 @@ def compute_overview_viewport(snapshot: dict[str, Any]) -> dict[str, int]:
 
     pipeline.ensure_known_map_plots(snapshot)
     plot_index = map_render.build_render_plot_index(snapshot)
-    return map_render.compute_viewport(snapshot, plot_index, pad=2)
+    viewport = map_render.compute_viewport(snapshot, plot_index, pad=2)
+    return _wrap_overview_viewport(snapshot, plot_index, viewport, pad=2)
+
+
+def _wrap_overview_viewport(snapshot: dict[str, Any], plot_index: dict, viewport: dict[str, int],
+                            pad: int = 2) -> dict[str, int]:
+    """On an east-west wrapping map, start the strategic window after the widest empty
+    column gap so known land that straddles the seam stays in one block (the renderer
+    rotates any window with x0 + width > map width, as the tactical view does)."""
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    try:
+        width, height = int(game["map_width"]), int(game["map_height"])
+    except (KeyError, TypeError, ValueError):
+        return viewport
+    if not game.get("wrap_x") or width <= 0:
+        return viewport
+    known_map = snapshot.get("known_map", {})
+    grid = map_render._normalize_visibility_grid(
+        known_map.get("visibility_grid") if isinstance(known_map.get("visibility_grid"), list) else [],
+        width, height,
+    )
+    coords = map_render._collect_viewport_coords(snapshot, plot_index, grid, width, height)
+    cols = sorted({int(c[0]) % width for c in coords})
+    if len(cols) < 2:
+        return viewport
+    gaps = [((cols[(i + 1) % len(cols)] - cols[i]) % width or width, cols[i]) for i in range(len(cols))]
+    gap, before = max(gaps)
+    start = (before + gap) % width
+    span = (before - start) % width + 1
+    if span + 2 * pad >= int(viewport.get("width", width)) or start == cols[0]:
+        return viewport
+    vw = min(width, span + 2 * pad)
+    return {**viewport, "x0": (start - pad) % width, "width": vw}
 
 
 def _render_role(
