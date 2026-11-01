@@ -31,3 +31,13 @@ def test_landmass_line_flood_fill():
     snap2 = {"known_map": {"plots": ring + [{"x": 3, "y": 4}]}, "your_cities": [{"plot_id": "PLOT_3_4"}],
              "your_units": [], "game": {"map_width": 20}}
     assert "unrevealed land on it: none" in r.landmass_line(snap2)
+
+
+def test_full_wire_text_includes_landmass_line():
+    import json, os
+    path = "/workspace/ji.json"
+    if not os.path.exists(path):
+        import pytest; pytest.skip("fixture absent")
+    from sidecar import civ6_wire
+    snap = json.load(open(path))["snapshot"]
+    assert "map.landmass = " in civ6_wire.build_civ6_model_wire_text(snap)

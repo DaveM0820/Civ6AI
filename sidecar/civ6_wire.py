@@ -421,10 +421,11 @@ def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None
     try:
         from sidecar import civ6_recall_facts as recall
 
-        land = recall.landmass_line(snapshot)
+        raw = snapshot.get("_raw_snapshot") if isinstance(snapshot.get("_raw_snapshot"), dict) else snapshot
+        land = recall.landmass_line(raw)
         if land:
             lines.append(pipeline._wire_line("map.landmass", land))
-        barbs = recall.barbarian_last_seen(snapshot)
+        barbs = recall.barbarian_last_seen(raw)
         if barbs:
             lines.append(pipeline._wire_line("barbarians.last_seen", " | ".join(barbs)))
     except Exception:
@@ -2448,6 +2449,8 @@ def build_civ6_model_wire_text(snapshot: dict[str, Any], *, max_prompt_chars: in
 
     map_stats = pipeline._map_wire_stats_from_snapshot(snapshot)
     context = build_civ6_playable_context(snapshot)
+    # Recall facts need full known_map plots and visible_other_units, which the playable context strips.
+    context["_raw_snapshot"] = snapshot
     units = [unit for unit in context.get("your_units") or [] if isinstance(unit, dict)]
     cities = [city for city in context.get("your_cities") or [] if isinstance(city, dict)]
     unit_compact = prompt_budget.units_need_compact(len(units))
