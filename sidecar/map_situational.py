@@ -193,9 +193,19 @@ def clamp_map_viewport(
     height: int,
     map_width: int,
     map_height: int,
+    *,
+    wrap_x: bool = False,
 ) -> dict[str, int]:
     max_w = max(4, int(map_width * 0.5))
     max_h = max(4, int(map_height * 0.5))
+    if wrap_x and map_width > 0:
+        # East-west wrap: keep the window's width and let it cross the seam;
+        # _render_role draws it from a rotated copy.
+        vw = max(1, min(int(width), max_w))
+        clamped = map_render.clamp_viewport_to_map(
+            {"x0": 0, "y0": y0, "width": vw, "height": height}, map_width, map_height,
+            max_width=max_w, max_height=max_h)
+        return {**clamped, "x0": int(x0) % map_width, "width": vw}
     return map_render.clamp_viewport_to_map(
         {"x0": x0, "y0": y0, "width": width, "height": height},
         map_width,
@@ -212,6 +222,7 @@ def viewport_centered_on_plot(
     map_height: int,
     *,
     size: int | None = None,
+    wrap_x: bool = False,
 ) -> dict[str, int]:
     tile_size = size if size is not None else max_tactical_viewport_size_with_coords()
     half = max(1, tile_size // 2)
@@ -222,6 +233,7 @@ def viewport_centered_on_plot(
         tile_size,
         map_width,
         map_height,
+        wrap_x=wrap_x,
     )
 
 
@@ -230,6 +242,8 @@ def viewport_focused_on_tile(
     y: int,
     map_width: int,
     map_height: int,
+    *,
+    wrap_x: bool = False,
 ) -> dict[str, int]:
     return viewport_centered_on_plot(
         x,
@@ -237,6 +251,7 @@ def viewport_focused_on_tile(
         map_width,
         map_height,
         size=max_tactical_viewport_size_with_coords(),
+        wrap_x=wrap_x,
     )
 
 
@@ -307,10 +322,12 @@ def viewport_rect_from_stored(
     stored: dict[str, Any],
     map_width: int,
     map_height: int,
+    *,
+    wrap_x: bool = False,
 ) -> dict[str, int] | None:
     focus = parse_map_focus_tile(stored)
     if focus is not None:
-        return viewport_focused_on_tile(focus[0], focus[1], map_width, map_height)
+        return viewport_focused_on_tile(focus[0], focus[1], map_width, map_height, wrap_x=wrap_x)
     parsed = parse_map_viewport_value(stored)
     if parsed is None:
         return None
@@ -321,6 +338,7 @@ def viewport_rect_from_stored(
         parsed["height"],
         map_width,
         map_height,
+        wrap_x=wrap_x,
     )
 
 
@@ -784,6 +802,17 @@ def _wrap_overview_viewport(snapshot: dict[str, Any], plot_index: dict, viewport
     gap, before = max(gaps)
     start = (before + gap) % width
     span = (before - start) % width + 1
+    if span + 2 * pad >= width:
+        # Whole width either way: open the picture at the emptiest column so known
+        # territory is never cut by the image edge.
+        if gap > 1:
+            empty = (before + (gap + 1) // 2) % width
+        else:
+            counts = [0] * width
+            for c in coords:
+                counts[int(c[0]) % width] += 1
+            empty = min(range(width), key=lambda col: (counts[col], col))
+        return {**viewport, "x0": empty, "width": width}
     if span + 2 * pad >= int(viewport.get("width", width)) or start == cols[0]:
         return viewport
     vw = min(width, span + 2 * pad)
@@ -886,6 +915,8 @@ def prepare_civ5_situational_maps(
         force_omit_tactical = bool(omit_tactical)
         resolved_tactical = 0 if force_omit_tactical else map_render.resolve_civ5_tactical_model_image_size(tactical_size)
 
+    _game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    wrap_x = bool(_game.get("wrap_x"))
     overview_viewport = compute_overview_viewport(snapshot)
     overview_meta = _render_role(
         snapshot,
@@ -908,7 +939,7 @@ def prepare_civ5_situational_maps(
     tactical_rect: dict[str, int] | None = None
     tactical_label = tactical_banner
     if isinstance(map_viewport, dict):
-        tactical_rect = viewport_rect_from_stored(map_viewport, map_width, map_height)
+        tactical_rect = viewport_rect_from_stored(map_viewport, map_width, map_height, wrap_x=wrap_x)
         focus = parse_map_focus_tile(map_viewport)
         if focus is not None:
             tactical_label = f"Tactical viewport centered on ({focus[0]},{focus[1]})"
@@ -922,7 +953,7 @@ def prepare_civ5_situational_maps(
         tactical_rect, tactical_label = tactical_frame
     if tactical_rect is None:
         focus = pick_auto_focus_tile({}, snapshot)
-        tactical_rect = viewport_focused_on_tile(focus[0], focus[1], map_width, map_height)
+        tactical_rect = viewport_focused_on_tile(focus[0], focus[1], map_width, map_height, wrap_x=wrap_x)
         tactical_label = f"Auto tactical viewport centered on ({focus[0]},{focus[1]})"
 
     # Send the close-up unless the strategic map already labels every hex and
@@ -985,6 +1016,7 @@ def prepare_civ5_situational_maps(
         map_width,
         map_height,
         size=FOCUS_TACTICAL_VIEWPORT_SIZE,
+        wrap_x=wrap_x,
     )
     omit_focus_flag, focus_omit_reason = should_omit_focus_map(
         overview_viewport,

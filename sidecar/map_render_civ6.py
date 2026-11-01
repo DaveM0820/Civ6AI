@@ -2031,7 +2031,7 @@ def render_civ6_map_png(
     # Header line plus room for the first legend row (whose baseline sits one
     # swatch below the header); the old value let row 1 overlap the header text.
     if prefer_civ5_sprites:
-        header_text = f"viewport x0={x0} y0={y0} {vw}x{vh} flat-top odd-r hex"
+        header_text = f"viewport x0={gx(x0)} y0={y0} {vw}x{vh} flat-top odd-r hex"
     else:
         owned = (
             "improvement left, district right, resource center"
