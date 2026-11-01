@@ -47,8 +47,38 @@ function Civ6Ai_Apply._ApplyResultsPath(playerID)
   return Civ6Ai_Util.JoinPath(root, "sessions", sessionId, playerLabel, "apply-results.jsonl")
 end
 
+-- Autotest fallback research/civic picks (command_id CMD_auto_*) are not model orders.
+function Civ6Ai_Apply._ResultSource(command, source)
+  local cid = command and tostring(command.command_id or "") or ""
+  if string.sub(cid, 1, 9) == "CMD_auto_" then
+    return "auto_fallback"
+  end
+  return source or "model"
+end
+
+-- Remember the local seat's model research/civic choices so the autotest fallback
+-- does not overwrite them while they are in flight (Civ6Ai_Autotest.NoteModelChoice).
+function Civ6Ai_Apply._NoteModelChoices(playerID, commands)
+  if Civ6Ai_Autotest == nil or Civ6Ai_Autotest.NoteModelChoice == nil or Game == nil
+      or Game.GetLocalPlayer == nil or playerID ~= Game.GetLocalPlayer() then
+    return
+  end
+  for _, c in ipairs(commands or {}) do
+    local cid = tostring(c.command_id or "")
+    if (c.kind == "set_research_tech" or c.kind == "set_research_civic") and string.sub(cid, 1, 9) ~= "CMD_auto_" then
+      Civ6Ai_Autotest.NoteModelChoice(playerID, c.kind, Game.GetCurrentGameTurn())
+    end
+  end
+end
+
 function Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs, source)
   local turn = Game.GetCurrentGameTurn()
+  -- The model's research/civic order has landed (applied or refused): the fallback
+  -- may act again if the slot is still empty.
+  if command ~= nil and Civ6Ai_Autotest ~= nil and Civ6Ai_Autotest.ClearModelChoice ~= nil
+      and string.sub(tostring(command.command_id or ""), 1, 9) ~= "CMD_auto_" then
+    Civ6Ai_Autotest.ClearModelChoice(playerID, command.kind)
+  end
   local payload = {
     event = "apply_result",
     turn = turn,
@@ -57,7 +87,7 @@ function Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs, so
     kind = command and command.kind or "",
     ok = ok,
     reason = reason or "",
-    source = source or "model",
+    source = Civ6Ai_Apply._ResultSource(command, source),
     fixed_arguments = fixedArgs or {},
   }
   Civ6Ai_Util.AppendJsonLine(Civ6Ai_Apply._ApplyResultsPath(playerID), payload)
@@ -168,6 +198,7 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   decision.commands = Civ6Ai_Apply._AttacksBeforeMoves(decision.commands)
   local orderedUnit, orderedCity = Civ6Ai_Apply._CountAttacks(decision.commands)
   local rest = decision.commands
+  Civ6Ai_Apply._NoteModelChoices(playerID, rest)
   if playerID ~= Game.GetLocalPlayer() then
     if forTurn == nil then
       if Civ6Ai_Bridge ~= nil and Civ6Ai_Bridge.SeatForTurn ~= nil then

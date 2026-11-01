@@ -1849,6 +1849,8 @@ def infer_order_source(row: dict[str, Any]) -> str:
     src = row.get("source")
     if src in ("model", "fallback"):
         return src
+    if src == "auto_fallback":  # mod's own research/civic fallback pick (CMD_auto_*)
+        return "fallback"
     cid = str(row.get("command_id") or "")
     if cid.startswith("AUTO_"):
         return "fallback"

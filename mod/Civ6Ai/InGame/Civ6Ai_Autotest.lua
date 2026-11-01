@@ -573,11 +573,51 @@ function Civ6Ai_Autotest._SetFallback(playerID, kind, args, direct)
   return direct(playerID, args)
 end
 
+-- The local seat's model research/civic choice goes out on the synced channel and
+-- lands a moment later. Until it lands the slot still reads empty, so a fallback
+-- pick sent now would arrive after it and overwrite it. Remember the model's
+-- choice per seat, kind and turn, and hold the fallback while it is in flight.
+-- MODEL_CHOICE_WAIT bounds the hold (blocker sweeps) so a rejected choice can never
+-- leave the turn blocked. Local seat only: AI seats never run this fallback path.
+Civ6Ai_Autotest.MODEL_CHOICE_WAIT = 40
+Civ6Ai_Autotest._modelChoice = Civ6Ai_Autotest._modelChoice or {}
+
+function Civ6Ai_Autotest.NoteModelChoice(playerID, kind, turn)
+  if kind ~= "set_research_tech" and kind ~= "set_research_civic" then
+    return
+  end
+  Civ6Ai_Autotest._modelChoice[tostring(playerID) .. "|" .. kind] = { turn = turn, waits = 0 }
+end
+
+function Civ6Ai_Autotest.ClearModelChoice(playerID, kind)
+  Civ6Ai_Autotest._modelChoice[tostring(playerID) .. "|" .. tostring(kind)] = nil
+end
+
+-- True when the fallback should wait for this turn's model choice of this kind.
+function Civ6Ai_Autotest._HoldForModelChoice(playerID, kind)
+  local key = tostring(playerID) .. "|" .. kind
+  local rec = Civ6Ai_Autotest._modelChoice[key]
+  local turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or nil
+  if rec == nil or rec.turn ~= turn then
+    return false
+  end
+  rec.waits = rec.waits + 1
+  if rec.waits > Civ6Ai_Autotest.MODEL_CHOICE_WAIT then
+    Civ6Ai_Autotest._modelChoice[key] = nil
+    return false
+  end
+  return true
+end
+
 function Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
   if Civ6Ai_Apply == nil then
     return
   end
   local techId = Civ6Ai_Autotest._PickFallbackTech(playerID)
+  if techId ~= nil and Civ6Ai_Autotest._HoldForModelChoice(playerID, "set_research_tech") then
+    Civ6Ai_Util.Log("autotest|auto_research_held|player=" .. tostring(playerID) .. "|reason=model_choice_in_flight")
+    techId = nil
+  end
   if techId ~= nil and Civ6Ai_Apply._SetResearchTech ~= nil then
     local ok, reason = Civ6Ai_Autotest._SetFallback(playerID, "set_research_tech", { tech_id = techId }, Civ6Ai_Apply._SetResearchTech)
     Civ6Ai_Autotest._LogLine(
@@ -590,6 +630,10 @@ function Civ6Ai_Autotest._ClearResearchCivicBlockers(playerID)
       .. "|reason=" .. tostring(reason or ""))
   end
   local civicId = Civ6Ai_Autotest._PickFallbackCivic(playerID)
+  if civicId ~= nil and Civ6Ai_Autotest._HoldForModelChoice(playerID, "set_research_civic") then
+    Civ6Ai_Util.Log("autotest|auto_civic_held|player=" .. tostring(playerID) .. "|reason=model_choice_in_flight")
+    civicId = nil
+  end
   if civicId ~= nil and Civ6Ai_Apply._SetResearchCivic ~= nil then
     local ok, reason = Civ6Ai_Autotest._SetFallback(playerID, "set_research_civic", { civic_id = civicId }, Civ6Ai_Apply._SetResearchCivic)
     Civ6Ai_Autotest._LogLine(
