@@ -598,6 +598,32 @@ def _cooldown_problem(snapshot: dict, frm: str, to: str, give: list, want: list)
     return None
 
 
+PACT_TURNS = {"open_borders": 30}
+
+
+def _pact_in_force_problem(snapshot: dict, me: str, other: str, want: list) -> str | None:
+    """Asking again for a pact the other seat already granted (accepted ledger deal) that is still running."""
+    turn = _turn(snapshot)
+    asked = {str(i.get("kind")) for i in want if isinstance(i, dict) and i.get("kind") in PACT_TURNS}
+    for deal in load_deals(snapshot):
+        if deal.get("status") != "accepted":
+            continue
+        if deal.get("from") == me and deal.get("to") == other:
+            got = deal.get("want") or []
+        elif deal.get("from") == other and deal.get("to") == me:
+            got = deal.get("give") or []
+        else:
+            continue
+        for item in got:
+            kind = str(item.get("kind")) if isinstance(item, dict) else ""
+            if kind in asked:
+                start = int(deal.get("done_turn") or deal.get("turn") or 0)
+                if turn - start < PACT_TURNS[kind]:
+                    return (f"you already have {kind.replace('_', ' ')} from that player since T{start} "
+                            f"(runs until about T{start + PACT_TURNS[kind]}); do not pay for it again")
+    return None
+
+
 def rival_status_line(snapshot: dict, rival_id: str) -> str | None:
     """One line: at war since T81; peace offered T96 pending/rejected."""
     major = next((m for m in _lst(diplomacy(snapshot).get("majors")) if isinstance(m, dict)
@@ -827,6 +853,9 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         if problem:
             return [], [f"{key}={value}: {problem}"]
         problem = _cooldown_problem(snapshot, _me(snapshot), pid, give, want)
+        if problem:
+            return [], [f"{key}={value}: {problem}"]
+        problem = _pact_in_force_problem(snapshot, _me(snapshot), pid, want)
         if problem:
             return [], [f"{key}={value}: {problem}"]
         deals = [d for d in load_deals(snapshot)

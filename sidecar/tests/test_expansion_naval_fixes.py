@@ -125,3 +125,15 @@ def test_unit_goal_memory_kept_until_arrival():
     assert ul.update_goals(snap, state, [dict(row, turn=6)])["U"]["set_turn"] == 5
     snap["your_units"][0].update(x=9, y=4)
     assert ul.update_goals(snap, state, []) == {}
+
+
+def test_open_borders_not_bought_twice(monkeypatch):
+    from sidecar import civ6_diplomacy as dip
+    deals = [{"from": "PLAYER_0", "to": "PLAYER_3", "give": [{"res": "RESOURCE_HORSES", "n": 16}],
+              "want": [{"kind": "open_borders"}], "turn": 52, "status": "accepted", "done_turn": 52}]
+    monkeypatch.setattr(dip, "load_deals", lambda snap: deals)
+    snap = {"decision": {"turn": 53, "player_id": "PLAYER_0"}}
+    assert "already have open borders" in dip._pact_in_force_problem(snap, "PLAYER_0", "PLAYER_3", [{"kind": "open_borders"}])
+    assert dip._pact_in_force_problem(snap, "PLAYER_0", "PLAYER_5", [{"kind": "open_borders"}]) is None
+    snap["decision"]["turn"] = 90
+    assert dip._pact_in_force_problem(snap, "PLAYER_0", "PLAYER_3", [{"kind": "open_borders"}]) is None
