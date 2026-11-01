@@ -1281,6 +1281,18 @@ def _empire_section(
     return lines
 
 
+def _improve_offered(snapshot: dict[str, Any]) -> bool:
+    """True when some unit the model commands has an Improve option this turn."""
+    units = {str(u.get("unit_id")): u for u in snapshot.get("your_units", []) if isinstance(u, dict)}
+    for uid, tokens in _civ6_unit_tokens(snapshot).items():
+        unit = units.get(uid)
+        if unit is not None and _game_ai_builder(unit):
+            continue
+        if any(str(t).startswith("Improve(") for t in tokens):
+            return True
+    return False
+
+
 def _found_now_lines(snapshot: dict[str, Any]) -> list[str]:
     """This turn's game check, put above older notes so they cannot override it."""
     units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
@@ -2071,7 +2083,9 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):",
         "unitId.command = MoveTo(x,y) | AttackTo(x,y) | "
         + ("Automate(explore) | " if _explore_offered(snapshot) else "")
-        + "FoundCity | Improve(x,y,IMPROVEMENT_X) (builders) | Fortify | Skip "
+        + "FoundCity | "
+        + ("Improve(x,y,IMPROVEMENT_X) (builders) | " if _improve_offered(snapshot) else "")
+        + "Fortify | Skip "
         "(one option per unit from its row; MoveTo(x,y) = any destination tile, the unit walks toward it).",
         *(
             ["cityName.production = UNIT_* | BUILDING_* | PROJECT_* from that city's listed options (only when "
@@ -2151,6 +2165,9 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         viewport_hint = f"{viewport_hint}. Image 2 is now {where}"
     optional_keys.append(("map.viewport", viewport_hint))
     optional_keys.append(("remember", "text (duration N turns | forever)"))
+    seat_memory = snapshot.get("_seat_memory")
+    if isinstance(seat_memory, dict) and not str((seat_memory.get("plan") or {}).get("goal") or "").strip():
+        optional_keys.append(("plan.goal", "science | culture | domination | diplomacy | religion | score (not set yet)"))
     from sidecar import civ6_priorities
 
     prio_lines = civ6_priorities.prompt_lines(snapshot)
