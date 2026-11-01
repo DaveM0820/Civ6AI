@@ -1281,6 +1281,21 @@ def _empire_section(
     return lines
 
 
+def _found_now_lines(snapshot: dict[str, Any]) -> list[str]:
+    """This turn's game check, put above older notes so they cannot override it."""
+    units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
+    wire_ids = pipeline._build_unit_wire_id_map(units)
+    tokens = _civ6_unit_tokens(snapshot)
+    out = []
+    for unit in units:
+        uid = str(unit.get("unit_id"))
+        if "FoundCity" in tokens.get(uid, []):
+            out.append(pipeline._wire_line(
+                f"now.{wire_ids.get(uid, uid)}",
+                "FoundCity legal here this turn (game check; notes below may be older)"))
+    return out
+
+
 def _game_ai_builder(unit: dict[str, Any]) -> bool:
     """AI-seat builder the mod leaves to the game's builder AI (charges, never needs orders)."""
     return (int(unit.get("build_charges") or 0) > 0 and not unit.get("needs_orders")
@@ -2274,6 +2289,9 @@ def build_civ6_wire_prompt(
     if attention:
         sections.append(pipeline._wire_section(civ6_attention.SECTION, attention))
     thoughts = _thoughts_section(context)
+    now_found = _found_now_lines(context)
+    if thoughts and now_found:
+        thoughts = now_found + thoughts
     if thoughts:
         sections.append(pipeline._wire_section("THOUGHTS", thoughts))
     memory = _memory_section(context)
