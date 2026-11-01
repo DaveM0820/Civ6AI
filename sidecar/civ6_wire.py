@@ -2113,7 +2113,8 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "- Never MoveTo a mountain, a water tile this unit cannot enter, or a tile another of your units of the same kind "
         "(military or civilian) already holds. Mountains are impassable; water is impassable to land units until they can embark. "
         "A rejected move says impassable when the tile cannot be entered, and no_path when no route exists. "
-        "The unit then takes one step toward that destination on a tile it can enter. Do not repeat a destination that stays blocked.",
+        "A move to a water or impassable tile is dropped and the unit does not move that turn; the note lists the nearest reachable land. "
+        "Do not repeat a destination that stays blocked.",
         f"- Coordinates: {coaching.civ6_y_axis_phrase(snapshot)} and x increases east; see the GAME "
         "section for X-wrap.",
         f"- {coaching.CIV6_UNIT_STACKING_GUIDANCE}",

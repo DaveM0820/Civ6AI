@@ -74,11 +74,9 @@ CIV6_SETTLER_MAP_ADVICE = (
 )
 
 CIV6_CHAT_VARIETY_COACHING = (
-    "Chat: do not repeat your opening introduction every turn. After first contact, send a "
-    "fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or "
-    "silence via no chat). Prefer a private chat.<rival leader> key for one met major rival; "
-    "use chat.all sparingly. "
-    "A near-copy or re-introduction after your first public line is dropped, not sent. "
+    "chat.all: only when something changed for you this turn (a city, a meeting, a discovery, "
+    "a war or deal); otherwise skip it. Don't reuse a sentence, opener or image (e.g. 'the tides') "
+    "that you or anyone else used in the last few turns. "
     "thought.strategy is planning prose — do not paste it into chat."
 )
 

@@ -105,3 +105,33 @@ def test_lua_compact_plot_drops_empty_fields():
     rec = lua.eval("Civ6Ai_Snapshot._CompactPlot({x=1, y=2, water=false, hills=true, area_id='AREA_0', "
                    "city_id=Civ6Ai_Util.JsonNull(), visible_stack_ids={}, terrain_id='TERRAIN_PLAINS'})")
     assert sorted(rec.keys()) == ["hills", "terrain_id", "x", "y"]
+
+
+def test_water_move_lists_nearest_reachable_land():
+    from sidecar import civ6_apply_results as ar
+    plots = [{"x": x, "y": 5, "terrain_id": "TERRAIN_PLAINS"} for x in (3, 4, 5)]
+    plots += [{"x": 6, "y": 5, "terrain_id": "TERRAIN_COAST", "water": True},
+              {"x": 8, "y": 5, "terrain_id": "TERRAIN_PLAINS"}]  # land across water: not reachable
+    unit = {"unit_id": "U1", "plot_id": "PLOT_3_5", "domain_id": "DOMAIN_LAND", "unit_type_id": "UNIT_WARRIOR"}
+    snap = {"known_map": {"plots": plots}, "your_units": [unit], "game": {"map_width": 20}}
+    text = ar.move_failure_text(snap, "warrior_1", 6, 5, "impassable", "PLAYER_0", "DOMAIN_LAND", unit)
+    assert "(5,5) or (4,5)" in text and "(8,5)" not in text and "did not move" in text
+
+
+def test_move_rule_no_longer_claims_a_step_toward():
+    import inspect
+    from sidecar import civ6_wire, civ6_prompt_budget
+    for mod in (civ6_wire, civ6_prompt_budget):
+        assert "takes one step toward that destination" not in inspect.getsource(mod)
+
+
+def test_water_tint_is_saturated_blue_and_coast_lighter():
+    from sidecar import map_render_civ6 as m, map_render
+    coast = m.water_tint_rgb({"terrain_id": "TERRAIN_COAST", "water": True})
+    ocean = m.water_tint_rgb({"terrain_id": "TERRAIN_OCEAN", "water": True})
+    assert m.water_tint_rgb({"terrain_id": "TERRAIN_PLAINS"}) is None
+    for r, g, b in (coast, ocean):
+        assert b >= 190 and b - max(r, g) >= 90  # clearly blue, not gray
+    assert sum(coast) > sum(ocean)
+    fog = m.FOG_BASE_GRAY
+    assert map_render.UNEXPLORED_FILL == "#000000" and 80 <= fog <= 170

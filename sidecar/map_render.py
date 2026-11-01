@@ -42,8 +42,8 @@ CELL_FONT_BASE = 5
 UNEXPLORED_FILL = "#000000"
 
 TERRAIN_COLORS: dict[str, str] = {
-    "TERRAIN_OCEAN": "#426080",
-    "TERRAIN_COAST": "#5a8ab0",
+    "TERRAIN_OCEAN": "#1048c8",
+    "TERRAIN_COAST": "#2896f5",
     "TERRAIN_GRASS": "#6a9a5a",
     "TERRAIN_PLAINS": "#b0a070",
     "TERRAIN_DESERT": "#c8b070",
@@ -53,15 +53,15 @@ TERRAIN_COLORS: dict[str, str] = {
 
 GRID_CHAR_COLORS: dict[str, str] = {
     ".": "#6a9a5a",
-    "~": "#5a8ab0",
+    "~": "#2896f5",
     "^": "#f4f4f4",
     "#": "#777777",
 }
 
 TERRAIN_LEGEND = [
     ("Grass", "#6a9a5a"),
-    ("Coast", "#5a8ab0"),
-    ("Ocean", "#426080"),
+    ("Coast", "#2896f5"),
+    ("Ocean", "#1048c8"),
     ("Plains", "#b0a070"),
     ("Desert", "#c8b070"),
     ("Hills", "#777777"),
@@ -946,7 +946,7 @@ def _territory_owners_in_viewport(
 
 
 def _cell_label_color(fill: str) -> str:
-    if fill in {UNEXPLORED_FILL, "#1a1a22", "#426080", "#777777"}:
+    if fill in {UNEXPLORED_FILL, "#1a1a22", "#1048c8", "#777777"}:
         return "#ddd"
     return "#111"
 

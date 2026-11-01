@@ -562,12 +562,85 @@ def _plot_facts(snapshot: dict[str, Any], x: int, y: int, player_id: str) -> lis
     return facts
 
 
+def _hex_cube(x: int, y: int) -> tuple[int, int]:
+    """Odd-r offset to axial (q, r)."""
+    return x - (y - (y & 1)) // 2, y
+
+
+def _hex_dist(a: tuple[int, int], b: tuple[int, int]) -> int:
+    aq, ar = _hex_cube(*a)
+    bq, br = _hex_cube(*b)
+    dq, dr = aq - bq, ar - br
+    return max(abs(dq), abs(dr), abs(dq + dr))
+
+
+def nearest_reachable_land(snapshot: dict[str, Any], unit: dict[str, Any] | None,
+                           tx: int, ty: int, limit: int = 3) -> list[tuple[int, int]]:
+    """Known land tiles a land unit can walk to from where it stands, nearest to (tx,ty) first.
+
+    Walks only known land (no water, no mountain); tiles held by your own units are
+    passed through but not offered.
+    """
+    from sidecar import map_render
+
+    if not isinstance(unit, dict):
+        return []
+    start = map_render._parse_plot_coords(unit.get("plot_id"))
+    if start is None:
+        return []
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    width = int(game.get("map_width") or 0)
+    wrap = bool(game.get("wrap_x")) and width > 0
+    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    land: set[tuple[int, int]] = set()
+    for p in known.get("plots") or []:
+        if not isinstance(p, dict) or not isinstance(p.get("x"), int) or not isinstance(p.get("y"), int):
+            continue
+        if p.get("water") or p.get("peak") or legality.is_mountain(p):
+            continue
+        land.add((p["x"], p["y"]))
+    occupied = set(legality.own_occupied_plots(snapshot))
+    seen = {start}
+    queue = [start]
+    while queue:
+        x, y = queue.pop(0)
+        deltas = ([(1, 0), (1, 1), (0, 1), (-1, 0), (0, -1), (1, -1)] if y & 1
+                  else [(1, 0), (0, 1), (-1, 1), (-1, 0), (-1, -1), (0, -1)])
+        for dx, dy in deltas:
+            nx, ny = x + dx, y + dy
+            if wrap:
+                nx %= width
+            if (nx, ny) in seen or (nx, ny) not in land:
+                continue
+            seen.add((nx, ny))
+            queue.append((nx, ny))
+
+    def dist(t: tuple[int, int]) -> int:
+        best = _hex_dist(t, (tx, ty))
+        if wrap:
+            best = min(best, _hex_dist((t[0] + width, t[1]), (tx, ty)), _hex_dist((t[0] - width, t[1]), (tx, ty)))
+        return best
+
+    options = [t for t in seen if t != start and t not in occupied]
+    options.sort(key=lambda t: (dist(t), _hex_dist(t, start), t))
+    return options[:limit]
+
+
+def _land_hint(snapshot: dict[str, Any], unit: dict[str, Any] | None, x: int, y: int) -> str:
+    tiles = nearest_reachable_land(snapshot, unit, x, y)
+    if not tiles:
+        return ""
+    names = [f"({a},{b})" for a, b in tiles]
+    joined = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+    return f" Nearest reachable land toward it: {joined}. The unit did not move."
+
+
 _MOVE_TAIL = ("Try a different tile. Remember to check the map before issuing movement orders "
               "to make sure it's a valid tile.")
 
 
 def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reason: str, pid: str,
-                      domain: str = "") -> str:
+                      domain: str = "", unit: dict[str, Any] | None = None) -> str:
     """'You tried to move Warrior 1 to tile (x,y). Tile (x,y) is a mountain and is impassable. ...'"""
     facts = _plot_facts(snapshot, x, y, pid)
     sea = domain == "DOMAIN_SEA"
@@ -595,7 +668,10 @@ def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reas
         why = "not explored (no known path)"
     else:
         why = "not reachable: " + (describe_reason(reason) or "the game rejected it")
-    return (f"You tried to move {actor or 'the unit'} to tile ({x},{y}). Tile ({x},{y}) is {why}. " + _MOVE_TAIL)
+    hint = ""
+    if not sea and ("water" in facts or "mountain" in facts or reason == "impassable"):
+        hint = _land_hint(snapshot, unit, x, y)
+    return (f"You tried to move {actor or 'the unit'} to tile ({x},{y}). Tile ({x},{y}) is {why}.{hint} " + _MOVE_TAIL)
 
 
 def tile_failure_text(snapshot: dict[str, Any], row: dict[str, Any], actor: str, reason: str) -> str | None:
@@ -611,7 +687,7 @@ def tile_failure_text(snapshot: dict[str, Any], row: dict[str, Any], actor: str,
     if kind == "move_unit":
         unit = next((u for u in snapshot.get("your_units") or [] if isinstance(u, dict)
                      and str(u.get("unit_id")) == str(fixed.get("unit_id"))), {})
-        return move_failure_text(snapshot, actor, x, y, reason, pid, str(unit.get("domain_id") or ""))
+        return move_failure_text(snapshot, actor, x, y, reason, pid, str(unit.get("domain_id") or ""), unit)
     reasons = [r for r in [describe_reason(reason) or "the game rejected it"] + _plot_facts(snapshot, x, y, pid) if r]
     return f"Last turn you tried to {action} ({x},{y}) but it failed: " + " | ".join(dict.fromkeys(reasons))
 

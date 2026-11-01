@@ -263,7 +263,7 @@ GOOD JSON (entire reply — row numbers on keys; host strips the prefix):
 
 Command rules:
 - Movement: unitId.command = MoveTo(x,y) with any destination. One MoveTo spends the unit's remaining moves (unitId.moves of unitId.maxMovement) along the game's route; pick a destination at least that far on open ground. Hills, forest, and rivers cost extra; a step needs its full cost from the moves left, except that a unit that has not moved this turn can always enter one adjacent tile, however rough (that uses all its movement).
-- Never MoveTo a mountain, a water tile this unit cannot enter, or a tile another of your units of the same kind (military or civilian) already holds. Mountains are impassable; water is impassable to land units until they can embark. A rejected move says impassable when the tile cannot be entered, and no_path when no route exists. The unit then takes one step toward that destination on a tile it can enter. Do not repeat a destination that stays blocked.
+- Never MoveTo a mountain, a water tile this unit cannot enter, or a tile another of your units of the same kind (military or civilian) already holds. Mountains are impassable; water is impassable to land units until they can embark. A rejected move says impassable when the tile cannot be entered, and no_path when no route exists. A move to a water or impassable tile is dropped and the unit does not move that turn; the note lists the nearest reachable land. Do not repeat a destination that stays blocked.
 - Coordinates: game-plot y increases north (up on the map image; north at top) and x increases east; see the GAME section for X-wrap.
 - Civ6 stacking: typically one military formation-class unit per tile, plus one civilian or support unit; two military units of the same formation class cannot share a tile. Use corps/armies and support units (e.g. battering ram, siege tower) intentionally.
 - Attacks are AttackTo on a unit row (melee, ranged, or bombard) and rangeStrike on a city row (a city attack or city strike). A unit with leftover movement can often still attack this turn after moving — do not treat "already moved" as "cannot attack" unless the unit has 0 moves left or the attack is otherwise illegal.
@@ -274,7 +274,7 @@ Command rules:
 - Private messages are tagged by turn (chat.private.tN.*); reply only to DMs from this turn, not older lines.
 - DM recipients: Cleopatra
 - You have not spoken publicly yet — an optional punchy opener is fine; skip solemn welcomes.
-- Chat: do not repeat your opening introduction every turn. After first contact, send a fresh line tied to this turn (deal, threat, tease, map discovery, war, amenity, or silence via no chat). Prefer a private chat.<rival leader> key for one met major rival; use chat.all sparingly. A near-copy or re-introduction after your first public line is dropped, not sent. thought.strategy is planning prose — do not paste it into chat.
+- chat.all: only when something changed for you this turn (a city, a meeting, a discovery, a war or deal); otherwise skip it. Don't reuse a sentence, opener or image (e.g. 'the tides') that you or anyone else used in the last few turns. thought.strategy is planning prose — do not paste it into chat.
 - Private DMs use a rival's leader name as the key (chat.Cleopatra). chat.all is public. Address people by those leader names, never as Player N. Write the line in English, in your own words — do not send another player's line back to them. Keep each line under 800 characters.
 
 === OPTIONAL COMMANDS ===

@@ -132,7 +132,11 @@ class Civ6PromptCoachingTests(unittest.TestCase):
 
 
     def test_expansion_and_chat_coaching_constants(self):
-        self.assertIn("do not repeat", coaching.CIV6_CHAT_VARIETY_COACHING.lower())
+        text = coaching.CIV6_CHAT_VARIETY_COACHING.lower()
+        self.assertIn("don't reuse", text)
+        self.assertIn("otherwise skip it", text)
+        # The near-repeat guard is off, so the prompt must not claim drops.
+        self.assertNotIn("dropped", text)
 
     def test_explored_percent_is_the_whole_map_not_the_picture(self):
         from sidecar.map_situational import format_strategic_window

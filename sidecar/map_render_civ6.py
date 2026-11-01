@@ -794,6 +794,21 @@ def _plot_is_water(plot: dict[str, Any] | None) -> bool:
     return terrain.endswith("_OCEAN") or terrain.endswith("_COAST") or terrain.endswith("_WATER")
 
 
+# Saturated blue wash over water sprites so water never reads as fog or
+# unexplored gray. Coast is lighter than ocean; both are clearly blue.
+COAST_WATER_RGB = (40, 150, 245)
+OCEAN_WATER_RGB = (16, 72, 200)
+WATER_TINT_ALPHA = 0.72
+
+
+def water_tint_rgb(plot: dict[str, Any] | None) -> tuple[int, int, int] | None:
+    """Blue for a water plot (coast lighter than ocean), None for land."""
+    if not _plot_is_water(plot):
+        return None
+    terrain = str((plot or {}).get("terrain_id") or "").upper()
+    return OCEAN_WATER_RGB if terrain.endswith("_OCEAN") else COAST_WATER_RGB
+
+
 def _draw_water_mark(draw: Any, cx: float, cy: float, hex_radius: float) -> None:
     """Blue bar so water reads as impassable to a land unit, even on a pale sprite."""
     width = max(6.0, hex_radius * 0.72)
@@ -2127,6 +2142,13 @@ def render_civ6_map_png(
                     used_sprite = _paste_strategic_hex(
                         canvas, plot, cx, cy, hex_radius, prefer_civ5_sprites=prefer_civ5_sprites,
                     )
+                    water_rgb = water_tint_rgb(plot)
+                    if water_rgb is not None and used_sprite and not prefer_civ5_sprites:
+                        alpha = WATER_TINT_ALPHA * (0.8 if plot.get("knowledge") == "remembered" else 1.0)
+                        _paste_territory_tint(
+                            canvas, cx, cy, hex_radius,
+                            "#%02x%02x%02x" % water_rgb, alpha,
+                        )
                     if territory_owner is not None and used_sprite:
                         _paste_territory_tint(
                             canvas,

@@ -332,7 +332,7 @@ def _shorten_legend_rule(line: str) -> str:
         return line
     return (
         "- Never MoveTo a mountain or a water tile this unit cannot enter, or a tile one of your units already holds. "
-        "A rejected move says impassable or no_path. The unit then takes one step toward that destination."
+        "A rejected move says impassable or no_path; for a water or impassable tile the unit does not move."
     )
 
 
