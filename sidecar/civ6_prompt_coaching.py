@@ -269,7 +269,28 @@ def _water_and_embark_clause(snapshot: Any) -> str:
         else:
             text += (" Shipbuilding lets units embark onto coast (shallow water) only;"
                      " ocean (deep water) needs Cartography, for ships too.")
+            text += _cartography_status(snapshot)
     return text
+
+
+def _cartography_status(snapshot: dict[str, Any]) -> str:
+    """Whether Cartography is researchable now, else which known-missing techs come first."""
+    from sidecar import civ6_legality
+    from sidecar.civ6_governance import governance
+
+    techs = governance(snapshot).get("techs") or {}
+    techs = techs if isinstance(techs, dict) else {}
+    ids = {str(o.get("id")) for o in techs.get("options") or [] if isinstance(o, dict)}
+    if "TECH_CARTOGRAPHY" in ids or techs.get("current") == "TECH_CARTOGRAPHY":
+        return " Cartography is researchable now."
+    needs = techs.get("cartography_needs")
+    if not isinstance(needs, list):
+        # Older mod build: in this ruleset Cartography opened the turn Buttress finished.
+        needs = [] if civ6_legality.knows_tech(snapshot, "TECH_BUTTRESS") else ["TECH_BUTTRESS"]
+    names = [str(t).removeprefix("TECH_").replace("_", " ").title() for t in needs if t]
+    if names:
+        return f" Cartography is not researchable yet; it needs {', '.join(names)} first."
+    return ""
 
 
 def nearest_city(snapshot: dict[str, Any], x: int, y: int) -> tuple[str, int] | None:

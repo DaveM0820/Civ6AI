@@ -5355,6 +5355,20 @@ function Civ6Ai_Snapshot._GovTechs(player)
     out.current_boost = Civ6Ai_Snapshot._BoostText(trow.TechnologyType)
   end
   out.science_per_turn = Civ6Ai_Snapshot._YieldOrCities(player, gcall(techs, "GetScienceYield"), YieldTypes ~= nil and YieldTypes.SCIENCE or nil)
+  -- Unknown prerequisites of Cartography (ocean for ships and embarked units), from game data.
+  local carto = GameInfo.Technologies["TECH_CARTOGRAPHY"]
+  if carto ~= nil and gcall(techs, "HasTech", carto.Index) == false and GameInfo.TechnologyPrereqs ~= nil then
+    local needs = Civ6Ai_Util.JsonArrayList()
+    for pr in GameInfo.TechnologyPrereqs() do
+      if pr.Technology == "TECH_CARTOGRAPHY" then
+        local row = GameInfo.Technologies[pr.PrereqTech]
+        if row ~= nil and gcall(techs, "HasTech", row.Index) == false then
+          needs[#needs + 1] = pr.PrereqTech
+        end
+      end
+    end
+    out.cartography_needs = needs
+  end
   for t in GameInfo.Technologies() do
     if gcall(techs, "CanResearch", t.Index) == true and gcall(techs, "HasTech", t.Index) == false then
       out.options[#out.options + 1] = {
