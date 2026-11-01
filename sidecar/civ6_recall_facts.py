@@ -89,7 +89,7 @@ def _can_reach_other_land(snapshot: dict[str, Any]) -> bool:
 
 
 def landmass_line(snapshot: dict[str, Any]) -> str | None:
-    """'N known land tiles; unrevealed land on it: ...' for the land the capital stands on."""
+    """'N known land tiles; unexplored land continues past ... reachable on foot now' for the land the capital stands on."""
     from sidecar.civ6_tactical_view import _capital
 
     start = _capital(snapshot)
@@ -116,10 +116,10 @@ def landmass_line(snapshot: dict[str, Any]) -> str | None:
     if edges:
         shown = ", ".join(f"({x},{y})" for x, y in edges[:LANDMASS_EDGE_CAP])
         more = "…" if len(edges) > LANDMASS_EDGE_CAP else ""
-        fog = f"unrevealed land on it: may continue past {shown}{more}"
+        fog = f"unexplored land continues past {shown}{more} reachable on foot now"
     else:
-        fog = "unrevealed land on it: none"
+        fog = "fully explored"
     line = f"{len(region)} known land tiles; {fog}"
     if not _can_reach_other_land(snapshot):
-        line += "; land units reach other land only after Shipbuilding (embark); ships can scout it"
+        line += "; other landmasses need Shipbuilding (embark)"
     return line

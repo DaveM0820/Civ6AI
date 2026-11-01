@@ -22,7 +22,8 @@ def test_landmass_line_flood_fill():
     snap = {"known_map": {"plots": plots}, "your_cities": [{"plot_id": "PLOT_3_4", "is_capital": True}],
             "your_units": [], "game": {"map_width": 20}}
     line = r.landmass_line(snap)
-    assert line.startswith("3 known land tiles; unrevealed land on it: may continue past (2,4)")
+    assert line == ("3 known land tiles; unexplored land continues past (2,4), (3,4), (4,4) reachable on foot now; "
+                    "other landmasses need Shipbuilding (embark)")
     assert "Shipbuilding" in line
     snap["your_units"] = [{"domain_id": "DOMAIN_SEA"}]
     assert "Shipbuilding" in r.landmass_line(snap)
@@ -32,7 +33,7 @@ def test_landmass_line_flood_fill():
     ring = [{"x": x, "y": y, "water": True} for x in range(0, 6) for y in range(2, 7) if (x, y) != (3, 4)]
     snap2 = {"known_map": {"plots": ring + [{"x": 3, "y": 4}]}, "your_cities": [{"plot_id": "PLOT_3_4"}],
              "your_units": [], "game": {"map_width": 20}}
-    assert "unrevealed land on it: none" in r.landmass_line(snap2)
+    assert r.landmass_line(snap2) == "1 known land tiles; fully explored; other landmasses need Shipbuilding (embark)"
 
 
 def test_full_wire_text_includes_landmass_line():
