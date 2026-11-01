@@ -47,6 +47,36 @@ def assign(units: list[dict[str, Any]], state: dict[str, Any]) -> dict[str, str]
     return out
 
 
+def update_goals(snapshot: dict[str, Any], state: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, dict]:
+    """Per-unit goal memory: the model's last MoveTo target, kept until the unit is
+    there, gets a different kind of order, or is gone. ``rows`` are last turn's apply rows."""
+    from sidecar.civ6_common import plot_xy
+
+    goals = state.get("goals") if isinstance(state.get("goals"), dict) else {}
+    units = {str(u.get("unit_id")): u for u in snapshot.get("your_units") or [] if isinstance(u, dict)}
+    for row in rows:
+        if not isinstance(row, dict) or row.get("source") != "model":
+            continue
+        fixed = row.get("fixed_arguments") if isinstance(row.get("fixed_arguments"), dict) else {}
+        uid = str(fixed.get("unit_id") or "")
+        if not uid:
+            continue
+        if row.get("kind") == "move_unit" and isinstance(fixed.get("target_x"), int) and isinstance(fixed.get("target_y"), int):
+            old = goals.get(uid) if isinstance(goals.get(uid), dict) else {}
+            same = (old.get("x"), old.get("y")) == (fixed["target_x"], fixed["target_y"])
+            goals[uid] = {"x": fixed["target_x"], "y": fixed["target_y"],
+                          "set_turn": old.get("set_turn") if same else row.get("turn")}
+        elif row.get("kind") not in ("fallback_hint",):
+            goals.pop(uid, None)
+    for uid in list(goals):
+        unit = units.get(uid)
+        goal = goals[uid]
+        if unit is None or not isinstance(goal, dict) or plot_xy(unit) == (goal.get("x"), goal.get("y")):
+            goals.pop(uid, None)
+    state["goals"] = goals
+    return goals
+
+
 def activate(snapshot: dict[str, Any], state_dir: Path | str | None) -> dict[str, str]:
     """Load, assign, save, and make the labels the ones every prompt/parse call uses."""
     from sidecar import pipeline_v2 as pipeline
@@ -60,6 +90,20 @@ def activate(snapshot: dict[str, Any], state_dir: Path | str | None) -> dict[str
         except (OSError, ValueError):
             state = {}
     labels = assign(list(snapshot.get("your_units") or []), state)
+    try:
+        from sidecar import civ6_apply_results
+
+        decision = snapshot.get("decision") if isinstance(snapshot.get("decision"), dict) else {}
+        rows: list[dict[str, Any]] = []
+        if state_dir and decision.get("turn") is not None:
+            turn = int(decision["turn"])
+            if state.get("goals_turn") != turn:
+                _, rows = civ6_apply_results.latest_turn_rows(
+                    civ6_apply_results.load_apply_results(Path(state_dir)), str(decision.get("player_id") or ""), turn)
+                state["goals_turn"] = turn
+        snapshot["_unit_goals"] = update_goals(snapshot, state, rows)
+    except Exception:
+        pass
     if path is not None:
         try:
             path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")

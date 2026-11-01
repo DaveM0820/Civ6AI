@@ -113,3 +113,15 @@ def test_unit_labels_stable_when_same_type_unit_dies(tmp_path):
         assert pl._build_unit_wire_id_map([{"unit_id": "X", "unit_type_id": "UNIT_WARRIOR"}]) == {"X": "warrior_1"}
     finally:
         pl._STABLE_UNIT_LABELS = None
+
+
+def test_unit_goal_memory_kept_until_arrival():
+    from sidecar import civ6_unit_labels as ul
+    state = {}
+    snap = {"your_units": [{"unit_id": "U", "x": 1, "y": 1}]}
+    row = {"source": "model", "kind": "move_unit", "turn": 5,
+           "fixed_arguments": {"unit_id": "U", "target_x": 9, "target_y": 4}}
+    assert ul.update_goals(snap, state, [row]) == {"U": {"x": 9, "y": 4, "set_turn": 5}}
+    assert ul.update_goals(snap, state, [dict(row, turn=6)])["U"]["set_turn"] == 5
+    snap["your_units"][0].update(x=9, y=4)
+    assert ul.update_goals(snap, state, []) == {}

@@ -1854,6 +1854,12 @@ def _unit_memory_lines(context: dict[str, Any]) -> list[str]:
             text += f"; heading to ({goal['x']},{goal['y']})"
             if goal.get("set_turn") not in (None, ""):
                 text += f" since T{goal['set_turn']}"
+        else:
+            own_goal = (context.get("_unit_goals") or {}).get(uid)
+            if isinstance(own_goal, dict) and own_goal.get("x") is not None:
+                text += f"; your goal ({own_goal['x']},{own_goal['y']})"
+                if own_goal.get("set_turn") not in (None, ""):
+                    text += f" set T{own_goal['set_turn']}"
         out.append(pipeline._wire_line(f"unit.{names.get(uid, uid)}", text))
     return out
 
