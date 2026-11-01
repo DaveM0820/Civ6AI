@@ -96,3 +96,20 @@ def test_recommended_sites_drop_too_close_and_occupied():
             "your_units": []}
     rows = cw.game_settle_recommendations(snap)
     assert [(r["x"], r["y"], r["label"]) for r in rows] == [(16, 10, "S1")]
+
+
+def test_unit_labels_stable_when_same_type_unit_dies(tmp_path):
+    from sidecar import civ6_unit_labels as ul, pipeline_v2 as pl
+    a = {"unit_id": "UNIT_1", "unit_type_id": "UNIT_SETTLER"}
+    b = {"unit_id": "UNIT_2", "unit_type_id": "UNIT_SETTLER"}
+    try:
+        assert ul.activate({"your_units": [a, b]}, tmp_path) == {"UNIT_1": "settler_1", "UNIT_2": "settler_2"}
+        labels = ul.activate({"your_units": [b]}, tmp_path)
+        assert labels == {"UNIT_2": "settler_2"}
+        assert pl._build_unit_wire_id_map([b]) == {"UNIT_2": "settler_2"}
+        c = {"unit_id": "UNIT_0", "unit_type_id": "UNIT_SETTLER"}
+        assert ul.activate({"your_units": [b, c]}, tmp_path)["UNIT_0"] == "settler_3"
+        # foreign / unregistered units fall back to plain numbering
+        assert pl._build_unit_wire_id_map([{"unit_id": "X", "unit_type_id": "UNIT_WARRIOR"}]) == {"X": "warrior_1"}
+    finally:
+        pl._STABLE_UNIT_LABELS = None

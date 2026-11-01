@@ -1174,7 +1174,17 @@ def _unit_type_label(unit_type_id: Any) -> str:
     return _readable_id(unit_type_id, "UNIT_").lower()
 
 
+# Stable unit labels for the seat being prompted (civ6_unit_labels.activate). When
+# every unit in a call is registered, its registered label is used, so a unit keeps
+# its label for life instead of being renumbered when a same-type unit dies.
+_STABLE_UNIT_LABELS: dict[str, str] | None = None
+
+
 def _build_unit_wire_id_map(units: list[dict[str, Any]]) -> dict[str, str]:
+    if _STABLE_UNIT_LABELS:
+        ids = [u["unit_id"] for u in units if isinstance(u, dict) and isinstance(u.get("unit_id"), str)]
+        if ids and all(uid in _STABLE_UNIT_LABELS for uid in ids):
+            return {uid: _STABLE_UNIT_LABELS[uid] for uid in ids}
     type_counts: dict[str, int] = {}
     wire_ids: dict[str, str] = {}
     sorted_units = sorted(

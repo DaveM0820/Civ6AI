@@ -733,6 +733,11 @@ def main() -> None:
     _apply_personality(snapshot, args.personality)
     from sidecar import civ6_legality as legality
 
+    try:  # stable unit labels for this seat (settler_2 keeps its label when another settler dies)
+        from sidecar import civ6_unit_labels
+        civ6_unit_labels.activate(snapshot, args.session_dir)
+    except Exception as error:
+        print(f"unit labels skipped: {error}", file=sys.stderr)
     try:
         civ6_apply_results.inject_command_results(snapshot, args.session_dir)
     except Exception as error:  # never block a seat-turn on feedback rows
