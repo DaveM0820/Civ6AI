@@ -25,7 +25,8 @@
     "city_captured",
     "city_founded",
     "first_city",
-    "government_change"
+    "government_change",
+    "idle_settlers"
   ],
   "sentence_mins": [[5, 5], [10, 8], [15, 10], [20, 15]],
   "triggers": {

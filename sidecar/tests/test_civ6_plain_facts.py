@@ -161,3 +161,38 @@ def test_coord_label_font_fits_hex():
     size = m.fit_coord_font("(73,45)", 40, 30.0)
     l, _t, r, _b = map_render._coord_label_font(size).getbbox("(73,45)")
     assert r - l <= 36 and size >= 7
+
+
+def test_captured_settler_is_dropped_with_its_alert():
+    from sidecar import civ6_apply_results as ar
+    snap = {
+        "your_units": [
+            {"unit_id": "UNIT_9", "unit_type_id": "UNIT_SETTLER", "plot_id": "PLOT_43_14",
+             "needs_orders": True, "settle": {"here_ok": False, "here_reason": "plot_not_found"}},
+            {"unit_id": "UNIT_1", "unit_type_id": "UNIT_WARRIOR", "plot_id": "PLOT_41_15"},
+            {"unit_id": "UNIT_2", "unit_type_id": "UNIT_WARRIOR", "plot_id": "PLOT_-9999_-9999"},
+        ],
+        "strategic_summary": {"city_alerts": [
+            {"text": "UNIT_9 cannot found a city on its tile (plot_not_found).", "affected_ids": ["UNIT_9"]},
+            {"text": "Qusqu needs housing", "affected_ids": []}]},
+    }
+    assert ar.drop_gone_units(snap) == ["UNIT_9", "UNIT_2"]
+    assert [u["unit_id"] for u in snap["your_units"]] == ["UNIT_1"]
+    assert [a["text"] for a in snap["strategic_summary"]["city_alerts"]] == ["Qusqu needs housing"]
+
+
+def test_unit_not_found_reported_once():
+    from sidecar import civ6_apply_results as ar
+    rows = [{"player_id": "PLAYER_0", "turn": 22, "ok": False, "reason": "unit_not_found", "kind": "move_unit",
+             "fixed_arguments": {"unit_id": "UNIT_9", "target_x": 40, "target_y": 14}},
+            {"player_id": "PLAYER_0", "turn": 22, "ok": False, "reason": "impassable", "kind": "move_unit",
+             "fixed_arguments": {"unit_id": "UNIT_1", "target_x": 36, "target_y": 17}}]
+    snap = {"your_units": [{"unit_id": "UNIT_1", "plot_id": "PLOT_37_17"}]}
+    later = ar._earlier_failed_items(snap, rows, "PLAYER_0", 23, [])
+    assert all("no longer exists" not in i.get("summary", "") for i in later)
+    assert len(later) == 1
+
+
+def test_idle_settlers_is_exempt_from_baseline():
+    from sidecar import civ6_turn_importance as imp
+    assert "idle_settlers" in imp.load_config().get("exempt", [])

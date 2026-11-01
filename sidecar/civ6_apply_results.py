@@ -807,6 +807,8 @@ def _earlier_failed_items(snapshot: dict[str, Any], rows: list[dict[str, Any]], 
         except (TypeError, ValueError):
             continue
         key = _target_key(row)
+        if str(row.get("reason") or "") in UNIT_GONE_REASONS:
+            continue  # "that unit no longer exists" is said once, on the turn it happened
         if key is None or key in skip or not (latest - EARLIER_LOOKBACK_TURNS <= turn < latest):
             continue
         if key not in newest or turn >= int(newest[key]["turn"]):
@@ -818,6 +820,51 @@ def _earlier_failed_items(snapshot: dict[str, Any], rows: list[dict[str, Any]], 
         item["kind"] = KIND_FAILED_EARLIER
         items.append(item)
     return items
+
+
+UNIT_GONE_REASONS = frozenset({"unit_not_found", "no_units", "stale_unit_id"})
+
+
+def drop_gone_units(snapshot: dict[str, Any]) -> list[str]:
+    """Remove units that no longer exist (captured, killed) from this turn's unit list.
+
+    A captured settler can still be listed for one snapshot with its own tile
+    reported as "plot_not_found"; a unit's own tile is never off the map, so that
+    (or an off-map plot) means the unit is gone. Its alerts go too.
+    """
+    from sidecar import map_render
+
+    units = snapshot.get("your_units")
+    if not isinstance(units, list):
+        return []
+    gone: list[str] = []
+    kept: list[Any] = []
+    for unit in units:
+        if not isinstance(unit, dict):
+            kept.append(unit)
+            continue
+        settle = unit.get("settle") if isinstance(unit.get("settle"), dict) else {}
+        xy = map_render._parse_plot_coords(unit.get("plot_id")) if unit.get("plot_id") else None
+        off_map = unit.get("plot_id") is not None and (xy is None or xy[0] < 0 or xy[1] < 0)
+        if settle.get("here_reason") == "plot_not_found" or off_map:
+            gone.append(str(unit.get("unit_id") or ""))
+            continue
+        kept.append(unit)
+    if not gone:
+        return []
+    snapshot["your_units"] = kept
+    summary = snapshot.get("strategic_summary")
+    if isinstance(summary, dict):
+        for section, alerts in list(summary.items()):
+            if not (section.endswith("_alerts") and isinstance(alerts, list)):
+                continue
+            summary[section] = [
+                a for a in alerts
+                if not (isinstance(a, dict) and any(
+                    g and (str(a.get("text") or "").startswith(g + " ") or g in (a.get("affected_ids") or []))
+                    for g in gone))
+            ]
+    return gone
 
 
 def inject_command_results(snapshot: dict[str, Any], session_dir: Path | None) -> int:

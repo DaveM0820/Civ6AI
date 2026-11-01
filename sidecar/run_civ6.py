@@ -730,6 +730,10 @@ def main() -> None:
     raw = _read(state_path)
     snapshot = civ6_adapter.upgrade_runtime_snapshot(raw) if args.from_game else raw
     civ6_adapter.normalize_civ6_snapshot(snapshot)
+    try:  # a captured/killed unit can linger one snapshot; it takes no orders
+        civ6_apply_results.drop_gone_units(snapshot)
+    except Exception as error:
+        print(f"gone-unit filter skipped: {error}", file=sys.stderr)
     _apply_personality(snapshot, args.personality)
     from sidecar import civ6_legality as legality
 
