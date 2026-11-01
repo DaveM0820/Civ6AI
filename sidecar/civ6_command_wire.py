@@ -125,6 +125,12 @@ def _wrap_x(snapshot: dict[str, Any], x: int) -> int:
     return x
 
 
+def _unit_name(snapshot: dict[str, Any], unit_id: Any) -> str:
+    """The unit's prompt label (settler_1), not the raw UNIT_ id."""
+    units = [u for u in snapshot.get("your_units") or [] if isinstance(u, dict)]
+    return pipeline._build_unit_wire_id_map(units).get(str(unit_id), str(unit_id))
+
+
 def labeled_settle_sites(snapshot: dict[str, Any], radius: int | None = None) -> list[dict[str, Any]]:
     """Stable S1..Sn labels for legal nearby settle tiles (unranked; overlay + prompt)."""
     return []  # settle-site suggestions removed (prompt and map); the model picks tiles
@@ -541,7 +547,7 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
         picked = _pick_improve(improves, value, coord)
         if picked is None:
             offered = sorted({f"({xy[0]},{xy[1]})" for xy in (_improve_xy(t) for t, _c in improves) if xy})
-            _reject(snapshot, f"{value} for {unit_id} (Improve is offered this turn only at {', '.join(offered)})",
+            _reject(snapshot, f"{value} for {_unit_name(snapshot, unit_id)} (Improve is offered this turn only at {', '.join(offered)})",
                     "improve_tile_not_offered")
         return picked
     for token, cmd_id in candidates:
@@ -729,13 +735,13 @@ def _synthesize_far_move(
     Encodes WP-A MOVE G=1 and A=arrival intent (found=1, improve=2, religion=3, trade=4).
     """
     if not _on_map(snapshot, x, y):
-        _reject(snapshot, f"MoveTo({x},{y}) for {unit_id}", "off_map")
+        _reject(snapshot, f"MoveTo({x},{y}) for {_unit_name(snapshot, unit_id)}", "off_map")
         return None
     unit = _unit_row(snapshot, unit_id)
     here = _plot_xy(unit)
     if here == (x, y):
         # The unit holds this turn (Skip) and the model is told why next turn.
-        _reject(snapshot, f"MoveTo({x},{y}) for {unit_id}", "self_tile_move")
+        _reject(snapshot, f"MoveTo({x},{y}) for {_unit_name(snapshot, unit_id)}", "self_tile_move")
         return _synthesize_skip(snapshot, unit_id)
     if intent == INTENT_MOVE:
         attack = _legal_attack_at(snapshot, unit_id, x, y)
@@ -793,10 +799,10 @@ def _synthesize_settle(snapshot: dict[str, Any], unit_id: str, x: int, y: int) -
                 fixed = command.get("fixed_arguments") if isinstance(command.get("fixed_arguments"), dict) else {}
                 if fixed.get("unit_id") == unit_id:
                     return str(command.get("command_id"))
-        _reject(snapshot, f"FoundCity({x},{y}) for {unit_id}", "found_city_not_offered")
+        _reject(snapshot, f"FoundCity({x},{y}) for {_unit_name(snapshot, unit_id)}", "found_city_not_offered")
         return None
     if not site_obeys_founding_rules(snapshot, x, y):
-        _reject(snapshot, f"Settle({x},{y}) for {unit_id}", "not_a_legal_site")
+        _reject(snapshot, f"Settle({x},{y}) for {_unit_name(snapshot, unit_id)}", "not_a_legal_site")
         return None
     return _synthesize_far_move(snapshot, unit_id, x, y, intent=INTENT_FOUND)
 
@@ -823,7 +829,7 @@ def _synthesize_trade_route(snapshot: dict[str, Any], unit_id: str, value: Any) 
             return str(cmd_id) if isinstance(cmd_id, str) else None
         if intent == "trade" and _norm(token or "") == wanted:
             return str(cmd_id) if isinstance(cmd_id, str) else None
-    LAST_UNRESOLVED.append(f"dropped: trade_route={value} for {unit_id} is not a listed destination")
+    LAST_UNRESOLVED.append(f"dropped: trade_route={value} for {_unit_name(snapshot, unit_id)} is not a listed destination")
     return None
 
 
