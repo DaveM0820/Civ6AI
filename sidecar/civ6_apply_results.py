@@ -1607,8 +1607,15 @@ def repeat_failure_rule(snapshot: dict[str, Any], ctx: dict[str, Any]):
         matched = match(fp[0], fp[1], fp[2], fp[3])
         if matched is None:
             return None
+        units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
+        name = pipeline._build_unit_wire_id_map(units).get(str(fp[1]), str(fp[1] or "the unit"))
+        verb = {"move_unit": "MoveTo", "attack_target": "AttackTo"}.get(str(fp[0]), str(fp[0]))
+        where = f"({fp[2]},{fp[3]})" if fp[2] is not None and fp[3] is not None else ""
+        code = matched[2].split(':')[0] or "non-transient"
+        text = describe_reason(matched[2])
+        why = f"{code}: {text}" if text and text != code else code
         return (
-            f"dropped: repeat of T{matched[1]} failure ({matched[2].split(':')[0] or 'non-transient'}). "
+            f"dropped: {name} {verb}{where} is a repeat of T{matched[1]} failure ({why}). "
             "Do not order that destination again."
         ), None
     return check
