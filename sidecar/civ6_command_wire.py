@@ -198,8 +198,29 @@ def game_settle_recommendations(snapshot: dict[str, Any]) -> list[dict[str, Any]
         if (x, y) in seen:
             continue
         seen.add((x, y))
+        if not _recommended_site_usable(snapshot, x, y):
+            continue
         out.append({"x": x, "y": y, "label": f"S{len(out) + 1}"})
     return out
+
+
+def _recommended_site_usable(snapshot: dict[str, Any], x: int, y: int) -> bool:
+    """Drop a game-recommended site FoundCity could not use: inside the minimum city
+    distance, water/mountain, held by another player's (e.g. barbarian) unit, or out of
+    every settler's reach on the known map."""
+    from sidecar import civ6_legality
+    from sidecar.civ6_common import plot_xy
+
+    if not site_obeys_founding_rules(snapshot, x, y):
+        return False
+    for other in snapshot.get("visible_other_units") or []:
+        if isinstance(other, dict) and plot_xy(other) == (x, y):
+            return False
+    settlers = [u for u in snapshot.get("your_units") or []
+                if isinstance(u, dict) and "SETTLER" in str(u.get("unit_type_id") or "").upper()]
+    if settlers and not any(civ6_legality.reachable(snapshot, u, (x, y)) for u in settlers):
+        return False
+    return True
 
 
 def extract_map_viewport(response: dict[str, Any]) -> Any:

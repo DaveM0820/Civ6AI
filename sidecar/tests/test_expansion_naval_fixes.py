@@ -85,3 +85,14 @@ def test_game_ai_units_get_no_command_row():
     trader = {"unit_id": "T", "unit_type_id": "UNIT_TRADER", "can_act": False, "needs_orders": False,
               "movement": {"current": 2}}
     assert civ6_wire._game_ai_civilian(trader)
+
+
+def test_recommended_sites_drop_too_close_and_occupied():
+    from sidecar import civ6_command_wire as cw
+    snap = {"game": {"map_width": 74, "wrap_x": True},
+            "your_cities": [{"x": 10, "y": 10}],
+            "visible_other_units": [{"plot_id": "PLOT_20_10", "owner_player_id": "PLAYER_63"}],
+            "civ6": {"settle_recommended": [{"x": 13, "y": 10}, {"x": 20, "y": 10}, {"x": 16, "y": 10}]},
+            "your_units": []}
+    rows = cw.game_settle_recommendations(snap)
+    assert [(r["x"], r["y"], r["label"]) for r in rows] == [(16, 10, "S1")]
