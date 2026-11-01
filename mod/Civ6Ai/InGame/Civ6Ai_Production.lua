@@ -539,10 +539,12 @@ function Civ6Ai_Production.ScoreBuild(buildId, tags, situation, kind)
       score = score - 40
     end
   end
-  if situation.missing_monument == true and buildId == "BUILDING_MONUMENT" then
+  -- A one-city empire gets its first settler before the monument/granary bonus applies.
+  local oneCity = tonumber(situation.cities) ~= nil and tonumber(situation.cities) <= 1
+  if situation.missing_monument == true and buildId == "BUILDING_MONUMENT" and not oneCity then
     score = score + 15
   end
-  if situation.missing_granary == true and buildId == "BUILDING_GRANARY" then
+  if situation.missing_granary == true and buildId == "BUILDING_GRANARY" and not oneCity then
     score = score + 15
   end
   if situation.missing_district == true and kind == "district"
@@ -559,8 +561,13 @@ function Civ6Ai_Production.ScoreBuild(buildId, tags, situation, kind)
     if (tonumber(situation.pop) or 1) < 2 or situation.land == false then
       score = score - 200
     end
-    if situation.need_expansion ~= true then
+    if situation.need_expansion ~= true and not (oneCity and situation.at_war ~= true) then
       score = score - 40
+    end
+    -- Settlers already waiting (no site yet, or walking): one more adds upkeep, not cities.
+    local waiting = tonumber((situation.unit_counts or {})["UNIT_SETTLER"]) or 0
+    if waiting >= 2 then
+      score = score - 100
     end
   end
   -- Every open tile already has a charge waiting: another builder adds nothing.

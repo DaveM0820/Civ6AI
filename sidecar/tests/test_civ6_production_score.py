@@ -40,8 +40,9 @@ class ProductionScoreTests(unittest.TestCase):
         )
         scores = {c["id"]: prio.item_score(c["id"], c["tags"], situation, c["kind"]) for c in _basic()}
         self.assertEqual(115, scores["UNIT_SETTLER"])
-        self.assertEqual(25, scores["BUILDING_GRANARY"])
-        self.assertEqual(20, scores["BUILDING_MONUMENT"])
+        # One city: no monument/granary bonus before the first settler.
+        self.assertEqual(10, scores["BUILDING_GRANARY"])
+        self.assertEqual(5, scores["BUILDING_MONUMENT"])
         self.assertEqual(-20, scores["UNIT_WARRIOR"])
         self.assertEqual(("UNIT_SETTLER", 115), prio.pick_build(_basic(), situation))
 

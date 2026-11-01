@@ -5753,7 +5753,41 @@ function Civ6Ai_Orders.EarlySettle(owner)
     -- AI strategies only steer the game's own AI; a human seat has none.
     return false
   end
-  return (Civ6Ai_Orders.EarlyOpen(owner)) == true
+  if (Civ6Ai_Orders.EarlyOpen(owner)) == true then
+    return true
+  end
+  return Civ6Ai_Orders.PresetSettle(owner)
+end
+
+-- Past the early window the settler weight stays on while the seat's own preset
+-- asks for expansion (expansion or settlers_only level > 0), it is behind one
+-- city per 10 turns (min 3), has no settler alive, and is not at war with a major.
+function Civ6Ai_Orders.PresetSettle(owner)
+  local p = Players ~= nil and Players[owner] or nil
+  if p == nil or call(p, "IsMajor") ~= true then
+    return false
+  end
+  local wants = false
+  for _, a in ipairs(Civ6Ai_Orders.PriorityLevels(owner)) do
+    if (a.key == "expansion" or a.key == "settlers_only") and a.level > 0 then
+      wants = true
+    end
+  end
+  if not wants or Civ6Ai_Orders.AtWarWithMajor(owner) then
+    return false
+  end
+  local _, n = Civ6Ai_Orders.PeakCities(owner)
+  local goal = math.max(3, math.floor(Game.GetCurrentGameTurn() / 10))
+  if n >= goal then
+    return false
+  end
+  for _, u in ipairs(sortedMembers(call(p, "GetUnits"))) do
+    local row = GameInfo.Units[call(u, "GetType")]
+    if row ~= nil and (row.FoundCity == true or row.FoundCity == 1) then
+      return false
+    end
+  end
+  return true
 end
 
 function Civ6Ai_Orders.RegisterEarlyStrategies()

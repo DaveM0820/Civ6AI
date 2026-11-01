@@ -668,6 +668,7 @@ def compose_situation(
         "army_heavy": int(major_wars) <= 0 and int(military) > int(cities) * 2,
         "at_war": int(major_wars) > 0,
         "city_target": target,
+        "cities": int(cities),
         "missing_monument": missing_monument is True,
         "missing_granary": missing_granary is True,
         "missing_district": missing_district is True,
@@ -809,9 +810,10 @@ def item_score(type_id: str, tags: list[str], situation: dict, kind: str = "", w
             score -= 80
         elif situation.get("military_over"):
             score -= 40
-    if situation.get("missing_monument") and type_id == "BUILDING_MONUMENT":
+    one_city = situation.get("cities") is not None and int(situation.get("cities")) <= 1
+    if situation.get("missing_monument") and type_id == "BUILDING_MONUMENT" and not one_city:
         score += 15
-    if situation.get("missing_granary") and type_id == "BUILDING_GRANARY":
+    if situation.get("missing_granary") and type_id == "BUILDING_GRANARY" and not one_city:
         score += 15
     if (situation.get("missing_district") and kind == "district"
             and type_id != "DISTRICT_CITY_CENTER" and "WONDER" not in type_id):
@@ -819,8 +821,10 @@ def item_score(type_id: str, tags: list[str], situation: dict, kind: str = "", w
     if "PSEUDOYIELD_UNIT_SETTLER" in seen or type_id == "UNIT_SETTLER":
         if int(situation.get("pop") or 1) < 2 or situation.get("land") is False:
             score -= 200
-        if not situation.get("need_expansion"):
+        if not situation.get("need_expansion") and not (one_city and not situation.get("at_war")):
             score -= 40
+        if int((situation.get("unit_counts") or {}).get("UNIT_SETTLER") or 0) >= 2:
+            score -= 100
     # Walls are the defense list. At peace with no enemy nearby they must not
     # outrank a settler or a builder. A war, or a city under threat, keeps them.
     if ("PSEUDOYIELD_CITY_DEFENSES" in seen and not situation.get("threatened")

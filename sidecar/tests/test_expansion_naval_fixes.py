@@ -56,3 +56,17 @@ def test_cartography_status_line():
     assert "researchable now" in coaching._water_and_embark_clause(snap)
     snap["civ6"] = {"governance": {"techs": {"options": [], "cartography_needs": ["TECH_SQUARE_RIGGING"]}}}
     assert "needs Square Rigging" in coaching._water_and_embark_clause(snap)
+
+
+def test_first_settler_not_penalised_and_idle_settlers_capped():
+    from sidecar import civ6_priorities as pr
+    base = {"levels": {}, "pop": 3, "land": True, "need_expansion": False, "missing_monument": True}
+    one = dict(base, cities=1)
+    two = dict(base, cities=2)
+    s1 = pr.item_score("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], one, "unit")
+    s2 = pr.item_score("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], two, "unit")
+    assert s1 - s2 == 40
+    assert pr.item_score("BUILDING_MONUMENT", [], one) == 0
+    assert pr.item_score("BUILDING_MONUMENT", [], two) == 15
+    many = dict(one, unit_counts={"UNIT_SETTLER": 2})
+    assert pr.item_score("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], many, "unit") == s1 - 100
