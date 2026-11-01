@@ -100,6 +100,7 @@ _SIMPLE_REASONS = {
     "too_many_focus": "too many focuses: the maximum is 3, and any focus past that is rejected",
     "water": "that tile is water and this unit cannot embark there yet",
     "water_no_ocean_embark": "that tile is ocean and this unit cannot embark onto ocean yet",
+    "ocean_needs_cartography": "that tile is ocean (deep water); ships and embarked units need Cartography to enter it",
     "land": "naval units cannot enter land tiles",
     "impassable": "impassable: that tile is a mountain or natural wonder; do not move there. Do not order that destination again.",
     "occupied_foreign": "another civilization's unit is standing on that tile",
@@ -577,6 +578,8 @@ def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reas
                 "Give it a different tile, or Skip.")
     elif "mountain" in facts:
         why = "a mountain and is impassable"
+    elif reason in ("ocean_needs_cartography", "water_no_ocean_embark"):
+        why = "ocean (deep water); ships and embarked units can enter ocean only after Cartography, coast is fine"
     elif sea and known and "water" not in facts:
         why = "land; ships can't enter land tiles"
     elif "water" in facts and not sea and occupied:

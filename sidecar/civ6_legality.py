@@ -81,6 +81,16 @@ def can_embark(snapshot: dict[str, Any]) -> bool:
     return civ == "CIVILIZATION_MAORI"  # Maori start able to embark
 
 
+def is_ocean(plot: dict[str, Any] | None) -> bool:
+    return isinstance(plot, dict) and bool(plot.get("water")) and "OCEAN" in str(
+        plot.get("terrain_id") or plot.get("terrain") or "").upper()
+
+
+def ocean_blocked(snapshot: dict[str, Any], plot: dict[str, Any] | None) -> bool:
+    """Deep ocean before Cartography: closed to ships and embarked land units (vanilla rule)."""
+    return is_ocean(plot) and not knows_tech(snapshot, "TECH_CARTOGRAPHY")
+
+
 def knows_tech(snapshot: dict[str, Any], tech: str) -> bool:
     research = _dct(_dct(snapshot.get("your_empire")).get("research"))
     return tech in {str(t) for t in _lst(research.get("known_tech_ids")) if t}
@@ -141,6 +151,8 @@ def tile_passable(snapshot: dict[str, Any], unit: dict[str, Any], x: int, y: int
         return "impassable"
     if domain == "DOMAIN_SEA" and not water:
         return "impassable"
+    if ocean_blocked(snapshot, plot) and plot_xy(unit) != (x, y):
+        return "ocean_needs_cartography"
     uid = str(unit.get("unit_id") or "")
     holders = own_occupied_plots(snapshot).get((x, y)) or []
     mine = stack_class(unit)
@@ -206,6 +218,8 @@ def reachable(snapshot: dict[str, Any], unit: dict[str, Any], dest: tuple[int, i
             if domain != "DOMAIN_SEA" and water and not can_embark(snapshot):
                 continue
             if domain == "DOMAIN_SEA" and not water:
+                continue
+            if ocean_blocked(snapshot, plot):
                 continue
             seen.add((nx, ny))
             q.append((nx, ny))
