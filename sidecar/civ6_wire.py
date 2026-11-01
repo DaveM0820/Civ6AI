@@ -481,7 +481,9 @@ def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None
 # Orders use readable tokens from civ6_command_wire so prompt and parser match.
 # ---------------------------------------------------------------------------
 
-_CIV6_TOKEN_ORDER = ("MoveTo", "Settle", "Improve", "AttackTo", "FoundCity", "TradeRoute", "Automate",
+# FoundCity first: it is only offered when legal on the settler's own tile, so the
+# reply example shows it ahead of MoveTo.
+_CIV6_TOKEN_ORDER = ("FoundCity", "MoveTo", "Settle", "Improve", "AttackTo", "TradeRoute", "Automate",
                      "Activate", "Promote", "Upgrade",
                      "Fortify", "Alert", "Heal", "Sleep", "Skip", "Delete")
 
@@ -776,9 +778,13 @@ def _civ6_required_rows(snapshot: dict[str, Any]) -> list[tuple[str, str]]:
         unit_id = unit.get("unit_id")
         if not isinstance(unit_id, str):
             continue
+        if _game_ai_builder(unit) or _game_ai_civilian(unit):
+            continue
         options = _required_unit_options(unit_tokens.get(unit_id, []))
         has_attack = any(str(option).startswith("AttackTo(") for option in options)
-        needs = unit.get("needs_orders") is True or unit.get("promotion_ready") or has_attack
+        # A settler on a tile where FoundCity is legal always gets a row, even under a host goal.
+        can_found = "FoundCity" in options
+        needs = unit.get("needs_orders") is True or unit.get("promotion_ready") or has_attack or can_found
         idle = _unit_idle_for(snapshot, unit_id) if _military_unit(unit) else 0
         if idle >= IDLE_REQUIRED_TURNS:
             needs = True
@@ -1265,7 +1271,7 @@ def _empire_section(
                         if (isinstance(movement.get("maximum"), int) and movement["maximum"] > 0
                                 and movement.get("maximum") != current_moves):
                             lines.append(pipeline._wire_line(f"{prefix}.maxMovement", movement["maximum"]))
-                if not unit_compact and "SETTLER" in str(unit.get("unit_type_id") or ""):
+                if "SETTLER" in str(unit.get("unit_type_id") or ""):
                     lines.extend(coaching.settler_fact_lines(prefix, unit, context))
                 if not unit_compact and str(unit.get("unit_type_id") or "") == "UNIT_BUILDER" and unit.get("needs_orders"):
                     lines.extend(coaching.builder_fact_lines(prefix, unit, context))
@@ -2137,6 +2143,8 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         unit_id = str(unit.get("unit_id"))
         key = f"{wire_ids.get(unit_id, unit_id)}.command"
         if key in required_keys or not unit_tokens.get(unit_id):
+            continue
+        if _game_ai_builder(unit) or _game_ai_civilian(unit):
             continue
         optional_keys.append((key, " | ".join(unit_tokens[unit_id])))
     city_tokens = _civ6_city_tokens(snapshot)

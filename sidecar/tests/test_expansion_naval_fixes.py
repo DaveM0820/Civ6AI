@@ -70,3 +70,18 @@ def test_first_settler_not_penalised_and_idle_settlers_capped():
     assert pr.item_score("BUILDING_MONUMENT", [], two) == 15
     many = dict(one, unit_counts={"UNIT_SETTLER": 2})
     assert pr.item_score("UNIT_SETTLER", ["PSEUDOYIELD_UNIT_SETTLER"], many, "unit") == s1 - 100
+
+
+def test_foundcity_sorts_first_and_fresh_water_is_not_a_blocker():
+    from sidecar import civ6_wire
+    toks = sorted(["MoveTo(x,y)", "FoundCity", "Skip"], key=civ6_wire._token_sort_key)
+    assert toks[0] == "FoundCity"
+    lines = coaching.settler_fact_lines("settler_1", {"settle": {"here_ok": True, "fresh_water": False}}, {})
+    assert "FoundCity legal here, no fresh water (optional" in lines[0]
+
+
+def test_game_ai_units_get_no_command_row():
+    from sidecar import civ6_wire
+    trader = {"unit_id": "T", "unit_type_id": "UNIT_TRADER", "can_act": False, "needs_orders": False,
+              "movement": {"current": 2}}
+    assert civ6_wire._game_ai_civilian(trader)

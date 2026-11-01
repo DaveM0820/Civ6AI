@@ -1122,7 +1122,7 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
     if fresh is True:
         bits.append("fresh water")
     elif fresh is False:
-        bits.append("no fresh water")
+        bits.append("no fresh water" + (" (optional: less housing; FoundCity still legal)" if here_ok is True else ""))
     if coast is True:
         bits.append("coast")
     elif coast is False:
