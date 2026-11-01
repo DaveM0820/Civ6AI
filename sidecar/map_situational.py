@@ -57,6 +57,19 @@ def viewport_shows_tile_coords(viewport: dict[str, Any]) -> bool:
     return show_tile
 
 
+TACTICAL_COVERED_FRACTION = 0.9
+
+
+def tactical_needed(overview: dict[str, Any], tactical: dict[str, Any] | None) -> bool:
+    """False when the strategic map draws per-tile (x,y) (renderer's own threshold)
+    and already covers the tactical window; then the close-up adds nothing."""
+    if not viewport_shows_tile_coords(overview):
+        return True
+    if isinstance(tactical, dict) and viewport_overlap_fraction(tactical, overview) < TACTICAL_COVERED_FRACTION:
+        return True
+    return False
+
+
 def should_omit_tactical_map(
     overview: dict[str, Any],
     tactical: dict[str, Any],
@@ -878,9 +891,14 @@ def prepare_civ5_situational_maps(
         tactical_rect = viewport_focused_on_tile(focus[0], focus[1], map_width, map_height)
         tactical_label = f"Auto tactical viewport centered on ({focus[0]},{focus[1]})"
 
-    # Always send the close-up. Both the strategic map and this one go out at
-    # high detail; the focus crop, when it is attached, stays low.
+    # Send the close-up unless the strategic map already labels every hex and
+    # covers it. A seat's own map.viewport always gets its close-up.
     omit_tactical_flag, omit_reason = False, ""
+    seat_chose_viewport = isinstance(map_viewport, dict) and map_viewport.get("auto") is False
+    if (not force_omit_tactical and not seat_chose_viewport
+            and tactical_needed(overview_viewport, tactical_rect) is False):
+        # Strategic map already writes (x,y) on every hex and covers the close-up.
+        omit_tactical_flag, omit_reason = True, "strategic_tile_coords"
     if force_omit_tactical:
         omit_tactical_flag = True
         omit_reason = omit_reason or "context_budget"

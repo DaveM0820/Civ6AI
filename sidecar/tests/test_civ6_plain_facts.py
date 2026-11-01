@@ -135,3 +135,29 @@ def test_water_tint_is_saturated_blue_and_coast_lighter():
     assert sum(coast) > sum(ocean)
     fog = m.FOG_BASE_GRAY
     assert map_render.UNEXPLORED_FILL == "#000000" and 80 <= fog <= 170
+
+
+def test_tactical_skipped_only_when_strategic_labels_each_hex():
+    from sidecar import map_situational as ms
+    small = {"x0": 10, "y0": 10, "width": 13, "height": 14}   # 182 cells: coords drawn
+    big = {"x0": 10, "y0": 10, "width": 16, "height": 18}     # 288 cells: axes only
+    inside = {"x0": 11, "y0": 11, "width": 12, "height": 12}
+    away = {"x0": 40, "y0": 10, "width": 12, "height": 12}
+    assert ms.tactical_needed(small, inside) is False
+    assert ms.tactical_needed(small, away) is True
+    assert ms.tactical_needed(big, inside) is True
+
+
+def test_one_map_clause_when_tactical_omitted():
+    from sidecar import civ6_wire
+    snap = {"advciv": {"map_images": [{"role": "overview", "tactical_omitted": True,
+                                        "tactical_omit_reason": "strategic_tile_coords"}]}}
+    assert civ6_wire._tactical_omitted(snap)
+    assert not civ6_wire._tactical_omitted({"advciv": {"map_images": [{"role": "overview"}, {"role": "viewport"}]}})
+
+
+def test_coord_label_font_fits_hex():
+    from sidecar import map_render_civ6 as m, map_render
+    size = m.fit_coord_font("(73,45)", 40, 30.0)
+    l, _t, r, _b = map_render._coord_label_font(size).getbbox("(73,45)")
+    assert r - l <= 36 and size >= 7

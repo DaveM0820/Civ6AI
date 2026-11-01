@@ -1449,6 +1449,23 @@ def _hex_coord_label_flags(vw: int, vh: int) -> tuple[bool, bool]:
     return False, True
 
 
+def fit_coord_font(label: str, start: int, hex_radius: float, min_size: int = 7) -> int:
+    """Largest font size <= start whose label fits ~1.2 hex radii wide (the hex's lower band)."""
+    max_w = hex_radius * 1.2
+    size = max(min_size, int(start))
+    while size > min_size:
+        font = map_render._coord_label_font(size)
+        try:
+            left, _top, right, _bottom = font.getbbox(label)
+            width = right - left
+        except AttributeError:
+            width = len(label) * size * 0.6
+        if width <= max_w:
+            break
+        size -= 1
+    return size
+
+
 def _draw_settle_site_marker(
     draw: Any,
     canvas: Any,
@@ -2327,16 +2344,17 @@ def render_civ6_map_png(
             for vx in range(vw):
                 wx = x0 + vx
                 cx, cy, _, _ = _odd_r_cell_center(wx, wy, x0, y0, tile_px, axis_gutter, flip_y=flip_y, vh=vh)
+                label = f"({gx(wx)},{wy})"
                 coord_font = map_render._coord_font_size(tile_px, wx, wy)
-                if image_role == "viewport":
-                    # Tactical close-up: big enough to read after the provider downscales.
-                    coord_font = max(coord_font, tile_px // 5)
+                # Large enough to read after the provider downscales, but shrunk
+                # until "(x,y)" fits inside the lower part of the hex.
+                coord_font = fit_coord_font(label, max(coord_font, tile_px // 5), hex_radius)
                 _draw_outlined_text(
                     draw,
                     (cx, cy + hex_radius * 0.62),
-                    f"{gx(wx)},{wy}",
+                    label,
                     map_render._coord_label_font(coord_font),
-                    stroke=max(2, coord_font // 8) if image_role == "viewport" else 0,
+                    stroke=max(1, coord_font // 8),
                 )
     elif zoomed and not prefer_civ5_sprites:
         # Close-up: label the tiles around your own units (and the unit tile)
@@ -2356,8 +2374,8 @@ def render_civ6_map_png(
             _draw_outlined_text(
                 draw,
                 (cx, cy + hex_radius * 0.72),
-                f"{gx(wx)},{wy}",
-                map_render._coord_label_font(max(12, tile_px // 7)),
+                f"({gx(wx)},{wy})",
+                map_render._coord_label_font(fit_coord_font(f"({gx(wx)},{wy})", max(12, tile_px // 7), hex_radius)),
             )
     for plate in civ5_nameplates:
         _draw_city_nameplate(draw, *plate)

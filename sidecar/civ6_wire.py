@@ -849,6 +849,17 @@ def _civ6_chat_rules(snapshot: dict[str, Any]) -> list[str]:
     return keep
 
 
+def _tactical_omitted(snapshot: dict[str, Any]) -> bool:
+    """True when this turn's render sent the strategic map only (no tactical close-up)."""
+    advciv = snapshot.get("advciv")
+    manifest = advciv.get("map_images") if isinstance(advciv, dict) else None
+    if not isinstance(manifest, list) or not manifest:
+        return False
+    if any(isinstance(r, dict) and r.get("role") == "viewport" for r in manifest):
+        return False
+    return any(isinstance(r, dict) and r.get("tactical_omitted") for r in manifest)
+
+
 def _tactical_image_where(snapshot: dict[str, Any]) -> str:
     """Where image 2 is looking, so the reply can talk about that picture."""
     advciv = snapshot.get("advciv")
@@ -917,7 +928,14 @@ def build_civ6_role_instruction(snapshot: dict[str, Any]) -> str:
         role += f", playing as the {civ_label} civilization"
     attach_map = pipeline.map_image_attach_turn(snapshot)
     where = _tactical_image_where(snapshot)
-    if attach_map:
+    if attach_map and _tactical_omitted(snapshot):
+        map_clause = (
+            " One map image is attached: the strategic map. Each hex has its (x,y) written at the bottom, "
+            "so no tactical close-up is sent this turn. "
+            "Set map.viewport = (x,y) to get a tactical close-up centered on that tile next turn. "
+            "Write every word of your reply in English. "
+        )
+    elif attach_map:
         where_bit = f" ({where})" if where else ""
         map_clause = (
             " Two map images are attached. Image 1 is the strategic map of the whole front. "
@@ -927,7 +945,7 @@ def build_civ6_role_instruction(snapshot: dict[str, Any]) -> str:
             "or map.viewport = auto. "
             "On the tactical close-up a military unit sits at the top of the hex, the resource icon in the center, "
             "a civilian unit at the bottom, an improvement on the left and a district on the right. "
-            "A health bar under a unit is its hit points. Each hex on the close-up has its (x,y) written at the bottom. "
+            "A health bar under a unit is its hit points. Each hex on the close-up has its (x,y) written at the bottom, like (12,5). "
             "Write every word of your reply in English. "
         )
     else:
@@ -2162,6 +2180,9 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     optional_keys.append(("chat", f"chat.all | {chat_dm_examples(snapshot)}"))
     where = _tactical_image_where(snapshot)
     viewport_hint = "(x,y) to center image 2 next turn, or auto"
+    if _tactical_omitted(snapshot):
+        viewport_hint = ("(x,y) to get a tactical close-up (image 2) centered there next turn, or auto "
+                         "(auto sends it only when the strategic map is too zoomed out to label each hex)")
     if where:
         viewport_hint = f"{viewport_hint}. Image 2 is now {where}"
     optional_keys.append(("map.viewport", viewport_hint))
