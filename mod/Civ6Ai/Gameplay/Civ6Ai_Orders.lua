@@ -447,10 +447,30 @@ function Civ6Ai_Orders._SameDomain(unit, plot)
   local row = GameInfo.Units[unit:GetType()]
   local domain = row ~= nil and row.Domain or "DOMAIN_LAND"
   local water = call(plot, "IsWater") == true
+  local ocean = false
+  if water then
+    local t = GameInfo.Terrains[call(plot, "GetTerrainType")]
+    ocean = t ~= nil and t.TerrainType == "TERRAIN_OCEAN"
+  end
+  if ocean and not Civ6Ai_Orders._OwnerHasTech(unit, "TECH_CARTOGRAPHY") then
+    return false
+  end
   if domain == "DOMAIN_SEA" then
     return water or call(plot, "IsCity") == true
   end
-  return not water
+  -- Land units may step onto coast once they can embark (Shipbuilding).
+  return not water or Civ6Ai_Orders._OwnerHasTech(unit, "TECH_SHIPBUILDING")
+end
+
+function Civ6Ai_Orders._OwnerHasTech(unit, techType)
+  local row = GameInfo.Technologies[techType]
+  local player = row ~= nil and Players[unit:GetOwner()] or nil
+  local techs = player ~= nil and player.GetTechs ~= nil and player:GetTechs() or nil
+  if techs == nil then
+    return false
+  end
+  local ok, has = pcall(function() return techs:HasTech(row.Index) end)
+  return ok and has == true
 end
 
 function Civ6Ai_Orders._SameLandmass(a, b)
