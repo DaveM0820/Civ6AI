@@ -81,6 +81,7 @@ _PATH_RE = re.compile(
     r"^(?P<partial>partial_)?path:(?P<fx>-?\d+),(?P<fy>-?\d+)>(?P<tx>-?\d+),(?P<ty>-?\d+)"
     r":steps=(?P<steps>\d+):len=(?P<len>\d+):stop=(?P<stop>.*)$"
 )
+_MOVED_RE = re.compile(r"^moved:(-?\d+),(-?\d+)$")
 _INSUFFICIENT_RE = re.compile(r"^insufficient_moves:(?P<cost>-?[\d.]+)>(?P<moves>-?[\d.]+)$")
 _PARTIAL_MOVE_RE = re.compile(r"^partial_move_to_(?P<x>-?\d+)_(?P<y>-?\d+)$")
 _RETARGET_RE = re.compile(
@@ -457,8 +458,18 @@ def _success_text(row: dict[str, Any]) -> str:
             return f"ok — retargeted; {detail}"
         if reason.startswith("step_toward:"):
             return f"ok — {detail}"
+        moved = _MOVED_RE.match(reason)
+        if moved is not None:
+            at = (int(moved.group(1)), int(moved.group(2)))
+            if at == (fixed.get("target_x"), fixed.get("target_y")) or "target_x" not in fixed:
+                return f"ok — arrived at ({at[0]},{at[1]})"
+            return f"ok (partial) — moved to ({at[0]},{at[1]}), short of {_coords(fixed) or 'the target'}; reissue or pick a new destination"
+        if path is not None and path.group("stop") in ("no_moves_left", "arrived") and (
+                int(path.group("tx")), int(path.group("ty"))) == (fixed.get("target_x"), fixed.get("target_y")) and (
+                path.group("steps") == path.group("len")):
+            return f"ok — arrived at {_coords(fixed)}"
         if not reason or arrived:
-            return f"ok — moved to {_coords(fixed) or 'the target'}"
+            return f"ok — arrived at {_coords(fixed) or 'the target'}"
         if reason.startswith("first_step:"):
             return f"ok — moved to {_coords(fixed) or 'the target'} (rough tile: it used all its movement)"
         return f"ok (partial) — {detail}; reissue or pick a new destination"
