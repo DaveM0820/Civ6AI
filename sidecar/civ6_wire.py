@@ -418,6 +418,17 @@ def _append_civ6_empire_wire(lines: list[str], snapshot: dict[str, Any]) -> None
     cities = [city for city in snapshot.get("your_cities", []) if isinstance(city, dict)]
     if cities:
         lines.append(pipeline._wire_line("empire.cities", len(cities)))
+    try:
+        from sidecar import civ6_recall_facts as recall
+
+        land = recall.landmass_line(snapshot)
+        if land:
+            lines.append(pipeline._wire_line("map.landmass", land))
+        barbs = recall.barbarian_last_seen(snapshot)
+        if barbs:
+            lines.append(pipeline._wire_line("barbarians.last_seen", " | ".join(barbs)))
+    except Exception:
+        pass
     anarchy = empire.get("anarchy_turns") if isinstance(empire.get("anarchy_turns"), int) else 0
     economy = ((snapshot.get("civ6") or {}).get("economy") or {}) if isinstance(snapshot.get("civ6"), dict) else {}
     if not isinstance(economy.get("gold"), dict):
