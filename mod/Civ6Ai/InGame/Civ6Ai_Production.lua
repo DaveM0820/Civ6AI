@@ -862,7 +862,7 @@ function Civ6Ai_Production.BuildOptions(city, situation)
   return out
 end
 
--- Deterministic weighted pick. Weight = score above the worst option, bounded
+-- Deterministic top-weight pick. Weight = score above the worst option, bounded
 -- to [WEIGHT_FLOOR, WEIGHT_CAP] so one inflated item cannot squeeze every
 -- building down to a weight of 1.
 Civ6Ai_Production.WEIGHT_FLOOR = 5
@@ -885,16 +885,19 @@ function Civ6Ai_Production.WeightedPick(options, seed, situation)
     o.weight = math.floor(w)
     total = total + o.weight
   end
-  -- Park-Miller step: products stay below 2^53, exact in Lua 5.1 doubles.
-  local r = ((seed % 2147483646) + 1) * 16807 % 2147483647
-  local roll = r % total
+  -- Top-weight pick, like the native AI's best-scored build (game 3: a
+  -- weighted random draw picked the top-weight settler once in 13 fills).
+  -- Ties break on raw score, then id, so every client agrees. seed is unused
+  -- and kept only for the call signature.
+  local best = nil
   for _, o in ipairs(options) do
-    if o.weight > 0 and roll < o.weight then
-      return o, total
+    if best == nil or o.weight > best.weight
+        or (o.weight == best.weight and ((o.score or 0) > (best.score or 0)
+          or ((o.score or 0) == (best.score or 0) and tostring(o.id) < tostring(best.id)))) then
+      best = o
     end
-    roll = roll - o.weight
   end
-  return options[#options], total
+  return best, total
 end
 
 Civ6Ai_Production._lastPick = Civ6Ai_Production._lastPick or {}
@@ -1234,4 +1237,72 @@ function Civ6Ai_Production.OnProductionCompleted(playerID, cityID, orderType, it
   local turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or -1
   Civ6Ai_Util.Log("production|completed|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
     .. "|city=" .. tostring(cityID) .. "|order=" .. tostring(orderType) .. "|canceled=" .. tostring(canceled) .. "|item=" .. name)
+end
+
+-- Host seat: one exact build for one city (the vanilla production request).
+-- Districts need the tile the snapshot offered. Replaces the current item the
+-- way a click in the production panel does; the engine keeps stored progress.
+function Civ6Ai_Production.QueueProduction(playerID, args)
+  args = args or {}
+  return Civ6Ai_Production.QueueBuild(playerID, args.city_id, args.build_id, tonumber(args.target_x), tonumber(args.target_y))
+end
+
+function Civ6Ai_Production._CityByWire(playerID, cityWireId)
+  local player = Players ~= nil and Players[playerID] or nil
+  local cities = player ~= nil and player:GetCities() or nil
+  if cities == nil then
+    return nil
+  end
+  local want = tostring(cityWireId or "")
+  for _, city in cities:Members() do
+    if Civ6Ai_Production._WireCityId(city) == want or tostring(city:GetID()) == want then
+      return city
+    end
+  end
+  return nil
+end
+
+function Civ6Ai_Production.QueueBuild(playerID, cityWireId, buildId, x, y)
+  if Game == nil or Game.GetLocalPlayer == nil or Game.GetLocalPlayer() ~= playerID then
+    return false, "production_requires_local_player"
+  end
+  if buildId == nil or buildId == "" then
+    return false, "missing_build_id"
+  end
+  local city = Civ6Ai_Production._CityByWire(playerID, cityWireId)
+  if city == nil then
+    return false, "city_not_found"
+  end
+  local item, paramKey = Civ6Ai_Production._ResolveBuildItem(buildId)
+  if item == nil or paramKey == nil then
+    return false, "build_not_found"
+  end
+  local current = Civ6Ai_Production._GetCityProductionState(city)
+  if current == buildId then
+    return true, "already_building"
+  end
+  local bq = city:GetBuildQueue()
+  if bq == nil or not bq:CanProduce(item.Hash, true) then
+    return false, "cannot_produce"
+  end
+  local C = CityOperationTypes
+  local tCheck = {}
+  tCheck[paramKey] = item.Hash
+  if paramKey == C.PARAM_DISTRICT_TYPE then
+    if x == nil or y == nil then
+      return false, "district_needs_tile"
+    end
+    tCheck[C.PARAM_X], tCheck[C.PARAM_Y] = x, y
+  end
+  if not CityManager.CanStartOperation(city, C.BUILD, tCheck, true) then
+    return false, paramKey == C.PARAM_DISTRICT_TYPE and "district_tile_invalid" or "cannot_start"
+  end
+  local tParams = {}
+  for k, v in pairs(tCheck) do tParams[k] = v end
+  tParams[C.PARAM_INSERT_MODE] = C.VALUE_EXCLUSIVE
+  CityManager.RequestOperation(city, C.BUILD, tParams)
+  -- The model picked this city's build; the empty-queue fill leaves it alone.
+  Civ6Ai_Production._fillTried = Civ6Ai_Production._fillTried or {}
+  Civ6Ai_Production._fillTried[tostring(playerID) .. ":" .. tostring(city:GetID())] = Game.GetCurrentGameTurn()
+  return true, "queued"
 end

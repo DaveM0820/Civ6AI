@@ -22,11 +22,11 @@ Civ6Ai_OrderChannel.K = {
   TEST_MELEE_MOVE = 52, TEST_SCRIPTED_COMBAT = 53, TEST_SCRIPTED_PRODUCTION = 54, TEST_IMPROVEMENT = 55,
   TEST_EXPERIENCE = 56, TEST_FAR_MOVE = 57, TEST_COMBAT_PROBE = 58, TEST_DAMAGE_CHECK = 59,
   TEST_RESOLVED_ATTACK = 60, TEST_API_SURVEY = 61,
-  TEST_PRODUCTION_STEER = 62, TEST_FORCE_BUILD = 63, TEST_PRIORITY = 64, HINT = 36,
+  TEST_PRODUCTION_STEER = 62, TEST_FORCE_BUILD = 63, TEST_PRIORITY = 64, HINT = 36, BUILD_NEXT = 37,
 }
 Civ6Ai_OrderChannel.KIND_BY_COMMAND = {
   move_unit = 1, set_research_tech = 2, set_research_civic = 3, found_city = 4, unit_skip = 5,
-  unit_posture_fortify = 6, attack_target = 7, set_build_priority = 9,
+  unit_posture_fortify = 6, attack_target = 7, set_build_priority = 9, set_build_next = 37,
   change_government = 10, set_policies = 11, found_pantheon = 12, found_religion = 13,
   recruit_great_person = 14, patronize_great_person = 15,
   send_diplomatic_action = 17, execute_deal = 33, send_envoy = 34, purchase_item = 19, purchase_tile = 20,
@@ -220,6 +220,18 @@ function Civ6Ai_OrderChannel._Fields(playerID, command)
       return nil, "missing_priority"
     end
     f.I, f.X = id, level
+  elseif kind == 37 then
+    -- Build next: I = index into the sorted Civ6Ai_NextItems table (0 clears).
+    local item = tostring(args.item_id or "")
+    if item == "" or item == "NONE" then
+      f.I = 0
+    else
+      local idx = Civ6Ai_Util.BuildNextIndex ~= nil and Civ6Ai_Util.BuildNextIndex(item) or nil
+      if idx == nil then
+        return nil, "unknown build item " .. item
+      end
+      f.I = idx
+    end
   elseif kind == 10 then
     local row = args.government_id ~= nil and GameInfo.Governments[args.government_id] or nil
     if row == nil then
@@ -472,7 +484,8 @@ function Civ6Ai_OrderChannel.SendDecision(playerID, decision, forTurn, snapshotT
     f.K = nil
     local seq = Civ6Ai_OrderChannel.Send(kind, f, forTurn)
     if seq ~= nil then
-      Civ6Ai_OrderChannel._pending[seq] = { playerID = playerID, command = entry.command, turn = forTurn, kind = kind }
+      Civ6Ai_OrderChannel._pending[seq] = { playerID = playerID, command = entry.command, turn = forTurn, kind = kind,
+        decisionTurn = decisionTurn }
       sent = sent + 1
       if entry.attack then
         attackSent = attackSent + 1
@@ -525,7 +538,8 @@ function Civ6Ai_OrderChannel.DrainResults()
       r._taken = true
       Civ6Ai_OrderChannel._pending[r.seq] = nil
       Civ6Ai_Apply._RecordResult(
-        entry.playerID, entry.command, r.ok == true, r.reason, entry.command.arguments or {}, r.source or "model")
+        entry.playerID, entry.command, r.ok == true, r.reason, entry.command.arguments or {}, r.source or "model",
+        r.decision_turn or entry.decisionTurn)
     elseif r.sender == me and Civ6Ai_OrderChannel._pending[r.seq] == nil then
       -- Already consumed, or never ours. Do not let it crowd out unread rows.
       r._taken = true

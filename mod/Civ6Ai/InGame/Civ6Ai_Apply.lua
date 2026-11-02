@@ -71,7 +71,7 @@ function Civ6Ai_Apply._NoteModelChoices(playerID, commands)
   end
 end
 
-function Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs, source)
+function Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs, source, decisionTurn)
   local turn = Game.GetCurrentGameTurn()
   -- The model's research/civic order has landed (applied or refused): the fallback
   -- may act again if the slot is still empty.
@@ -90,6 +90,11 @@ function Civ6Ai_Apply._RecordResult(playerID, command, ok, reason, fixedArgs, so
     source = Civ6Ai_Apply._ResultSource(command, source),
     fixed_arguments = fixedArgs or {},
   }
+  -- Order-channel results run at the seat's next turn start; the sidecar needs
+  -- the batch's own turn or it shows the previous batch (game 3, P2-P5).
+  if tonumber(decisionTurn) ~= nil then
+    payload.decision_turn = tonumber(decisionTurn)
+  end
   Civ6Ai_Util.AppendJsonLine(Civ6Ai_Apply._ApplyResultsPath(playerID), payload)
 end
 
@@ -560,6 +565,11 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
   end
   if command.kind == "queue_production" then
     return Civ6Ai_Apply._QueueProduction(playerID, args)
+  end
+  if command.kind == "set_build_next" then
+    -- Synced game property, like priorities: the order channel sets it.
+    Civ6Ai_OrderChannel.SendDecision(playerID, { commands = { command } }, Game.GetCurrentGameTurn(), nil)
+    return false, Civ6Ai_Apply.DEFERRED, args
   end
   if command.kind == "set_build_priority" then
     -- Priorities are synced game properties; the order channel sets them for every seat.
@@ -1104,9 +1114,13 @@ function Civ6Ai_Apply._UnitFortify(playerID, args)
 end
 
 function Civ6Ai_Apply._QueueProduction(playerID, args)
-  -- The local seat is the human. AI seats use set_build_priority. A stale
-  -- queue_production command is refused and does not touch the city.
-  return false, "production_requires_local_player", args
+  -- Host seat only (CityManager.RequestOperation is the local production screen).
+  -- AI seats use set_build_priority / set_build_next; a stale order is refused.
+  if Civ6Ai_Production == nil or Civ6Ai_Production.QueueProduction == nil then
+    return false, "production_module_missing", args
+  end
+  local ok, reason = Civ6Ai_Production.QueueProduction(playerID, args)
+  return ok == true, reason or "", args
 end
 
 function Civ6Ai_Apply._ParsePlotId(plotId)
@@ -1142,7 +1156,7 @@ Civ6Ai_Apply.SYNCED_KINDS = {
   -- The local seat's UI research request returns nothing (not true), so every
   -- P0 research order was logged research_rejected. Use the synced channel.
   set_research_tech = true, set_research_civic = true,
-  set_build_priority = true,
+  set_build_priority = true, set_build_next = true,
 }
 
 local function gcall(obj, name, ...)

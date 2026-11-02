@@ -175,23 +175,28 @@ function Civ6Ai_GameCore._CitySiteProblem(x, y)
   if Map.GetPlotDistance == nil then
     return nil
   end
-  local tooClose = false
-  pcall(function()
-    for pid = 0, 63 do
+  -- One pcall per player: a slot whose GetCities errors used to abort the
+  -- whole scan, so the UI side marked a tile legal that gameplay refused
+  -- (game 3 P3: three FoundCity orders refused too_close_to_city).
+  local near = nil
+  for pid = 0, 63 do
+    if near ~= nil then break end
+    pcall(function()
       local other = Players[pid]
       local otherCities = other ~= nil and other:GetCities() or nil
       if otherCities ~= nil and otherCities.Members ~= nil then
         for _, city in otherCities:Members() do
-          if Map.GetPlotDistance(x, y, city:GetX(), city:GetY()) < 4 then
-            tooClose = true
+          local cx, cy = city:GetX(), city:GetY()
+          if Map.GetPlotDistance(x, y, cx, cy) < 4 then
+            near = tostring(pid) .. "@" .. tostring(cx) .. "," .. tostring(cy)
             return
           end
         end
       end
-    end
-  end)
-  if tooClose then
-    return "too_close_to_city"
+    end)
+  end
+  if near ~= nil then
+    return "too_close_to_city", near
   end
   return nil
 end
@@ -210,8 +215,12 @@ function Civ6Ai_GameCore.CanFoundCityForPlayer(playerID, unitNumericId)
     return false, "unit_cannot_found_city"
   end
   local x, y = unit:GetX(), unit:GetY()
-  local siteReason = Civ6Ai_GameCore._CitySiteProblem(x, y)
+  local siteReason, near = Civ6Ai_GameCore._CitySiteProblem(x, y)
   if siteReason ~= nil then
+    if near ~= nil then
+      print("CIV6AI|found_site|refused|player=" .. tostring(playerID) .. "|at=" .. tostring(x) .. "," .. tostring(y)
+        .. "|" .. siteReason .. "|city=" .. tostring(near))
+    end
     return false, siteReason
   end
   local plot = Map.GetPlot(x, y)
@@ -917,6 +926,7 @@ function Civ6Ai_InitializeGameCore()
   ExposedMembers.Civ6Ai.ResolvePlayerUnits = Civ6Ai_GameCore.ResolvePlayerUnits
   ExposedMembers.Civ6Ai.FoundCityForPlayer = Civ6Ai_GameCore.FoundCityForPlayer
   ExposedMembers.Civ6Ai.CanFoundCityForPlayer = Civ6Ai_GameCore.CanFoundCityForPlayer
+  ExposedMembers.Civ6Ai.CitySiteProblem = Civ6Ai_GameCore._CitySiteProblem
   ExposedMembers.Civ6Ai.CanMoveUnitToForPlayer = Civ6Ai_GameCore.CanMoveUnitToForPlayer
   ExposedMembers.Civ6Ai.MoveUnitForPlayer = Civ6Ai_GameCore.MoveUnitForPlayer
   ExposedMembers.Civ6Ai.MoveUnitAlongPathForPlayer = Civ6Ai_GameCore.MoveUnitAlongPathForPlayer

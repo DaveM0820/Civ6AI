@@ -23,6 +23,66 @@ function Civ6Ai_Snapshot._SettleRecommendations(playerID)
   return out
 end
 
+-- This seat's "build next" pick (synced property set by the order channel).
+function Civ6Ai_Snapshot._BuildNextPick(playerID)
+  local idx = tonumber(Game:GetProperty("CIV6AI_PICK_" .. tostring(playerID))) or 0
+  if idx <= 0 then
+    return nil
+  end
+  local item = Civ6Ai_Util.BuildNextItems()[idx]
+  if item == nil then
+    return nil
+  end
+  return { item_id = item, set_turn = tonumber(Game:GetProperty("CIV6AI_PICK_T_" .. tostring(playerID))) or -1 }
+end
+
+-- Items an AI seat can name for "build next": every Civ6Ai_NextItems entry
+-- some city of the seat can produce now, with the engine's own turn estimate
+-- for the fastest city. Not for the local (host) seat, which orders each
+-- city's production directly.
+Civ6Ai_Snapshot.BUILDABLE_CAP = 60
+function Civ6Ai_Snapshot._BuildableItems(playerID)
+  local out = Civ6Ai_Util.JsonArrayList()
+  if Game.GetLocalPlayer() == playerID or Players[playerID] == nil then
+    return out
+  end
+  local cities = {}
+  pcall(function()
+    for _, city in Players[playerID]:GetCities():Members() do
+      cities[#cities + 1] = city
+    end
+  end)
+  if #cities == 0 then
+    return out
+  end
+  for _, item in ipairs(Civ6Ai_Util.BuildNextItems()) do
+    if #out >= Civ6Ai_Snapshot.BUILDABLE_CAP then break end
+    local row = GameInfo.Units[item] or GameInfo.Buildings[item] or GameInfo.Districts[item]
+    if row ~= nil then
+      local best, bestCity = nil, nil
+      for _, city in ipairs(cities) do
+        local ok, can, turns = pcall(function()
+          local bq = city:GetBuildQueue()
+          if not bq:CanProduce(row.Hash, true) then
+            return false, nil
+          end
+          return true, tonumber(bq:GetTurnsLeft(row.Hash))
+        end)
+        if ok and can then
+          if bestCity == nil or (turns ~= nil and (best == nil or turns < best)) then
+            best, bestCity = turns, city
+          end
+        end
+      end
+      if bestCity ~= nil then
+        local okName, name = pcall(function() return Locale.Lookup(bestCity:GetName()) end)
+        out[#out + 1] = { item_id = item, turns = best or -1, city_name = okName and tostring(name) or "" }
+      end
+    end
+  end
+  return out
+end
+
 function Civ6Ai_Snapshot._Priorities(playerID)
   local out = Civ6Ai_Util.JsonArrayList()
   for id = 1, 24 do
@@ -2573,10 +2633,11 @@ function Civ6Ai_Snapshot._PlansNextTurn(playerID)
   return Game.GetLocalPlayer() ~= playerID
 end
 
--- No seat is offered queue_production. The local seat is the human. AI seats
--- steer what the engine AI builds with set_build_priority.
+-- Only the local (host) seat is offered queue_production: CityManager.RequestOperation
+-- is the local player's production screen. AI seats steer the engine AI with
+-- set_build_priority and set_build_next.
 function Civ6Ai_Snapshot._CanQueueProduction(playerID)
-  return false
+  return Game ~= nil and Game.GetLocalPlayer ~= nil and Game.GetLocalPlayer() == playerID
 end
 
 -- Movement the unit has for the model's orders. Prefers the GameCore view (see
@@ -2800,7 +2861,7 @@ Civ6Ai_Snapshot.COMMAND_RESULTS_CAP = 12
 
 Civ6Ai_Snapshot.KIND_NAMES = {
   [1] = "move_unit", [2] = "set_research_tech", [3] = "set_research_civic", [4] = "found_city",
-  [5] = "unit_skip", [6] = "unit_posture_fortify", [7] = "attack_target", [9] = "set_build_priority",
+  [5] = "unit_skip", [6] = "unit_posture_fortify", [7] = "attack_target", [9] = "set_build_priority", [37] = "set_build_next",
   [10] = "change_government", [11] = "set_policies", [12] = "found_pantheon", [13] = "found_religion",
   [14] = "recruit_great_person", [15] = "patronize_great_person", [16] = "governor",
   [17] = "send_diplomatic_action", [18] = "propose_peace", [19] = "purchase_item",
@@ -2869,26 +2930,48 @@ function Civ6Ai_Snapshot._PlotCitySiteProblem(playerID, x, y)
   if (plot.IsWater ~= nil and plot:IsWater()) or (plot.IsImpassable ~= nil and plot:IsImpassable()) then
     return "invalid_city_site"
   end
+  -- The UI context only sees cities the host has revealed, so a city in the
+  -- host's fog was missed and gameplay refused the founding (game 3 P3, three
+  -- times). Ask the gameplay rule itself (read-only) when it is loaded.
+  local gc = ExposedMembers ~= nil and ExposedMembers.Civ6Ai ~= nil and ExposedMembers.Civ6Ai.CitySiteProblem or nil
+  if gc ~= nil then
+    local okGc, why = pcall(gc, x, y)
+    if okGc then
+      if why ~= nil then
+        return why
+      end
+      local owner = plot.GetOwner ~= nil and plot:GetOwner() or -1
+      if owner ~= nil and owner >= 0 and owner ~= playerID then
+        return "foreign_territory"
+      end
+      return nil
+    end
+  end
   if Map.GetPlotDistance == nil then
     return nil
   end
-  local tooClose = false
-  pcall(function()
-    for pid = 0, 63 do
+  -- One pcall per player: a slot whose GetCities errors used to abort the
+  -- whole scan, so the UI side marked a tile legal that gameplay refused
+  -- (game 3 P3: three FoundCity orders refused too_close_to_city).
+  local near = nil
+  for pid = 0, 63 do
+    if near ~= nil then break end
+    pcall(function()
       local other = Players[pid]
       local otherCities = other ~= nil and other:GetCities() or nil
       if otherCities ~= nil and otherCities.Members ~= nil then
         for _, city in otherCities:Members() do
-          if Map.GetPlotDistance(x, y, city:GetX(), city:GetY()) < 4 then
-            tooClose = true
+          local cx, cy = city:GetX(), city:GetY()
+          if Map.GetPlotDistance(x, y, cx, cy) < 4 then
+            near = tostring(pid) .. "@" .. tostring(cx) .. "," .. tostring(cy)
             return
           end
         end
       end
-    end
-  end)
-  if tooClose then
-    return "too_close_to_city"
+    end)
+  end
+  if near ~= nil then
+    return "too_close_to_city", near
   end
   local owner = plot.GetOwner ~= nil and plot:GetOwner() or -1
   if owner ~= nil and owner >= 0 and owner ~= playerID then
@@ -3361,7 +3444,106 @@ function Civ6Ai_Snapshot._AddAdjacentMoveCommands(commands, unit, unitId)
   end
 end
 
+Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP = 24
+Civ6Ai_Snapshot.DISTRICT_TILES_CAP = 2
+
+function Civ6Ai_Snapshot._CanQueueRow(city, row, paramKey)
+  if city == nil or row == nil or paramKey == nil then
+    return false
+  end
+  local ok, result = pcall(function()
+    local bq = city:GetBuildQueue()
+    if bq == nil or not bq:CanProduce(row.Hash, true) then
+      return false
+    end
+    local tCheck = {}
+    tCheck[paramKey] = row.Hash
+    return CityManager.CanStartOperation(city, CityOperationTypes.BUILD, tCheck, true)
+  end)
+  return ok and result == true
+end
+
+-- Host seat only: exact per-city builds (cityName.production) through the
+-- vanilla production request (CityManager.RequestOperation), so costs,
+-- modifiers, chops and overflow stay the engine's. AI seats steer the engine
+-- AI with set_build_priority and "build next" picks instead.
 function Civ6Ai_Snapshot._AddProductionCommands(commands, playerID)
+  if not Civ6Ai_Snapshot._CanQueueProduction(playerID) then
+    return
+  end
+  if Civ6Ai_Production == nil or Players[playerID] == nil or GameInfo == nil or CityManager == nil then
+    return
+  end
+  local cities = Players[playerID]:GetCities()
+  if cities == nil then
+    return
+  end
+  for _, city in cities:Members() do
+    local cityId = Civ6Ai_Production._WireCityId(city)
+    local added = 0
+    local function add(buildId)
+      table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+        command_id = "CMD_prod_" .. buildId .. "_" .. cityId,
+        kind = "queue_production",
+        fixed_arguments = {city_id = cityId, build_id = buildId},
+      }))
+      added = added + 1
+    end
+    -- Units, then regular buildings, then districts (a legal tile each), then
+    -- projects. Wonders need a placement plot and stay off this list.
+    if GameInfo.Units ~= nil then
+      for row in GameInfo.Units() do
+        if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP then break end
+        if Civ6Ai_Snapshot._CanQueueRow(city, row, CityOperationTypes.PARAM_UNIT_TYPE) then
+          add(row.UnitType)
+        end
+      end
+    end
+    if GameInfo.Buildings ~= nil then
+      for row in GameInfo.Buildings() do
+        if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP then break end
+        if not row.IsWonder and Civ6Ai_Snapshot._CanQueueRow(city, row, CityOperationTypes.PARAM_BUILDING_TYPE) then
+          add(row.BuildingType)
+        end
+      end
+    end
+    local C = CityOperationTypes
+    if GameInfo.Districts ~= nil and Map ~= nil and Map.GetNeighborPlots ~= nil then
+      for row in GameInfo.Districts() do
+        if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP + 12 then break end
+        local okBq, bq = pcall(function() return city:GetBuildQueue() end)
+        local okCan, canDistrict = false, false
+        if okBq and bq ~= nil then
+          okCan, canDistrict = pcall(function() return bq:CanProduce(row.Hash, true) end)
+        end
+        if row.DistrictType ~= "DISTRICT_CITY_CENTER" and okCan and canDistrict then
+          local n = 0
+          for _, plot in ipairs(Map.GetNeighborPlots(city:GetX(), city:GetY(), 3) or {}) do
+            if n >= Civ6Ai_Snapshot.DISTRICT_TILES_CAP then break end
+            local t = { [C.PARAM_DISTRICT_TYPE] = row.Hash, [C.PARAM_X] = plot:GetX(), [C.PARAM_Y] = plot:GetY() }
+            local ok, can = pcall(CityManager.CanStartOperation, city, C.BUILD, t, false)
+            if ok and can then
+              n = n + 1
+              table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+                command_id = "CMD_prod_" .. row.DistrictType .. "_" .. cityId .. "_" .. plot:GetX() .. "_" .. plot:GetY(),
+                kind = "queue_production",
+                fixed_arguments = {city_id = cityId, build_id = row.DistrictType, target_x = plot:GetX(), target_y = plot:GetY()},
+              }))
+              added = added + 1
+            end
+          end
+        end
+      end
+    end
+    if GameInfo.Projects ~= nil then
+      for row in GameInfo.Projects() do
+        if added >= Civ6Ai_Snapshot.PRODUCTION_PER_CITY_CAP then break end
+        if Civ6Ai_Snapshot._CanQueueRow(city, row, CityOperationTypes.PARAM_PROJECT_TYPE) then
+          add(row.ProjectType)
+        end
+      end
+    end
+  end
 end
 
 Civ6Ai_Snapshot.PURCHASE_UNAVAILABLE = 1000000000
@@ -4911,7 +5093,24 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
   local player = Players[playerID]
   if player ~= nil then
     for _, unit in ipairs(Civ6Ai_Snapshot._IterateUnits(player:GetUnits())) do
-      if Civ6Ai_Snapshot._UnitNeedsOrders(unit) or Civ6Ai_Snapshot._HeldMilitary(unit) then
+      local needsOrders = Civ6Ai_Snapshot._UnitNeedsOrders(unit) or Civ6Ai_Snapshot._HeldMilitary(unit)
+      -- A settler still walking to a goal is not "needing orders", so it got no
+      -- found_city even standing on a legal site (game 3 P3 T47 at 31,23).
+      if not needsOrders and GameInfo ~= nil and GameInfo.UnitOperations ~= nil then
+        local info = Civ6Ai_Snapshot._UnitInfo(unit)
+        if info ~= nil and (info.FoundCity == true or info.FoundCity == 1) then
+          local foundOp = GameInfo.UnitOperations["UNITOPERATION_FOUND_CITY"]
+          if Civ6Ai_Snapshot._CanFoundCity(unit, foundOp) then
+            local unitId = Civ6Ai_Snapshot._UnitWireId(unit)
+            table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
+              command_id = "CMD_found_" .. unitId,
+              kind = "found_city",
+              fixed_arguments = {unit_id = unitId},
+            }))
+          end
+        end
+      end
+      if needsOrders then
         local unitId = Civ6Ai_Snapshot._UnitWireId(unit)
         table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
           command_id = "CMD_skip_" .. unitId,
@@ -5751,6 +5950,10 @@ function Civ6Ai_Snapshot.Build(playerID, options)
   -- sidecar offers the priorities command when this list is present. The local
   -- seat's empty queues are filled from them (FillEmptyQueuesWeighted).
   civ6Block.priorities = Civ6Ai_Snapshot._Priorities(playerID)
+  pcall(function()
+    civ6Block.build_next = Civ6Ai_Snapshot._BuildNextPick(playerID)
+    civ6Block.buildable = Civ6Ai_Snapshot._BuildableItems(playerID)
+  end)
   -- Early-expansion rule state from gameplay (Civ6Ai_Orders.EarlyOpen): open
   -- while the seat never held 3 cities, has no major war, and no city threatened.
   if Game ~= nil and Game.GetProperty ~= nil then

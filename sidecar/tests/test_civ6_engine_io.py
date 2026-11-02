@@ -23,7 +23,7 @@ APPLY_KINDS = {
     "unit_skip", "unit_posture_fortify", "found_city", "attack_target",
     "send_diplomatic_action", "execute_deal", "send_envoy", "purchase_item", "purchase_tile",
     "worker_improve", "pillage_improvement", "explore", "activate_great_person",
-    "upgrade_unit", "promote_unit", "join_formation", "city_attack", "build_fort",
+    "upgrade_unit", "promote_unit", "join_formation", "city_attack", "build_fort", "set_build_next",
     "trade_route", "spread_religion", "set_build_priority",
 }
 
@@ -78,7 +78,7 @@ class Civ6EngineIoTests(unittest.TestCase):
         self.assertLessEqual(applied, APPLY_KINDS)
         for kind in ("attack_target", "set_research_civic", "move_unit"):
             self.assertIn(kind, offered)
-        self.assertNotIn("queue_production", offered)
+        self.assertIn("queue_production", offered)  # host per-city builds (local seat only)
 
     def test_remember_round_trip(self):
         snap = civ6_adapter.build_classical_golden_snapshot()

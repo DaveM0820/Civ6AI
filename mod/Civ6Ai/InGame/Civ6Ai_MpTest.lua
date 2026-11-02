@@ -464,11 +464,37 @@ function Civ6Ai_MpTest._PrioStep(step)
   end
 end
 
--- The unit and combat checks of steps 1-6 are settled; this round runs only
--- the priority test so nothing spawns next to the seats being compared.
+-- Build next (Data/Civ6Ai_BuildNext.sql) through test 63 mode 4: the first
+-- three AI seats get the unlocking techs and a synced build-next pick (Archer,
+-- Granary, Campus) set by the real BUILD_NEXT order; the fourth is the
+-- control. Steps 2-12 read back picks, what each seat has and builds; a pick
+-- clears itself once a city starts the item. Step 13 clears every pick.
+-- Needs the 2-PC LAN run (both PCs must log the same reads and no desync).
+Civ6Ai_MpTest.ROUND = "build_next"
+Civ6Ai_MpTest.NEXT_SET_STEP = 1
+Civ6Ai_MpTest.NEXT_CLEAR_STEP = 13
+
+function Civ6Ai_MpTest._NextStep(step)
+  if step == Civ6Ai_MpTest.NEXT_SET_STEP then
+    return Civ6Ai_MpTest._Force(4)
+  end
+  if step == Civ6Ai_MpTest.NEXT_CLEAR_STEP then
+    return Civ6Ai_MpTest._Force(2)
+  end
+  if step < Civ6Ai_MpTest.NEXT_CLEAR_STEP then
+    return Civ6Ai_MpTest._Force(1)
+  end
+end
+
+-- The unit and combat checks of steps 1-6 are settled; this round runs one
+-- build test so nothing spawns next to the seats being compared.
 for step = 1, Civ6Ai_MpTest.LAST_STEP - 1 do
   Civ6Ai_MpTest.Steps[step] = function()
-    Civ6Ai_MpTest._PrioStep(step)
+    if Civ6Ai_MpTest.ROUND == "build_next" then
+      Civ6Ai_MpTest._NextStep(step)
+    else
+      Civ6Ai_MpTest._PrioStep(step)
+    end
   end
 end
 

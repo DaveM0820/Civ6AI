@@ -61,6 +61,7 @@ Civ6Ai_Orders.K = {
   CITY_STRIKE = 31,
   FORT = 32,
   SPREAD = 35,
+  BUILD_NEXT = 37,
   PING = 40,
   TEST_MODE = 49,
   TEST_INTROSPECT = 50,
@@ -86,7 +87,7 @@ Civ6Ai_Orders.DECISION_KINDS = {
   [10] = true, [11] = true, [12] = true, [13] = true, [14] = true, [15] = true, [16] = true,
   [17] = true, [18] = true, [19] = true, [20] = true, [21] = true, [22] = true,
   [24] = true, [25] = true, [26] = true, [27] = true, [28] = true, [29] = true, [31] = true, [32] = true, [33] = true, [34] = true,
-  [35] = true, [36] = true,
+  [35] = true, [36] = true, [37] = true,
 }
 -- Intent on a MOVE (param A). N is the batch count on the wire, so intent is A.
 Civ6Ai_Orders.INTENT = { MOVE = 0, FOUND = 1, IMPROVE = 2, RELIGION = 3, TRADE = 4 }
@@ -1483,6 +1484,9 @@ function Civ6Ai_Orders._Execute(sender, o)
   local k = o.K
   if k == Civ6Ai_Orders.K.PRIORITY then
     return Civ6Ai_Orders._SetPriority(sender, o)
+  end
+  if k == Civ6Ai_Orders.K.BUILD_NEXT then
+    return Civ6Ai_Orders._SetBuildNext(sender, o)
   end
   if k ~= nil and k >= Civ6Ai_Orders.K.GOVERNMENT and k <= Civ6Ai_Orders.K.GOVERNOR then
     return Civ6Ai_Orders._DoGovernance(sender, o)
@@ -5337,7 +5341,9 @@ end
 local function forceRead(seats)
   local out = {}
   for _, owner in ipairs(seats) do
-    local parts = { "seat" .. owner .. "[force=" .. Civ6Ai_Orders.ForceTarget(owner) .. "]" }
+    local pick = Civ6Ai_Orders.BuildNextPick ~= nil and Civ6Ai_Orders.BuildNextPick(owner) or 0
+    local pickItem = pick > 0 and Civ6Ai_Orders.BuildNextItems()[pick] or "none"
+    local parts = { "seat" .. owner .. "[force=" .. Civ6Ai_Orders.ForceTarget(owner) .. ",next=" .. tostring(pickItem) .. "]" }
     for _, target in ipairs(Civ6Ai_Orders.FORCE_TARGETS) do
       parts[#parts + 1] = target.item .. ":" .. forceProgress(owner, target)
     end
@@ -5361,7 +5367,7 @@ Civ6Ai_Orders.Tests[Civ6Ai_Orders.K.TEST_FORCE_BUILD] = function(sender, o)
   if #seats == 0 then
     return false, "no_seat"
   end
-  if o.I == 3 then
+  if o.I == 3 or o.I == 4 then
     local out = {}
     for _, s in ipairs(seats) do
       local techs = call(Players[s], "GetTechs")
@@ -5377,17 +5383,151 @@ Civ6Ai_Orders.Tests[Civ6Ai_Orders.K.TEST_FORCE_BUILD] = function(sender, o)
     end
     for i, target in ipairs(Civ6Ai_Orders.FORCE_TARGETS) do
       if forced[i] ~= nil and Players[forced[i]] ~= nil then
-        Game:SetProperty("CIV6AI_FORCE_" .. forced[i], target.id)
+        if o.I == 4 then
+          -- Build next through the real BUILD_NEXT order (sender = this host).
+          local idx = 0
+          for j, item in ipairs(Civ6Ai_Orders.BuildNextItems()) do
+            if item == target.item then idx = j end
+          end
+          local okSet, why = Civ6Ai_Orders._SetBuildNext(sender, { P = forced[i], I = idx })
+          out[#out + 1] = "next" .. forced[i] .. "=" .. tostring(okSet) .. ":" .. tostring(why)
+        else
+          Game:SetProperty("CIV6AI_FORCE_" .. forced[i], target.id)
+        end
       end
     end
     return true, table.concat(out, ";") .. ";" .. forceRead(seats)
   elseif o.I == 2 then
     for _, s in ipairs(seats) do
       Game:SetProperty("CIV6AI_FORCE_" .. s, 0)
+      if Civ6Ai_Orders._ClearBuildNext ~= nil then
+        Civ6Ai_Orders._ClearBuildNext(s, "test_off")
+      end
     end
     return true, "force_off;" .. forceRead(seats)
   end
   return true, forceRead(seats)
+end
+
+
+-- ---------------------------------------------------------------------------
+-- Build next (Data/Civ6Ai_BuildNext.sql). One engine AI strategy per item; the
+-- model's pick for a seat is the synced property CIV6AI_PICK_<player> (index
+-- into the sorted Civ6Ai_NextItems list, 0 = none) with its turn in
+-- CIV6AI_PICK_T_<player>. GameEvents.Civ6AiNext_<Item> answers true for that
+-- seat while the pick is younger than BUILD_NEXT_TURNS, so the engine AI
+-- starts it at the next empty queue (its own city choice, vanilla costs).
+-- The pick clears when one of the seat's cities starts it. Answers come only
+-- from synced properties and game events, so every PC agrees.
+-- ---------------------------------------------------------------------------
+Civ6Ai_Orders.BUILD_NEXT_TURNS = 5
+
+function Civ6Ai_Orders.BuildNextItems()
+  if Civ6Ai_Orders._nextItems ~= nil then
+    return Civ6Ai_Orders._nextItems
+  end
+  local list = {}
+  pcall(function()
+    for row in GameInfo.Civ6Ai_NextItems() do
+      list[#list + 1] = row.Item
+    end
+  end)
+  table.sort(list)
+  Civ6Ai_Orders._nextItems = list
+  return list
+end
+
+function Civ6Ai_Orders.BuildNextPick(owner)
+  local idx = num(Game:GetProperty("CIV6AI_PICK_" .. tostring(owner))) or 0
+  local setTurn = num(Game:GetProperty("CIV6AI_PICK_T_" .. tostring(owner))) or -1
+  return idx, setTurn
+end
+
+local function clearPick(owner, why)
+  local idx = Civ6Ai_Orders.BuildNextPick(owner)
+  if idx ~= 0 then
+    Game:SetProperty("CIV6AI_PICK_" .. tostring(owner), 0)
+    log("build_next|cleared|player=" .. tostring(owner) .. "|item=" .. tostring(Civ6Ai_Orders.BuildNextItems()[idx])
+      .. "|why=" .. tostring(why) .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))
+  end
+end
+Civ6Ai_Orders._ClearBuildNext = clearPick
+
+-- BUILD_NEXT order: P = player, I = item index (0 clears).
+function Civ6Ai_Orders._SetBuildNext(sender, o)
+  local owner = o.P
+  local problem = Civ6Ai_Orders._Authorize(sender, owner)
+  if problem ~= nil then
+    return false, problem
+  end
+  if call(Players[owner], "IsMajor") == false then
+    return false, "not_major"
+  end
+  local idx = o.I or 0
+  if idx == 0 or idx == -1 then
+    clearPick(owner, "model")
+    return true, "build_next|player=" .. tostring(owner) .. "|cleared"
+  end
+  local item = Civ6Ai_Orders.BuildNextItems()[idx]
+  if item == nil then
+    return false, "bad_build_item"
+  end
+  Game:SetProperty("CIV6AI_PICK_" .. tostring(owner), idx)
+  Game:SetProperty("CIV6AI_PICK_T_" .. tostring(owner), Game.GetCurrentGameTurn())
+  return true, "build_next|player=" .. tostring(owner) .. "|item=" .. item
+end
+
+function Civ6Ai_Orders._BuildNextCondition(idx, owner)
+  local pick, setTurn = Civ6Ai_Orders.BuildNextPick(owner)
+  if pick ~= idx then
+    return false
+  end
+  local turn = Game.GetCurrentGameTurn()
+  if setTurn >= 0 and turn - setTurn > Civ6Ai_Orders.BUILD_NEXT_TURNS then
+    return false
+  end
+  return true
+end
+
+-- A city of the seat started the picked item: the pick is used up.
+function Civ6Ai_Orders.OnBuildNextProductionChanged(owner, cityID)
+  local idx = Civ6Ai_Orders.BuildNextPick(owner)
+  if idx == 0 then
+    return
+  end
+  local item = Civ6Ai_Orders.BuildNextItems()[idx]
+  local row = item ~= nil and (GameInfo.Units[item] or GameInfo.Buildings[item] or GameInfo.Districts[item]) or nil
+  local player = Players[owner]
+  local city = player ~= nil and call(call(player, "GetCities"), "FindID", cityID) or nil
+  local bq = city ~= nil and call(city, "GetBuildQueue") or nil
+  local current = bq ~= nil and call(bq, "GetCurrentProductionTypeHash") or nil
+  if row ~= nil and current ~= nil and current == row.Hash then
+    clearPick(owner, "started_city_" .. tostring(cityID))
+  end
+end
+
+function Civ6Ai_Orders.RegisterBuildNext()
+  local n = 0
+  for idx, item in ipairs(Civ6Ai_Orders.BuildNextItems()) do
+    local ev = GameEvents["Civ6AiNext_" .. item]
+    if ev ~= nil and ev.Add ~= nil then
+      local i = idx
+      ev.Add(function(owner, threshold)
+        local ok, v = pcall(Civ6Ai_Orders._BuildNextCondition, i, owner)
+        return ok and v == true
+      end)
+      n = n + 1
+    end
+  end
+  if Events ~= nil and Events.CityProductionChanged ~= nil then
+    Events.CityProductionChanged.Add(function(owner, cityID)
+      local ok, err = pcall(Civ6Ai_Orders.OnBuildNextProductionChanged, owner, cityID)
+      if not ok then
+        log("build_next|changed_error|" .. tostring(err))
+      end
+    end)
+  end
+  return n
 end
 
 
@@ -5944,6 +6084,8 @@ function Civ6Ai_Orders.Init()
   end)
   Civ6Ai_Orders.RegisterForceStrategies()
   local nPrio = Civ6Ai_Orders.RegisterPriorityStrategies()
+  local okNext, nNext = pcall(Civ6Ai_Orders.RegisterBuildNext)
+  log("build_next|registered=" .. tostring(okNext and nNext or ("error:" .. tostring(nNext))))
   Civ6Ai_Orders.RegisterEarlyStrategies()
   local shared = Civ6Ai_Orders._Shared()
   shared.OrdersVersion = Civ6Ai_Orders.VERSION

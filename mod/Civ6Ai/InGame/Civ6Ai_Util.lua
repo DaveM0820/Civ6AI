@@ -824,3 +824,29 @@ function Civ6Ai_Util.DecodeJsonAt(text, pos)
   end
   return tonumber(word), nextPos
 end
+
+-- Build next items (Data/Civ6Ai_BuildNext.sql), sorted by id so the UI and
+-- gameplay sides agree on the index sent over the order channel.
+function Civ6Ai_Util.BuildNextItems()
+  if Civ6Ai_Util._nextItems ~= nil then
+    return Civ6Ai_Util._nextItems
+  end
+  local list = {}
+  pcall(function()
+    for row in GameInfo.Civ6Ai_NextItems() do
+      list[#list + 1] = row.Item
+    end
+  end)
+  table.sort(list)
+  Civ6Ai_Util._nextItems = list
+  return list
+end
+
+function Civ6Ai_Util.BuildNextIndex(item)
+  for i, id in ipairs(Civ6Ai_Util.BuildNextItems()) do
+    if id == item then
+      return i
+    end
+  end
+  return nil
+end

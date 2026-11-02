@@ -1259,8 +1259,8 @@ class OrdersGameplayTests(unittest.TestCase):
         r = self.last()["reason"]
         self.assertTrue(self.last()["ok"])
         self.assertIn("seat5[TECH_ARCHERY=true,TECH_POTTERY=true,TECH_WRITING=true]", r)
-        self.assertIn("seat2[force=1],UNIT_ARCHER:have=1", r)  # the fake seat 2 owns one ranged unit (type 1)
-        self.assertIn("seat5[force=0]", r)
+        self.assertIn("seat2[force=1,next=none],UNIT_ARCHER:have=1", r)  # the fake seat 2 owns one ranged unit (type 1)
+        self.assertIn("seat5[force=0,next=none]", r)
         self.assertEqual(self.rt.eval("GetProp('CIV6AI_FORCE_3')"), 2)
         fire = lambda fn, p: self.rt.eval("GameEvents.%s.fns[1](%d, 0)" % (fn, p))
         self.assertTrue(fire("Civ6AiForceArcher", 2))
@@ -1275,6 +1275,49 @@ class OrdersGameplayTests(unittest.TestCase):
         self.order(0, K=63, P=2, U=3, X=4, Y=5, I=2, S=52)
         self.assertIn("force_off", self.last()["reason"])
         self.assertFalse(fire("Civ6AiForceArcher", 2))
+
+    def test_build_next_set_condition_expiry_and_started_clears(self):
+        self.rt.execute(r"""
+          GameInfo.Units.UNIT_ARCHER = {Index=1, Hash=777}
+          GameInfo.Buildings = {BUILDING_GRANARY={Index=5, Hash=555}}
+          GameInfo.Districts = {}
+          local rows = {{Item="UNIT_ARCHER"}, {Item="BUILDING_GRANARY"}}
+          GameInfo.Civ6Ai_NextItems = function() local i = 0
+            return function() i = i + 1; return rows[i] end end
+          Civ6Ai_Orders._nextItems = nil
+          NEXT_N = Civ6Ai_Orders.RegisterBuildNext()
+          CURRENT = 0
+          Players[2].GetCities = function() return {FindID=function(_, id)
+            return {GetBuildQueue=function() return {GetCurrentProductionTypeHash=function() return CURRENT end} end}
+          end} end
+        """)
+        self.assertEqual(self.rt.eval("NEXT_N"), 2)
+        self.order(0, K=37, P=2, I=1, S=70)  # 1 = BUILDING_GRANARY (sorted)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertIn("item=BUILDING_GRANARY", self.last()["reason"])
+        fire = lambda item, p: self.rt.eval("GameEvents.Civ6AiNext_%s.fns[1](%d, 0)" % (item, p))
+        self.assertTrue(fire("BUILDING_GRANARY", 2))
+        self.assertFalse(fire("UNIT_ARCHER", 2))
+        self.assertFalse(fire("BUILDING_GRANARY", 3))
+        # another item starting does not clear; the picked one does
+        self.rt.execute("CURRENT = 777; Civ6Ai_Orders.OnBuildNextProductionChanged(2, 1)")
+        self.assertTrue(fire("BUILDING_GRANARY", 2))
+        self.rt.execute("CURRENT = 555; Civ6Ai_Orders.OnBuildNextProductionChanged(2, 1)")
+        self.assertFalse(fire("BUILDING_GRANARY", 2))
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_PICK_2')"), 0)
+        # expiry after BUILD_NEXT_TURNS
+        self.order(0, K=37, P=2, I=2, S=71)
+        self.assertTrue(fire("UNIT_ARCHER", 2))
+        self.rt.execute("SetTurn(5 + Civ6Ai_Orders.BUILD_NEXT_TURNS)")
+        self.assertTrue(fire("UNIT_ARCHER", 2))
+        self.rt.execute("SetTurn(6 + Civ6Ai_Orders.BUILD_NEXT_TURNS)")
+        self.assertFalse(fire("UNIT_ARCHER", 2))
+        # clear and bad index
+        self.rt.execute("SetTurn(5)")
+        self.order(0, K=37, P=2, I=0, S=72)
+        self.assertIn("cleared", self.last()["reason"])
+        self.order(0, K=37, P=2, I=9, S=73)
+        self.assertFalse(self.last()["ok"])
 
     def test_force_build_needs_a_seat(self):
         self.order(0, K=49, V=1, S=53)
