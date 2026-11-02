@@ -403,6 +403,7 @@ REASON_TEXT = {
     "off_map": "that tile is off the map",
     "improve_tile_not_offered": "no Improve is offered on that tile; use a listed Improve tile",
     "found_city_not_offered": "FoundCity is not offered for this settler here",
+    "option_not_offered": "that choice is not offered for this unit this turn; use one listed on its row",
     "not_a_legal_site": "not a legal city site (too close to a city, or not land)",
 }
 
@@ -596,10 +597,56 @@ def build_offer_set(snapshot: dict[str, Any]) -> None:
 
     civ6_priorities.inject_legal_commands(snapshot)
     civ6_wire.prune_settlers_without_sites(snapshot)
+    prune_naval_land_attacks(snapshot)
+    try:
+        from sidecar import civ6_build_next
+        civ6_build_next.inject_offers(snapshot)
+    except Exception:  # never block a seat-turn on the build-next list
+        pass
     try:
         civ6_apply_results.suppress_failed_offers(snapshot)
     except Exception:  # never block a seat-turn on feedback rows
         pass
+
+
+def naval_melee_onto_land(snapshot: dict[str, Any], unit_id: Any, x: Any, y: Any, ranged: Any = False) -> bool:
+    """A melee ship ordered to attack or capture on a land tile that is not a city.
+
+    The game refuses it (naval melee only reaches water tiles and cities); the
+    galley was offered "capture Barbarian Builder" on land for 17 turns (game 3 P0).
+    """
+    if ranged or not isinstance(x, int) or not isinstance(y, int):
+        return False
+    unit = next((u for u in snapshot.get("your_units") or [] if isinstance(u, dict)
+                 and str(u.get("unit_id")) == str(unit_id)), None)
+    if unit is None or str(unit.get("domain_id") or "") != "DOMAIN_SEA":
+        return False
+    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    plot = next((p for p in known.get("plots") or [] if isinstance(p, dict)
+                 and p.get("x") == x and p.get("y") == y), None)
+    if plot is None or plot.get("water") or plot.get("city_id"):
+        return False
+    return True
+
+
+def prune_naval_land_attacks(snapshot: dict[str, Any]) -> int:
+    """Drop melee-ship attack offers onto land tiles without a city."""
+    legal = snapshot.get("legal_commands")
+    if not isinstance(legal, list):
+        return 0
+    kept, dropped = [], 0
+    for command in legal:
+        fixed = command.get("fixed_arguments") if isinstance(command, dict) else None
+        if (isinstance(fixed, dict) and command.get("kind") in ("attack_target", "melee_attack")
+                and fixed.get("target_kind") != "city"
+                and naval_melee_onto_land(snapshot, fixed.get("unit_id"), fixed.get("target_x"),
+                                          fixed.get("target_y"), fixed.get("ranged"))):
+            dropped += 1
+            continue
+        kept.append(command)
+    if dropped:
+        snapshot["legal_commands"] = kept
+    return dropped
 
 
 def _state_path(snapshot: dict[str, Any]) -> Path | None:

@@ -550,6 +550,19 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
             _reject(snapshot, f"{value} for {_unit_name(snapshot, unit_id)} (Improve is offered this turn only at {', '.join(offered)})",
                     "improve_tile_not_offered")
         return picked
+    named = re.match(r"^\s*[A-Za-z]+\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*$", str(value or ""))
+    if named and verb in ("promote", "upgrade"):
+        # Promote(PROMOTION_GARRISON) used to run the first listed promotion
+        # instead (game 3 P0 got VOLLEY). Only the named choice, or nothing.
+        want = named.group(1).upper()
+        for token, cmd_id in candidates:
+            arg = re.match(r"^\s*[A-Za-z]+\s*\(\s*([A-Za-z0-9_]+)\s*\)", token)
+            if _verb(token) == verb and arg and arg.group(1).upper() in (want, "PROMOTION_" + want, "UNIT_" + want):
+                return cmd_id
+        offered = sorted(t for t, _c in candidates if _verb(t) == verb)
+        _reject(snapshot, f"{value} for {_unit_name(snapshot, unit_id)}"
+                + (f" (offered: {', '.join(offered)})" if offered else ""), "option_not_offered")
+        return None
     for token, cmd_id in candidates:
         if _verb(token) != verb:
             continue
@@ -1016,9 +1029,15 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
                     if cmd_id in legal_ids:
                         bound.append(cmd_id)
             continue
+        from sidecar import civ6_build_next
         from sidecar import civ6_governance as governance_wire
         from sidecar import civ6_diplomacy as diplomacy_wire
 
+        if civ6_build_next.is_reply_key(key):
+            next_ids, next_notes = civ6_build_next.bind_reply(snapshot, key, value)
+            bound.extend(next_ids)
+            unresolved.extend(next_notes)
+            continue
         if governance_wire.is_reply_key(key):
             gov_ids, gov_notes = governance_wire.bind_reply(snapshot, key, value)
             bound.extend(gov_ids)

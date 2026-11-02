@@ -24,6 +24,7 @@ SETTLE_HERE_LABEL = "settler tile"
 UNEXPLORED = map_render.UNEXPLORED_FILL
 # Tight Civ5 view is about 8x12. Twice that many cells uses axis labels only.
 HEX_AXIS_ONLY_MIN_CELLS = 8 * 12 * 2
+HEX_TILE_COORD_MAX_SIDE = 20
 TILE_COORD_MAX_CELLS = 150  # zoomed views at or below this tile count label every tile
 # Screen Y grows down. Flat-top corners use angle π/6 + i·π/3, so:
 #   edge 5 = east, edge 0 = southeast, edge 1 = southwest.
@@ -1444,7 +1445,11 @@ def _hex_coord_label_flags(vw: int, vh: int) -> tuple[bool, bool]:
     cells = vw * vh
     if cells <= 0:
         return False, False
-    if cells >= HEX_AXIS_ONLY_MIN_CELLS:
+    # The cell count alone never let a strategic window (16x17 = 272 cells,
+    # hexes ~90 px wide on the 1536 px canvas) draw per-hex (x,y), so every seat
+    # got a second, tactical image (game 3). A window up to
+    # HEX_TILE_COORD_MAX_SIDE hexes on its longest side is still legible.
+    if cells >= HEX_AXIS_ONLY_MIN_CELLS and max(vw, vh) > HEX_TILE_COORD_MAX_SIDE:
         return True, False
     return False, True
 

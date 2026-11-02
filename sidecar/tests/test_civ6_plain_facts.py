@@ -140,7 +140,7 @@ def test_water_tint_is_saturated_blue_and_coast_lighter():
 def test_tactical_skipped_only_when_strategic_labels_each_hex():
     from sidecar import map_situational as ms
     small = {"x0": 10, "y0": 10, "width": 13, "height": 14}   # 182 cells: coords drawn
-    big = {"x0": 10, "y0": 10, "width": 16, "height": 18}     # 288 cells: axes only
+    big = {"x0": 10, "y0": 10, "width": 24, "height": 14}     # 336 cells, side > 20: axes only
     inside = {"x0": 11, "y0": 11, "width": 12, "height": 12}
     away = {"x0": 40, "y0": 10, "width": 12, "height": 12}
     assert ms.tactical_needed(small, inside) is False

@@ -18,6 +18,16 @@ def _type_of(label: str) -> str:
     return label.rsplit("_", 1)[0]
 
 
+PAST_CAP = 200
+
+
+def past_label(unit_id: str) -> str | None:
+    from sidecar import pipeline_v2 as pipeline
+
+    past = getattr(pipeline, "_PAST_UNIT_LABELS", None) or {}
+    return past.get(unit_id)
+
+
 def assign(units: list[dict[str, Any]], state: dict[str, Any]) -> dict[str, str]:
     """Return {unit_id: label} for the seat's own units and update ``state`` in place."""
     from sidecar import pipeline_v2 as pipeline
@@ -42,7 +52,17 @@ def assign(units: list[dict[str, Any]], state: dict[str, Any]) -> dict[str, str]
             nxt[kind] = int(nxt.get(kind) or 0) + 1
             label = f"{kind}_{nxt[kind]}"
         out[uid] = label
-    state["labels"] = out  # dead units drop out; their numbers are not reused
+    # Dead units drop out; their numbers are not reused. Keep their last label
+    # so last turn's results still name them (apply text showed unit_393220
+    # for P3's settler after it founded, game 3).
+    past = state.get("past") if isinstance(state.get("past"), dict) else {}
+    for uid, label in labels.items():
+        if uid not in out and isinstance(label, str):
+            past[uid] = label
+    if len(past) > PAST_CAP:
+        past = dict(list(past.items())[-PAST_CAP:])
+    state["past"] = past
+    state["labels"] = out
     state["next"] = nxt
     return out
 
@@ -110,4 +130,5 @@ def activate(snapshot: dict[str, Any], state_dir: Path | str | None) -> dict[str
         except OSError:
             pass
     pipeline._STABLE_UNIT_LABELS = labels
+    pipeline._PAST_UNIT_LABELS = dict(state.get("past") or {})
     return labels

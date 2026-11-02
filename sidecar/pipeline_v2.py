@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import copy
 import hashlib
+import contextlib
 import json
 import os
 
@@ -1027,12 +1028,52 @@ def _synthesize_plots_from_entities(
     return [by_key[key] for key in sorted(by_key)]
 
 
+@contextlib.contextmanager
+def metrics_lock(path: Path, wait_s: float = 10.0, stale_s: float = 60.0):
+    """Cross-process lock for turn_metrics.jsonl (one file shared by every seat).
+
+    A seat's read-modify-write (order-source merge) raced another seat's
+    append and left tail fragments, losing rows (game 3: 7 fragments, 5 rows).
+    Proceeds unlocked after wait_s rather than block a seat-turn.
+    """
+    lock = path.with_name(path.name + ".lock")
+    deadline = time.time() + wait_s
+    held = False
+    while True:
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            held = True
+            break
+        except FileExistsError:
+            try:
+                if time.time() - lock.stat().st_mtime > stale_s:
+                    lock.unlink()
+                    continue
+            except OSError:
+                pass
+            if time.time() >= deadline:
+                break
+            time.sleep(0.02)
+        except OSError:
+            break
+    try:
+        yield held
+    finally:
+        if held:
+            try:
+                lock.unlink()
+            except OSError:
+                pass
+
+
 def append_turn_metrics(metrics_dir: Path, event: dict[str, Any]) -> bool:
     try:
         metrics_dir.mkdir(parents=True, exist_ok=True)
         path = metrics_dir / "turn_metrics.jsonl"
-        with path.open("a", encoding="utf-8", newline="\n") as stream:
-            stream.write(canonical_json({"recorded_unix_ms": int(time.time() * 1000), **event}) + "\n")
+        with metrics_lock(path):
+            with path.open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(canonical_json({"recorded_unix_ms": int(time.time() * 1000), **event}) + "\n")
         return True
     except OSError:
         return False

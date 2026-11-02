@@ -10,6 +10,7 @@ wire can print ``apply.last.N`` rows and ATTENTION "Blocked" lines (Civ5 parity)
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -325,6 +326,87 @@ def load_apply_results(session_dir: Path | None) -> list[dict[str, Any]]:
     return rows
 
 
+def journal_command_turns(session_dir: Path | None) -> dict[str, list[int]]:
+    """command_id -> the decision turns (journal.jsonl) whose batch carried it."""
+    out: dict[str, list[int]] = {}
+    if session_dir is None:
+        return out
+    path = Path(session_dir) / "journal.jsonl"
+    if not path.is_file():
+        return out
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return out
+    for line in text.splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        commands = entry.get("commands") if isinstance(entry, dict) else None
+        if not isinstance(commands, list):
+            continue
+        for command in commands:
+            if not isinstance(command, dict) or not command.get("command_id"):
+                continue
+            try:
+                turn = int(command.get("turn", entry.get("turn")))
+            except (TypeError, ValueError):
+                continue
+            out.setdefault(str(command["command_id"]), []).append(turn)
+    return out
+
+
+def stamp_decision_turns(rows: list[dict[str, Any]], session_dir: Path | None) -> int:
+    """Give rows without decision_turn the turn of the batch that sent them.
+
+    Orders for the game's AI seats go through the order channel and run at the
+    seat's next turn start, so their row ``turn`` is the apply turn (decision
+    + 1). Reading it as the decision turn showed P2-P5 their previous batch
+    (game 3: 124 of 126 cases). The journal says which batch carried each
+    command id; the latest decision turn at or before the apply turn wins.
+    """
+    if not rows:
+        return 0
+    by_id = journal_command_turns(session_dir)
+    if not by_id:
+        return 0
+    # The seat's lag (0: applied in the decision turn, 1: at the next turn
+    # start) from command ids that only one batch ever carried; repeated ids
+    # (CMD_skip_UNIT_x every turn) would be ambiguous on their own.
+    votes: dict[int, int] = {}
+    for row in rows:
+        if row.get("decision_turn") is not None:
+            continue
+        turns = by_id.get(str(row.get("command_id") or ""))
+        if not turns or len(set(turns)) != 1:
+            continue
+        try:
+            lag = int(row.get("turn")) - turns[0]
+        except (TypeError, ValueError):
+            continue
+        if lag in (0, 1):
+            votes[lag] = votes.get(lag, 0) + 1
+    if not votes:
+        return 0
+    lag = max(sorted(votes), key=lambda k: votes[k])
+    stamped = 0
+    for row in rows:
+        if row.get("decision_turn") is not None:
+            continue
+        try:
+            applied = int(row.get("turn"))
+        except (TypeError, ValueError):
+            continue
+        turns = by_id.get(str(row.get("command_id") or ""))
+        if turns and len(set(turns)) == 1 and applied - turns[0] in (0, 1):
+            row["decision_turn"] = turns[0]
+        else:
+            row["decision_turn"] = applied - lag
+        stamped += 1
+    return stamped
+
+
 def _row_decision_turn(row: dict[str, Any]) -> int | None:
     for key in ("decision_turn", "turn"):
         try:
@@ -377,13 +459,24 @@ def _readable(value: Any, prefix: str) -> str:
     return text.replace("_", " ").title()
 
 
+def _past_label(unit_id: str) -> str | None:
+    """Label of a unit that no longer exists (founded, captured, killed)."""
+    if not unit_id:
+        return None
+    try:
+        from sidecar import civ6_unit_labels
+        return civ6_unit_labels.past_label(unit_id)
+    except Exception:
+        return None
+
+
 def _order_label(row: dict[str, Any], wire_ids: dict[str, str], city_names: dict[str, str]) -> tuple[str, str]:
     """(actor, order) e.g. ('warrior_1', 'MoveTo(6,10)')."""
     kind = str(row.get("kind") or "")
     fixed = row.get("fixed_arguments") if isinstance(row.get("fixed_arguments"), dict) else {}
     if not fixed:
         unit_raw = str(row.get("unit") or "")
-        actor = wire_ids.get(unit_raw) or (unit_raw.lower() if unit_raw else "")
+        actor = wire_ids.get(unit_raw) or _past_label(unit_raw) or (unit_raw.lower() if unit_raw else "")
         coords = None
         if isinstance(row.get("x"), int) and isinstance(row.get("y"), int):
             coords = f"({row['x']},{row['y']})"
@@ -397,7 +490,7 @@ def _order_label(row: dict[str, Any], wire_ids: dict[str, str], city_names: dict
         # empty fixed still continues into kind-specific jsonl labels below
         fixed = {}
     unit_id = str(fixed.get("unit_id") or "")
-    actor = wire_ids.get(unit_id) or (unit_id.lower() if unit_id else "")
+    actor = wire_ids.get(unit_id) or _past_label(unit_id) or (unit_id.lower() if unit_id else "")
     coords = _coords(fixed) or "(?,?)"
     if kind == "move_unit":
         return actor, f"MoveTo{coords}"
@@ -894,6 +987,10 @@ def inject_command_results(snapshot: dict[str, Any], session_dir: Path | None) -
         return 0
     existing = history.get("command_results")
     all_rows = load_apply_results(session_dir)
+    try:
+        stamp_decision_turns(all_rows, session_dir)
+    except Exception:  # stale rather than none
+        pass
     turn, rows = latest_turn_rows(all_rows, player_id, current_turn)
     if turn is None or not rows:
         if isinstance(existing, list):
@@ -1901,6 +1998,11 @@ def merge_order_sources_into_metrics(
     if not path.is_file():
         return False
     fields = order_source_fields(rows)
+    with pipeline.metrics_lock(path):
+        return _merge_order_sources_locked(path, player_id, turn, fields)
+
+
+def _merge_order_sources_locked(path: Path, player_id: Any, turn: int, fields: dict[str, Any]) -> bool:
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:
@@ -1929,8 +2031,10 @@ def merge_order_sources_into_metrics(
             out.append(line)
     if not updated:
         return False
+    tmp = path.with_name(path.name + ".tmp")
     try:
-        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        tmp.write_text("\n".join(out) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
     except OSError:
         return False
     return True

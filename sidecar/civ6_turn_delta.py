@@ -84,6 +84,16 @@ def _near(a: Any, b: Any) -> bool:
     return pa is not None and pb is not None and (pa == pb or pb in hex_neighbors(*pa))
 
 
+_CIVILIAN_TAGS = ("SETTLER", "BUILDER", "TRADER", "MISSIONARY", "APOSTLE", "INQUISITOR", "GURU",
+                  "ARCHAEOLOGIST", "NATURALIST", "ROCK_BAND", "SPY", "MILITARY_ENGINEER", "MEDIC",
+                  "SUPPLY_CONVOY", "SIEGE_TOWER", "BATTERING_RAM", "COMANDANTE", "SOOTHSAYER")
+
+
+def _never_upgrades(typ: str) -> bool:
+    """Unit classes with no upgrade line in vanilla Civ VI."""
+    return any(tag in typ for tag in _CIVILIAN_TAGS)
+
+
 def diff(prev: dict[str, Any], now: dict[str, Any]) -> list[str]:
     """Plain change bits, most important first. Empty when nothing changed."""
     bits: list[str] = []
@@ -112,8 +122,14 @@ def diff(prev: dict[str, Any], now: dict[str, Any]) -> list[str]:
             bits.append(f"used {_type_name(unit.get('type'))} {unit.get('label') or uid}")
             upgraded.add(uid)
             continue
+        # Civilians never upgrade: a captured settler next to a new builder
+        # read "UPGRADED settler_2 to Builder builder_4" (game 3 P1 T49).
+        if _never_upgrades(typ):
+            continue
         twin = next((g for gid, g in gained_now.items() if g.get("plot") == unit.get("plot")
-                     and gid not in upgraded and "GREAT_" not in str(g.get("type") or "").upper()), None)
+                     and gid not in upgraded and "GREAT_" not in str(g.get("type") or "").upper()
+                     and not _never_upgrades(str(g.get("type") or "").upper())
+                     and str(g.get("type") or "").upper() != typ), None)
         if twin is not None:
             twin_id = next(gid for gid, g in gained_now.items() if g is twin)
             upgraded.add(twin_id)

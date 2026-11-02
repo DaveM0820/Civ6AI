@@ -43,7 +43,8 @@ class Civ5MapRenderTests(unittest.TestCase):
 
     def test_hex_coord_flags_switch_at_double_tight_view(self):
         self.assertEqual((False, True), _hex_coord_label_flags(8, 12))
-        self.assertEqual((True, False), _hex_coord_label_flags(16, 12))
+        self.assertEqual((False, True), _hex_coord_label_flags(16, 17))  # legible: <= 20 per side
+        self.assertEqual((True, False), _hex_coord_label_flags(24, 12))
         self.assertEqual(192, HEX_AXIS_ONLY_MIN_CELLS)
 
     def test_ruins_plot_is_in_render_index(self):

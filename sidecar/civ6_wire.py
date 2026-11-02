@@ -1270,6 +1270,14 @@ def _empire_section(
                 elif _game_ai_civilian(unit):
                     lines.append(pipeline._wire_line(
                         f"{prefix}.control", "the game's own AI moves this unit (trade routes, spreading religion); no order needed"))
+                elif (unit.get("needs_orders") and "TRADER" in str(unit.get("unit_type_id") or "").upper()
+                      and not any(str(t).startswith("TradeRoute") for t in unit_tokens.get(str(unit_id), []))):
+                    # Human seat: the game has no AI for its trader, and a route
+                    # needs a destination city (game 3 P0: 1 city, nobody met).
+                    lines.append(pipeline._wire_line(
+                        f"{prefix}.trade",
+                        "no trade route can start now (a route needs a second city of yours, or a met civ's or "
+                        "city-state's city in range); TradeRoute appears in this unit's commands once one exists"))
                 idle_n = _unit_idle_for(context, unit_id)
                 if idle_n:
                     lines.append(pipeline._wire_line(
@@ -1532,7 +1540,9 @@ def _other_player_lines(context: dict[str, Any]) -> list[str]:
         for unit in units[:24]:
             owner = str(unit.get("owner_player_id") or "")
             type_label = pipeline._readable_id(str(unit.get("unit_type_id") or "UNIT"), "UNIT_").lower()
-            base = f"{_player_display(context, owner)}.{type_label}"
+            # Barbarians are not in known_players: they showed as PLAYER_63 and P0
+            # took "Player 63" for a rival civ for 20 turns (game 3).
+            base = f"{combat_wire._owner_label(context, owner)}.{type_label}"
             used_keys[base] = used_keys.get(base, 0) + 1
             key = base if used_keys[base] == 1 else f"{base}_{used_keys[base]}"
             lines.append(pipeline._wire_line(f"{key}.position", pipeline._plot_coords_text(unit.get("plot_id"))))
@@ -1548,6 +1558,8 @@ def _other_player_lines(context: dict[str, Any]) -> list[str]:
             if (isinstance(rival.get("relation"), dict) and rival["relation"].get("at_war"))
             or civ6_player_kind(rival) == "barbarians"
         }
+        hostile_ids |= {str(u.get("owner_player_id") or "") for u in units
+                        if combat_wire._owner_label(context, u.get("owner_player_id")) == "Barbarian"}
         game = context.get("game", {}) if isinstance(context.get("game"), dict) else {}
         width = game.get("map_width") if isinstance(game.get("map_width"), int) else None
         wrap_x = game.get("wrap_x") is not False
@@ -2207,6 +2219,11 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     prio_lines = civ6_priorities.prompt_lines(snapshot)
     if prio_lines:
         optional_keys.append((civ6_priorities.REPLY_KEY, "preset name | none (see PRODUCTION PRESET)"))
+    from sidecar import civ6_build_next
+
+    next_lines = civ6_build_next.prompt_lines(snapshot)
+    if next_lines:
+        optional_keys.append((civ6_build_next.REPLY_KEY, "one item id | NONE (see BUILD NEXT)"))
     required_keys = {key for key, _ in required}
     units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
     wire_ids = pipeline._build_unit_wire_id_map(units)
@@ -2269,6 +2286,9 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     if prio_lines:
         opt.append("")
         opt.extend(prio_lines)
+    if next_lines:
+        opt.append("")
+        opt.extend(next_lines)
 
     req = [
         "=== REQUIRED COMMANDS ===",

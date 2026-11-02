@@ -352,6 +352,9 @@ def capture_lines(context: dict[str, Any]) -> list[str]:
         x, y = _int(row.get("target_x")), _int(row.get("target_y"))
         if x is None or y is None:
             continue
+        from sidecar import civ6_legality
+        if civ6_legality.naval_melee_onto_land(context, row.get("unit_id"), x, y, row.get("ranged")):
+            continue  # a ship cannot capture on land
         name = wire_ids.get(str(row.get("unit_id")), str(row.get("unit_id") or "unit"))
         who = _target_text(context, row)
         extra = " after moving into reach" if row.get("needs_move") else ""

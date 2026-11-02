@@ -187,7 +187,7 @@ def parse_blob_lines(text: str) -> list[dict[str, Any]]:
 
 _JSONL_MARK = "CIV6AI|jsonl|"
 APPLY_RESULTS_NAME = "apply-results.jsonl"
-_APPLY_RESULT_KEEP = ("ok", "event", "kind", "reason", "turn", "fixed_arguments", "command_id", "player_id", "source")
+_APPLY_RESULT_KEEP = ("ok", "event", "kind", "reason", "turn", "decision_turn", "fixed_arguments", "command_id", "player_id", "source")
 
 
 def parse_apply_result_lines(text: str) -> list[dict[str, Any]]:

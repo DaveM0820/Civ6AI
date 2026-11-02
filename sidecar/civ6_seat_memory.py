@@ -34,7 +34,7 @@ OBJECTIVE_ORDERS = {
     "settle": frozenset({"found_city"}),
     "research": frozenset({"set_research_tech", "set_research_civic"}),
     "defend": frozenset({"unit_posture_fortify", "attack_target", "city_attack", "queue_production"}),
-    "build": frozenset({"queue_production", "set_build_priority", "purchase_item"}),
+    "build": frozenset({"queue_production", "set_build_priority", "set_build_next", "purchase_item"}),
 }
 
 _PROMISE_RE = re.compile(r"\b(i will|i promise|i shall|i won't|i will not)\b", re.I)
