@@ -1155,8 +1155,37 @@ function Civ6Ai_Production.SituationFor(playerID, city)
   return Civ6Ai_Production.ComposeSituation(raw)
 end
 
-function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID)
+-- The local seat's empty queue is a required model decision (the prompt's
+-- <City>.production row). The end-turn blocker sweep can run before this turn's
+-- reply lands; filling then raced the model (game 5 T6: fill sent Monument, the
+-- model's Builder landed after it). Hold the sweep fill until the reply has been
+-- applied, bounded by FILL_HOLD_WAIT sweeps so a missing reply never blocks the turn.
+Civ6Ai_Production.FILL_HOLD_WAIT = 40
+Civ6Ai_Production._fillHold = Civ6Ai_Production._fillHold or {}
+
+function Civ6Ai_Production._HoldFillForModel(playerID, turn)
+  if Civ6Ai_Bridge == nil or Civ6Ai_Bridge._WasAppliedThisPulse == nil
+      or Civ6Ai_Bridge._WasAppliedThisPulse(playerID) then
+    return false
+  end
+  local key = tostring(playerID)
+  local rec = Civ6Ai_Production._fillHold[key]
+  if rec == nil or rec.turn ~= turn then
+    rec = { turn = turn, waits = 0 }
+    Civ6Ai_Production._fillHold[key] = rec
+  end
+  rec.waits = rec.waits + 1
+  return rec.waits <= Civ6Ai_Production.FILL_HOLD_WAIT
+end
+
+function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID, afterApply)
   if Game == nil or Game.GetLocalPlayer == nil or Game.GetLocalPlayer() ~= playerID then
+    return 0
+  end
+  if afterApply ~= true and Civ6Ai_Production._HoldFillForModel(playerID, Game.GetCurrentGameTurn()) then
+    if Civ6Ai_Util ~= nil and Civ6Ai_Util.Log ~= nil then
+      Civ6Ai_Util.Log("production|fill_held|player=" .. tostring(playerID) .. "|reason=model_choice_pending")
+    end
     return 0
   end
   if CityManager == nil or CityManager.RequestOperation == nil or CityOperationTypes == nil then
