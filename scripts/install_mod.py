@@ -78,8 +78,13 @@ BACKUP_DIRNAME = "Civ6Ai_mod_backups"
 
 
 def backup_root(dst: Path) -> Path:
-    """Backups live next to Mods (not inside it) so Civ6 never loads a stale duplicate .modinfo."""
-    return dst.parent.parent / BACKUP_DIRNAME
+    """Backups live outside Mods (so Civ6 never loads a stale duplicate .modinfo) and in
+    the local civ6ai root, never next to Mods (Documents may be OneDrive-synced)."""
+    if str(Path(__file__).resolve().parent) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from civ6_paths import civ6ai_root
+
+    return civ6ai_root() / BACKUP_DIRNAME
 
 
 def backup_existing(dst: Path) -> Path | None:

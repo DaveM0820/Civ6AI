@@ -12,7 +12,7 @@ from pathlib import Path
 
 CREATE_NO_WINDOW = 0x08000000
 HOME = Path.home()
-REPO = HOME / "OneDrive" / "Documents" / "Civ6AI"
+REPO = Path(__file__).resolve().parents[2]
 LA = Path(os.environ.get("LOCALAPPDATA", ""))
 LUA_LOG = LA / "Firaxis Games" / "Sid Meier's Civilization VI" / "Logs" / "Lua.log"
 STATE_PATH = REPO / "runtime" / "hourly_watch_state.json"
@@ -290,8 +290,7 @@ def check_lua_and_session():
 
     # sessions / decision freshness
     session_roots = [
-        HOME / "OneDrive" / "Documents" / "My Games" / "Sid Meier's Civilization VI" / "civ6ai",
-        HOME / "Documents" / "My Games" / "Sid Meier's Civilization VI" / "civ6ai",
+        Path(os.environ.get("LOCALAPPDATA", str(HOME / "AppData" / "Local"))) / "Firaxis Games" / "Sid Meier's Civilization VI" / "civ6ai",
         REPO / "sessions",
         LUA_LOG.parent / "civ6ai",
     ]

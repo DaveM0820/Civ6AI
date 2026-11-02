@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -158,8 +159,9 @@ class LiveConfigWriteTests(unittest.TestCase):
 
 class BackupLocationTests(unittest.TestCase):
     def test_backups_go_outside_mods_and_legacy_ones_are_moved(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(os.environ, {"LOCALAPPDATA": str(Path(tmp) / "local")}):
             games = Path(tmp) / "My Games" / "Sid Meier's Civilization VI"
+            local = Path(tmp) / "local" / "Firaxis Games" / "Sid Meier's Civilization VI" / "civ6ai"
             target = games / "Mods" / "Civ6Ai"
             (target).mkdir(parents=True)
             (target / "Civ6Ai.modinfo").write_text("new", encoding="utf-8")
@@ -169,9 +171,9 @@ class BackupLocationTests(unittest.TestCase):
             moved = install_mod.relocate_legacy_backups(target)
             self.assertEqual(1, len(moved))
             self.assertFalse(legacy.exists())
-            self.assertEqual(games / "Civ6Ai_mod_backups", moved[0].parent)
+            self.assertEqual(local / "Civ6Ai_mod_backups", moved[0].parent)
             backup = install_mod.backup_existing(target)
-            self.assertEqual(games / "Civ6Ai_mod_backups", backup.parent)
+            self.assertEqual(local / "Civ6Ai_mod_backups", backup.parent)
             self.assertFalse(target.exists())
             self.assertEqual([], [p for p in (games / "Mods").iterdir()])
 
