@@ -25,7 +25,11 @@ end
 
 -- This seat's "build next" pick (synced property set by the order channel).
 function Civ6Ai_Snapshot._BuildNextPick(playerID)
-  local idx = tonumber(Game:GetProperty("CIV6AI_PICK_" .. tostring(playerID))) or 0
+  local function prop(key)
+    local ok, value = pcall(function() return Game:GetProperty(key) end)
+    return ok and tonumber(value) or nil
+  end
+  local idx = prop("CIV6AI_PICK_" .. tostring(playerID)) or 0
   if idx <= 0 then
     return nil
   end
@@ -33,7 +37,7 @@ function Civ6Ai_Snapshot._BuildNextPick(playerID)
   if item == nil then
     return nil
   end
-  return { item_id = item, set_turn = tonumber(Game:GetProperty("CIV6AI_PICK_T_" .. tostring(playerID))) or -1 }
+  return { item_id = item, set_turn = prop("CIV6AI_PICK_T_" .. tostring(playerID)) or -1 }
 end
 
 -- Items an AI seat can name for "build next": every Civ6Ai_NextItems entry
@@ -5950,10 +5954,20 @@ function Civ6Ai_Snapshot.Build(playerID, options)
   -- sidecar offers the priorities command when this list is present. The local
   -- seat's empty queues are filled from them (FillEmptyQueuesWeighted).
   civ6Block.priorities = Civ6Ai_Snapshot._Priorities(playerID)
-  pcall(function()
-    civ6Block.build_next = Civ6Ai_Snapshot._BuildNextPick(playerID)
-    civ6Block.buildable = Civ6Ai_Snapshot._BuildableItems(playerID)
-  end)
+  -- Build next (AI seats): two separate calls so one failing cannot hide the
+  -- other, and a failure is logged instead of silently dropping the offers.
+  local okPick, pick = pcall(Civ6Ai_Snapshot._BuildNextPick, playerID)
+  if okPick then
+    civ6Block.build_next = pick
+  else
+    Civ6Ai_Util.Log("snapshot|build_next_pick_failed|" .. tostring(pick))
+  end
+  local okBuildable, buildable = pcall(Civ6Ai_Snapshot._BuildableItems, playerID)
+  if okBuildable and type(buildable) == "table" then
+    civ6Block.buildable = buildable
+  else
+    Civ6Ai_Util.Log("snapshot|buildable_failed|" .. tostring(buildable))
+  end
   -- Early-expansion rule state from gameplay (Civ6Ai_Orders.EarlyOpen): open
   -- while the seat never held 3 cities, has no major war, and no city threatened.
   if Game ~= nil and Game.GetProperty ~= nil then

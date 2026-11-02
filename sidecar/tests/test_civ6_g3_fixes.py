@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import threading
+
+import pytest
 from pathlib import Path
 
 from sidecar import civ6_apply_results as ar
@@ -102,3 +104,37 @@ def test_barbarian_owner_label():
     ctx = {"players": [{"player_id": "PLAYER_63", "civilization": "CIVILIZATION_BARBARIAN", "kind": "barbarians"}]}
     label = cw._owner_label(ctx, "PLAYER_63")
     assert label in ("Barbarian", "Barbarians") or "PLAYER_63" not in label
+
+
+def test_build_next_snapshot_keys_pass_schema():
+    """The mod's civ6.buildable / civ6.build_next must survive snapshot validation."""
+    from sidecar import civ6_adapter
+    snap = civ6_adapter.load_golden_snapshot()
+    snap["civ6"]["buildable"] = [{"item_id": "UNIT_BUILDER", "turns": 3, "city_name": "Rome"},
+                                 {"item_id": "BUILDING_GRANARY", "turns": -1, "city_name": ""}]
+    snap["civ6"]["build_next"] = {"item_id": "UNIT_BUILDER", "set_turn": 4}
+    civ6_adapter.validate_civ6_snapshot(snap)
+    snap["civ6"]["buildable"] = {}  # Lua empty table
+    civ6_adapter.normalize_civ6_snapshot(snap)
+    assert snap["civ6"]["buildable"] == []
+
+
+def test_build_next_lua_snapshot_survives_property_errors():
+    lupa = pytest.importorskip("lupa")
+    lua = lupa.LuaRuntime(unpack_returned_tuples=True)
+    lua.execute('''
+Civ6Ai_Util = {}
+function Civ6Ai_Util.JsonArrayList() return {} end
+function Civ6Ai_Util.BuildNextItems() return {"UNIT_BUILDER"} end
+Locale = {Lookup = function(s) return s end}
+Game = {GetLocalPlayer = function() return 0 end,
+        GetProperty = function(self, k) error("no such property " .. k) end}
+local bq = {CanProduce = function() return true end, GetTurnsLeft = function() return 3 end}
+local city = {GetBuildQueue = function() return bq end, GetName = function() return "Rome" end}
+Players = {[1] = {GetCities = function() return {Members = function() return ipairs({city}) end} end}}
+GameInfo = {Units = {UNIT_BUILDER = {Hash = 1}}, Buildings = {}, Districts = {}}
+''')
+    lua.execute((Path(__file__).resolve().parents[2] / "mod" / "Civ6Ai" / "InGame" / "Civ6Ai_Snapshot.lua").read_text(encoding="utf-8"))
+    assert lua.eval("Civ6Ai_Snapshot._BuildNextPick(1)") is None
+    rows = lua.eval("Civ6Ai_Snapshot._BuildableItems(1)")
+    assert rows[1]["item_id"] == "UNIT_BUILDER" and rows[1]["turns"] == 3

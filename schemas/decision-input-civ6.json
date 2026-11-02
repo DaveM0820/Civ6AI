@@ -112,6 +112,8 @@
         "research_tech": {"type": ["string", "null"]},
         "experiment_city_id": {"type": ["string", "null"]},
         "early_open": {"type": "boolean"},
+        "build_next": {"type": ["object", "null"], "description": "This AI seat's current build-next pick.", "additionalProperties": false, "required": ["item_id"], "properties": {"item_id": {"type": "string"}, "set_turn": {"type": "integer"}}},
+        "buildable": {"type": "array", "description": "Build-next items some city of this AI seat can produce now (fastest city's turn estimate).", "items": {"type": "object", "additionalProperties": false, "required": ["item_id"], "properties": {"item_id": {"type": "string"}, "turns": {"type": "integer"}, "city_name": {"type": "string"}}}},
         "peak_cities": {"type": "integer", "minimum": 0},
         "experiment_build_id": {"type": ["string", "null"]},
         "research_civic": {

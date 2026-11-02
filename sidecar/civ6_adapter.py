@@ -231,6 +231,7 @@ _LUA_ARRAY_KEYS = frozenset({
     "strategics",
     "sites",
     "settle_recommended",
+    "buildable",
 })
 
 
