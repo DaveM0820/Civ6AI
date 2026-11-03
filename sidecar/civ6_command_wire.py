@@ -242,11 +242,15 @@ def extract_map_viewport(response: dict[str, Any]) -> Any:
     return None
 
 
+STRATEGY_CHARS = 500
+
+
 def extract_plan(response: dict[str, Any]) -> dict[str, Any] | None:
     """Pull plan.goal / plan.objective out of a wire reply and remove those keys."""
     if not isinstance(response, dict):
         return None
     goal = None
+    strategy = None
     objectives: list[str] = []
     done: list[str] = []
     drop: list[str] = []
@@ -254,7 +258,12 @@ def extract_plan(response: dict[str, Any]) -> dict[str, Any] | None:
         if not isinstance(key, str):
             continue
         base = pipeline.normalize_wire_property_key(strip_row_prefix(key))
-        if base == "plan.goal":
+        if base == "plan.strategy":
+            text = " ".join(str(value or "").split())
+            if text:
+                strategy = text[:STRATEGY_CHARS]
+            drop.append(key)
+        elif base == "plan.goal":
             text = str(value or "").strip()
             if text:
                 goal = text[:120]
@@ -271,9 +280,9 @@ def extract_plan(response: dict[str, Any]) -> dict[str, Any] | None:
             drop.append(key)
     for key in drop:
         response.pop(key, None)
-    if goal is None and not objectives and not done:
+    if goal is None and strategy is None and not objectives and not done:
         return None
-    return {"goal": goal, "objectives": objectives, "done": done}
+    return {"goal": goal, "strategy": strategy, "objectives": objectives, "done": done}
 
 
 def extract_remember(response: dict[str, Any]) -> list[str]:

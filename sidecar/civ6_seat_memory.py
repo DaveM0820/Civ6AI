@@ -265,6 +265,11 @@ def apply_plan(memory: dict[str, Any], turn: int, update: dict[str, Any]) -> dic
     goal = update.get("goal")
     if isinstance(goal, str) and goal.strip():
         plan["goal"] = goal.strip()[:120]
+    strategy = update.get("strategy")
+    if isinstance(strategy, str) and strategy.strip():
+        # One high-level strategy per seat; a new one replaces the old.
+        plan["strategy"] = strategy.strip()[:500]
+        plan["strategy_turn"] = int(turn)
     for raw in update.get("objectives") or []:
         parsed = _parse_objective(str(raw))
         if parsed is None:
@@ -711,6 +716,10 @@ def prompt_lines(memory: dict[str, Any]) -> list[tuple[str, str]]:
     plan = memory.get("plan") if isinstance(memory.get("plan"), dict) else {}
     if str(plan.get("goal") or "").strip():
         lines.append(("plan.goal", str(plan["goal"])[:120]))
+    if str(plan.get("strategy") or "").strip():
+        written = plan.get("strategy_turn")
+        lines.append(("plan.strategy", str(plan["strategy"])[:500]
+                      + (f" (written T{written})" if isinstance(written, int) else "")))
     index = 0
     for obj in plan.get("objectives") or []:
         if not isinstance(obj, dict) or obj.get("status") == "done":

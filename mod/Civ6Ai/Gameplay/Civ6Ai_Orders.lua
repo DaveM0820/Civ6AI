@@ -2678,6 +2678,7 @@ function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
   log("turn_start|player=" .. tostring(owner) .. "|turn=" .. tostring(turn))
   Game:SetProperty("CIV6AI_STARTED_" .. tostring(owner), turn)
   pcall(Civ6Ai_Orders.ApplyEarlyLock, owner)
+  pcall(Civ6Ai_Orders.SweepBuildNext, owner)
   local t, sender, orders, autoMode = Civ6Ai_Orders._Take(owner)
   if t == turn then
     log("queue_apply|player=" .. tostring(owner) .. "|turn=" .. turn .. "|orders=" .. #orders)
@@ -5506,6 +5507,36 @@ function Civ6Ai_Orders.OnBuildNextProductionChanged(owner, cityID)
   end
 end
 
+-- Turn-start sweep (gameplay context, GameEvents.PlayerTurnStartComplete, so
+-- it runs on every PC from synced state): an expired pick is cleared, and a
+-- pick that one of the seat's cities is now producing is used up. g7: the
+-- Events.CityProductionChanged hook never cleared a pick (0 of 153 builds).
+function Civ6Ai_Orders.SweepBuildNext(owner)
+  local idx, setTurn = Civ6Ai_Orders.BuildNextPick(owner)
+  if idx == 0 then
+    return
+  end
+  local turn = Game.GetCurrentGameTurn()
+  if setTurn >= 0 and turn - setTurn > Civ6Ai_Orders.BUILD_NEXT_TURNS then
+    clearPick(owner, "expired")
+    return
+  end
+  local item = Civ6Ai_Orders.BuildNextItems()[idx]
+  local row = item ~= nil and (GameInfo.Units[item] or GameInfo.Buildings[item] or GameInfo.Districts[item]) or nil
+  local player = Players[owner]
+  if row == nil or player == nil then
+    return
+  end
+  for _, city in call(player, "GetCities"):Members() do
+    local bq = call(city, "GetBuildQueue")
+    local current = bq ~= nil and call(bq, "GetCurrentProductionTypeHash") or nil
+    if current ~= nil and current == row.Hash then
+      clearPick(owner, "started_city_" .. tostring(call(city, "GetID")))
+      return
+    end
+  end
+end
+
 function Civ6Ai_Orders.RegisterBuildNext()
   local n = 0
   for idx, item in ipairs(Civ6Ai_Orders.BuildNextItems()) do
@@ -5514,6 +5545,16 @@ function Civ6Ai_Orders.RegisterBuildNext()
       local i = idx
       ev.Add(function(owner, threshold)
         local ok, v = pcall(Civ6Ai_Orders._BuildNextCondition, i, owner)
+        if ok and v == true then
+          -- Log only (no game state): shows the engine asked and the strategy is on.
+          Civ6Ai_Orders._nextAsked = Civ6Ai_Orders._nextAsked or {}
+          local key = tostring(owner) .. ":" .. tostring(Game.GetCurrentGameTurn())
+          if Civ6Ai_Orders._nextAsked[owner] ~= key then
+            Civ6Ai_Orders._nextAsked[owner] = key
+            log("build_next|active|player=" .. tostring(owner) .. "|item=" .. tostring(Civ6Ai_Orders.BuildNextItems()[i])
+              .. "|turn=" .. tostring(Game.GetCurrentGameTurn()))
+          end
+        end
         return ok and v == true
       end)
       n = n + 1

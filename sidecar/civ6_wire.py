@@ -69,9 +69,116 @@ def settler_offers_without_sites(snapshot: dict[str, Any], legal: list[Any]) -> 
 def no_city_sites_lines(context: dict[str, Any]) -> list[str]:
     if not isinstance(context, dict):
         return []
-    # Removed: "no walkable / reachable site" and "build no more settlers".
-    # The map shows the land and fog; the model decides where to settle.
-    return []
+    # No "build no more settlers": the model decides. When the seat knows of at
+    # most one legal site, say so plainly and point at the fog it can still
+    # reach (g7: P0 ran out of known sites at 8% explored and never looked).
+    line = few_sites_explore_line(context)
+    return [line] if line else []
+
+
+_COMPASS = ("E", "NE", "N", "NW", "W", "SW", "S", "SE")
+
+
+def _compass(origin: tuple[int, int], xy: tuple[int, int], width: int | None, wrap: bool) -> str:
+    import math
+
+    dx = xy[0] - origin[0]
+    if wrap and width:
+        if dx > width / 2:
+            dx -= width
+        elif dx < -width / 2:
+            dx += width
+    dy = origin[1] - xy[1]  # y grows southward on the Civ grid
+    if dx == 0 and dy == 0:
+        return "here"
+    angle = (math.degrees(math.atan2(dy, dx)) + 360 + 22.5) % 360
+    return _COMPASS[int(angle // 45)]
+
+
+def fog_edge_text(context: dict[str, Any]) -> str:
+    """'Unexplored edge on land ...; on coast ...' from the seat's revealed map ('' when none)."""
+    from sidecar import civ6_legality as legality
+
+    cities = [c for c in context.get("your_cities") or [] if isinstance(c, dict)]
+    if not cities:
+        return ""
+    plots = legality.known_plots(context)
+    first = cities[0]
+    origin = legality.plot_xy(first)
+    if origin is None and isinstance(first.get("x"), int) and isinstance(first.get("y"), int):
+        origin = (first["x"], first["y"])
+    if origin is None or not plots:
+        return ""
+    game = context.get("game") if isinstance(context.get("game"), dict) else {}
+    width = game.get("map_width") if isinstance(game.get("map_width"), int) else None
+    wrap = game.get("wrap_x") is not False
+    height = game.get("map_height") if isinstance(game.get("map_height"), int) else None
+
+    def on_map(x: int, y: int) -> bool:
+        if y < 0 or (height is not None and y >= height):
+            return False
+        return wrap or width is None or 0 <= x < width
+
+    def norm(x: int, y: int) -> tuple[int, int]:
+        return ((x % width) if (wrap and width) else x, y)
+
+    land: list[tuple[int, tuple[int, int]]] = []
+    sea: list[tuple[int, tuple[int, int]]] = []
+    for xy, plot in plots.items():
+        if legality.is_mountain(plot):
+            continue
+        edge = any(on_map(*n) and norm(*n) not in plots for n in legality.hex_neighbors(*xy))
+        if not edge:
+            continue
+        dist = _odd_r_distance(origin, xy, width, wrap)
+        if plot.get("water"):
+            if not legality.ocean_blocked(context, plot):
+                sea.append((dist, xy))
+        else:
+            land.append((dist, xy))
+    land.sort()
+    sea.sort()
+
+    def fmt(rows: list[tuple[int, tuple[int, int]]]) -> str:
+        return ", ".join(f"({x},{y}) {_compass(origin, (x, y), width, wrap)} dist {d}" for d, (x, y) in rows[:3])
+
+    bits = []
+    if land:
+        bits.append(f"Unexplored edge on land ({len(land)} known land tiles border fog), nearest: {fmt(land)}.")
+    if sea:
+        how = "ships, or land units embarked" if legality.can_embark(context) else "ships (land units embark after Shipbuilding)"
+        bits.append(f"Unexplored edge on coast reachable by {how} ({len(sea)} tiles), nearest: {fmt(sea)}.")
+    return " ".join(bits)
+
+
+def few_sites_explore_line(context: dict[str, Any]) -> str | None:
+    from sidecar import civ6_command_wire as command_wire
+    from sidecar import civ6_legality as legality
+    from sidecar.civ6_prompt_coaching import civ6_true_explored
+
+    cities = [c for c in context.get("your_cities") or [] if isinstance(c, dict)]
+    if not cities:
+        return None
+    # The settler lens is only read while the seat has a settler.
+    if not any("SETTLER" in str(u.get("unit_type_id") or "").upper()
+               for u in context.get("your_units") or [] if isinstance(u, dict)):
+        return None
+    try:
+        sites = command_wire.game_settle_recommendations(context)
+    except Exception:
+        sites = []
+    if len(sites) > 1:
+        return None
+    true = civ6_true_explored(context)
+    if true is None or true[2] >= 80:
+        return None
+    known = ("the game's settler lens shows no recommended city site in your revealed map" if not sites
+             else "the game's settler lens shows only one recommended city site in your revealed map")
+    edges = fog_edge_text(context)
+    if not edges:
+        return None
+    return (f"SETTLE SITES: {known}. {100 - true[2]}% of the map is still unrevealed, and more sites may lie "
+            f"in the fog. {edges} Scouts and ships moved toward these edges reveal new land.")
 
 
 def _has_queue_production(snapshot: dict[str, Any] | None) -> bool:
@@ -2117,7 +2224,11 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         *(
             ["plan.goal = victory type (science, culture, domination, diplomacy, religion, or score). "
              "plan.objective = attack|peace|improve|settle|research|defend, the aim, and by T<turn>. "
-             "plan.objective.done = that kind when the objective is finished. Update the plan every turn."]
+             "plan.objective.done = that kind when the objective is finished. Update the plan every turn. "
+             "plan.strategy = your one high-level strategy (up to ~80 words), kept and shown back every turn until "
+             "you write a new one, which replaces it: the victory path and how policies, build orders, tech/civic "
+             "direction, expansion (land and sea) and military fit together. Rewrite it when the situation changes; "
+             "omit the key to keep it."]
             if isinstance(snapshot.get("_seat_memory"), dict) else []
         ),
         f"Required Event.* logs this turn: {event_count} (numbered under REQUIRED COMMANDS).",
@@ -2214,6 +2325,8 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     seat_memory = snapshot.get("_seat_memory")
     if isinstance(seat_memory, dict) and not str((seat_memory.get("plan") or {}).get("goal") or "").strip():
         optional_keys.append(("plan.goal", "science | culture | domination | diplomacy | religion | score (not set yet)"))
+    if isinstance(seat_memory, dict) and not str((seat_memory.get("plan") or {}).get("strategy") or "").strip():
+        optional_keys.append(("plan.strategy", "your high-level strategy: victory path + policies + builds + tech/civics + expansion (not set yet)"))
     from sidecar import civ6_priorities
 
     prio_lines = civ6_priorities.prompt_lines(snapshot)

@@ -253,13 +253,12 @@ class PolicyApplyTests(unittest.TestCase):
         self.assertEqual("CMD_citystrike_65536_46_16", results[1]["id"])
         self.assertEqual("city_strike_stopped", results[1]["reason"])
 
-    def test_names_the_empty_slot_instead_of_applying_a_partial_plan(self):
-        lua, ok, reason, recorded = self._run("1=POLICY_SURVEY", "slots[0] = -1")
-        self.assertFalse(ok)
-        self.assertIn("slot 0", str(reason))
-        self.assertIn("still holds nothing", str(reason))
-        self.assertIsNone(lua.eval("REQUEST"))
-        self.assertEqual([], recorded)
+    def test_partial_plan_fills_the_empty_slot_with_an_unlocked_card(self):
+        lua, ok, reason, recorded = self._run("1=POLICY_SURVEY", "slots[0] = -1; slots[1] = -1")
+        self.assertIsNotNone(lua.eval("REQUEST"), (ok, reason))
+        self.assertEqual("0=888;1=777", lua.eval("REQUEST.add"))
+        self.assertTrue(recorded and recorded[-1]["ok"], (ok, reason, recorded))
+        self.assertIn("filled_empty=slot0=POLICY_DISCIPLINE", recorded[-1]["reason"])
 
 
 if __name__ == "__main__":

@@ -399,7 +399,12 @@ end
 -- Land unit onto water: needs Shipbuilding (coast/lake) or Cartography (ocean).
 function Civ6Ai_GameCore._EmbarkProblem(playerID, plot)
   local player = Players ~= nil and Players[playerID] or nil
+  -- Ocean by terrain type (IsShallowWater is not reliably exposed to scripts).
+  local terrain = GameInfo ~= nil and GameInfo.Terrains ~= nil and GameInfo.Terrains[Civ6Ai_GameCore._Call(plot, "GetTerrainType")] or nil
   local shallow = Civ6Ai_GameCore._Call(plot, "IsShallowWater")
+  if terrain ~= nil then
+    shallow = terrain.TerrainType ~= "TERRAIN_OCEAN"
+  end
   if shallow == false then
     if not Civ6Ai_GameCore._HasTech(player, "TECH_CARTOGRAPHY") then
       return "water_no_ocean_embark"

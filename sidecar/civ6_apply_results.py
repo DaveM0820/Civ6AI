@@ -762,8 +762,18 @@ def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reas
         why = "land; ships can't enter land tiles (your own coastal cities are fine)"
     elif "water" in facts and not sea and occupied:
         why = f"water {occupied.replace('occupied by', 'with')} embarked on it ({_STACK_RULE})"
+    elif "water" in facts and not sea and not legality.can_embark(snapshot):
+        why = "water; land units cannot embark until you have Shipbuilding"
     elif "water" in facts and not sea:
-        why = "water (this unit cannot enter it)"
+        # This seat can embark (Shipbuilding): coast is fine, so say what actually failed
+        # instead of blaming the water (g7: ~30 no_path/stack_limit refusals read as "cannot enter").
+        me = pid or str(snapshot.get("player_id") or (snapshot.get("decision") or {}).get("player_id") or "")
+        owner = next((f for f in facts if f.startswith("owned by") and f != f"owned by {me}"), None)
+        detail = describe_reason(reason) or "the game rejected it"
+        why = f"coast your land units can embark onto, but this move failed: {detail}"
+        if owner:
+            why += (f" (the tile is {owner.replace('owned by', 'inside the borders of')}; "
+                    "the game may refuse entry into foreign borders without open borders)")
     elif reason == "impassable":
         why = ("not water; ships can't enter land tiles" if sea
                else "impassable for this unit (mountain, or water it cannot enter)")
@@ -774,7 +784,9 @@ def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reas
     else:
         why = "not reachable: " + (describe_reason(reason) or "the game rejected it")
     hint = ""
-    if not sea and ("water" in facts or "mountain" in facts or reason == "impassable"):
+    if not sea and why.startswith("coast your land units"):
+        hint = " The unit did not move."
+    elif not sea and ("water" in facts or "mountain" in facts or reason == "impassable"):
         hint = _land_hint(snapshot, unit, x, y)
     elif sea and why.startswith(("land;", "not water;")):
         hint = _water_hint(snapshot, unit, x, y)

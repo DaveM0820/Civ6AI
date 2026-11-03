@@ -1327,6 +1327,51 @@ function Civ6Ai_Apply._PolicyTypeHash(prow)
   return prow.Hash
 end
 
+-- Fill empty slots (desired[i] == nil) with unlocked, unused cards that fit.
+-- Deterministic (GameInfo order). Returns { "slotN=POLICY_X", ... }.
+function Civ6Ai_Apply._FillEmptyPolicySlots(culture, n, desired)
+  local used, out = {}, {}
+  local rows = {}
+  local okIter = pcall(function()
+    for prow in GameInfo.Policies() do rows[#rows + 1] = prow end
+  end)
+  if not okIter or #rows == 0 then
+    rows = {}
+    for k, prow in pairs(GameInfo.Policies or {}) do
+      if type(k) == "number" then rows[#rows + 1] = prow end
+    end
+    table.sort(rows, function(a, b) return (a.Index or 0) < (b.Index or 0) end)
+  end
+  for i = 0, n - 1 do
+    if desired[i] ~= nil then
+      used[desired[i].PolicyType] = true
+    end
+  end
+  for i = 0, n - 1 do
+    if desired[i] == nil then
+      local st = gcall(culture, "GetSlotType", i)
+      local srow = st ~= nil and GameInfo.GovernmentSlots[st] or nil
+      local slotType = srow ~= nil and srow.GovernmentSlotType or "?"
+      for _, prow in ipairs(rows) do
+        if not used[prow.PolicyType] and slotFits(slotType, prow) then
+          local typeHash = Civ6Ai_Apply._PolicyTypeHash(prow)
+          local unlocked = gcall(culture, "IsPolicyUnlocked", typeHash) == true
+            or gcall(culture, "IsPolicyUnlocked", prow.Hash) == true
+            or gcall(culture, "IsPolicyUnlocked", prow.Index) == true
+          local obsolete = gcall(culture, "IsPolicyObsolete", prow.Index) == true
+          if unlocked and not obsolete then
+            desired[i] = prow
+            used[prow.PolicyType] = true
+            out[#out + 1] = "slot" .. i .. "=" .. prow.PolicyType
+            break
+          end
+        end
+      end
+    end
+  end
+  return out
+end
+
 function Civ6Ai_Apply._SetPolicies(playerID, command, args)
   local plan, why = Civ6Ai_Apply._ParsePolicySlots(args.slots)
   if plan == nil then
@@ -1426,9 +1471,18 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
       return false, desired[i].PolicyType .. " has no type hash", args
     end
   end
+  -- A partial plan is fine: every slot left empty gets an unlocked card that
+  -- fits it (the game only confirms a full set, GovernmentScreen
+  -- bAnySlotsFree). The filler is named in the result so the model can swap it.
+  local filled = {}
   if #empty > 0 then
-    return false, "the game will not apply a policy change while slot " .. table.concat(empty, ", ")
-      .. " still holds nothing (every slot has to hold a card)", args
+    filled = Civ6Ai_Apply._FillEmptyPolicySlots(culture, n, desired)
+    for i = 0, n - 1 do
+      if desired[i] == nil then
+        return false, "the game will not apply a policy change while slot " .. tostring(i)
+          .. " still holds nothing and no unlocked card fits it", args
+      end
+    end
   end
   -- Confirm is hidden until GetCostToUnlockPolicies() is 0. On a turn a civic
   -- did not complete, that cost stays above 0 and RequestPolicyChanges is
@@ -1503,7 +1557,8 @@ function Civ6Ai_Apply._SetPolicies(playerID, command, args)
     end
     if #missing == 0 then
       table.sort(parts)
-      return true, "policies=" .. table.concat(parts, ";")
+      local note = #filled > 0 and (":filled_empty=" .. table.concat(filled, ";")) or ""
+      return true, "policies=" .. table.concat(parts, ";") .. note
     end
     local seatNote = isLocal(playerID) and "" or " (policy cards for a seat that is not the local player can only be "
       .. "set through the game's screen, which ignored the request; the game's own AI keeps choosing this seat's cards)"

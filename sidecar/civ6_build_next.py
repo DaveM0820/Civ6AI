@@ -64,7 +64,9 @@ def prompt_lines(snapshot: dict[str, Any]) -> list[str]:
         "progress. If several cities empty their queues the same turn, more than one may start it. The pick "
         "ends when a city starts it, or after a few turns.")
     if pick:
-        lines.append(f"Current pick: {pick.get('item_id')} (set T{pick.get('set_turn', '?')}).")
+        exp = pick.get("expires_turn")
+        lines.append(f"Current pick: {pick.get('item_id')} (set T{pick.get('set_turn', '?')}"
+                     + (f", lapses after T{exp} if no city has started it" if isinstance(exp, int) else "") + ").")
     else:
         lines.append("Current pick: none (your production preset decides).")
     shown = rows[:OPTIONS_CAP]

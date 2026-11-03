@@ -37,7 +37,14 @@ function Civ6Ai_Snapshot._BuildNextPick(playerID)
   if item == nil then
     return nil
   end
-  return { item_id = item, set_turn = prop("CIV6AI_PICK_T_" .. tostring(playerID)) or -1 }
+  local setTurn = prop("CIV6AI_PICK_T_" .. tostring(playerID)) or -1
+  -- An expired pick no longer steers anything (Orders.BUILD_NEXT_TURNS = 5);
+  -- do not show it as current.
+  local turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or nil
+  if setTurn >= 0 and turn ~= nil and turn - setTurn > 5 then
+    return nil
+  end
+  return { item_id = item, set_turn = setTurn, expires_turn = setTurn >= 0 and (setTurn + 5) or nil }
 end
 
 -- Items an AI seat can name for "build next": every Civ6Ai_NextItems entry

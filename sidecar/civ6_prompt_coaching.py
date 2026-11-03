@@ -534,7 +534,18 @@ def civ6_explored_fact_line(snapshot: dict[str, Any], explored: int) -> str | No
         f"EXPLORATION: {seen}. Unrevealed land hides settle sites, rivals, city-states and tribal villages. "
         "Explore by moving units toward the fog you can see on the map. "
         "Naval exploration is also encouraged once you can build ships."
+        + _fog_edges_suffix(snapshot)
     )
+
+
+def _fog_edges_suffix(snapshot: dict[str, Any]) -> str:
+    try:
+        from sidecar.civ6_wire import fog_edge_text
+
+        text = fog_edge_text(snapshot)
+    except Exception:
+        return ""
+    return (" " + text) if text else ""
 
 
 def civ6_low_hp_retreat_attention(snapshot: dict[str, Any]) -> str | None:
