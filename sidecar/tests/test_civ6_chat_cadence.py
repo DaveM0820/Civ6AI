@@ -106,3 +106,17 @@ def test_chat_is_always_allowed():
             {"target": "player", "target_player_id": "PLAYER_2", "text": "Still peace?"}]
     kept, dropped = results.filter_repeat_public_chat(snap, msgs)
     assert len(kept) == 3 and dropped == []
+
+
+class ChatSpecificityToneTests(unittest.TestCase):
+    def test_tone_asks_for_specific_lines_and_bans_stock_phrases(self):
+        low = coaching.CIV6_LOBBY_CHAT_TONE.lower()
+        for word in ("specific", "by name", "own voice", "banned stock lines", "tides",
+                     "never invent facts", "say nothing"):
+            self.assertIn(word, low)
+        self.assertLess(len(coaching.CIV6_LOBBY_CHAT_TONE), 1100)
+
+    def test_variety_points_at_own_lines_in_chat_log(self):
+        low = coaching.CIV6_CHAT_VARIETY_COACHING.lower()
+        self.assertIn("chat log", low)
+        self.assertIn("marked you", low)

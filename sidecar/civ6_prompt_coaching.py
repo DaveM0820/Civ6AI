@@ -77,7 +77,8 @@ CIV6_SETTLER_MAP_ADVICE = (
 CIV6_CHAT_VARIETY_COACHING = (
     "chat.all: only when something changed for you this turn (a city, a meeting, a discovery, "
     "a war or deal); otherwise skip it. Don't reuse a sentence, opener or image (e.g. 'the tides') "
-    "that you or anyone else used in the last few turns. "
+    "that you or anyone else used in the last few turns — check the Chat Log, where your own lines "
+    "are marked You. "
     "thought.strategy is planning prose — do not paste it into chat."
 )
 
@@ -85,8 +86,13 @@ CIV6_CHAT_VARIETY_COACHING = (
 CIV6_LOBBY_CHAT_TONE = (
     "Chat tone: a multiplayer game lobby, not a UN session. Talk like a player at the table who is also "
     "this leader: light humor, playful taunts and friendly trash talk drawn from your leader's personality "
-    "and the board (a rival's slow start, a sniped wonder, a nervous border). Keep it good-natured — never "
-    "hostile, crude, or personal. One punchy line beats a formal speech."
+    "and the board. Keep it good-natured — never hostile, crude, or personal. One punchy line beats a formal speech. "
+    "Make every line about something specific you can see in this prompt: a city or leader by name, a unit "
+    "on your border, a wonder, a war or peace, a deal, a score gap, a tech or barbarian. Wit over bravado: "
+    "a concrete joke, jab, boast, or complaint in your own voice and civ flavour (your history, gods, trade, "
+    "rivals). Banned stock lines: fog, tides, storms, horizon, 'watch your coasts', 'let us see who', "
+    "'hope you're not hiding', 'X here!', greetings after turn 1, and emoji. "
+    "Never invent facts you cannot see. Nothing specific to say = say nothing."
 )
 
 # Shared by every seat: relations are part of how you win.
