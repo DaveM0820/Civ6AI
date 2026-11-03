@@ -251,6 +251,7 @@ def extract_plan(response: dict[str, Any]) -> dict[str, Any] | None:
         return None
     goal = None
     strategy = None
+    targets: dict[str, str] = {}
     objectives: list[str] = []
     done: list[str] = []
     drop: list[str] = []
@@ -262,6 +263,17 @@ def extract_plan(response: dict[str, Any]) -> dict[str, Any] | None:
             text = " ".join(str(value or "").split())
             if text:
                 strategy = text[:STRATEGY_CHARS]
+            drop.append(key)
+        elif base in ("plan.research_target", "plan.civic_target"):
+            from sidecar import civ6_research_target as rt
+
+            kind = "tech" if base == "plan.research_target" else "civic"
+            resolved = rt.resolve(kind, value)
+            if resolved is None:
+                LAST_UNRESOLVED.append(f"{key}={value}: not a known {kind}; use an id such as "
+                                       + ("TECH_SHIPBUILDING" if kind == "tech" else "CIVIC_POLITICAL_PHILOSOPHY"))
+            else:
+                targets[base.split(".", 1)[1]] = resolved
             drop.append(key)
         elif base == "plan.goal":
             text = str(value or "").strip()
@@ -280,9 +292,9 @@ def extract_plan(response: dict[str, Any]) -> dict[str, Any] | None:
             drop.append(key)
     for key in drop:
         response.pop(key, None)
-    if goal is None and strategy is None and not objectives and not done:
+    if goal is None and strategy is None and not objectives and not done and not targets:
         return None
-    return {"goal": goal, "strategy": strategy, "objectives": objectives, "done": done}
+    return {"goal": goal, "strategy": strategy, "objectives": objectives, "done": done, **targets}
 
 
 def extract_remember(response: dict[str, Any]) -> list[str]:
@@ -929,7 +941,9 @@ def pack_apply_command(snapshot: dict[str, Any] | None, command: dict[str, Any])
     if kind in ("set_research_tech", "set_research_civic") and isinstance(snapshot, dict):
         field = "tech_id" if kind == "set_research_tech" else "civic_id"
         chosen = args.get(field)
-        extras = []
+        from sidecar import civ6_research_target as rt
+
+        extras = [v for v in rt.path_backups(snapshot, "tech" if kind == "set_research_tech" else "civic", str(chosen or ""))]
         for item in snapshot.get("legal_commands") or []:
             if not isinstance(item, dict) or item.get("kind") != kind:
                 continue

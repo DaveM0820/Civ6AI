@@ -2293,7 +2293,10 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
              "plan.strategy = your one high-level strategy (up to ~80 words), kept and shown back every turn until "
              "you write a new one, which replaces it: the victory path and how policies, build orders, tech/civic "
              "direction, expansion (land and sea) and military fit together. Rewrite it when the situation changes; "
-             "omit the key to keep it."]
+             "omit the key to keep it. "
+             "plan.research_target = a far tech (e.g. TECH_SHIPBUILDING) and plan.civic_target = a far civic: "
+             "kept until reached; whenever you give no legal.research.tech / legal.research.civic order, the next "
+             "prerequisite on the path is ordered for you. none clears it."]
             if isinstance(snapshot.get("_seat_memory"), dict) else []
         ),
         f"Required Event.* logs this turn: {event_count} (numbered under REQUIRED COMMANDS).",
@@ -2392,6 +2395,12 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         optional_keys.append(("plan.goal", "science | culture | domination | diplomacy | religion | score (not set yet)"))
     if isinstance(seat_memory, dict) and not str((seat_memory.get("plan") or {}).get("strategy") or "").strip():
         optional_keys.append(("plan.strategy", "your high-level strategy: victory path + policies + builds + tech/civics + expansion (not set yet)"))
+    if isinstance(seat_memory, dict):
+        _plan = seat_memory.get("plan") or {}
+        if not _plan.get("research_target"):
+            optional_keys.append(("plan.research_target", "TECH_* you are heading for; prerequisites are researched in order (see Tech tree)"))
+        if not _plan.get("civic_target"):
+            optional_keys.append(("plan.civic_target", "CIVIC_* you are heading for (see Civic tree)"))
     from sidecar import civ6_priorities
 
     prio_lines = civ6_priorities.prompt_lines(snapshot)

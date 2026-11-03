@@ -215,6 +215,9 @@ def prompt_lines(snapshot: dict) -> list[str]:
                 lines.append(f"    {_short(c.get('id'), 'POLICY_')} ({_short(c.get('slot_type'), 'SLOT_')}){mark}{eff}")
     lines.extend(_research_lines(_dct(gov.get("techs")), "Tech", "TECH_", "science", "eureka"))
     lines.extend(_research_lines(_dct(gov.get("civics")), "Civic", "CIVIC_", "culture", "inspiration"))
+    from sidecar import civ6_research_target
+
+    lines.extend(civ6_research_target.prompt_lines(snapshot))
     r = _dct(gov.get("religion"))
     if r:
         pan = _short(r.get("pantheon"), "BELIEF_") or "none"

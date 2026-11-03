@@ -1,0 +1,1002 @@
+{
+"civics": {
+"CIVIC_CAPITALISM": {
+"cost": 1580,
+"era": "ERA_MODERN",
+"prereqs": [
+"CIVIC_MASS_MEDIA"
+]
+},
+"CIVIC_CIVIL_ENGINEERING": {
+"cost": 1010,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"CIVIC_MERCANTILISM"
+]
+},
+"CIVIC_CIVIL_SERVICE": {
+"cost": 300,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"CIVIC_DEFENSIVE_TACTICS",
+"CIVIC_RECORDED_HISTORY"
+]
+},
+"CIVIC_CLASS_STRUGGLE": {
+"cost": 1640,
+"era": "ERA_MODERN",
+"prereqs": [
+"CIVIC_IDEOLOGY"
+]
+},
+"CIVIC_CODE_OF_LAWS": {
+"cost": 20,
+"era": "ERA_ANCIENT",
+"prereqs": []
+},
+"CIVIC_COLD_WAR": {
+"cost": 2185,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"CIVIC_IDEOLOGY"
+]
+},
+"CIVIC_COLONIALISM": {
+"cost": 800,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"CIVIC_MERCANTILISM"
+]
+},
+"CIVIC_CONSERVATION": {
+"cost": 1540,
+"era": "ERA_MODERN",
+"prereqs": [
+"CIVIC_NATURAL_HISTORY"
+]
+},
+"CIVIC_CORPORATE_LIBERTARIANISM": {
+"cost": 3000,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"CIVIC_GLOBALIZATION",
+"CIVIC_SOCIAL_MEDIA"
+]
+},
+"CIVIC_CRAFTSMANSHIP": {
+"cost": 40,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"CIVIC_CODE_OF_LAWS"
+]
+},
+"CIVIC_CULTURAL_HEGEMONY": {
+"cost": 3200,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"CIVIC_CULTURAL_HERITAGE": {
+"cost": 1955,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"CIVIC_CONSERVATION"
+]
+},
+"CIVIC_DEFENSIVE_TACTICS": {
+"cost": 175,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"CIVIC_GAMES_RECREATION",
+"CIVIC_POLITICAL_PHILOSOPHY"
+]
+},
+"CIVIC_DIGITAL_DEMOCRACY": {
+"cost": 3000,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"CIVIC_GLOBALIZATION",
+"CIVIC_SOCIAL_MEDIA"
+]
+},
+"CIVIC_DIPLOMATIC_SERVICE": {
+"cost": 600,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"CIVIC_GUILDS"
+]
+},
+"CIVIC_DIVINE_RIGHT": {
+"cost": 340,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"CIVIC_CIVIL_SERVICE",
+"CIVIC_THEOLOGY"
+]
+},
+"CIVIC_DRAMA_POETRY": {
+"cost": 110,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"CIVIC_EARLY_EMPIRE"
+]
+},
+"CIVIC_EARLY_EMPIRE": {
+"cost": 70,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"CIVIC_FOREIGN_TRADE"
+]
+},
+"CIVIC_ENVIRONMENTALISM": {
+"cost": 2880,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"CIVIC_CULTURAL_HERITAGE",
+"CIVIC_RAPID_DEPLOYMENT"
+]
+},
+"CIVIC_EXODUS_IMPERATIVE": {
+"cost": 3200,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"CIVIC_EXPLORATION": {
+"cost": 440,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"CIVIC_MEDIEVAL_FAIRES",
+"CIVIC_MERCENARIES"
+]
+},
+"CIVIC_FEUDALISM": {
+"cost": 300,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"CIVIC_DEFENSIVE_TACTICS"
+]
+},
+"CIVIC_FOREIGN_TRADE": {
+"cost": 40,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"CIVIC_CODE_OF_LAWS"
+]
+},
+"CIVIC_FUTURE_CIVIC": {
+"cost": 3500,
+"era": "ERA_FUTURE",
+"prereqs": [
+"CIVIC_GLOBALIZATION",
+"CIVIC_SOCIAL_MEDIA"
+]
+},
+"CIVIC_GAMES_RECREATION": {
+"cost": 110,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"CIVIC_STATE_WORKFORCE"
+]
+},
+"CIVIC_GLOBALIZATION": {
+"cost": 2880,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"CIVIC_RAPID_DEPLOYMENT",
+"CIVIC_SPACE_RACE"
+]
+},
+"CIVIC_GLOBAL_WARMING_MITIGATION": {
+"cost": 3200,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"CIVIC_GUILDS": {
+"cost": 420,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"CIVIC_CIVIL_SERVICE",
+"CIVIC_FEUDALISM"
+]
+},
+"CIVIC_HUMANISM": {
+"cost": 600,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"CIVIC_GUILDS",
+"CIVIC_MEDIEVAL_FAIRES"
+]
+},
+"CIVIC_IDEOLOGY": {
+"cost": 1640,
+"era": "ERA_MODERN",
+"prereqs": [
+"CIVIC_MASS_MEDIA",
+"CIVIC_MOBILIZATION"
+]
+},
+"CIVIC_INFORMATION_WARFARE": {
+"cost": 3200,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"CIVIC_MASS_MEDIA": {
+"cost": 1540,
+"era": "ERA_MODERN",
+"prereqs": [
+"CIVIC_NATURAL_HISTORY",
+"CIVIC_URBANIZATION"
+]
+},
+"CIVIC_MEDIEVAL_FAIRES": {
+"cost": 420,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"CIVIC_FEUDALISM"
+]
+},
+"CIVIC_MERCANTILISM": {
+"cost": 720,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"CIVIC_HUMANISM"
+]
+},
+"CIVIC_MERCENARIES": {
+"cost": 340,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"CIVIC_FEUDALISM",
+"CIVIC_MILITARY_TRAINING"
+]
+},
+"CIVIC_MILITARY_TRADITION": {
+"cost": 50,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"CIVIC_CRAFTSMANSHIP"
+]
+},
+"CIVIC_MILITARY_TRAINING": {
+"cost": 120,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"CIVIC_GAMES_RECREATION",
+"CIVIC_MILITARY_TRADITION"
+]
+},
+"CIVIC_MOBILIZATION": {
+"cost": 1540,
+"era": "ERA_MODERN",
+"prereqs": [
+"CIVIC_SCORCHED_EARTH",
+"CIVIC_URBANIZATION"
+]
+},
+"CIVIC_MYSTICISM": {
+"cost": 50,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"CIVIC_FOREIGN_TRADE"
+]
+},
+"CIVIC_NATIONALISM": {
+"cost": 1010,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"CIVIC_THE_ENLIGHTENMENT"
+]
+},
+"CIVIC_NATURAL_HISTORY": {
+"cost": 1050,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"CIVIC_COLONIALISM"
+]
+},
+"CIVIC_NAVAL_TRADITION": {
+"cost": 220,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"CIVIC_DEFENSIVE_TACTICS"
+]
+},
+"CIVIC_NEAR_FUTURE_GOVERNANCE": {
+"cost": 3100,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"CIVIC_ENVIRONMENTALISM",
+"CIVIC_GLOBALIZATION"
+]
+},
+"CIVIC_NUCLEAR_PROGRAM": {
+"cost": 1715,
+"era": "ERA_MODERN",
+"prereqs": [
+"CIVIC_IDEOLOGY"
+]
+},
+"CIVIC_OPERA_BALLET": {
+"cost": 800,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"CIVIC_THE_ENLIGHTENMENT"
+]
+},
+"CIVIC_POLITICAL_PHILOSOPHY": {
+"cost": 110,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"CIVIC_EARLY_EMPIRE",
+"CIVIC_STATE_WORKFORCE"
+]
+},
+"CIVIC_PROFESSIONAL_SPORTS": {
+"cost": 2185,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"CIVIC_IDEOLOGY"
+]
+},
+"CIVIC_RAPID_DEPLOYMENT": {
+"cost": 2415,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"CIVIC_COLD_WAR"
+]
+},
+"CIVIC_RECORDED_HISTORY": {
+"cost": 175,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"CIVIC_DRAMA_POETRY",
+"CIVIC_POLITICAL_PHILOSOPHY"
+]
+},
+"CIVIC_REFORMED_CHURCH": {
+"cost": 440,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"CIVIC_DIVINE_RIGHT",
+"CIVIC_GUILDS"
+]
+},
+"CIVIC_SCORCHED_EARTH": {
+"cost": 1210,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"CIVIC_NATIONALISM"
+]
+},
+"CIVIC_SMART_POWER_DOCTRINE": {
+"cost": 3200,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"CIVIC_SOCIAL_MEDIA": {
+"cost": 2880,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"CIVIC_PROFESSIONAL_SPORTS",
+"CIVIC_SPACE_RACE"
+]
+},
+"CIVIC_SPACE_RACE": {
+"cost": 2415,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"CIVIC_COLD_WAR"
+]
+},
+"CIVIC_STATE_WORKFORCE": {
+"cost": 70,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"CIVIC_CRAFTSMANSHIP"
+]
+},
+"CIVIC_SUFFRAGE": {
+"cost": 1640,
+"era": "ERA_MODERN",
+"prereqs": [
+"CIVIC_IDEOLOGY"
+]
+},
+"CIVIC_SYNTHETIC_TECHNOCRACY": {
+"cost": 3000,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"CIVIC_GLOBALIZATION",
+"CIVIC_SOCIAL_MEDIA"
+]
+},
+"CIVIC_THEOLOGY": {
+"cost": 120,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"CIVIC_DRAMA_POETRY",
+"CIVIC_MYSTICISM"
+]
+},
+"CIVIC_THE_ENLIGHTENMENT": {
+"cost": 720,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"CIVIC_DIPLOMATIC_SERVICE",
+"CIVIC_HUMANISM"
+]
+},
+"CIVIC_TOTALITARIANISM": {
+"cost": 1640,
+"era": "ERA_MODERN",
+"prereqs": [
+"CIVIC_IDEOLOGY"
+]
+},
+"CIVIC_URBANIZATION": {
+"cost": 1210,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"CIVIC_CIVIL_ENGINEERING",
+"CIVIC_NATIONALISM"
+]
+}
+},
+"eras": [
+"ERA_ANCIENT",
+"ERA_CLASSICAL",
+"ERA_MEDIEVAL",
+"ERA_RENAISSANCE",
+"ERA_INDUSTRIAL",
+"ERA_MODERN",
+"ERA_ATOMIC",
+"ERA_INFORMATION",
+"ERA_FUTURE"
+],
+"source": "Civ VI gameplay DB (Base+Expansion1+Expansion2), Cost = base standard-speed cost",
+"techs": {
+"TECH_ADVANCED_AI": {
+"cost": 2200,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"TECH_ADVANCED_BALLISTICS": {
+"cost": 1480,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"TECH_REPLACEABLE_PARTS",
+"TECH_STEEL"
+]
+},
+"TECH_ADVANCED_FLIGHT": {
+"cost": 1480,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"TECH_RADIO"
+]
+},
+"TECH_ADVANCED_POWER_CELLS": {
+"cost": 2200,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"TECH_ANIMAL_HUSBANDRY": {
+"cost": 25,
+"era": "ERA_ANCIENT",
+"prereqs": []
+},
+"TECH_APPRENTICESHIP": {
+"cost": 300,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"TECH_CURRENCY",
+"TECH_HORSEBACK_RIDING"
+]
+},
+"TECH_ARCHERY": {
+"cost": 50,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"TECH_ANIMAL_HUSBANDRY"
+]
+},
+"TECH_ASTROLOGY": {
+"cost": 50,
+"era": "ERA_ANCIENT",
+"prereqs": []
+},
+"TECH_ASTRONOMY": {
+"cost": 730,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"TECH_EDUCATION"
+]
+},
+"TECH_BALLISTICS": {
+"cost": 930,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"TECH_METAL_CASTING"
+]
+},
+"TECH_BANKING": {
+"cost": 600,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"TECH_EDUCATION",
+"TECH_STIRRUPS"
+]
+},
+"TECH_BRONZE_WORKING": {
+"cost": 80,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"TECH_MINING"
+]
+},
+"TECH_BUTTRESS": {
+"cost": 300,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"TECH_MATHEMATICS",
+"TECH_SHIPBUILDING"
+]
+},
+"TECH_CARTOGRAPHY": {
+"cost": 600,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"TECH_BUTTRESS"
+]
+},
+"TECH_CASTLES": {
+"cost": 390,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"TECH_CONSTRUCTION"
+]
+},
+"TECH_CELESTIAL_NAVIGATION": {
+"cost": 120,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"TECH_ASTROLOGY",
+"TECH_SAILING"
+]
+},
+"TECH_CHEMISTRY": {
+"cost": 1370,
+"era": "ERA_MODERN",
+"prereqs": [
+"TECH_REPLACEABLE_PARTS",
+"TECH_SANITATION"
+]
+},
+"TECH_COMBINED_ARMS": {
+"cost": 1480,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"TECH_COMBUSTION",
+"TECH_STEEL"
+]
+},
+"TECH_COMBUSTION": {
+"cost": 1370,
+"era": "ERA_MODERN",
+"prereqs": [
+"TECH_REFINING",
+"TECH_STEEL"
+]
+},
+"TECH_COMPOSITES": {
+"cost": 1850,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"TECH_SYNTHETIC_MATERIALS"
+]
+},
+"TECH_COMPUTERS": {
+"cost": 1660,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"TECH_ELECTRICITY",
+"TECH_RADIO"
+]
+},
+"TECH_CONSTRUCTION": {
+"cost": 200,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"TECH_HORSEBACK_RIDING",
+"TECH_MASONRY"
+]
+},
+"TECH_CURRENCY": {
+"cost": 120,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"TECH_WRITING"
+]
+},
+"TECH_CYBERNETICS": {
+"cost": 2200,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"TECH_ECONOMICS": {
+"cost": 1070,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"TECH_METAL_CASTING",
+"TECH_SCIENTIFIC_THEORY"
+]
+},
+"TECH_EDUCATION": {
+"cost": 390,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"TECH_APPRENTICESHIP",
+"TECH_MATHEMATICS"
+]
+},
+"TECH_ELECTRICITY": {
+"cost": 1370,
+"era": "ERA_MODERN",
+"prereqs": [
+"TECH_STEAM_POWER"
+]
+},
+"TECH_ENGINEERING": {
+"cost": 200,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"TECH_THE_WHEEL"
+]
+},
+"TECH_FLIGHT": {
+"cost": 1250,
+"era": "ERA_MODERN",
+"prereqs": [
+"TECH_INDUSTRIALIZATION",
+"TECH_SCIENTIFIC_THEORY"
+]
+},
+"TECH_FUTURE_TECH": {
+"cost": 2600,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"TECH_GUIDANCE_SYSTEMS": {
+"cost": 1850,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"TECH_ADVANCED_BALLISTICS",
+"TECH_ROCKETRY"
+]
+},
+"TECH_GUNPOWDER": {
+"cost": 600,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"TECH_APPRENTICESHIP",
+"TECH_MILITARY_ENGINEERING",
+"TECH_STIRRUPS"
+]
+},
+"TECH_HORSEBACK_RIDING": {
+"cost": 120,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"TECH_ARCHERY"
+]
+},
+"TECH_INDUSTRIALIZATION": {
+"cost": 930,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"TECH_MASS_PRODUCTION",
+"TECH_SQUARE_RIGGING"
+]
+},
+"TECH_IRON_WORKING": {
+"cost": 120,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"TECH_BRONZE_WORKING"
+]
+},
+"TECH_IRRIGATION": {
+"cost": 50,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"TECH_POTTERY"
+]
+},
+"TECH_LASERS": {
+"cost": 1850,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"TECH_NUCLEAR_FISSION"
+]
+},
+"TECH_MACHINERY": {
+"cost": 300,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"TECH_ENGINEERING",
+"TECH_IRON_WORKING"
+]
+},
+"TECH_MASONRY": {
+"cost": 80,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"TECH_MINING"
+]
+},
+"TECH_MASS_PRODUCTION": {
+"cost": 600,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"TECH_BUTTRESS",
+"TECH_EDUCATION",
+"TECH_MILITARY_TACTICS"
+]
+},
+"TECH_MATHEMATICS": {
+"cost": 200,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"TECH_CURRENCY"
+]
+},
+"TECH_METAL_CASTING": {
+"cost": 730,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"TECH_GUNPOWDER"
+]
+},
+"TECH_MILITARY_ENGINEERING": {
+"cost": 390,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"TECH_CONSTRUCTION"
+]
+},
+"TECH_MILITARY_SCIENCE": {
+"cost": 930,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"TECH_PRINTING",
+"TECH_SIEGE_TACTICS"
+]
+},
+"TECH_MILITARY_TACTICS": {
+"cost": 300,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"TECH_MATHEMATICS"
+]
+},
+"TECH_MINING": {
+"cost": 25,
+"era": "ERA_ANCIENT",
+"prereqs": []
+},
+"TECH_NANOTECHNOLOGY": {
+"cost": 2155,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"TECH_COMPOSITES"
+]
+},
+"TECH_NUCLEAR_FISSION": {
+"cost": 1660,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"TECH_ADVANCED_BALLISTICS",
+"TECH_COMBINED_ARMS"
+]
+},
+"TECH_NUCLEAR_FUSION": {
+"cost": 2155,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"TECH_LASERS"
+]
+},
+"TECH_OFFWORLD_MISSION": {
+"cost": 2500,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"TECH_PLASTICS": {
+"cost": 1480,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"TECH_COMBUSTION"
+]
+},
+"TECH_POTTERY": {
+"cost": 25,
+"era": "ERA_ANCIENT",
+"prereqs": []
+},
+"TECH_PREDICTIVE_SYSTEMS": {
+"cost": 2200,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"TECH_PRINTING": {
+"cost": 600,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"TECH_MACHINERY"
+]
+},
+"TECH_RADIO": {
+"cost": 1370,
+"era": "ERA_MODERN",
+"prereqs": [
+"TECH_FLIGHT",
+"TECH_STEAM_POWER"
+]
+},
+"TECH_REFINING": {
+"cost": 1250,
+"era": "ERA_MODERN",
+"prereqs": [
+"TECH_RIFLING"
+]
+},
+"TECH_REPLACEABLE_PARTS": {
+"cost": 1250,
+"era": "ERA_MODERN",
+"prereqs": [
+"TECH_ECONOMICS"
+]
+},
+"TECH_RIFLING": {
+"cost": 1070,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"TECH_BALLISTICS",
+"TECH_MILITARY_SCIENCE"
+]
+},
+"TECH_ROBOTICS": {
+"cost": 2155,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"TECH_COMPUTERS",
+"TECH_GUIDANCE_SYSTEMS",
+"TECH_LASERS",
+"TECH_SATELLITES"
+]
+},
+"TECH_ROCKETRY": {
+"cost": 1480,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"TECH_CHEMISTRY",
+"TECH_RADIO"
+]
+},
+"TECH_SAILING": {
+"cost": 50,
+"era": "ERA_ANCIENT",
+"prereqs": []
+},
+"TECH_SANITATION": {
+"cost": 1070,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"TECH_SCIENTIFIC_THEORY"
+]
+},
+"TECH_SATELLITES": {
+"cost": 1850,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"TECH_ADVANCED_FLIGHT",
+"TECH_ROCKETRY"
+]
+},
+"TECH_SCIENTIFIC_THEORY": {
+"cost": 930,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"TECH_ASTRONOMY",
+"TECH_BANKING"
+]
+},
+"TECH_SEASTEADS": {
+"cost": 2200,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"TECH_SHIPBUILDING": {
+"cost": 200,
+"era": "ERA_CLASSICAL",
+"prereqs": [
+"TECH_SAILING"
+]
+},
+"TECH_SIEGE_TACTICS": {
+"cost": 730,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"TECH_CASTLES"
+]
+},
+"TECH_SMART_MATERIALS": {
+"cost": 2200,
+"era": "ERA_FUTURE",
+"prereqs": []
+},
+"TECH_SQUARE_RIGGING": {
+"cost": 730,
+"era": "ERA_RENAISSANCE",
+"prereqs": [
+"TECH_CARTOGRAPHY"
+]
+},
+"TECH_STEALTH_TECHNOLOGY": {
+"cost": 1850,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"TECH_SYNTHETIC_MATERIALS"
+]
+},
+"TECH_STEAM_POWER": {
+"cost": 1070,
+"era": "ERA_INDUSTRIAL",
+"prereqs": [
+"TECH_INDUSTRIALIZATION"
+]
+},
+"TECH_STEEL": {
+"cost": 1250,
+"era": "ERA_MODERN",
+"prereqs": [
+"TECH_RIFLING"
+]
+},
+"TECH_STIRRUPS": {
+"cost": 390,
+"era": "ERA_MEDIEVAL",
+"prereqs": [
+"TECH_APPRENTICESHIP",
+"TECH_HORSEBACK_RIDING"
+]
+},
+"TECH_SYNTHETIC_MATERIALS": {
+"cost": 1660,
+"era": "ERA_ATOMIC",
+"prereqs": [
+"TECH_PLASTICS"
+]
+},
+"TECH_TELECOMMUNICATIONS": {
+"cost": 1850,
+"era": "ERA_INFORMATION",
+"prereqs": [
+"TECH_COMPUTERS"
+]
+},
+"TECH_THE_WHEEL": {
+"cost": 80,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"TECH_MINING"
+]
+},
+"TECH_WRITING": {
+"cost": 50,
+"era": "ERA_ANCIENT",
+"prereqs": [
+"TECH_POTTERY"
+]
+}
+}
+}

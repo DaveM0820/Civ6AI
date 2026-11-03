@@ -301,6 +301,12 @@ def _civ6_post_bind(snapshot: dict, validated: dict, commands: list) -> tuple[di
 
     # After every filter: hints are targets only. Lua's single fallback pass
     # uses one only for an entity no successful model order handled.
+    try:  # research/civic target: next on-path step when the model gave no order
+        from sidecar import civ6_research_target
+
+        commands.extend(civ6_research_target.auto_commands(snapshot, commands))
+    except Exception as error:
+        print(f"research target skipped: {error}", file=sys.stderr)
     commands.extend(civ6_fallbacks.plan(snapshot, commands))
     commands = [civ6_command_wire.pack_apply_command(snapshot, item) for item in commands]
     unresolved = civ6_command_wire.take_unresolved()
@@ -767,6 +773,9 @@ def main() -> None:
 
         thought_memory = civ6_seat_memory.observe(snapshot, thought_memory)
         thought_memory = civ6_seat_memory.note_exploration(snapshot, thought_memory)
+        from sidecar import civ6_research_target
+
+        thought_memory = civ6_research_target.observe(snapshot, thought_memory)
         snapshot["_seat_memory"] = civ6_seat_memory.compact(thought_memory)
     except Exception as error:
         print(f"seat memory skipped: {error}", file=sys.stderr)

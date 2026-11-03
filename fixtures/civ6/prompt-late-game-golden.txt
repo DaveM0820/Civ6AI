@@ -250,7 +250,7 @@ thought.strategy = long-term path to victory and why — prose only, no wire key
 thought.plan = the turn plan: every command you issue this turn and its intention (see REQUIRED COMMANDS).
 Event.<Name>.log = required attention notes (see REQUIRED COMMANDS).
 remember = text plus duration; store deals, rival impressions, war aims, and multi-turn plans. Forever notes are for things you want to remember permanently; never use them for specific units or positions. opinion.* / history.* as needed.
-plan.goal = victory type (science, culture, domination, diplomacy, religion, or score). plan.objective = attack|peace|improve|settle|research|defend, the aim, and by T<turn>. plan.objective.done = that kind when the objective is finished. Update the plan every turn. plan.strategy = your one high-level strategy (up to ~80 words), kept and shown back every turn until you write a new one, which replaces it: the victory path and how policies, build orders, tech/civic direction, expansion (land and sea) and military fit together. Rewrite it when the situation changes; omit the key to keep it.
+plan.goal = victory type (science, culture, domination, diplomacy, religion, or score). plan.objective = attack|peace|improve|settle|research|defend, the aim, and by T<turn>. plan.objective.done = that kind when the objective is finished. Update the plan every turn. plan.strategy = your one high-level strategy (up to ~80 words), kept and shown back every turn until you write a new one, which replaces it: the victory path and how policies, build orders, tech/civic direction, expansion (land and sea) and military fit together. Rewrite it when the situation changes; omit the key to keep it. plan.research_target = a far tech (e.g. TECH_SHIPBUILDING) and plan.civic_target = a far civic: kept until reached; whenever you give no legal.research.tech / legal.research.civic order, the next prerequisite on the path is ordered for you. none clears it.
 Required Event.* logs this turn: 2 (numbered under REQUIRED COMMANDS).
 
 Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):
@@ -290,13 +290,15 @@ Optional JSON keys:
   "24.map.viewport": "(x,y) to center image 2 next turn, or auto",
   "25.remember": "text (duration N turns | forever)",
   "26.plan.strategy": "your high-level strategy: victory path + policies + builds + tech/civics + expansion (not set yet)",
-  "27.Polis0.production": "bare ID from Polis0.production.catalog",
-  "28.Polis1.production": "bare ID from Polis1.production.catalog",
-  "29.Polis2.production": "bare ID from Polis2.production.catalog",
-  "30.Polis4.production": "bare ID from Polis4.production.catalog",
-  "31.Polis5.production": "bare ID from Polis5.production.catalog",
-  "32.Polis6.production": "bare ID from Polis6.production.catalog",
-  "33.Polis7.production": "bare ID from Polis7.production.catalog",
+  "27.plan.research_target": "TECH_* you are heading for; prerequisites are researched in order (see Tech tree)",
+  "28.plan.civic_target": "CIVIC_* you are heading for (see Civic tree)",
+  "29.Polis0.production": "bare ID from Polis0.production.catalog",
+  "30.Polis1.production": "bare ID from Polis1.production.catalog",
+  "31.Polis2.production": "bare ID from Polis2.production.catalog",
+  "32.Polis4.production": "bare ID from Polis4.production.catalog",
+  "33.Polis5.production": "bare ID from Polis5.production.catalog",
+  "34.Polis6.production": "bare ID from Polis6.production.catalog",
+  "35.Polis7.production": "bare ID from Polis7.production.catalog",
 
 Reference catalogs (not numbered JSON keys):
 legal.validUnits = warrior_1 | warrior_2 | warrior_3 | warrior_4 | warrior_5 | warrior_6 | warrior_7 | warrior_8 | warrior_9 | warrior_10 | warrior_11 | warrior_12 | warrior_13 | warrior_14

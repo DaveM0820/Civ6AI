@@ -270,6 +270,9 @@ def apply_plan(memory: dict[str, Any], turn: int, update: dict[str, Any]) -> dic
         # One high-level strategy per seat; a new one replaces the old.
         plan["strategy"] = strategy.strip()[:500]
         plan["strategy_turn"] = int(turn)
+    from sidecar import civ6_research_target
+
+    civ6_research_target.apply_update(plan, update, turn)
     for raw in update.get("objectives") or []:
         parsed = _parse_objective(str(raw))
         if parsed is None:
