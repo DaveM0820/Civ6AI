@@ -302,8 +302,58 @@ end
 -- seat (the old behaviour). An unmanaged seat gets none of this mod's steering:
 -- no build priorities, presets, build-next picks, early/force strategies,
 -- scout cut or turn-1 move dump. Human seats are never unmanaged.
+-- Install-time backstop: install_mod writes the model seats into the mod's
+-- database (GlobalParameters CIV6AI_MANAGED_SEATS = "0,1,2"; "" = every AI
+-- major is a model seat). Every PC loads the same mod, so this is identical
+-- everywhere and known from turn 1, before the interface can send SEATS.
+Civ6Ai_Orders._configMask = nil
+function Civ6Ai_Orders.ConfigUnmanagedMask()
+  if Civ6Ai_Orders._configMask ~= nil then
+    return Civ6Ai_Orders._configMask
+  end
+  local text = ""
+  local okRow, row = pcall(function()
+    return GameInfo.GlobalParameters["CIV6AI_MANAGED_SEATS"]
+  end)
+  if okRow and row ~= nil and row.Value ~= nil then
+    text = tostring(row.Value)
+  end
+  local listed, any = {}, false
+  for seat in string.gmatch(text, "%d+") do
+    listed[tonumber(seat)] = true
+    any = true
+  end
+  local mask, majors = 0, 0
+  if Players ~= nil then
+    for i = 0, 30 do
+      local p = Players[i]
+      if p ~= nil and call(p, "IsMajor") == true then
+        majors = majors + 1
+        if any and call(p, "IsHuman") ~= true and listed[i] ~= true then
+          mask = mask + 2 ^ i
+        end
+      end
+    end
+  end
+  mask = math.floor(mask)
+  -- Cache only once the majors exist (the list is fixed for the whole game).
+  if majors > 0 or not any then
+    Civ6Ai_Orders._configMask = mask
+    log("seats|config_managed=" .. text .. "|unmanaged_mask=" .. tostring(mask))
+  end
+  return mask
+end
+
 function Civ6Ai_Orders.UnmanagedMask()
-  return num(Game:GetProperty("CIV6AI_UNMANAGED_MASK"))
+  local synced = num(Game:GetProperty("CIV6AI_UNMANAGED_MASK"))
+  if synced ~= nil and synced > 0 then
+    return synced
+  end
+  local cfg = Civ6Ai_Orders.ConfigUnmanagedMask()
+  if cfg ~= nil and cfg > 0 then
+    return cfg
+  end
+  return synced
 end
 
 function Civ6Ai_Orders.Unmanaged(owner)
@@ -3082,12 +3132,16 @@ function Civ6Ai_Orders.OnOrder(sender, params)
   local turn = Game.GetCurrentGameTurn()
   local o = readOrder(params)
   local k = o.K
+  if k ~= Civ6Ai_Orders.K.HINT and k ~= Civ6Ai_Orders.K.MOVE then
+    log("on_order|turn=" .. tostring(turn) .. "|from=" .. tostring(sender) .. "|kind=" .. tostring(k)
+      .. "|seq=" .. tostring(o.S) .. "|P=" .. tostring(o.P) .. "|I=" .. tostring(o.I) .. "|V=" .. tostring(o.V))
+  end
   if k == Civ6Ai_Orders.K.REPORT then
     Civ6Ai_Orders._Report(sender, params)
     return
   end
   if k == Civ6Ai_Orders.K.SEATS then
-    local ok, reason = Civ6Ai_Orders._SetUnmanaged(sender, o.V)
+    local ok, reason = Civ6Ai_Orders._SetUnmanaged(sender, o.I or o.V)
     Civ6Ai_Orders._Record(sender, o, ok, reason)
     return
   end

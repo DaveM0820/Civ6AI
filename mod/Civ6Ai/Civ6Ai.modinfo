@@ -18,6 +18,7 @@
     <File>Data/Civ6Ai_Strategies.sql</File>
     <File>Data/Civ6Ai_Priorities.sql</File>
     <File>Data/Civ6Ai_BuildNext.sql</File>
+    <File>Data/Civ6Ai_Seats.sql</File>
     <File>Gameplay/Civ6Ai_GameCore.lua</File>
     <File>Gameplay/Civ6Ai_Orders.lua</File>
     <File>InGame/Civ6Ai_Util.xml</File>
@@ -80,6 +81,14 @@
       </Properties>
       <Items>
         <File>Data/Civ6Ai_BuildNext.sql</File>
+      </Items>
+    </UpdateDatabase>
+    <UpdateDatabase id="Civ6Ai_Seats">
+      <Properties>
+        <LoadOrder>1001</LoadOrder>
+      </Properties>
+      <Items>
+        <File>Data/Civ6Ai_Seats.sql</File>
       </Items>
     </UpdateDatabase>
     <GameplayScripts id="Civ6Ai_GameCore">

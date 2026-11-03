@@ -93,7 +93,8 @@ function Civ6Ai_InGame._SyncUnmanagedSeats()
   end
   Civ6Ai_InGame._seatMaskSentTurn = turn
   Civ6Ai_Util.Log("seats|send_unmanaged_mask=" .. tostring(mask) .. "|was=" .. tostring(cur))
-  Civ6Ai_OrderChannel.Send(Civ6Ai_OrderChannel.K.SEATS, { V = mask })
+  -- Mask in I (a param every working order uses) and V (older readers).
+  Civ6Ai_OrderChannel.Send(Civ6Ai_OrderChannel.K.SEATS, { I = mask, V = mask })
 end
 
 -- Gameplay LuaEvents often do not reach InGame in a network game. Gameplay still

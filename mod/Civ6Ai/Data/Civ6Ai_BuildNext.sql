@@ -102,6 +102,14 @@ SELECT 'Civ6AiNextPY_' || Item, PseudoYield, 1, 300 FROM Civ6Ai_NextCategory;
 -- (Victories.xml:138,201,278). Seats with no pick (P5, humans) stay at 0.
 -- UNVERIFIED: a new AiOperationTypes Value (7; vanilla has 0..6) and whether
 -- the engine starts a SelfStart op for majors from Default_List.
+-- GAME 10 (T1-28): no sign it ran - settler picks were still beaten by
+-- builders/slingers/galleys for 4-9 turns. Static review: Build Railroad is
+-- NOT an AiOperation; it is a TriggeredBehaviorTree (TRIGGER_RAILROAD,
+-- AI_EVENT_NEEDS_RAILROAD, DefaultTriggeredTrees) started by an engine-raised
+-- AI event, which Lua cannot raise. Every vanilla SelfStart op uses one of the
+-- 7 engine OperationType values; a new Value 7 has no precedent and is most
+-- likely ignored by the engine's fixed enum. No MP-safe fix found; harmless
+-- as is (limit 0 unless a pick is active). Candidate for removal.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS Civ6Ai_DirectUnits (
   Item TEXT NOT NULL PRIMARY KEY,

@@ -304,6 +304,32 @@ class OrdersGameplayTests(unittest.TestCase):
         self.order(1, K=38, V=0, T=1)
         self.assertEqual(self.last()["reason"], "not_controller")
 
+    def test_unmanaged_from_installed_seat_list_without_seats_order(self):
+        O = self.rt.globals().Civ6Ai_Orders
+        self._early_world(cities=1)
+        self.rt.execute('Players[7].IsHuman = function() return false end')
+        self.rt.execute('Players[2].IsMajor = function() return true end')
+        self.rt.execute('Players[2].IsHuman = function() return false end')
+        self.rt.execute('GameInfo.GlobalParameters = {CIV6AI_MANAGED_SEATS = {Value = "0,1,2"}}')
+        O._configMask = None
+        self.assertIsNone(self.rt.eval("GetProp('CIV6AI_UNMANAGED_MASK')"))
+        self.assertTrue(O.Unmanaged(7))
+        self.assertFalse(O.Unmanaged(2))
+        self.assertFalse(O.Unmanaged(0))
+        self.assertFalse(O.ApplyEarlyLock(7))
+        # Empty list: every AI major is a model seat.
+        self.rt.execute('GameInfo.GlobalParameters = {CIV6AI_MANAGED_SEATS = {Value = ""}}')
+        O._configMask = None
+        self.assertFalse(O.Unmanaged(7))
+
+    def test_seats_order_reads_mask_from_I(self):
+        O = self.rt.globals().Civ6Ai_Orders
+        self._early_world(cities=1)
+        self.rt.execute('Players[7].IsHuman = function() return false end')
+        self.order(0, K=38, I=1 << 7, T=1)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertTrue(O.Unmanaged(7))
+
     def test_registers_event_handler(self):
         self.assertEqual(len(_vals(self.rt.eval("GameEvents.Civ6AiOrder.fns"))), 1)
         self.assertEqual(len(_vals(self.rt.eval("GameEvents.OnGameTurnStarted.fns"))), 1)

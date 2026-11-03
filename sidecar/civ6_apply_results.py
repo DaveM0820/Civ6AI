@@ -1425,18 +1425,53 @@ def is_near_duplicate_chat(text: str, recent: list[str], threshold: float = CHAT
 CHAT_COPY_THRESHOLD = 0.85
 
 
+CHAT_SELF_REPEAT_THRESHOLD = 0.9
+CHAT_SELF_REPEAT_TURNS = 10
+CHAT_SHARED_PHRASE_WORDS = 6
+
+
+def _chat_words(text: str) -> list[str]:
+    import re
+
+    return re.findall(r"[a-z0-9']+", (text or "").lower().replace("\u2019", "'"))
+
+
+def _ngrams(words: list[str], n: int) -> set[tuple[str, ...]]:
+    return {tuple(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def repeated_own_line(text: str, prior_rows: list[tuple[int, str]]) -> tuple[int, str] | None:
+    """This seat's own recent line (turn, text) that `text` repeats exactly or near-exactly (>= 90%)."""
+    from difflib import SequenceMatcher
+
+    needle = " ".join((text or "").lower().split())
+    if not needle:
+        return None
+    for turn, prior in prior_rows:
+        hay = " ".join(str(prior or "").lower().split())
+        if not hay:
+            continue
+        if needle == hay or (len(needle) >= 25 and SequenceMatcher(None, needle, hay).ratio() >= CHAT_SELF_REPEAT_THRESHOLD):
+            return turn, str(prior)
+    return None
+
+
 def copied_other_line(snapshot: dict[str, Any], text: str) -> str | None:
-    """Another player's recent line that `text` copies almost verbatim (character ratio)."""
+    """Another player's recent line that `text` copies almost verbatim (character ratio),
+    or shares a distinctive phrase with (a run of 6+ identical words)."""
     from difflib import SequenceMatcher
 
     needle = " ".join((text or "").lower().split())
     if len(needle) < 25:
         return None  # short lines ("Greetings.") collide by chance
+    grams = _ngrams(_chat_words(needle), CHAT_SHARED_PHRASE_WORDS)
     for prior in _recent_other_lines(snapshot):
         hay = " ".join(prior.lower().split())
         # Lines in history carry a "Leader: " prefix; compare against the text after it too.
         candidates = [hay] + ([hay.split(": ", 1)[1]] if ": " in hay else [])
         if any(SequenceMatcher(None, needle, c).ratio() >= CHAT_COPY_THRESHOLD for c in candidates):
+            return prior
+        if grams and grams & _ngrams(_chat_words(hay), CHAT_SHARED_PHRASE_WORDS):
             return prior
     return None
 
@@ -1648,10 +1683,10 @@ def filter_repeat_public_chat(
     chat_messages: list[dict[str, Any]],
     commands: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """The one chat gate. Chat is always allowed: no cooldown, rate limit or near-repeat drops.
-
-    Only an exact duplicate inside this same reply and a line addressed to your own
-    leader are dropped. The cadence gate stays off unless its settings are raised.
+    """The one chat gate. Dropped: a copy of another player's recent line (or a 6+ word
+    phrase from it) and a (near-)repeat of this seat's own line from the last 10 turns
+    (g10: P1/P2/P4 resent the same line 3-4 times). Notes only: an exact duplicate
+    inside this reply and a line addressed to your own leader. The cadence gate stays off unless its settings are raised.
     """
     recent_map = recent_self_chats_by_target(snapshot)
     events = chat_event_players(snapshot, commands)
@@ -1674,7 +1709,7 @@ def filter_repeat_public_chat(
         # P0's own city 9 times on T4-T9). The model is told so next turn.
         echoed = copied_other_line(snapshot, needle)
         if echoed is not None:
-            dropped.append("dropped: chat copied another player's recent line almost word for word "
+            dropped.append("dropped: chat copied another player's recent line or a 6+ word phrase from it "
                            f"(\"{echoed[:60]}\") and was not sent; write your own line about your own situation")
             continue
         key = chat_target_key(message)
@@ -1685,8 +1720,17 @@ def filter_repeat_public_chat(
         if leader and (low.startswith(f"friend {leader}") or low.startswith(leader + ",") or low.startswith(leader + ":")):
             dropped.append("note: chat addressed your own leader by name (sent anyway); "
                            "speak as yourself to the other leaders")
-        if needle and any(needle.lower() == str(row[1]).strip().lower() for row in prior_rows):
-            dropped.append("note: chat repeated a line you already sent on an earlier turn (sent anyway)")
+        try:
+            now_turn = int((snapshot.get("decision") or {}).get("turn") or 0)
+        except (TypeError, ValueError):
+            now_turn = 0
+        self_repeat = repeated_own_line(
+            needle, [row for row in prior_rows if now_turn - CHAT_SELF_REPEAT_TURNS <= int(row[0] or 0) < now_turn])
+        if self_repeat is not None:
+            dropped.append(f"dropped: chat repeated your own line from turn {self_repeat[0]} almost word for word "
+                           f"(\"{str(self_repeat[1])[:60]}\") and was not sent; say something new about this turn "
+                           "or stay silent")
+            continue
         too_soon = chat_cadence_problem(snapshot, key, events, last_turns)
         if too_soon is None and key in spoken_to and chat_cooldown_turns(key) > 0 and not (
                 key.split(":", 1)[-1] in events or (key in ("all", "team") and events)):
