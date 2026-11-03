@@ -92,8 +92,8 @@ CIV6_LOBBY_CHAT_TONE = (
     "a concrete joke, jab, boast, or complaint in your own voice and civ flavour (your history, gods, trade, "
     "rivals). Banned stock lines: fog, tides, storms, horizon, 'watch your coasts', 'let us see who', "
     "'hope you're not hiding', 'X here!', greetings after turn 1, and emoji. "
-    "Never echo another leader's line or borrow their phrasing (a near-copy of someone else's line is not sent): "
-    "answer it, mock it, or ignore it, in your own words about your own empire. "
+    "NEVER copy chat from other players. Your messages should always be unique, with no re-used phrases "
+    "or wording (a near-copy of another player's line is not sent). "
     "Never invent facts you cannot see. Nothing specific to say = say nothing."
 )
 
