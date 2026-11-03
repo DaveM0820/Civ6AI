@@ -24,17 +24,31 @@ CREATE TABLE StrategyConditions (StrategyType TEXT, ConditionFunction TEXT, Stri
 CREATE TABLE AiListTypes (ListType TEXT PRIMARY KEY);
 CREATE TABLE AiLists (ListType TEXT PRIMARY KEY, System TEXT);
 CREATE TABLE Strategy_Priorities (StrategyType TEXT, ListType TEXT, PRIMARY KEY (StrategyType, ListType));
-CREATE TABLE AiFavoredItems (ListType TEXT, Item TEXT, Favored INT, Value INT, PRIMARY KEY (ListType, Item));
+CREATE TABLE AiFavoredItems (ListType TEXT, Item TEXT, Favored INT DEFAULT 0, Value INT, PRIMARY KEY (ListType, Item));
 CREATE TABLE PseudoYields (PseudoYieldType TEXT PRIMARY KEY);
-CREATE TABLE Units (UnitType TEXT PRIMARY KEY, Cost INT, FormationClass TEXT, PseudoYieldType TEXT);
+CREATE TABLE Units (UnitType TEXT PRIMARY KEY, Cost INT, FormationClass TEXT, PseudoYieldType TEXT, PromotionClass TEXT);
+CREATE TABLE AiOperationTypes (OperationType TEXT PRIMARY KEY, Value INT NOT NULL);
+CREATE TABLE BehaviorTrees (TreeName TEXT PRIMARY KEY);
+CREATE TABLE BehaviorTreeNodes (TreeName TEXT, NodeId INT, JumpTo INT, NodeType TEXT, PrimaryKey INTEGER PRIMARY KEY);
+CREATE TABLE TreeData (DefnId INT, NodeId INT, TreeName TEXT, Tag TEXT, DefaultData TEXT, ParentTag TEXT, UniqueId INTEGER PRIMARY KEY);
+CREATE TABLE AiOperationDefs (OperationName TEXT PRIMARY KEY, TargetType TEXT, TargetParameter INT, BehaviorTree TEXT, Priority INT,
+  MaxTargetDistInRegion INT, MaxTargetDistInArea INT, MaxTargetDistInWorld INT, SelfStart INT, OperationType TEXT);
+CREATE TABLE AiTeams (TeamName TEXT PRIMARY KEY);
+CREATE TABLE AiOperationTeams (TeamName TEXT, OperationName TEXT, MinUnits INT, InitialStrengthAdvantage REAL, OngoingStrengthAdvantage REAL);
+CREATE TABLE OpTeamRequirements (TeamName TEXT, AiType TEXT, MinNumber INT, MaxNumber INT);
+CREATE TABLE AllowedOperations (ListType TEXT, OperationDef TEXT);
+CREATE TABLE AiScoutUses (ScoutUseType TEXT PRIMARY KEY);
+INSERT INTO AiScoutUses VALUES ('DEFAULT_LAND_SCOUTS'), ('DEFAULT_NAVAL_SCOUTS'), ('LAND_SCOUTS_PER_PRIMARY_REGION'),
+  ('LAND_SCOUTS_PER_SECONDARY_REGION'), ('NAVAL_SCOUTS_FOR_WORLD_EXPLORATION');
 CREATE TABLE Buildings (BuildingType TEXT PRIMARY KEY, Cost INT, IsWonder INT);
 CREATE TABLE Districts (DistrictType TEXT PRIMARY KEY, Cost INT);
 INSERT INTO PseudoYields VALUES ('PSEUDOYIELD_UNIT_SETTLER'), ('PSEUDOYIELD_UNIT_TRADE'),
-  ('PSEUDOYIELD_UNIT_COMBAT'), ('PSEUDOYIELD_UNIT_NAVAL_COMBAT'), ('PSEUDOYIELD_DISTRICT');
-INSERT INTO Units VALUES ('UNIT_SETTLER', 80, 'FORMATION_CLASS_CIVILIAN', 'PSEUDOYIELD_UNIT_SETTLER'),
-  ('UNIT_TRADER', 40, 'FORMATION_CLASS_CIVILIAN', 'PSEUDOYIELD_UNIT_TRADE'),
-  ('UNIT_GALLEY', 65, 'FORMATION_CLASS_NAVAL', NULL), ('UNIT_ARCHER', 60, 'FORMATION_CLASS_LAND_COMBAT', NULL),
-  ('UNIT_BUILDER', 50, 'FORMATION_CLASS_CIVILIAN', NULL);
+  ('PSEUDOYIELD_UNIT_COMBAT'), ('PSEUDOYIELD_UNIT_NAVAL_COMBAT'), ('PSEUDOYIELD_DISTRICT'), ('PSEUDOYIELD_UNIT_EXPLORER');
+INSERT INTO Units VALUES ('UNIT_SETTLER', 80, 'FORMATION_CLASS_CIVILIAN', 'PSEUDOYIELD_UNIT_SETTLER', NULL),
+  ('UNIT_TRADER', 40, 'FORMATION_CLASS_CIVILIAN', 'PSEUDOYIELD_UNIT_TRADE', NULL),
+  ('UNIT_GALLEY', 65, 'FORMATION_CLASS_NAVAL', NULL, NULL), ('UNIT_ARCHER', 60, 'FORMATION_CLASS_LAND_COMBAT', NULL, NULL),
+  ('UNIT_BUILDER', 50, 'FORMATION_CLASS_CIVILIAN', NULL, NULL),
+  ('UNIT_SCOUT', 30, 'FORMATION_CLASS_LAND_COMBAT', 'PSEUDOYIELD_UNIT_EXPLORER', 'PROMOTION_CLASS_RECON');
 INSERT INTO Buildings VALUES ('BUILDING_GRANARY', 65, 0), ('BUILDING_PYRAMIDS', 200, 1);
 INSERT INTO Districts VALUES ('DISTRICT_CAMPUS', 54), ('DISTRICT_CITY_CENTER', 0);
 """
@@ -49,15 +63,15 @@ class BuildNextCategoryTests(unittest.TestCase):
     def boost(self, item: str):
         return self.db.execute(
             "SELECT f.Item, f.Value FROM Strategy_Priorities s JOIN AiLists l ON l.ListType = s.ListType "
-            "JOIN AiFavoredItems f ON f.ListType = s.ListType WHERE l.System = 'PseudoYields' AND s.StrategyType = ?",
+            "JOIN AiFavoredItems f ON f.ListType = s.ListType WHERE l.System = 'PseudoYields' AND s.ListType LIKE 'Civ6AiNextPY_%' AND s.StrategyType = ?",
             ("CIV6AI_NEXT_" + item,)).fetchall()
 
     def test_each_pick_boosts_its_category(self):
-        self.assertEqual([("PSEUDOYIELD_UNIT_SETTLER", 1500)], self.boost("UNIT_SETTLER"))
-        self.assertEqual([("PSEUDOYIELD_UNIT_TRADE", 1500)], self.boost("UNIT_TRADER"))
-        self.assertEqual([("PSEUDOYIELD_UNIT_NAVAL_COMBAT", 1500)], self.boost("UNIT_GALLEY"))
-        self.assertEqual([("PSEUDOYIELD_UNIT_COMBAT", 1500)], self.boost("UNIT_ARCHER"))
-        self.assertEqual([("PSEUDOYIELD_DISTRICT", 1500)], self.boost("DISTRICT_CAMPUS"))
+        self.assertEqual([("PSEUDOYIELD_UNIT_SETTLER", 300)], self.boost("UNIT_SETTLER"))
+        self.assertEqual([("PSEUDOYIELD_UNIT_TRADE", 300)], self.boost("UNIT_TRADER"))
+        self.assertEqual([("PSEUDOYIELD_UNIT_NAVAL_COMBAT", 300)], self.boost("UNIT_GALLEY"))
+        self.assertEqual([("PSEUDOYIELD_UNIT_COMBAT", 300)], self.boost("UNIT_ARCHER"))
+        self.assertEqual([("PSEUDOYIELD_DISTRICT", 300)], self.boost("DISTRICT_CAMPUS"))
         # No vanilla category pseudoyield: favoured list only.
         self.assertEqual([], self.boost("UNIT_BUILDER"))
         self.assertEqual([], self.boost("BUILDING_GRANARY"))
@@ -65,12 +79,47 @@ class BuildNextCategoryTests(unittest.TestCase):
         n = self.db.execute("SELECT COUNT(*) FROM AiFavoredItems WHERE ListType = 'Civ6AiNext_UNIT_BUILDER' AND Favored = 1").fetchone()[0]
         self.assertEqual(1, n)
 
-    def test_boost_beats_every_preset_pseudoyield(self):
-        text = (DATA / "Civ6Ai_Priorities.sql").read_text(encoding="utf-8")
-        values = [int(v) for v in re.findall(r"PseudoYields', PseudoYieldType, 1, (-?\d+) FROM PseudoYields", text)]
-        self.assertTrue(values)
-        # Own category cut by the worst preset still beats the biggest rival boost.
-        self.assertGreater(1500 + min(values), max(values))
+    def test_boost_is_a_moderate_percentage(self):
+        # PseudoYield values are percentages of the base value: +300 = 4x.
+        text = (DATA / "Civ6Ai_Strategies.sql").read_text(encoding="utf-8")
+        self.assertNotIn("1500", text)
+        self.assertIn("'PSEUDOYIELD_UNIT_COMBAT', 1, 300", text)
+
+    def q(self, sql, *args):
+        return self.db.execute(sql, args).fetchall()
+
+    def test_settler_direct_request_op_only_via_pick_strategy(self):
+        op = "CIV6AI_OP_NEXT_UNIT_SETTLER"
+        self.assertEqual([(op,)], self.q("SELECT OperationType FROM AiOperationTypes"))
+        # Base limit 0 for everyone; raised to 1 only by the per-seat pick strategy.
+        self.assertEqual([(0,)], self.q("SELECT Value FROM AiFavoredItems WHERE ListType='BaseOperationsLimits' AND Item=?", op))
+        rows = self.q("SELECT s.StrategyType, f.Value FROM Strategy_Priorities s JOIN AiLists l ON l.ListType=s.ListType "
+                      "JOIN AiFavoredItems f ON f.ListType=s.ListType WHERE l.System='AiOperationTypes'")
+        self.assertEqual([("CIV6AI_NEXT_UNIT_SETTLER", 1)], rows)
+        self.assertEqual([("Call Lua Function", "Civ6AiNext_UNIT_SETTLER")], self.q(
+            "SELECT ConditionFunction, StringValue FROM StrategyConditions WHERE StrategyType='CIV6AI_NEXT_UNIT_SETTLER' AND Disqualifier IS NULL"))
+        self.assertEqual([(1, op, "Civ6Ai Next UNIT_SETTLER")], self.q("SELECT SelfStart, OperationType, BehaviorTree FROM AiOperationDefs"))
+
+    def test_settler_tree_is_railroad_shape_naming_the_unit(self):
+        tree = "Civ6Ai Next UNIT_SETTLER"
+        nodes = self.q("SELECT NodeId, JumpTo, NodeType FROM BehaviorTreeNodes WHERE TreeName=? ORDER BY NodeId", tree)
+        self.assertEqual([(0, 6, "Sequence"), (1, 0, "Decode Trigger"), (2, 6, "Priority"), (3, 0, "Find Available Unit"),
+                          (4, 6, "Contract Manager Decorator"), (5, 0, "Build Unit")], nodes)
+        data = {(n, d): (t, v) for d, n, t, v in self.q("SELECT DefnId, NodeId, Tag, DefaultData FROM TreeData WHERE TreeName=?", tree)}
+        self.assertEqual((None, "UNIT_SETTLER"), data[(3, 4)])
+        self.assertEqual(data[(3, 0)][0], data[(5, 0)][0])  # found-unit list feeds Build Unit
+        self.assertEqual(data[(4, 0)][0], data[(5, 4)][0])  # same contract
+        self.assertEqual((None, "1"), data[(5, 3)])  # release when built
+        self.assertEqual((None, "-1"), data[(5, 2)])  # any city
+
+    def test_scout_cuts(self):
+        self.assertEqual(sorted([("DEFAULT_LAND_SCOUTS", -100), ("LAND_SCOUTS_PER_PRIMARY_REGION", -100),
+                                 ("LAND_SCOUTS_PER_SECONDARY_REGION", -100)]),
+                         sorted(self.q("SELECT Item, Value FROM AiFavoredItems WHERE ListType='Civ6AiModelScouts'")))
+        self.assertEqual([("CIV6AI_MODEL_SEAT",)], self.q("SELECT StrategyType FROM Strategy_Priorities WHERE ListType='Civ6AiModelScouts'"))
+        no_explore = {r[0] for r in self.q("SELECT StrategyType FROM Strategy_Priorities WHERE ListType='Civ6AiNextNoExplore'")}
+        self.assertIn("CIV6AI_NEXT_UNIT_SETTLER", no_explore)
+        self.assertNotIn("CIV6AI_NEXT_UNIT_SCOUT", no_explore)
 
 
 class TradePromptTests(unittest.TestCase):

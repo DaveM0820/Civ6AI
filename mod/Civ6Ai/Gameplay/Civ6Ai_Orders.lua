@@ -5971,7 +5971,29 @@ function Civ6Ai_Orders.PresetSettle(owner)
   return true
 end
 
+-- Model seat (Data/Civ6Ai_BuildNext.sql CIV6AI_MODEL_SEAT: land scout quota
+-- cut): an AI major the model has steered, i.e. it has a production preset
+-- or has ever had a build-next pick. Synced properties only. A seat left on
+-- the built-in AI (no orders) and human seats answer false.
+function Civ6Ai_Orders.ModelSeat(owner)
+  local p = Players ~= nil and Players[owner] or nil
+  if p == nil or call(p, "IsHuman") == true or call(p, "IsMajor") ~= true then
+    return false
+  end
+  if Game:GetProperty("CIV6AI_PICK_T_" .. tostring(owner)) ~= nil then
+    return true
+  end
+  return #Civ6Ai_Orders.PriorityLevels(owner) > 0
+end
+
 function Civ6Ai_Orders.RegisterEarlyStrategies()
+  local seatEv = GameEvents ~= nil and GameEvents.Civ6AiModelSeat or nil
+  if seatEv ~= nil and seatEv.Add ~= nil then
+    seatEv.Add(function(owner, threshold)
+      local ok, yes = pcall(Civ6Ai_Orders.ModelSeat, owner)
+      return ok and yes == true
+    end)
+  end
   local fn = "Civ6AiEarlySettle"
   local settleEv = GameEvents ~= nil and GameEvents[fn] or nil
   if settleEv ~= nil and settleEv.Add ~= nil then

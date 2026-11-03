@@ -8,12 +8,9 @@
 --    largely ignored (vanilla uses Favored with Value 0/1).
 --  * a PseudoYields list boosting the item's category (settler, trade, naval,
 --    land/air combat, explorer, religious, archaeologist, spy, improvement for
---    builders, district) by +1500. The engine AI picks the category first by
---    pseudoyield. Our production presets (Civ6Ai_Priorities.sql) move a
---    category by -100 .. +1000 (SETTLERS_ONLY_ALL_IN settler +1000,
---    NAVAL_TOTAL_WAR_ALL_IN naval +880). +1500 keeps the picked category on top
---    even when the active preset cuts it by 100 and lifts a rival by 1000
---    (net +1400 vs +1000).
+--    builders, district) by +300. PseudoYield values are percentages of the
+--    category's base value (Infixo Real Strategy wiki, PseudoYields), so +300
+--    is 4x; the old +1500 (16x) swamped every other weight.
 --    Buildings have no category pseudoyield in vanilla, so building picks
 --    rely on the favoured list only.
 -- The engine still chooses the city, costs, chops and overflow: vanilla rules.
@@ -90,4 +87,126 @@ INSERT INTO Strategy_Priorities (StrategyType, ListType)
 SELECT 'CIV6AI_NEXT_' || Item, 'Civ6AiNextPY_' || Item FROM Civ6Ai_NextCategory;
 
 INSERT INTO AiFavoredItems (ListType, Item, Favored, Value)
-SELECT 'Civ6AiNextPY_' || Item, PseudoYield, 1, 1500 FROM Civ6Ai_NextCategory;
+SELECT 'Civ6AiNextPY_' || Item, PseudoYield, 1, 300 FROM Civ6Ai_NextCategory;
+
+-- ---------------------------------------------------------------------------
+-- Direct request (test: UNIT_SETTLER only). Scouting quotas and boost hunting
+-- reach the city through the "Build Unit" behaviour-tree node, which skips
+-- pseudoyield scoring. This adds a self-starting AI operation whose tree is
+-- Expansion2's "Build Railroad" (Expansion2_AI.xml:60-108) without its move /
+-- improve half and with UNIT_SETTLER named in "Find Available Unit" "Unit
+-- Type" (as Railroad names UNIT_MILITARY_ENGINEER). Its operation type has a
+-- base limit of 0; only the per-seat CIV6AI_NEXT_UNIT_SETTLER strategy (Lua
+-- condition on the synced pick) raises it to 1 - the same mechanism as
+-- vanilla VICTORY_STRATEGY_MILITARY_VICTORY -> MilitaryVictoryOperations
+-- (Victories.xml:138,201,278). Seats with no pick (P5, humans) stay at 0.
+-- UNVERIFIED: a new AiOperationTypes Value (7; vanilla has 0..6) and whether
+-- the engine starts a SelfStart op for majors from Default_List.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS Civ6Ai_DirectUnits (
+  Item TEXT NOT NULL PRIMARY KEY,
+  OpValue INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO Civ6Ai_DirectUnits (Item, OpValue)
+SELECT Item, 7 FROM Civ6Ai_NextItems WHERE Item = 'UNIT_SETTLER';
+
+INSERT INTO AiOperationTypes (OperationType, Value)
+SELECT 'CIV6AI_OP_NEXT_' || Item, OpValue FROM Civ6Ai_DirectUnits;
+
+INSERT INTO AiFavoredItems (ListType, Item, Value)
+SELECT 'BaseOperationsLimits', 'CIV6AI_OP_NEXT_' || Item, 0 FROM Civ6Ai_DirectUnits;
+
+INSERT INTO BehaviorTrees (TreeName)
+SELECT 'Civ6Ai Next ' || Item FROM Civ6Ai_DirectUnits;
+
+-- 0 Sequence -> 1 Decode Trigger, 2 Priority(3 Find Available Unit,
+-- 4 Contract Manager Decorator -> 5 Build Unit). JumpTo = first node after the
+-- subtree (6 = end).
+INSERT INTO BehaviorTreeNodes (TreeName, NodeId, JumpTo, NodeType)
+SELECT 'Civ6Ai Next ' || d.Item, n.NodeId, n.JumpTo, n.NodeType FROM Civ6Ai_DirectUnits d,
+(SELECT 0 AS NodeId, 6 AS JumpTo, 'Sequence' AS NodeType
+ UNION ALL SELECT 1, 0, 'Decode Trigger'
+ UNION ALL SELECT 2, 6, 'Priority'
+ UNION ALL SELECT 3, 0, 'Find Available Unit'
+ UNION ALL SELECT 4, 6, 'Contract Manager Decorator'
+ UNION ALL SELECT 5, 0, 'Build Unit') n;
+
+-- TreeData mirrors Build Railroad nodes 1,3,4,5 (Railroad's trigger tag is
+-- dropped). Build Unit: Required City -1 (any), Release Unit When Built 1 (as Build Trigger Unit).
+INSERT INTO TreeData (DefnId, NodeId, TreeName, Tag, DefaultData)
+SELECT t.DefnId, t.NodeId, 'Civ6Ai Next ' || d.Item, t.Tag,
+  CASE WHEN t.DefaultData = '@ITEM' THEN d.Item ELSE t.DefaultData END
+FROM Civ6Ai_DirectUnits d,
+(SELECT 0 AS DefnId, 1 AS NodeId, NULL AS Tag, NULL AS DefaultData
+ UNION ALL SELECT 1, 1, NULL, NULL UNION ALL SELECT 2, 1, NULL, NULL UNION ALL SELECT 3, 1, NULL, NULL
+ UNION ALL SELECT 4, 1, NULL, NULL UNION ALL SELECT 5, 1, NULL, NULL UNION ALL SELECT 6, 1, NULL, NULL
+ UNION ALL SELECT 7, 1, NULL, NULL UNION ALL SELECT 8, 1, 'Next Value', NULL
+ UNION ALL SELECT 0, 3, 'Next Units', NULL
+ UNION ALL SELECT 2, 3, 'Next Unit', NULL
+ UNION ALL SELECT 3, 3, NULL, NULL
+ UNION ALL SELECT 4, 3, NULL, '@ITEM'
+ UNION ALL SELECT 0, 4, 'Next Contract', NULL
+ UNION ALL SELECT 1, 4, NULL, NULL
+ UNION ALL SELECT 2, 4, NULL, '5'
+ UNION ALL SELECT 0, 5, 'Next Units', NULL
+ UNION ALL SELECT 1, 5, NULL, NULL
+ UNION ALL SELECT 2, 5, NULL, '-1'
+ UNION ALL SELECT 3, 5, NULL, '1'
+ UNION ALL SELECT 4, 5, 'Next Contract', NULL
+ UNION ALL SELECT 6, 5, NULL, NULL
+ UNION ALL SELECT 8, 5, 'Next Value', NULL) t;
+
+INSERT INTO AiOperationDefs (OperationName, TargetType, TargetParameter, BehaviorTree, Priority,
+  MaxTargetDistInRegion, MaxTargetDistInArea, MaxTargetDistInWorld, SelfStart, OperationType)
+SELECT 'Civ6Ai Next ' || Item, 'TARGET_FRIENDLY_CITY', 0, 'Civ6Ai Next ' || Item, 4,
+  -1, -1, 0, 1, 'CIV6AI_OP_NEXT_' || Item FROM Civ6Ai_DirectUnits;
+
+INSERT INTO AiTeams (TeamName)
+SELECT 'Civ6Ai Next Team ' || Item FROM Civ6Ai_DirectUnits;
+INSERT INTO AiOperationTeams (TeamName, OperationName, MinUnits, InitialStrengthAdvantage, OngoingStrengthAdvantage)
+SELECT 'Civ6Ai Next Team ' || Item, 'Civ6Ai Next ' || Item, 0, 0, 0 FROM Civ6Ai_DirectUnits;
+-- Needs no units to start; takes no combat units.
+INSERT INTO OpTeamRequirements (TeamName, AiType, MinNumber, MaxNumber)
+SELECT 'Civ6Ai Next Team ' || Item, 'UNITAI_COMBAT', 0, 0 FROM Civ6Ai_DirectUnits;
+
+INSERT INTO AllowedOperations (ListType, OperationDef)
+SELECT 'Default_List', 'Civ6Ai Next ' || Item FROM Civ6Ai_DirectUnits;
+
+INSERT INTO AiListTypes (ListType)
+SELECT 'Civ6AiNextOp_' || Item FROM Civ6Ai_DirectUnits;
+INSERT INTO AiLists (ListType, System)
+SELECT 'Civ6AiNextOp_' || Item, 'AiOperationTypes' FROM Civ6Ai_DirectUnits;
+INSERT INTO AiFavoredItems (ListType, Item, Value)
+SELECT 'Civ6AiNextOp_' || Item, 'CIV6AI_OP_NEXT_' || Item, 1 FROM Civ6Ai_DirectUnits;
+INSERT INTO Strategy_Priorities (StrategyType, ListType)
+SELECT 'CIV6AI_NEXT_' || Item, 'Civ6AiNextOp_' || Item FROM Civ6Ai_DirectUnits;
+
+-- ---------------------------------------------------------------------------
+-- No scout spam while a pick is active: explorer pseudoyield -100 on every
+-- non-recon pick (one shared list).
+-- ---------------------------------------------------------------------------
+INSERT INTO AiListTypes (ListType) VALUES ('Civ6AiNextNoExplore');
+INSERT INTO AiLists (ListType, System) VALUES ('Civ6AiNextNoExplore', 'PseudoYields');
+INSERT INTO AiFavoredItems (ListType, Item, Value)
+SELECT 'Civ6AiNextNoExplore', PseudoYieldType, -100 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_EXPLORER';
+INSERT INTO Strategy_Priorities (StrategyType, ListType)
+SELECT 'CIV6AI_NEXT_' || n.Item, 'Civ6AiNextNoExplore' FROM Civ6Ai_NextItems n
+WHERE n.Item NOT IN (SELECT UnitType FROM Units WHERE PromotionClass = 'PROMOTION_CLASS_RECON');
+
+-- ---------------------------------------------------------------------------
+-- Model seats: land scout quota cut (vanilla DefaultScoutUse, Leaders.xml:
+-- 809-813: 100/100/50 percent). Naval scouting kept (islands). Gated by
+-- GameEvents.Civ6AiModelSeat: an AI major the model has steered (a priority
+-- preset or a build-next pick in synced properties). P5 / humans: off.
+-- ---------------------------------------------------------------------------
+INSERT INTO Types (Type, Kind) VALUES ('CIV6AI_MODEL_SEAT', 'KIND_VICTORY_STRATEGY');
+INSERT INTO Strategies (StrategyType, VictoryType, NumConditionsNeeded) VALUES ('CIV6AI_MODEL_SEAT', NULL, 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, Disqualifier) VALUES ('CIV6AI_MODEL_SEAT', 'Is Not Major', 1);
+INSERT INTO StrategyConditions (StrategyType, ConditionFunction, StringValue, ThresholdValue)
+VALUES ('CIV6AI_MODEL_SEAT', 'Call Lua Function', 'Civ6AiModelSeat', 0);
+INSERT INTO AiListTypes (ListType) VALUES ('Civ6AiModelScouts');
+INSERT INTO AiLists (ListType, System) VALUES ('Civ6AiModelScouts', 'AiScoutUses');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_MODEL_SEAT', 'Civ6AiModelScouts');
+INSERT INTO AiFavoredItems (ListType, Item, Value)
+SELECT 'Civ6AiModelScouts', ScoutUseType, -100 FROM AiScoutUses
+WHERE ScoutUseType IN ('DEFAULT_LAND_SCOUTS', 'LAND_SCOUTS_PER_PRIMARY_REGION', 'LAND_SCOUTS_PER_SECONDARY_REGION');
