@@ -92,6 +92,8 @@ CIV6_LOBBY_CHAT_TONE = (
     "a concrete joke, jab, boast, or complaint in your own voice and civ flavour (your history, gods, trade, "
     "rivals). Banned stock lines: fog, tides, storms, horizon, 'watch your coasts', 'let us see who', "
     "'hope you're not hiding', 'X here!', greetings after turn 1, and emoji. "
+    "Never echo another leader's line or borrow their phrasing (a near-copy of someone else's line is not sent): "
+    "answer it, mock it, or ignore it, in your own words about your own empire. "
     "Never invent facts you cannot see. Nothing specific to say = say nothing."
 )
 
@@ -1027,12 +1029,21 @@ def _plot_fresh_coast(snapshot: dict[str, Any], plot_id: str) -> tuple[bool | No
 
 
 def builder_improve_sites(snapshot: dict[str, Any], x: int, y: int, cap: int = 6) -> list[dict[str, Any]]:
-    """Own, unimproved, non-city land tiles (resources first, then nearest) a builder can work."""
+    """Own, unimproved, non-city tiles (resources first, then nearest) a builder can work.
+
+    Water counts only with a resource (fishing boats) once builders can embark
+    (Sailing), and ocean only after Cartography.
+    """
+    from sidecar import civ6_legality as legality
+
     me = str((snapshot.get("decision") or {}).get("player_id") or "")
     known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    sea_ok = legality.unit_can_embark(snapshot, {"unit_type_id": "UNIT_BUILDER"})
     rows = []
     for p in known.get("plots") or []:
-        if not isinstance(p, dict) or p.get("water") or p.get("peak") or p.get("city_id") or p.get("improvement_id"):
+        if not isinstance(p, dict) or p.get("peak") or p.get("city_id") or p.get("improvement_id"):
+            continue
+        if p.get("water") and not (sea_ok and p.get("resource_id") and not legality.ocean_blocked(snapshot, p)):
             continue
         if not me or p.get("revealed_owner_id") != me:
             continue

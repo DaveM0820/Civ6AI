@@ -274,6 +274,36 @@ class OrdersGameplayTests(unittest.TestCase):
         self.assertTrue(expand(7, 0))
         self.assertFalse(threat(7, 0))
 
+    def test_unmanaged_seat_gets_no_steering_and_its_t1_dump_is_undone(self):
+        O = self.rt.globals().Civ6Ai_Orders
+        self._early_world(cities=1)
+        self.assertEqual("expand", O.EarlyMode(7))
+        self.assertTrue(O.ModelSeat(7))
+        self.rt.execute('Players[7].IsHuman = function() return false end')
+        self.rt.execute('Game:SetProperty("CIV6AI_PICK_7", 2); Game:SetProperty("CIV6AI_PICK_T_7", 4)')
+        # Player 2 (AI) had its moves dumped on turn 1; it is also left on the game's AI.
+        self.rt.execute('Players[2].IsMajor = function() return true end')
+        self.turn_start(2, turn=1)
+        self.assertEqual(self.rt.eval("Players[2].units[1].moves"), 0)
+        mask = (1 << 7) | (1 << 2)
+        self.order(0, K=38, V=mask, T=1)
+        self.assertTrue(self.last()["ok"], self.last())
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_UNMANAGED_MASK')"), mask)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_PRIO_7_19')"), 0)
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_PICK_7')"), 0)
+        self.assertEqual(self.rt.eval("Players[2].units[1].moves"), 2)  # restored
+        O._earlyCache = self.rt.table_from({})
+        self.assertIsNone(O.EarlyMode(7))
+        self.assertFalse(O.ModelSeat(7))
+        self.assertFalse(O.EarlySettle(7))
+        self.assertFalse(O._BuildNextCondition(2, 7))
+        self.assertFalse(O.ApplyEarlyLock(7))
+        self.assertTrue(O.Unmanaged(7))
+        self.assertFalse(O.Unmanaged(0))  # the human seat never is
+        # Non-host senders cannot change the mask.
+        self.order(1, K=38, V=0, T=1)
+        self.assertEqual(self.last()["reason"], "not_controller")
+
     def test_registers_event_handler(self):
         self.assertEqual(len(_vals(self.rt.eval("GameEvents.Civ6AiOrder.fns"))), 1)
         self.assertEqual(len(_vals(self.rt.eval("GameEvents.OnGameTurnStarted.fns"))), 1)

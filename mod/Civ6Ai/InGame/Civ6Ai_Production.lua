@@ -1254,8 +1254,13 @@ end
 -- settler share: production|completed|player=|turn=|item=.
 function Civ6Ai_Production.OnProductionCompleted(playerID, cityID, orderType, itemType, canceled)
   local name = tostring(itemType)
+  -- orderType names the table: 0 unit, 1 building, 2 district, 3 project
+  -- (g9: buildings and districts were logged as the unit with the same index,
+  -- e.g. order=1 "UNIT_SETTLER"). Unknown orderType falls back to the old scan.
+  local byOrder = ({ [0] = "Units", [1] = "Buildings", [2] = "Districts", [3] = "Projects" })[tonumber(orderType)]
+  local tables = byOrder ~= nil and { byOrder } or { "Units", "Buildings", "Districts", "Projects" }
   pcall(function()
-    for _, t in ipairs({ "Units", "Buildings", "Districts", "Projects" }) do
+    for _, t in ipairs(tables) do
       local row = GameInfo[t] ~= nil and GameInfo[t][itemType] or nil
       if row ~= nil then
         name = row.UnitType or row.BuildingType or row.DistrictType or row.ProjectType or name

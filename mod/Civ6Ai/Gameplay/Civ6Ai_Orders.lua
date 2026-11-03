@@ -62,6 +62,7 @@ Civ6Ai_Orders.K = {
   FORT = 32,
   SPREAD = 35,
   BUILD_NEXT = 37,
+  SEATS = 38,
   PING = 40,
   TEST_MODE = 49,
   TEST_INTROSPECT = 50,
@@ -294,6 +295,92 @@ function Civ6Ai_Orders._Authorize(sender, owner)
   return nil
 end
 
+-- Seats left on the game's own AI (install_mod --managed-seats lists the
+-- others). The host's interface sends the list once as a bit mask (SEATS,
+-- V = mask of AI majors the model does not play); it is kept in a synced game
+-- property so every PC answers the same. No mask = every AI major is a model
+-- seat (the old behaviour). An unmanaged seat gets none of this mod's steering:
+-- no build priorities, presets, build-next picks, early/force strategies,
+-- scout cut or turn-1 move dump. Human seats are never unmanaged.
+function Civ6Ai_Orders.UnmanagedMask()
+  return num(Game:GetProperty("CIV6AI_UNMANAGED_MASK"))
+end
+
+function Civ6Ai_Orders.Unmanaged(owner)
+  local mask = Civ6Ai_Orders.UnmanagedMask()
+  if mask == nil or mask <= 0 or type(owner) ~= "number" or owner < 0 or owner > 30 then
+    return false
+  end
+  local p = Players ~= nil and Players[owner] or nil
+  if p == nil or call(p, "IsHuman") == true then
+    return false
+  end
+  return math.floor(mask / (2 ^ owner)) % 2 == 1
+end
+
+function Civ6Ai_Orders._SetUnmanaged(sender, mask)
+  local s = Players[sender]
+  if s == nil or not call(s, "IsHuman") then
+    return false, "sender_not_human"
+  end
+  local controller = Civ6Ai_Orders._Controller()
+  if controller == nil then
+    Game:SetProperty("CIV6AI_CONTROLLER", sender)
+  elseif controller ~= sender then
+    return false, "not_controller"
+  end
+  mask = math.floor(num(mask) or 0)
+  if mask < 0 then
+    mask = 0
+  end
+  Game:SetProperty("CIV6AI_UNMANAGED_MASK", mask)
+  -- Undo what already ran before the mask arrived (turn 1 runs before the
+  -- interface is up): priorities from the early lock, any pick, and the
+  -- turn-1 move dump of units that have not moved since.
+  local cleared = {}
+  for owner = 0, 30 do
+    if Civ6Ai_Orders.Unmanaged(owner) then
+      cleared[#cleared + 1] = tostring(owner)
+      Civ6Ai_Orders._ClearSteering(owner)
+    end
+  end
+  log("seats|unmanaged_mask=" .. tostring(mask) .. "|seats=" .. table.concat(cleared, ","))
+  return true, "unmanaged=" .. table.concat(cleared, ",")
+end
+
+function Civ6Ai_Orders._ClearSteering(owner)
+  for _, cat in ipairs(Civ6Ai_Orders.PRIORITY_IDS or {}) do
+    if Civ6Ai_Orders.PriorityLevel(owner, cat.id) ~= 0 then
+      Game:SetProperty("CIV6AI_PRIO_" .. tostring(owner) .. "_" .. tostring(cat.id), 0)
+    end
+  end
+  if num(Game:GetProperty("CIV6AI_PICK_" .. tostring(owner))) ~= nil then
+    Game:SetProperty("CIV6AI_PICK_" .. tostring(owner), 0)
+  end
+  if Game:GetProperty("CIV6AI_PICK_T_" .. tostring(owner)) ~= nil then
+    Game:SetProperty("CIV6AI_PICK_T_" .. tostring(owner), nil)
+  end
+  if num(Game:GetProperty("CIV6AI_FORCE_" .. tostring(owner))) ~= nil then
+    Game:SetProperty("CIV6AI_FORCE_" .. tostring(owner), 0)
+  end
+  local p = Players[owner]
+  if p == nil or UnitManager == nil or UnitManager.RestoreMovement == nil then
+    return
+  end
+  local turn = Game.GetCurrentGameTurn()
+  for _, u in ipairs(sortedMembers(call(p, "GetUnits"))) do
+    local key = "CIV6AI_DUMP_" .. tostring(owner) .. "_" .. tostring(u:GetID())
+    local at = num(Game:GetProperty(key))
+    if at ~= nil and at == turn * 100000 + u:GetX() * 300 + u:GetY()
+        and (call(u, "GetMovesRemaining") or 0) <= 0 then
+      pcall(UnitManager.RestoreMovement, u)
+    end
+    if at ~= nil then
+      Game:SetProperty(key, nil)
+    end
+  end
+end
+
 -- ---------------------------------------------------------------------------
 -- Commands
 -- ---------------------------------------------------------------------------
@@ -459,8 +546,37 @@ function Civ6Ai_Orders._SameDomain(unit, plot)
   if domain == "DOMAIN_SEA" then
     return water or call(plot, "IsCity") == true
   end
-  -- Land units may step onto coast once they can embark (Shipbuilding).
+  -- Land units may step onto coast once they can embark: Shipbuilding for all,
+  -- earlier for some types from the DB (Technologies/Civics EmbarkUnitType:
+  -- builders with Sailing, traders with Celestial Navigation).
   return not water or Civ6Ai_Orders._OwnerHasTech(unit, "TECH_SHIPBUILDING")
+    or Civ6Ai_Orders._CanEmbarkByType(unit)
+end
+
+-- Synced read: a known tech or civic whose EmbarkUnitType is this unit's type
+-- (or EmbarkAll). Missing columns or tables answer false.
+function Civ6Ai_Orders._CanEmbarkByType(unit)
+  local row = GameInfo.Units[unit:GetType()]
+  local player = row ~= nil and Players[unit:GetOwner()] or nil
+  if player == nil then
+    return false
+  end
+  local ok, yes = pcall(function()
+    local techs = player:GetTechs()
+    for t in GameInfo.Technologies() do
+      if (t.EmbarkAll == true or t.EmbarkAll == 1 or t.EmbarkUnitType == row.UnitType) and techs:HasTech(t.Index) then
+        return true
+      end
+    end
+    local culture = player:GetCulture()
+    for c in GameInfo.Civics() do
+      if (c.EmbarkAll == true or c.EmbarkAll == 1 or c.EmbarkUnitType == row.UnitType) and culture:HasCivic(c.Index) then
+        return true
+      end
+    end
+    return false
+  end)
+  return ok and yes == true
 end
 
 function Civ6Ai_Orders._OwnerHasTech(unit, techType)
@@ -2401,6 +2517,12 @@ function Civ6Ai_Orders._FinishIdleUnits(owner, handled)
         native = native + 1
       elseif pcall(UnitManager.FinishMoves, u) then
         count = count + 1
+        if ran == nil and call(p, "IsMajor") == true then
+          -- Turn-1 dump mark: undone by _ClearSteering if this seat turns out
+          -- to be left on the game's own AI (the mask arrives after turn 1 starts).
+          Game:SetProperty("CIV6AI_DUMP_" .. tostring(owner) .. "_" .. tostring(u:GetID()),
+            Game.GetCurrentGameTurn() * 100000 + u:GetX() * 300 + u:GetY())
+        end
       end
     end
   end
@@ -2695,7 +2817,7 @@ function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
     end
     Civ6Ai_Orders._LogAttackBatch(owner, t, 0, attacks, why)
     Civ6Ai_Orders._ContinueGoals(owner, nil)
-  elseif turn == 1 and not call(Players[owner], "IsHuman") then
+  elseif turn == 1 and not call(Players[owner], "IsHuman") and not Civ6Ai_Orders.Unmanaged(owner) then
     Civ6Ai_Orders._FinishIdleUnits(owner, nil)
   else
     Civ6Ai_Orders._ContinueGoals(owner, nil)
@@ -2962,6 +3084,11 @@ function Civ6Ai_Orders.OnOrder(sender, params)
   local k = o.K
   if k == Civ6Ai_Orders.K.REPORT then
     Civ6Ai_Orders._Report(sender, params)
+    return
+  end
+  if k == Civ6Ai_Orders.K.SEATS then
+    local ok, reason = Civ6Ai_Orders._SetUnmanaged(sender, o.V)
+    Civ6Ai_Orders._Record(sender, o, ok, reason)
     return
   end
   if k == Civ6Ai_Orders.K.FINISH_SEAT then
@@ -5280,6 +5407,9 @@ function Civ6Ai_Orders.ForceTarget(owner)
 end
 
 function Civ6Ai_Orders._ForceCondition(target, owner, threshold)
+  if Civ6Ai_Orders.Unmanaged(owner) then
+    return false
+  end
   local active = Civ6Ai_Orders.ForceTarget(owner) == target.id
   local turn = Game.GetCurrentGameTurn()
   if Civ6Ai_Orders._forceSeenTurn ~= turn then
@@ -5479,6 +5609,9 @@ function Civ6Ai_Orders._SetBuildNext(sender, o)
 end
 
 function Civ6Ai_Orders._BuildNextCondition(idx, owner)
+  if Civ6Ai_Orders.Unmanaged(owner) then
+    return false
+  end
   local pick, setTurn = Civ6Ai_Orders.BuildNextPick(owner)
   if pick ~= idx then
     return false
@@ -5700,6 +5833,9 @@ end
 Civ6Ai_Orders._prioSeen = Civ6Ai_Orders._prioSeen or {}
 
 function Civ6Ai_Orders._PrioCondition(id, level, owner)
+  if Civ6Ai_Orders.Unmanaged(owner) then
+    return false
+  end
   local active = Civ6Ai_Orders.PriorityLevel(owner, id) == level
   if active then
     local turn = Game.GetCurrentGameTurn()
@@ -5908,7 +6044,7 @@ function Civ6Ai_Orders.EarlyMode(owner)
   local mode = ""
   mode_detail = ""
   local player = Players[owner]
-  if player ~= nil and call(player, "IsMajor") == true and turn <= Civ6Ai_Orders.EARLY_TURN
+  if player ~= nil and call(player, "IsMajor") == true and not Civ6Ai_Orders.Unmanaged(owner) and turn <= Civ6Ai_Orders.EARLY_TURN
       and #Civ6Ai_Orders.PriorityLevels(owner) > 0 then
     local peak, n = Civ6Ai_Orders.PeakCities(owner)
     if n >= 1 and peak < Civ6Ai_Orders.EARLY_CITY_TARGET then
@@ -5930,7 +6066,7 @@ end
 -- an AI major (not human) with 1 or 2 cities. Synced state only (city count).
 function Civ6Ai_Orders.EarlySettle(owner)
   local p = Players ~= nil and Players[owner] or nil
-  if p == nil or call(p, "IsHuman") == true then
+  if p == nil or call(p, "IsHuman") == true or Civ6Ai_Orders.Unmanaged(owner) then
     -- AI strategies only steer the game's own AI; a human seat has none.
     return false
   end
@@ -5977,7 +6113,7 @@ end
 -- the built-in AI (no orders) and human seats answer false.
 function Civ6Ai_Orders.ModelSeat(owner)
   local p = Players ~= nil and Players[owner] or nil
-  if p == nil or call(p, "IsHuman") == true or call(p, "IsMajor") ~= true then
+  if p == nil or call(p, "IsHuman") == true or call(p, "IsMajor") ~= true or Civ6Ai_Orders.Unmanaged(owner) then
     return false
   end
   if Game:GetProperty("CIV6AI_PICK_T_" .. tostring(owner)) ~= nil then
@@ -6184,7 +6320,7 @@ function Civ6Ai_Orders.ApplyEarlyLock(owner)
   -- Every major, the host (human-flagged) seat included: the levels are the
   -- seat's saved production weights and the prompt's preset facts.
   local p = Players ~= nil and Players[owner] or nil
-  if p == nil or call(p, "IsMajor") == false then
+  if p == nil or call(p, "IsMajor") == false or Civ6Ai_Orders.Unmanaged(owner) then
     return false
   end
   local open, why = Civ6Ai_Orders.EarlyOpen(owner)

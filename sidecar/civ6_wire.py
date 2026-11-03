@@ -72,8 +72,59 @@ def no_city_sites_lines(context: dict[str, Any]) -> list[str]:
     # No "build no more settlers": the model decides. When the seat knows of at
     # most one legal site, say so plainly and point at the fog it can still
     # reach (g7: P0 ran out of known sites at 8% explored and never looked).
+    out = []
     line = few_sites_explore_line(context)
-    return [line] if line else []
+    if line:
+        out.append(line)
+    home = home_island_full_line(context)
+    if home:
+        out.append(home)
+    return out
+
+
+def _tech_turns(snapshot: dict[str, Any], tech: str) -> int | None:
+    gov = ((snapshot.get("civ6") or {}).get("governance") or {}) if isinstance(snapshot.get("civ6"), dict) else {}
+    techs = gov.get("techs") if isinstance(gov, dict) and isinstance(gov.get("techs"), dict) else {}
+    if techs.get("current") == tech and isinstance(techs.get("turns_left"), int):
+        return techs["turns_left"]
+    for o in techs.get("options") or []:
+        if isinstance(o, dict) and o.get("id") == tech and isinstance(o.get("turns"), (int, float)):
+            return int(o["turns"])
+    return None
+
+
+def home_island_full_line(context: dict[str, Any]) -> str | None:
+    """Plain fact: the home landmass has no known settle site and the seat cannot embark yet."""
+    from sidecar import civ6_command_wire as command_wire
+    from sidecar import civ6_legality as legality
+    from sidecar import civ6_water
+
+    raw = context.get("_raw_snapshot")
+    snap = raw if isinstance(raw, dict) else context
+    if legality.can_embark(snap):
+        return None
+    # The settler lens (settle_recommended) is only read while the seat has a settler.
+    if not any("SETTLER" in str(u.get("unit_type_id") or "").upper()
+               for u in snap.get("your_units") or [] if isinstance(u, dict)):
+        return None
+    cities = [c for c in snap.get("your_cities") or [] if isinstance(c, dict)]
+    origin = civ6_water.city_xy(cities[0]) if cities else None
+    if origin is None:
+        return None
+    try:
+        sites = command_wire.game_settle_recommendations(snap)
+    except Exception:
+        return None
+    home = civ6_water.land_steps(snap, origin)
+    if len(home) < 2:
+        return None  # no known plots to judge the landmass by
+    if any((int(s.get("x", -1)), int(s.get("y", -1))) in home for s in sites if isinstance(s, dict)):
+        return None
+    ship = _tech_turns(snap, "TECH_SHIPBUILDING")
+    when = f"{ship} turns" if ship is not None else "not yet researchable (prerequisites missing)"
+    carto = "" if legality.knows_tech(snap, "TECH_CARTOGRAPHY") else " / Cartography (ocean)"
+    return (f"HOME ISLAND: your home landmass has no known settle sites left; other landmasses need "
+            f"Shipbuilding (embark){carto}. Shipbuilding: {when}.")
 
 
 _COMPASS = ("E", "NE", "N", "NW", "W", "SW", "S", "SE")
@@ -156,6 +207,11 @@ def few_sites_explore_line(context: dict[str, Any]) -> str | None:
     from sidecar import civ6_legality as legality
     from sidecar.civ6_prompt_coaching import civ6_true_explored
 
+    # The playable context drops known_map.plots; the lens, explored % and fog
+    # edges all need them, so read the raw snapshot when it is attached.
+    raw = context.get("_raw_snapshot")
+    if isinstance(raw, dict):
+        context = raw
     cities = [c for c in context.get("your_cities") or [] if isinstance(c, dict)]
     if not cities:
         return None
@@ -831,9 +887,15 @@ def _military_unit(unit: dict[str, Any]) -> bool:
 
 
 def _required_unit_options(tokens: list[str]) -> list[str]:
-    """Required-row options: drop Skip when anything else is legal (Civ5 parity)."""
-    options = [t for t in tokens if t != "Skip"] or list(tokens)
-    return options
+    """Required-row options: drop Skip only when another stay-in-place order is legal.
+
+    Military rows keep Fortify/Sleep/Alert as their way to hold. Builders and
+    settlers have no such order, so without Skip they "MoveTo" their own tile
+    (g9: 132 own-tile drops), which is rejected and noted every turn.
+    """
+    if any(t in ("Fortify", "Sleep", "Alert", "Heal") for t in tokens):
+        return [t for t in tokens if t != "Skip"] or list(tokens)
+    return list(tokens)
 
 
 def _example_command_value(value: str) -> str:
@@ -1939,7 +2001,10 @@ def _thoughts_section(context: dict[str, Any]) -> list[str]:
     if isinstance(seat, dict):
         from sidecar import civ6_seat_memory
 
-        for key, value in civ6_seat_memory.prompt_lines(seat):
+        from sidecar.civ6_apply_results import _snapshot_turn
+
+        turn = _snapshot_turn(context) or None
+        for key, value in civ6_seat_memory.prompt_lines(seat, turn):
             if value.strip():
                 lines.append(pipeline._wire_line(key, value.strip()))
     history = context.get("history", {})

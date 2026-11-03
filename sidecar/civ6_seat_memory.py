@@ -711,7 +711,10 @@ def compact(memory: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def prompt_lines(memory: dict[str, Any]) -> list[tuple[str, str]]:
+STRATEGY_STALE_TURNS = 20
+
+
+def prompt_lines(memory: dict[str, Any], turn: int | None = None) -> list[tuple[str, str]]:
     lines: list[tuple[str, str]] = []
     plan = memory.get("plan") if isinstance(memory.get("plan"), dict) else {}
     if str(plan.get("goal") or "").strip():
@@ -720,6 +723,11 @@ def prompt_lines(memory: dict[str, Any]) -> list[tuple[str, str]]:
         written = plan.get("strategy_turn")
         lines.append(("plan.strategy", str(plan["strategy"])[:500]
                       + (f" (written T{written})" if isinstance(written, int) else "")))
+        # A plain age note, not advice: keeping the strategy is a fine answer.
+        if isinstance(written, int) and isinstance(turn, int) and turn - written >= STRATEGY_STALE_TURNS:
+            lines.append(("plan.strategy.age",
+                          f"written {turn - written} turns ago (T{written}). If your situation has changed "
+                          "since then, write a new plan.strategy; otherwise omit the key to keep it."))
     index = 0
     for obj in plan.get("objectives") or []:
         if not isinstance(obj, dict) or obj.get("status") == "done":

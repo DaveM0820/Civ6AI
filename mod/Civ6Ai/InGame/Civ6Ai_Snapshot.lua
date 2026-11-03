@@ -4271,6 +4271,42 @@ function Civ6Ai_Snapshot._LegalImprovementsAt(playerID, unitType, plot)
   return out, resource ~= nil
 end
 
+-- Owned water with a sea resource (fishing boats) is a builder site once the
+-- builder can enter it: a known tech/civic with EmbarkUnitType = its type or
+-- EmbarkAll (vanilla: Sailing lets builders onto coast), and Cartography for
+-- ocean. g9: P0 had 4 owned sea resources and Sailing but no Improve offer,
+-- because the scan skipped every water plot.
+function Civ6Ai_Snapshot._BuilderWaterOk(playerID, urow, plot)
+  local M, p = Civ6Ai_Snapshot._Method, Players[playerID]
+  if urow == nil or p == nil or (M(plot, "GetResourceType") or -1) < 0 then
+    return false
+  end
+  local techs, culture = M(p, "GetTechs"), M(p, "GetCulture")
+  local terrain = GameInfo.Terrains[M(plot, "GetTerrainType") or -1]
+  if terrain ~= nil and terrain.TerrainType == "TERRAIN_OCEAN" then
+    local carto = GameInfo.Technologies["TECH_CARTOGRAPHY"]
+    if carto == nil or M(techs, "HasTech", carto.Index) ~= true then
+      return false
+    end
+  end
+  local ok, yes = pcall(function()
+    for t in GameInfo.Technologies() do
+      if (t.EmbarkAll == true or t.EmbarkAll == 1 or t.EmbarkUnitType == urow.UnitType)
+          and M(techs, "HasTech", t.Index) == true then
+        return true
+      end
+    end
+    for c in GameInfo.Civics() do
+      if (c.EmbarkAll == true or c.EmbarkAll == 1 or c.EmbarkUnitType == urow.UnitType)
+          and M(culture, "HasCivic", c.Index) == true then
+        return true
+      end
+    end
+    return false
+  end)
+  return ok and yes == true
+end
+
 function Civ6Ai_Snapshot._AddBuilderImproveCommands(commands, playerID, unit, unitId)
   local M = Civ6Ai_Snapshot._Method
   local charges, ui, core = Civ6Ai_Snapshot._BuildCharges(unit)
@@ -4288,15 +4324,18 @@ function Civ6Ai_Snapshot._AddBuilderImproveCommands(commands, playerID, unit, un
   for dx = -8, 8 do
     for dy = -8, 8 do
       local plot = Map.GetPlot(ux + dx, uy + dy)
-      if plot ~= nil and M(plot, "GetOwner") == playerID and not M(plot, "IsCity") and not M(plot, "IsWater")
+      local water = plot ~= nil and M(plot, "IsWater") == true
+      if plot ~= nil and M(plot, "GetOwner") == playerID and not M(plot, "IsCity")
+          and (not water or Civ6Ai_Snapshot._BuilderWaterOk(playerID, urow, plot))
           and not M(plot, "IsMountain") and (M(plot, "GetImprovementType") or -1) < 0
           and (M(plot, "GetDistrictType") or -1) < 0 then
         local d = Map.GetPlotDistance(ux, uy, plot:GetX(), plot:GetY())
         if d <= 8 then
           -- Snapshot plot records hardcode AREA_0. A nil GetArea on one side is
           -- unknown, not a different landmass; only two known differing ids exclude.
+          -- Water tiles (fishing boats) are a different area by definition.
           local plotArea = Civ6Ai_Snapshot._AreaId(plot)
-          if area ~= nil and plotArea ~= nil and plotArea ~= area then
+          if not water and area ~= nil and plotArea ~= nil and plotArea ~= area then
             droppedArea = droppedArea + 1
           else
             local imps, res = Civ6Ai_Snapshot._LegalImprovementsAt(playerID, urow.UnitType, plot)

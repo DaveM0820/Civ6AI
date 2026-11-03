@@ -57,6 +57,45 @@ function Civ6Ai_InGame._TurnStartDone(playerID, turn)
   return marks[playerID] ~= nil and marks[playerID] >= turn
 end
 
+-- Host only: tell the gameplay side (synced, every PC) which AI majors are left
+-- on the game's own AI, so it skips this mod's steering for them. Only when
+-- --managed-seats names a subset; an empty list means every AI major is ours.
+-- Sent again (at most once a turn) until the synced property matches.
+Civ6Ai_InGame._seatMaskSentTurn = nil
+function Civ6Ai_InGame._UnmanagedMask()
+  local listed = Civ6Ai_Config._managedSeats
+  if type(listed) ~= "table" or next(listed) == nil then
+    return 0
+  end
+  local mask = 0
+  for i = 0, 30 do
+    local p = Players[i]
+    if p ~= nil and p:IsAlive() and p:IsMajor() and not p:IsHuman() and listed[i] ~= true then
+      mask = mask + 2 ^ i
+    end
+  end
+  return math.floor(mask)
+end
+
+function Civ6Ai_InGame._SyncUnmanagedSeats()
+  if Civ6Ai_OrderChannel == nil or Civ6Ai_OrderChannel.K == nil or Civ6Ai_OrderChannel.K.SEATS == nil then
+    return
+  end
+  local mask = Civ6Ai_InGame._UnmanagedMask()
+  local okGet, cur = pcall(function() return Game:GetProperty("CIV6AI_UNMANAGED_MASK") end)
+  cur = okGet and tonumber(cur) or nil
+  if (cur or 0) == mask then
+    return
+  end
+  local turn = Game.GetCurrentGameTurn()
+  if Civ6Ai_InGame._seatMaskSentTurn == turn then
+    return
+  end
+  Civ6Ai_InGame._seatMaskSentTurn = turn
+  Civ6Ai_Util.Log("seats|send_unmanaged_mask=" .. tostring(mask) .. "|was=" .. tostring(cur))
+  Civ6Ai_OrderChannel.Send(Civ6Ai_OrderChannel.K.SEATS, { V = mask })
+end
+
 -- Gameplay LuaEvents often do not reach InGame in a network game. Gameplay still
 -- writes ExposedMembers.Civ6Ai.TurnStartComplete; pulse from that mark.
 function Civ6Ai_InGame._WatchTurnStarts()
@@ -66,6 +105,7 @@ function Civ6Ai_InGame._WatchTurnStarts()
   if Civ6Ai_Config.IsHostPc ~= nil and not Civ6Ai_Config.IsHostPc() then
     return
   end
+  pcall(Civ6Ai_InGame._SyncUnmanagedSeats)
   if Civ6Ai_Config.ManagedSeatsList == nil then
     return
   end
@@ -174,6 +214,9 @@ function Civ6Ai_OnLoadScreenClose()
     Civ6Ai_Autotest._DisableBoostPopups()
   end
   Civ6Ai_Util.Log("autotest|load_screen_closed")
+  if Civ6Ai_Config.IsHostPc == nil or Civ6Ai_Config.IsHostPc() then
+    pcall(Civ6Ai_InGame._SyncUnmanagedSeats)
+  end
   if Civ6Ai_Bridge.SameTurnSeats() and Game.GetCurrentGameTurn() <= 1 then
     Civ6Ai_Bridge.PrepulseSeats("host_end")
   end

@@ -81,6 +81,18 @@ def can_embark(snapshot: dict[str, Any]) -> bool:
     return civ == "CIVILIZATION_MAORI"  # Maori start able to embark
 
 
+# Vanilla Technologies.EmbarkUnitType: some unit types embark before Shipbuilding.
+_EARLY_EMBARK = (("BUILDER", "TECH_SAILING"), ("TRADER", "TECH_CELESTIAL_NAVIGATION"))
+
+
+def unit_can_embark(snapshot: dict[str, Any], unit: dict[str, Any] | None) -> bool:
+    """can_embark for the seat, or this unit's type embarks earlier (builders with Sailing)."""
+    if can_embark(snapshot):
+        return True
+    typ = str((unit or {}).get("unit_type_id") or "").upper()
+    return any(tag in typ and knows_tech(snapshot, tech) for tag, tech in _EARLY_EMBARK)
+
+
 def is_ocean(plot: dict[str, Any] | None) -> bool:
     return isinstance(plot, dict) and bool(plot.get("water")) and "OCEAN" in str(
         plot.get("terrain_id") or plot.get("terrain") or "").upper()
@@ -166,7 +178,7 @@ def tile_passable(snapshot: dict[str, Any], unit: dict[str, Any], x: int, y: int
     if is_mountain(plot):
         return "impassable"
     water = bool(plot.get("water"))
-    if domain != "DOMAIN_SEA" and water and not can_embark(snapshot):
+    if domain != "DOMAIN_SEA" and water and not unit_can_embark(snapshot, unit):
         return "impassable"
     if domain == "DOMAIN_SEA" and not water and (x, y) not in own_coastal_city_tiles(snapshot):
         return "impassable"
@@ -234,7 +246,7 @@ def reachable(snapshot: dict[str, Any], unit: dict[str, Any], dest: tuple[int, i
                 continue
             water = bool(plot.get("water"))
             domain = str(unit.get("domain_id") or "DOMAIN_LAND")
-            if domain != "DOMAIN_SEA" and water and not can_embark(snapshot):
+            if domain != "DOMAIN_SEA" and water and not unit_can_embark(snapshot, unit):
                 continue
             if domain == "DOMAIN_SEA" and not water and (nx, ny) not in own_coastal_city_tiles(snapshot):
                 continue

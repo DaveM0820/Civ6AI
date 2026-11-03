@@ -1422,6 +1422,25 @@ def is_near_duplicate_chat(text: str, recent: list[str], threshold: float = CHAT
     return False
 
 
+CHAT_COPY_THRESHOLD = 0.85
+
+
+def copied_other_line(snapshot: dict[str, Any], text: str) -> str | None:
+    """Another player's recent line that `text` copies almost verbatim (character ratio)."""
+    from difflib import SequenceMatcher
+
+    needle = " ".join((text or "").lower().split())
+    if len(needle) < 25:
+        return None  # short lines ("Greetings.") collide by chance
+    for prior in _recent_other_lines(snapshot):
+        hay = " ".join(prior.lower().split())
+        # Lines in history carry a "Leader: " prefix; compare against the text after it too.
+        candidates = [hay] + ([hay.split(": ", 1)[1]] if ": " in hay else [])
+        if any(SequenceMatcher(None, needle, c).ratio() >= CHAT_COPY_THRESHOLD for c in candidates):
+            return prior
+    return None
+
+
 def _recent_other_lines(snapshot: dict[str, Any]) -> list[str]:
     """Lines this seat heard from someone else (public, and private to this seat)."""
     me = str((snapshot.get("decision") or {}).get("player_id") or "")
@@ -1650,6 +1669,14 @@ def filter_repeat_public_chat(
         # and noted, so the next turn's feedback shows it.
         if needle and any(needle.lower() == prior.lower() for prior in batch):
             dropped.append("note: chat repeated a line from earlier in this reply (sent anyway)")
+        # The one drop: a near-verbatim copy of another player's recent line is an
+        # echo, not this leader's own voice (g9: P2-P4 resent P0's opener naming
+        # P0's own city 9 times on T4-T9). The model is told so next turn.
+        echoed = copied_other_line(snapshot, needle)
+        if echoed is not None:
+            dropped.append("dropped: chat copied another player's recent line almost word for word "
+                           f"(\"{echoed[:60]}\") and was not sent; write your own line about your own situation")
+            continue
         key = chat_target_key(message)
         prior_rows = recent_map.get(key, []) + recent_map.get("all", [])
         prior_texts = list(dict.fromkeys(row[1] for row in prior_rows))
