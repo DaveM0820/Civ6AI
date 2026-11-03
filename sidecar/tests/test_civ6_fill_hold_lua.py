@@ -31,3 +31,31 @@ def test_hold_bounded():
     for _ in range(40):
         assert lua.eval("Civ6Ai_Production.FillEmptyQueuesWeighted(0)") == 0
     assert lua.eval("Civ6Ai_Production.FillEmptyQueuesWeighted(0)") == 1
+
+
+def _pulse_turn_src():
+    import re
+    from pathlib import Path
+    src = (PRODUCTION.parent / "Civ6Ai_InGame.lua").read_text(encoding="utf-8")
+    m = re.search(r"function Civ6Ai_InGame\._PulseTurn\(playerID\).*?\nend", src, re.S)
+    assert m
+    return m.group(0)
+
+
+def _pulse_rt(applied):
+    lua = _rt(applied)
+    lua.execute("Civ6Ai_Bridge.RunTurnPulse = function() end; Civ6Ai_InGame = {}")
+    lua.execute(_pulse_turn_src())
+    return lua
+
+
+def test_pulse_that_only_sent_request_does_not_bypass_hold():
+    lua = _pulse_rt(False)
+    lua.execute("Civ6Ai_InGame._PulseTurn(0)")
+    assert lua.eval("#REQUESTS") == 0
+
+
+def test_pulse_that_applied_reply_fills_immediately():
+    lua = _pulse_rt(True)
+    lua.execute("Civ6Ai_InGame._PulseTurn(0)")
+    assert lua.eval("#REQUESTS") == 1

@@ -98,9 +98,14 @@ end
 
 function Civ6Ai_InGame._PulseTurn(playerID)
   Civ6Ai_Bridge.RunTurnPulse(playerID)
-  -- After apply: the local seat's empty queues get a priority-weighted build.
+  -- The pulse may only have sent the model request; the reply (with the
+  -- <City>.production choices) lands later. Bypass the fill hold only when this
+  -- turn's reply was actually applied; otherwise the hold (bounded by
+  -- FILL_HOLD_WAIT sweeps) waits for it so the fill does not pre-empt the model.
   if Civ6Ai_Production ~= nil and Civ6Ai_Production.FillEmptyQueuesWeighted ~= nil then
-    pcall(Civ6Ai_Production.FillEmptyQueuesWeighted, playerID, true)
+    local applied = Civ6Ai_Bridge._WasAppliedThisPulse ~= nil
+      and Civ6Ai_Bridge._WasAppliedThisPulse(playerID) == true
+    pcall(Civ6Ai_Production.FillEmptyQueuesWeighted, playerID, applied)
   end
 end
 
