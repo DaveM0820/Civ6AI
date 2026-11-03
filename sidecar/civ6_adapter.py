@@ -235,6 +235,47 @@ _LUA_ARRAY_KEYS = frozenset({
 })
 
 
+def _schema_array_keys() -> frozenset[str]:
+    """Every property name typed as array anywhere in the civ6 schemas."""
+    import glob
+    import json as _json
+
+    names: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            props = node.get("properties")
+            if isinstance(props, dict):
+                for key, sub in props.items():
+                    if isinstance(sub, dict):
+                        kind = sub.get("type")
+                        if kind == "array" or (isinstance(kind, list) and "array" in kind):
+                            names.add(key)
+            for sub in node.values():
+                walk(sub)
+        elif isinstance(node, list):
+            for sub in node:
+                walk(sub)
+
+    try:
+        for path in glob.glob(str(CIV6_SCHEMA_PATH.parent / "*.json")):
+            with open(path, encoding="utf-8") as handle:
+                walk(_json.load(handle))
+    except (OSError, ValueError):
+        pass
+    return frozenset(names)
+
+
+_SCHEMA_ARRAY_KEYS: frozenset[str] | None = None
+
+
+def _empty_array_keys() -> frozenset[str]:
+    global _SCHEMA_ARRAY_KEYS
+    if _SCHEMA_ARRAY_KEYS is None:
+        _SCHEMA_ARRAY_KEYS = _schema_array_keys()
+    return _SCHEMA_ARRAY_KEYS
+
+
 def _lua_table_to_array(value: dict[str, Any]) -> list[Any]:
     if not value:
         return []
@@ -258,6 +299,9 @@ def coerce_lua_empty_arrays(node: Any) -> Any:
                     out[key] = _lua_table_to_array(value)
                 else:
                     out[key] = coerce_lua_empty_arrays(value)
+            elif isinstance(value, dict) and not value and key in _empty_array_keys():
+                # Schema-typed array that Lua serialized as an empty table ({}).
+                out[key] = []
             else:
                 out[key] = coerce_lua_empty_arrays(value)
         return out

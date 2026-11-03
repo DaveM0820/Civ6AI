@@ -299,3 +299,23 @@ class Civ6AdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LuaEmptyTableArrayTests(unittest.TestCase):
+    def test_empty_lua_tables_become_arrays_before_validation(self):
+        snapshot = json.loads(GOLDEN_SNAPSHOT.read_text(encoding="utf-8"))
+        snapshot["civ6"]["trade"] = {"routes": 0, "capacity": 0, "traders": {}, "last_requests": {}}
+        civ6_adapter.normalize_civ6_snapshot(snapshot)
+        self.assertEqual([], snapshot["civ6"]["trade"]["traders"])
+        self.assertEqual([], snapshot["civ6"]["trade"]["last_requests"])
+        civ6_adapter.validate_civ6_snapshot(snapshot)
+
+    def test_schema_array_keys_cover_trade_and_buildnext(self):
+        keys = civ6_adapter._empty_array_keys()
+        for key in ("traders", "last_requests", "buildable"):
+            self.assertTrue(key in keys or key in civ6_adapter._LUA_ARRAY_KEYS, key)
+
+    def test_non_empty_object_untouched(self):
+        out = civ6_adapter.coerce_lua_empty_arrays({"players": {"a": 1}, "units": {}})
+        self.assertEqual({"a": 1}, out["players"])
+        self.assertEqual([], out["units"])
