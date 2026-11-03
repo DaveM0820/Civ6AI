@@ -3975,6 +3975,105 @@ function Civ6Ai_Snapshot._AddTradeRouteCommands(commands, playerID, unit, unitId
   end
 end
 
+-- Trade routes, read-only. Vanilla TradeOverview getters: Player:GetTrade()
+-- GetNumOutgoingRoutes / GetOutgoingRouteCapacity, City:GetTrade()
+-- GetOutgoingRoutes() rows (TraderUnitID, DestinationCityPlayer/ID). Every
+-- call is guarded; a missing getter leaves that field out.
+function Civ6Ai_Snapshot._RouteTraders(playerID)
+  local out = {}
+  local p = Players[playerID]
+  local cities = p ~= nil and p:GetCities() or nil
+  if cities == nil then return out end
+  for _, city in cities:Members() do
+    local okR, routes = pcall(function() return city:GetTrade():GetOutgoingRoutes() end)
+    if okR and type(routes) == "table" then
+      for _, r in ipairs(routes) do
+        if r.TraderUnitID ~= nil then
+          local dname = nil
+          local okD, dcity = pcall(function()
+            return Players[r.DestinationCityPlayer]:GetCities():FindID(r.DestinationCityID)
+          end)
+          if okD and dcity ~= nil then
+            local okN, n = pcall(function() return Locale.Lookup(dcity:GetName()) end)
+            dname = okN and tostring(n) or nil
+          end
+          out[tonumber(r.TraderUnitID)] = {
+            origin = city:GetID(), dest_player = r.DestinationCityPlayer, dest_city = dname,
+          }
+        end
+      end
+    end
+  end
+  return out
+end
+
+function Civ6Ai_Snapshot._IsTrader(unit)
+  local okRow, row = pcall(function() return GameInfo.Units[unit:GetType()] end)
+  return okRow and row ~= nil and (row.MakeTradeRoute == true or row.MakeTradeRoute == 1)
+end
+
+function Civ6Ai_Snapshot._TraderBusy(playerID, unit)
+  if not Civ6Ai_Snapshot._IsTrader(unit) then return false end
+  if Civ6Ai_Apply ~= nil and Civ6Ai_Apply.TradeRequestedThisTurn ~= nil
+      and Civ6Ai_Apply.TradeRequestedThisTurn(playerID, Civ6Ai_Snapshot._UnitWireId(unit)) then
+    return true
+  end
+  local ok, onRoute = pcall(function()
+    return Civ6Ai_Snapshot._RouteTraders(playerID)[unit:GetID()] ~= nil
+  end)
+  return ok and onRoute == true
+end
+
+-- civ6.trade: {routes, capacity, traders = {{unit_id, x, y, moves, on_route,
+-- destination}}, last_requests = {{unit_id, turn, took}}}. Also logs one
+-- trade|status line per seat per snapshot (turn start).
+function Civ6Ai_Snapshot._BuildTrade(playerID)
+  local p = Players[playerID]
+  if p == nil then return nil end
+  local block = {traders = {}}
+  local okT, trade = pcall(function() return p:GetTrade() end)
+  if okT and trade ~= nil then
+    local okN, n = pcall(function() return trade:GetNumOutgoingRoutes() end)
+    if okN and tonumber(n) ~= nil then block.routes = math.floor(tonumber(n)) end
+    local okC, c = pcall(function() return trade:GetOutgoingRouteCapacity() end)
+    if okC and tonumber(c) ~= nil then block.capacity = math.floor(tonumber(c)) end
+  end
+  local onRoute = Civ6Ai_Snapshot._RouteTraders(playerID)
+  local parts = {}
+  for _, unit in ipairs(Civ6Ai_Snapshot._IterateUnits(p:GetUnits())) do
+    if Civ6Ai_Snapshot._IsTrader(unit) then
+      local r = onRoute[unit:GetID()]
+      local row = {
+        unit_id = Civ6Ai_Snapshot._UnitWireId(unit), x = unit:GetX(), y = unit:GetY(),
+        moves = Civ6Ai_Snapshot._UnitMoves(unit), on_route = r ~= nil,
+      }
+      if r ~= nil and r.dest_city ~= nil then row.destination = r.dest_city end
+      block.traders[#block.traders + 1] = row
+      parts[#parts + 1] = row.unit_id .. "@" .. tostring(row.x) .. "," .. tostring(row.y)
+        .. ":mv=" .. tostring(row.moves) .. ":" .. (r ~= nil and ("route>" .. tostring(row.destination or r.dest_player)) or "idle")
+    end
+  end
+  local turn = Game.GetCurrentGameTurn()
+  local byUnit = Civ6Ai_Apply ~= nil and Civ6Ai_Apply._tradeRequested ~= nil and Civ6Ai_Apply._tradeRequested[playerID] or nil
+  if byUnit ~= nil then
+    for uid, req in pairs(byUnit) do
+      if req.turn < turn then
+        local num = tonumber(string.match(uid, "(%d+)$"))
+        local took = num ~= nil and onRoute[num] ~= nil
+        block.last_requests = block.last_requests or {}
+        block.last_requests[#block.last_requests + 1] = {unit_id = uid, turn = req.turn, took = took}
+        Civ6Ai_Util.Log("trade|route_check|player=" .. tostring(playerID) .. "|unit=" .. uid
+          .. "|requested_t=" .. tostring(req.turn) .. "|took=" .. tostring(took))
+        if req.turn < turn - 1 then byUnit[uid] = nil end
+      end
+    end
+  end
+  Civ6Ai_Util.Log("trade|status|player=" .. tostring(playerID) .. "|t=" .. tostring(turn)
+    .. "|routes=" .. tostring(block.routes) .. "/" .. tostring(block.capacity)
+    .. "|traders=" .. (#parts > 0 and table.concat(parts, ";") or "none"))
+  return block
+end
+
 -- Schema upgrade list: {} or {{unit_type_id, gold_cost}}.
 function Civ6Ai_Snapshot._UpgradeOptions(playerID, unit)
   local up, cost = Civ6Ai_Snapshot._UpgradeTarget(playerID, unit)
@@ -5121,6 +5220,11 @@ function Civ6Ai_Snapshot._BuildLegalCommands(playerID, playerLabel)
           end
         end
       end
+      -- A trader on a route (or sent on one this turn) gets no orders: a move
+      -- or skip would cancel the route request (g7: P0 asked three times).
+      if needsOrders and Civ6Ai_Snapshot._TraderBusy(playerID, unit) then
+        needsOrders = false
+      end
       if needsOrders then
         local unitId = Civ6Ai_Snapshot._UnitWireId(unit)
         table.insert(commands, Civ6Ai_Snapshot._EnrichLegalCommand({
@@ -5995,6 +6099,12 @@ function Civ6Ai_Snapshot.Build(playerID, options)
     civ6Block.settle_recommended = recs
   elseif not okR then
     Civ6Ai_Util.Log("snapshot|settle_recs_failed|" .. tostring(recs))
+  end
+  local okTrade, tradeBlock = pcall(Civ6Ai_Snapshot._BuildTrade, playerID)
+  if okTrade and type(tradeBlock) == "table" then
+    civ6Block.trade = tradeBlock
+  elseif not okTrade then
+    Civ6Ai_Util.Log("snapshot|trade_failed|" .. tostring(tradeBlock))
   end
   local okDiplo, civ6Diplomacy = pcall(Civ6Ai_Snapshot._BuildDiplomacy, playerID)
   if okDiplo and type(civ6Diplomacy) == "table" then

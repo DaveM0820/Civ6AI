@@ -33,10 +33,18 @@ class StrategiesSqlTests(unittest.TestCase):
     def test_each_strategy_has_one_single_item_list(self):
         rows = self.db.execute("""SELECT sp.StrategyType, COUNT(f.Item) FROM Strategy_Priorities sp
                                   JOIN AiFavoredItems f ON f.ListType = sp.ListType
+                                  JOIN AiLists l ON l.ListType = sp.ListType AND l.System <> 'PseudoYields'
                                   WHERE sp.StrategyType LIKE 'CIV6AI_STRATEGY_FORCE_%'
                                   GROUP BY sp.StrategyType""").fetchall()
         self.assertEqual(len(rows), 3)
         self.assertTrue(all(n == 1 for _, n in rows))
+        # Favoured items only rank within a category: the category pseudoyield is boosted too.
+        boosts = dict(self.db.execute("""SELECT sp.StrategyType, f.Item FROM Strategy_Priorities sp
+                                  JOIN AiLists l ON l.ListType = sp.ListType AND l.System = 'PseudoYields'
+                                  JOIN AiFavoredItems f ON f.ListType = sp.ListType
+                                  WHERE sp.StrategyType LIKE 'CIV6AI_STRATEGY_FORCE_%'""").fetchall())
+        self.assertEqual(boosts, {"CIV6AI_STRATEGY_FORCE_ARCHER": "PSEUDOYIELD_UNIT_COMBAT",
+                                  "CIV6AI_STRATEGY_FORCE_CAMPUS": "PSEUDOYIELD_DISTRICT"})
 
     def test_lua_handlers_exist_for_conditions(self):
         lua = (MOD / "Gameplay" / "Civ6Ai_Orders.lua").read_text()

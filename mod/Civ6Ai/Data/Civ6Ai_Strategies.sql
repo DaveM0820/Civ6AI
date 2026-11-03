@@ -47,6 +47,22 @@ INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) VALUES
 ('Civ6AiForceGranaryBuildings', 'BUILDING_GRANARY', 1, 1000),
 ('Civ6AiForceCampusDistricts',  'DISTRICT_CAMPUS',  1, 1000);
 
+-- Favoured items only rank within their category; the engine picks the
+-- category by pseudoyield. +1500 on the category beats any preset (-100..+1000),
+-- same as Civ6Ai_BuildNext.sql. Granary: no building pseudoyield in vanilla.
+INSERT INTO AiListTypes (ListType) VALUES
+('Civ6AiForceArcherPseudoYields'),
+('Civ6AiForceCampusPseudoYields');
+INSERT INTO AiLists (ListType, System) VALUES
+('Civ6AiForceArcherPseudoYields', 'PseudoYields'),
+('Civ6AiForceCampusPseudoYields', 'PseudoYields');
+INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES
+('CIV6AI_STRATEGY_FORCE_ARCHER', 'Civ6AiForceArcherPseudoYields'),
+('CIV6AI_STRATEGY_FORCE_CAMPUS', 'Civ6AiForceCampusPseudoYields');
+INSERT INTO AiFavoredItems (ListType, Item, Favored, Value) VALUES
+('Civ6AiForceArcherPseudoYields', 'PSEUDOYIELD_UNIT_COMBAT', 1, 1500),
+('Civ6AiForceCampusPseudoYields', 'PSEUDOYIELD_DISTRICT', 1, 1500);
+
 -- Early-game mode markers (expand / threat) for a seat the model drives with
 -- fewer than 3 cities by turn 60. They carry no build weights any more: what
 -- gets built follows the model's production preset. Kept for the early_mode

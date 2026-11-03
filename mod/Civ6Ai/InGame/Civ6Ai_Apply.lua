@@ -204,6 +204,9 @@ function Civ6Ai_Apply.ApplyDecision(playerID, decision, snapshotTurn, forTurn)
   local orderedUnit, orderedCity = Civ6Ai_Apply._CountAttacks(decision.commands)
   local rest = decision.commands
   Civ6Ai_Apply._NoteModelChoices(playerID, rest)
+  if playerID == Game.GetLocalPlayer() then
+    Civ6Ai_Apply._NoteTradeRequests(playerID, rest)
+  end
   if playerID ~= Game.GetLocalPlayer() then
     if forTurn == nil then
       if Civ6Ai_Bridge ~= nil and Civ6Ai_Bridge.SeatForTurn ~= nil then
@@ -559,6 +562,12 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
   end
   if command.kind == "set_research_civic" then
     return Civ6Ai_Apply._SetResearchCivic(playerID, args)
+  end
+  if (command.kind == "move_unit" or command.kind == "unit_skip")
+      and Civ6Ai_Apply.TradeRequestedThisTurn(playerID, args.unit_id) then
+    -- A move or skip would pull the trader out of its origin city (or end its
+    -- turn) and cancel the trade-route request made this turn.
+    return false, "trader_route_requested", args
   end
   if command.kind == "move_unit" then
     return Civ6Ai_Apply._MoveUnit(playerID, args)
@@ -1885,6 +1894,30 @@ end
 -- channel before this file.
 -- The local seat's trader: the vanilla trade-route request (see
 -- Civ6Ai_Snapshot._AddTradeRouteCommands). The engine checks and syncs it.
+-- Local seat traders sent on a route this turn: {[playerID] = {[unit_id] =
+-- {turn, x, y}}}. UI-only bookkeeping on the host (no game state), read by the
+-- snapshot next turn to report whether the route took.
+Civ6Ai_Apply._tradeRequested = Civ6Ai_Apply._tradeRequested or {}
+
+function Civ6Ai_Apply._NoteTradeRequests(playerID, commands)
+  local turn = Game.GetCurrentGameTurn()
+  for _, c in ipairs(commands or {}) do
+    local a = c.arguments or c.fixed_arguments or {}
+    if c.kind == "trade_route" and a.unit_id ~= nil then
+      Civ6Ai_Apply._tradeRequested[playerID] = Civ6Ai_Apply._tradeRequested[playerID] or {}
+      Civ6Ai_Apply._tradeRequested[playerID][tostring(a.unit_id)] = {
+        turn = turn, x = tonumber(a.target_x), y = tonumber(a.target_y),
+      }
+    end
+  end
+end
+
+function Civ6Ai_Apply.TradeRequestedThisTurn(playerID, unitId)
+  local byUnit = Civ6Ai_Apply._tradeRequested[playerID]
+  local r = byUnit ~= nil and unitId ~= nil and byUnit[tostring(unitId)] or nil
+  return r ~= nil and r.turn == Game.GetCurrentGameTurn()
+end
+
 function Civ6Ai_Apply._LocalTradeRoute(playerID, args)
   local unit = Civ6Ai_Apply._FindUnit(playerID, args.unit_id)
   local x, y = tonumber(args.target_x), tonumber(args.target_y)

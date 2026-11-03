@@ -2402,6 +2402,12 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
     if next_lines:
         opt.append("")
         opt.extend(next_lines)
+    from sidecar import civ6_trade
+
+    trade_lines = civ6_trade.prompt_lines(snapshot, wire_ids)
+    if trade_lines:
+        opt.append("")
+        opt.extend(trade_lines)
 
     req = [
         "=== REQUIRED COMMANDS ===",
