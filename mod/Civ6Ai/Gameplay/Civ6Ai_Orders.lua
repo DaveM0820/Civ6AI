@@ -3082,7 +3082,100 @@ function Civ6Ai_Orders._FlushOpenBatches(turn)
   end
 end
 
+-- API probe (read-only, once per load): log every function name reachable on
+-- the gameplay-context objects that could set city production directly.
+-- CIV6AI|probe|api|obj=<name>|part=<i>/<n>|names=a,b,c (chunked).
+function Civ6Ai_Orders._ProbeNames(obj)
+  local names, seen, visited = {}, {}, {}
+  local function scan(t, depth)
+    if t == nil or depth > 6 or visited[t] then
+      return
+    end
+    visited[t] = true
+    if type(t) == "table" then
+      for k, v in pairs(t) do
+        if type(k) == "string" and (type(v) == "function" or type(v) == "userdata") and not seen[k] then
+          seen[k] = true
+          names[#names + 1] = k
+        end
+      end
+    end
+    local okMt, mt = pcall(getmetatable, t)
+    if okMt and type(mt) == "table" then
+      local idx = rawget(mt, "__index")
+      if type(idx) == "table" then
+        scan(idx, depth + 1)
+      end
+      scan(mt, depth + 1)
+    end
+  end
+  pcall(scan, obj, 0)
+  table.sort(names)
+  return names
+end
+
+function Civ6Ai_Orders.ProbeApi()
+  if Civ6Ai_Orders._probed then
+    return
+  end
+  local objs = {}
+  local function add(name, getter)
+    local ok, v = pcall(getter)
+    if ok and v ~= nil then
+      objs[#objs + 1] = { name = name, obj = v }
+    else
+      log("probe|api|obj=" .. name .. "|missing=" .. tostring(ok and "nil" or v))
+    end
+  end
+  local function firstCity()
+    for i = 0, 63 do
+      local p = Players[i]
+      if p ~= nil and call(p, "IsMajor") == true then
+        local cities = call(p, "GetCities")
+        if cities ~= nil then
+          for _, c in cities:Members() do
+            return c, p, cities
+          end
+        end
+      end
+    end
+    return nil
+  end
+  local city, player, cities = firstCity()
+  -- Wait for a founded city (a build queue to inspect), at most to turn 5.
+  if city == nil and (Game.GetCurrentGameTurn() or 0) < 5 then
+    return
+  end
+  Civ6Ai_Orders._probed = true
+  add("BuildQueue", function() return city ~= nil and city:GetBuildQueue() or nil end)
+  add("City", function() return city end)
+  add("Cities", function() return cities end)
+  add("Player", function() return player or Players[0] end)
+  add("CityManager", function() return CityManager end)
+  add("UnitManager", function() return UnitManager end)
+  add("Game", function() return Game end)
+  for _, o in ipairs(objs) do
+    local names = Civ6Ai_Orders._ProbeNames(o.obj)
+    local chunks, cur = {}, {}
+    for _, n in ipairs(names) do
+      cur[#cur + 1] = n
+      if #cur >= 40 then
+        chunks[#chunks + 1] = cur
+        cur = {}
+      end
+    end
+    if #cur > 0 or #chunks == 0 then
+      chunks[#chunks + 1] = cur
+    end
+    for i, c in ipairs(chunks) do
+      log("probe|api|obj=" .. o.name .. "|type=" .. type(o.obj) .. "|count=" .. tostring(#names) .. "|part=" .. tostring(i)
+        .. "/" .. tostring(#chunks) .. "|names=" .. table.concat(c, ","))
+    end
+  end
+end
+
 function Civ6Ai_Orders.OnGameTurnStarted(turn)
+  pcall(Civ6Ai_Orders.ProbeApi)
   Civ6Ai_Orders._FlushOpenBatches(turn)
   local h, n = Civ6Ai_Orders.Checksum()
   local shared = Civ6Ai_Orders._Shared()

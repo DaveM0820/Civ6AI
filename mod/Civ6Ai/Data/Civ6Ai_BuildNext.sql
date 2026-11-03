@@ -190,20 +190,47 @@ INSERT INTO Strategy_Priorities (StrategyType, ListType)
 SELECT 'CIV6AI_NEXT_' || Item, 'Civ6AiNextOp_' || Item FROM Civ6Ai_DirectUnits;
 
 -- ---------------------------------------------------------------------------
--- No scout spam while a pick is active: explorer pseudoyield -100 on every
--- non-recon pick (one shared list).
+-- While a pick is active, make it the only attractive category: -100 (percent,
+-- so ~zero) on every OTHER unit category, districts and wonders. Never
+-- touches PSEUDOYIELD_CITY_DEFENSES / standing army / the City Defense tree.
+-- Items with no category of their own (builder, buildings) cut all of them.
 -- ---------------------------------------------------------------------------
-INSERT INTO AiListTypes (ListType) VALUES ('Civ6AiNextNoExplore');
-INSERT INTO AiLists (ListType, System) VALUES ('Civ6AiNextNoExplore', 'PseudoYields');
-INSERT INTO AiFavoredItems (ListType, Item, Value)
-SELECT 'Civ6AiNextNoExplore', PseudoYieldType, -100 FROM PseudoYields WHERE PseudoYieldType = 'PSEUDOYIELD_UNIT_EXPLORER';
+CREATE TABLE IF NOT EXISTS Civ6Ai_NextCutCategories (PseudoYield TEXT NOT NULL PRIMARY KEY);
+INSERT OR IGNORE INTO Civ6Ai_NextCutCategories (PseudoYield)
+SELECT PseudoYieldType FROM PseudoYields
+WHERE PseudoYieldType LIKE 'PSEUDOYIELD_UNIT_%' OR PseudoYieldType IN ('PSEUDOYIELD_DISTRICT', 'PSEUDOYIELD_WONDER');
+
+INSERT INTO AiListTypes (ListType)
+SELECT 'Civ6AiNextCut_' || Item FROM Civ6Ai_NextItems;
+INSERT INTO AiLists (ListType, System)
+SELECT 'Civ6AiNextCut_' || Item, 'PseudoYields' FROM Civ6Ai_NextItems;
 INSERT INTO Strategy_Priorities (StrategyType, ListType)
-SELECT 'CIV6AI_NEXT_' || n.Item, 'Civ6AiNextNoExplore' FROM Civ6Ai_NextItems n
-WHERE n.Item NOT IN (SELECT UnitType FROM Units WHERE PromotionClass = 'PROMOTION_CLASS_RECON');
+SELECT 'CIV6AI_NEXT_' || Item, 'Civ6AiNextCut_' || Item FROM Civ6Ai_NextItems;
+INSERT INTO AiFavoredItems (ListType, Item, Value)
+SELECT 'Civ6AiNextCut_' || n.Item, c.PseudoYield, -100 FROM Civ6Ai_NextItems n, Civ6Ai_NextCutCategories c
+WHERE c.PseudoYield <> COALESCE((SELECT PseudoYield FROM Civ6Ai_NextCategory k WHERE k.Item = n.Item), '');
+
+-- Promotion classes: recon -100 unless the pick is recon; a unit pick with a
+-- promotion class gets +100 on its own class.
+INSERT INTO AiListTypes (ListType)
+SELECT 'Civ6AiNextPC_' || Item FROM Civ6Ai_NextItems;
+INSERT INTO AiLists (ListType, System)
+SELECT 'Civ6AiNextPC_' || Item, 'UnitPromotionClasses' FROM Civ6Ai_NextItems;
+INSERT INTO Strategy_Priorities (StrategyType, ListType)
+SELECT 'CIV6AI_NEXT_' || Item, 'Civ6AiNextPC_' || Item FROM Civ6Ai_NextItems;
+INSERT INTO AiFavoredItems (ListType, Item, Value)
+SELECT 'Civ6AiNextPC_' || n.Item, 'PROMOTION_CLASS_RECON', -100 FROM Civ6Ai_NextItems n
+WHERE EXISTS (SELECT 1 FROM UnitPromotionClasses WHERE PromotionClassType = 'PROMOTION_CLASS_RECON')
+  AND n.Item NOT IN (SELECT UnitType FROM Units WHERE PromotionClass = 'PROMOTION_CLASS_RECON');
+INSERT OR IGNORE INTO AiFavoredItems (ListType, Item, Value)
+SELECT 'Civ6AiNextPC_' || u.UnitType, u.PromotionClass, 100 FROM Units u
+WHERE u.UnitType IN (SELECT Item FROM Civ6Ai_NextItems) AND u.PromotionClass IS NOT NULL
+  AND u.PromotionClass IN (SELECT PromotionClassType FROM UnitPromotionClasses);
 
 -- ---------------------------------------------------------------------------
 -- Model seats: land scout quota cut (vanilla DefaultScoutUse, Leaders.xml:
--- 809-813: 100/100/50 percent). Naval scouting kept (islands). Gated by
+-- 809-813: 100/100/50 percent; STRATEGY_EARLY_EXPLORATION adds +200 to
+-- DEFAULT_LAND_SCOUTS while the seat has few cities, so that one is -300). Naval scouting kept (islands). Gated by
 -- GameEvents.Civ6AiModelSeat: an AI major the model has steered (a priority
 -- preset or a build-next pick in synced properties). P5 / humans: off.
 -- ---------------------------------------------------------------------------
@@ -216,5 +243,5 @@ INSERT INTO AiListTypes (ListType) VALUES ('Civ6AiModelScouts');
 INSERT INTO AiLists (ListType, System) VALUES ('Civ6AiModelScouts', 'AiScoutUses');
 INSERT INTO Strategy_Priorities (StrategyType, ListType) VALUES ('CIV6AI_MODEL_SEAT', 'Civ6AiModelScouts');
 INSERT INTO AiFavoredItems (ListType, Item, Value)
-SELECT 'Civ6AiModelScouts', ScoutUseType, -100 FROM AiScoutUses
+SELECT 'Civ6AiModelScouts', ScoutUseType, CASE WHEN ScoutUseType = 'DEFAULT_LAND_SCOUTS' THEN -300 ELSE -100 END FROM AiScoutUses
 WHERE ScoutUseType IN ('DEFAULT_LAND_SCOUTS', 'LAND_SCOUTS_PER_PRIMARY_REGION', 'LAND_SCOUTS_PER_SECONDARY_REGION');

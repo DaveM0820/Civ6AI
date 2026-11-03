@@ -38,15 +38,18 @@ CREATE TABLE AiOperationTeams (TeamName TEXT, OperationName TEXT, MinUnits INT, 
 CREATE TABLE OpTeamRequirements (TeamName TEXT, AiType TEXT, MinNumber INT, MaxNumber INT);
 CREATE TABLE AllowedOperations (ListType TEXT, OperationDef TEXT);
 CREATE TABLE AiScoutUses (ScoutUseType TEXT PRIMARY KEY);
+CREATE TABLE UnitPromotionClasses (PromotionClassType TEXT PRIMARY KEY);
+INSERT INTO UnitPromotionClasses VALUES ('PROMOTION_CLASS_RECON'), ('PROMOTION_CLASS_RANGED');
 INSERT INTO AiScoutUses VALUES ('DEFAULT_LAND_SCOUTS'), ('DEFAULT_NAVAL_SCOUTS'), ('LAND_SCOUTS_PER_PRIMARY_REGION'),
   ('LAND_SCOUTS_PER_SECONDARY_REGION'), ('NAVAL_SCOUTS_FOR_WORLD_EXPLORATION');
 CREATE TABLE Buildings (BuildingType TEXT PRIMARY KEY, Cost INT, IsWonder INT);
 CREATE TABLE Districts (DistrictType TEXT PRIMARY KEY, Cost INT);
 INSERT INTO PseudoYields VALUES ('PSEUDOYIELD_UNIT_SETTLER'), ('PSEUDOYIELD_UNIT_TRADE'),
-  ('PSEUDOYIELD_UNIT_COMBAT'), ('PSEUDOYIELD_UNIT_NAVAL_COMBAT'), ('PSEUDOYIELD_DISTRICT'), ('PSEUDOYIELD_UNIT_EXPLORER');
+  ('PSEUDOYIELD_UNIT_COMBAT'), ('PSEUDOYIELD_UNIT_NAVAL_COMBAT'), ('PSEUDOYIELD_DISTRICT'), ('PSEUDOYIELD_UNIT_EXPLORER'),
+  ('PSEUDOYIELD_WONDER'), ('PSEUDOYIELD_CITY_DEFENSES'), ('PSEUDOYIELD_STANDING_ARMY_NUMBER');
 INSERT INTO Units VALUES ('UNIT_SETTLER', 80, 'FORMATION_CLASS_CIVILIAN', 'PSEUDOYIELD_UNIT_SETTLER', NULL),
   ('UNIT_TRADER', 40, 'FORMATION_CLASS_CIVILIAN', 'PSEUDOYIELD_UNIT_TRADE', NULL),
-  ('UNIT_GALLEY', 65, 'FORMATION_CLASS_NAVAL', NULL, NULL), ('UNIT_ARCHER', 60, 'FORMATION_CLASS_LAND_COMBAT', NULL, NULL),
+  ('UNIT_GALLEY', 65, 'FORMATION_CLASS_NAVAL', NULL, NULL), ('UNIT_ARCHER', 60, 'FORMATION_CLASS_LAND_COMBAT', NULL, 'PROMOTION_CLASS_RANGED'),
   ('UNIT_BUILDER', 50, 'FORMATION_CLASS_CIVILIAN', NULL, NULL),
   ('UNIT_SCOUT', 30, 'FORMATION_CLASS_LAND_COMBAT', 'PSEUDOYIELD_UNIT_EXPLORER', 'PROMOTION_CLASS_RECON');
 INSERT INTO Buildings VALUES ('BUILDING_GRANARY', 65, 0), ('BUILDING_PYRAMIDS', 200, 1);
@@ -113,13 +116,35 @@ class BuildNextCategoryTests(unittest.TestCase):
         self.assertEqual((None, "-1"), data[(5, 2)])  # any city
 
     def test_scout_cuts(self):
-        self.assertEqual(sorted([("DEFAULT_LAND_SCOUTS", -100), ("LAND_SCOUTS_PER_PRIMARY_REGION", -100),
+        self.assertEqual(sorted([("DEFAULT_LAND_SCOUTS", -300), ("LAND_SCOUTS_PER_PRIMARY_REGION", -100),
                                  ("LAND_SCOUTS_PER_SECONDARY_REGION", -100)]),
                          sorted(self.q("SELECT Item, Value FROM AiFavoredItems WHERE ListType='Civ6AiModelScouts'")))
         self.assertEqual([("CIV6AI_MODEL_SEAT",)], self.q("SELECT StrategyType FROM Strategy_Priorities WHERE ListType='Civ6AiModelScouts'"))
-        no_explore = {r[0] for r in self.q("SELECT StrategyType FROM Strategy_Priorities WHERE ListType='Civ6AiNextNoExplore'")}
-        self.assertIn("CIV6AI_NEXT_UNIT_SETTLER", no_explore)
-        self.assertNotIn("CIV6AI_NEXT_UNIT_SCOUT", no_explore)
+
+    def cut(self, item):
+        return dict(self.q("SELECT f.Item, f.Value FROM Strategy_Priorities s JOIN AiFavoredItems f ON f.ListType = s.ListType "
+                           "WHERE s.StrategyType = ? AND s.ListType LIKE 'Civ6AiNextCut_%'", "CIV6AI_NEXT_" + item))
+
+    def test_pick_cuts_every_other_category_never_defenses(self):
+        settler = self.cut("UNIT_SETTLER")
+        self.assertNotIn("PSEUDOYIELD_UNIT_SETTLER", settler)
+        for py in ("PSEUDOYIELD_UNIT_EXPLORER", "PSEUDOYIELD_UNIT_COMBAT", "PSEUDOYIELD_UNIT_NAVAL_COMBAT",
+                   "PSEUDOYIELD_UNIT_TRADE", "PSEUDOYIELD_DISTRICT", "PSEUDOYIELD_WONDER"):
+            self.assertEqual(-100, settler[py], py)
+        self.assertNotIn("PSEUDOYIELD_DISTRICT", self.cut("DISTRICT_CAMPUS"))
+        granary = self.cut("BUILDING_GRANARY")
+        self.assertIn("PSEUDOYIELD_UNIT_SETTLER", granary)
+        for item in ("UNIT_SETTLER", "BUILDING_GRANARY", "UNIT_SCOUT"):
+            for bad in ("PSEUDOYIELD_CITY_DEFENSES", "PSEUDOYIELD_STANDING_ARMY_NUMBER"):
+                self.assertNotIn(bad, self.cut(item))
+
+    def pc(self, item):
+        return dict(self.q("SELECT Item, Value FROM AiFavoredItems WHERE ListType = ?", "Civ6AiNextPC_" + item))
+
+    def test_promotion_class_weights(self):
+        self.assertEqual({"PROMOTION_CLASS_RECON": 100}, self.pc("UNIT_SCOUT"))
+        self.assertEqual({"PROMOTION_CLASS_RECON": -100, "PROMOTION_CLASS_RANGED": 100}, self.pc("UNIT_ARCHER"))
+        self.assertEqual({"PROMOTION_CLASS_RECON": -100}, self.pc("BUILDING_GRANARY"))
 
 
 class TradePromptTests(unittest.TestCase):

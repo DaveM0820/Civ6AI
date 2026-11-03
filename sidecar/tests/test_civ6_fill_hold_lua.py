@@ -59,3 +59,30 @@ def test_pulse_that_applied_reply_fills_immediately():
     lua = _pulse_rt(True)
     lua.execute("Civ6Ai_InGame._PulseTurn(0)")
     assert lua.eval("#REQUESTS") == 1
+
+
+def test_api_probe_is_read_only_chunked_and_once():
+    import re
+    from pathlib import Path
+    src = (PRODUCTION.parents[1] / "Gameplay" / "Civ6Ai_Orders.lua").read_text(encoding="utf-8")
+    a = src.index("function Civ6Ai_Orders._ProbeNames")
+    b = src.index("function Civ6Ai_Orders.OnGameTurnStarted")
+    body = src[a:b]
+    assert "SetProperty" not in body and "RequestOperation(" not in body
+    lua = lupa.LuaRuntime(unpack_returned_tuples=True)
+    lua.execute("Civ6Ai_Orders={} LOG={} function log(s) LOG[#LOG+1]=s end "
+                "function call(o,m,...) local f=o and o[m] if f then return f(o,...) end end")
+    lua.execute(body)
+    lua.execute("""
+      local names = {}
+      for i = 1, 45 do names['F' .. string.format('%02d', i)] = function() end end
+      local BQ = setmetatable({}, {__index = names})
+      local C = {GetBuildQueue = function() return BQ end}
+      local cities = {Members = function() local d = false return function() if d then return nil end d = true return 0, C end end}
+      Players = {[0] = {IsMajor = function() return true end, GetCities = function() return cities end}}
+      Game = {GetCurrentGameTurn = function() return 1 end}
+      Civ6Ai_Orders.ProbeApi() Civ6Ai_Orders.ProbeApi()""")
+    logs = list(lua.globals().LOG.values())
+    bq = [l for l in logs if "obj=BuildQueue" in l]
+    assert len(bq) == 2 and "part=1/2" in bq[0] and "count=45" in bq[0]
+    assert any("obj=CityManager|missing" in l for l in logs)
