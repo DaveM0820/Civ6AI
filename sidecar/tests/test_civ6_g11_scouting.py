@@ -87,3 +87,13 @@ class ExploreTokenTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NamedViewportTests(unittest.TestCase):
+    def test_named_focus_resolves_unit_and_city_without_import_error(self):
+        from sidecar import map_situational as ms
+        snap = {"your_units": [{"unit_id": "UNIT_7", "unit_type_id": "UNIT_SETTLER", "plot_id": "PLOT_5_6"}],
+                "your_cities": [{"city_id": "C1", "name": "Paris", "plot_id": "PLOT_9_9"}]}
+        self.assertEqual(ms.parse_named_map_focus(snap, "Paris"), (9, 9))
+        self.assertEqual(ms.parse_named_map_focus(snap, "UNIT_7"), (5, 6))
+        self.assertIsNone(ms.parse_named_map_focus(snap, "nowhere"))

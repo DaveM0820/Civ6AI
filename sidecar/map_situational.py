@@ -286,9 +286,22 @@ def parse_named_map_focus(snapshot: dict[str, Any], raw: Any) -> tuple[int, int]
     text = raw.strip()
     if not text or "," in text:
         return None
-    from sidecar.civ5_adapter import _resolve_named_move_plot
+    # civ5_adapter no longer has _resolve_named_move_plot (ImportError crashed
+    # the seat's persist step whenever map.viewport named a unit or city).
+    from sidecar import civ6_legality as legality
+    from sidecar import pipeline_v2 as pipeline
 
-    return _resolve_named_move_plot(snapshot, text)
+    want = text.lower().replace(" ", "_")
+    units = [u for u in snapshot.get("your_units") or [] if isinstance(u, dict)]
+    wire = pipeline._build_unit_wire_id_map(units)
+    for unit in units:
+        uid = str(unit.get("unit_id") or "")
+        if want in (uid.lower(), str(wire.get(uid, "")).lower()):
+            return legality.plot_xy(unit)
+    for city in snapshot.get("your_cities") or []:
+        if isinstance(city, dict) and str(city.get("name") or "").lower().replace(" ", "_") == want:
+            return legality.plot_xy(city)
+    return None
 
 
 def parse_map_viewport_value(raw: Any) -> dict[str, int] | None:
