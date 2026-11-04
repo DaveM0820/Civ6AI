@@ -50,11 +50,13 @@ CIV6_GAME_PRIMER = (
     "- Concepts: movement: one military plus one civilian unit per tile, never two of one class; mountains "
     "impassable; rivers, hills, woods cost extra moves. City sites: fresh water or coast, hills, luxuries, room "
     "for districts, 3-4 tiles apart, little overlap. Settlers and builders are captured by an adjacent enemy or "
-    "barbarian. Navy matters most on "
-    "island/archipelago maps: Sailing, Shipbuilding, Celestial Navigation, Cartography for ocean; galleys, "
-    "quadriremes, Harbors; naval melee vs naval ranged; screen embarked units; coastal raids; control sea lanes; "
-    "settle other islands. Explore aggressively with scouts and boats: goody huts, city-states, natural wonders, "
-    "settle spots. Tactics: read the map tactically; know each unit's movement and attack range; focus fire to "
+    "barbarian. Navy and the sea: "
+    "coast (shallow water) is traversable by ships and by embarked land units; ocean needs Cartography. "
+    "Sailing, Shipbuilding, Celestial Navigation, Cartography; galleys, quadriremes, Harbors; naval melee vs naval "
+    "ranged. Build a navy: ships explore coasts, escort embarked settlers to new land, screen embarked units, "
+    "raid and besiege coastal cities and control sea lanes. Fog hides most of the map all game: exploring on land "
+    "AND water never stops; scouts, ships and embarked units are all explorers (goody huts, city-states, natural "
+    "wonders, rivals, settle spots on other land). Tactics: read the map tactically; know each unit's movement and attack range; focus fire to "
     "kill one unit before the next; a mutually supporting front, ranged behind melee; chokepoints; retreat and "
     "heal damaged units; take cities with siege plus melee."
 )
@@ -459,6 +461,72 @@ def civ6_naval_explore_attention(snapshot: dict[str, Any]) -> str | None:
         f"NAVAL EXPLORE: {ships} {noun} can still move and the world is only {pct}% revealed "
         "(your real visibility, not the trimmed picture). Send a ship along the coast into unexplored water this turn."
     )
+
+
+CIV6_SCOUT_IDLE_TURNS = 2
+
+
+def civ6_scouting_fact_line(snapshot: dict[str, Any]) -> str | None:
+    """Fair facts for every seat: map revealed, water frontier, units idle while it exists."""
+    from sidecar import civ6_legality as legality
+    from sidecar.civ6_wire import _is_civilian
+
+    plots = legality.known_plots(snapshot)
+    if not plots:
+        return None
+    game = snapshot.get("game") if isinstance(snapshot.get("game"), dict) else {}
+    width = game.get("map_width") if isinstance(game.get("map_width"), int) else None
+    height = game.get("map_height") if isinstance(game.get("map_height"), int) else None
+    wrap = game.get("wrap_x") is not False
+
+    def norm(xy: tuple[int, int]) -> tuple[int, int] | None:
+        x, y = xy
+        if y < 0 or (height is not None and y >= height):
+            return None
+        if width:
+            if wrap:
+                x %= width
+            elif not 0 <= x < width:
+                return None
+        return (x, y)
+
+    frontier = open_frontier = 0
+    for xy, plot in plots.items():
+        if not plot.get("water"):
+            continue
+        if any((n := norm(nb)) is not None and n not in plots for nb in legality.hex_neighbors(*xy)):
+            frontier += 1
+            if not legality.ocean_blocked(snapshot, plot):
+                open_frontier += 1
+    true = civ6_true_explored(snapshot)
+    pct = true[2] if true is not None else _civ6_explored_percent(snapshot)
+    if not isinstance(pct, int) or (pct >= CIV6_EXPLORE_NUDGE_BELOW_PCT and frontier == 0):
+        return None
+    text = f"SCOUTING: {pct}% of the map revealed; {frontier} revealed water tiles border unexplored tiles"
+    if open_frontier != frontier:
+        text += f" ({open_frontier} reachable now, the rest are ocean)"
+    text += "."
+    if frontier:
+        economy = (snapshot.get("civ6") or {}).get("economy") if isinstance(snapshot.get("civ6"), dict) else {}
+        tracking = economy.get("tracking") if isinstance(economy, dict) else {}
+        idle = tracking.get("idle_turns") if isinstance(tracking, dict) else {}
+        idle = idle if isinstance(idle, dict) else {}
+        wire = pipeline._build_unit_wire_id_map([u for u in snapshot.get("your_units") or [] if isinstance(u, dict)])
+        bits: list[str] = []
+        for unit in snapshot.get("your_units") or []:
+            if not isinstance(unit, dict) or _is_civilian(unit):
+                continue
+            uid = str(unit.get("unit_id") or "")
+            n = idle.get(uid)
+            if isinstance(n, bool) or not isinstance(n, int) or n < CIV6_SCOUT_IDLE_TURNS:
+                continue
+            bits.append(f"{wire.get(uid, uid)} {n}t")
+        if bits:
+            text += f" Units idle while that frontier exists: {', '.join(bits[:8])}"
+            if len(bits) > 8:
+                text += f" (+{len(bits) - 8} more)"
+            text += "."
+    return text
 
 
 def civ6_lethargy_attention(snapshot: dict[str, Any]) -> str | None:

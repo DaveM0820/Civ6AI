@@ -647,24 +647,27 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
             else:
                 ids.append(_add_command(snapshot, "appoint_governor", {"governor_id": gid}, f"appoint {gid}"))
         elif action == "assign":
-            gname, city_text = _split_pair(value, "@:=")
-            gid = _match_id(gname, app_ids, ("GOVERNOR_", "GOVERNOR_THE_"))
-            city_id = None
-            for city in _lst(gv.get("cities")):
-                if isinstance(city, dict) and (_norm(city.get("name")).replace("_", "") == _norm(city_text).replace("_", "")
-                                               or str(city.get("city_id")) == city_text.strip()):
-                    city_id = str(city.get("city_id"))
-            if gid is None:
-                notes.append(f"{key}={value}: governor not appointed")
-            elif city_id is None:
-                notes.append(f"{key}={value}: city {city_text} is not yours")
-            elif _gov_entry_city(appointed, gid) == city_id:
-                notes.append(f"{key}={value}: {gid} is already assigned there; no order needed (moving it restarts establishing)")
-            elif _gov_establishing(appointed, gid):
-                notes.append(f"{key}={value}: {gid} is still establishing in its city; moving it now restarts that, so it was kept")
-            else:
-                ids.append(_add_command(snapshot, "assign_governor", {"governor_id": gid, "city_id": city_id},
-                                        f"assign {gid} to {city_text}"))
+            # One value may carry several "GOV @ City" pairs (";" or "," between them).
+            pairs = [p.strip() for p in re.split(r"[;,]", value)] if len(re.findall(r"[@:=]", value)) > 1 else [value]
+            for value in [p for p in pairs if p]:
+                gname, city_text = _split_pair(value, "@:=")
+                gid = _match_id(gname, app_ids, ("GOVERNOR_", "GOVERNOR_THE_"))
+                city_id = None
+                for city in _lst(gv.get("cities")):
+                    if isinstance(city, dict) and (_norm(city.get("name")).replace("_", "") == _norm(city_text).replace("_", "")
+                                                   or str(city.get("city_id")) == city_text.strip()):
+                        city_id = str(city.get("city_id"))
+                if gid is None:
+                    notes.append(f"{key}={value}: governor not appointed")
+                elif city_id is None:
+                    notes.append(f"{key}={value}: city {city_text} is not yours")
+                elif _gov_entry_city(appointed, gid) == city_id:
+                    notes.append(f"{key}={value}: {gid} is already assigned there; no order needed (moving it restarts establishing)")
+                elif _gov_establishing(appointed, gid):
+                    notes.append(f"{key}={value}: {gid} is still establishing in its city; moving it now restarts that, so it was kept")
+                else:
+                    ids.append(_add_command(snapshot, "assign_governor", {"governor_id": gid, "city_id": city_id},
+                                            f"assign {gid} to {city_text}"))
         elif action == "promote":
             gname, promo_text = _split_pair(value, ":@=")
             gid = _match_id(gname, app_ids, ("GOVERNOR_", "GOVERNOR_THE_"))
