@@ -91,7 +91,7 @@ Civ6Ai_Orders.DECISION_KINDS = {
   [35] = true, [36] = true, [37] = true,
 }
 -- Intent on a MOVE (param A). N is the batch count on the wire, so intent is A.
-Civ6Ai_Orders.INTENT = { MOVE = 0, FOUND = 1, IMPROVE = 2, RELIGION = 3, TRADE = 4 }
+Civ6Ai_Orders.INTENT = { MOVE = 0, FOUND = 1, IMPROVE = 2, RELIGION = 3, TRADE = 4, EXPLORE = 5 }
 Civ6Ai_Orders.GOAL_MAX_AGE = 10
 -- Order fields kept in the queue (P is the seat itself). A missing field is
 -- stored as -1, which every kind that reads the field treats as "none".
@@ -542,6 +542,53 @@ function Civ6Ai_Orders._StoreGoal(owner, unitId, x, y, intent, extra)
   Game:SetProperty(Civ6Ai_Orders._GoalKey(owner, unitId, "W"), extra.W or -1)
   log("goal_set|player=" .. tostring(owner) .. "|unit=" .. tostring(unitId)
     .. "|xy=" .. tostring(x) .. "," .. tostring(y) .. "|intent=" .. tostring(intent or 0))
+end
+
+-- The model's Explore order (opt-in, never assigned by the host): one step
+-- toward the nearest reachable fog through Gov.Explore (same domain, embark
+-- and Cartography/ocean rules as any move), then a standing EXPLORE goal so
+-- the unit keeps exploring each turn until the model orders it otherwise
+-- (any new order for the unit clears its goal) or nothing reachable is left.
+function Civ6Ai_Orders._ExploreOrder(owner, unitId)
+  local unit = Civ6Ai_Orders._Unit(owner, unitId)
+  if unit == nil then
+    Civ6Ai_Orders._ClearGoal(owner, unitId)
+    return false, "stale_unit_id"
+  end
+  if (call(unit, "GetMovesRemaining") or 0) <= 0 then
+    return false, "explore_wait:no_moves"
+  end
+  local fromX, fromY = unit:GetX(), unit:GetY()
+  local ok, why = Civ6Ai_Orders.Gov.Explore(owner, unitId)
+  local text = tostring(why or "")
+  unit = Civ6Ai_Orders._Unit(owner, unitId)
+  local moved = unit ~= nil and (unit:GetX() ~= fromX or unit:GetY() ~= fromY)
+  if string.find(text, "explore_unavailable", 1, true) or unit == nil or (not ok and not moved) then
+    Civ6Ai_Orders._ClearGoal(owner, unitId)
+    log("explore_end|player=" .. tostring(owner) .. "|unit=" .. tostring(unitId) .. "|reason=" .. text)
+    return false, (text ~= "" and text or "explore_no_target")
+  end
+  Civ6Ai_Orders._StoreGoal(owner, unitId, unit:GetX(), unit:GetY(), Civ6Ai_Orders.INTENT.EXPLORE)
+  return true, ok and text or ("explore_moved:" .. text)
+end
+
+-- Read-only trace: every settler's position (slide-back diagnosis).
+function Civ6Ai_Orders._LogSettlers(stage, onlyOwner)
+  local turn = Game.GetCurrentGameTurn()
+  for owner = 0, 62 do
+    if onlyOwner == nil or onlyOwner == owner then
+      local p = Players[owner]
+      if p ~= nil and call(p, "IsMajor") == true then
+        for _, u in ipairs(sortedMembers(call(p, "GetUnits"))) do
+          if Civ6Ai_Orders._IsSettler(u) and u:GetX() >= 0 then
+            log("settler_pos|stage=" .. stage .. "|turn=" .. tostring(turn) .. "|player=" .. tostring(owner)
+              .. "|unit=" .. tostring(u:GetID()) .. "|xy=" .. tostring(u:GetX()) .. "," .. tostring(u:GetY())
+              .. "|moves=" .. tostring(call(u, "GetMovesRemaining")) .. "/" .. tostring(call(u, "GetMaxMoves")))
+          end
+        end
+      end
+    end
+  end
 end
 
 function Civ6Ai_Orders._IsSettler(unit)
@@ -1156,7 +1203,7 @@ function Civ6Ai_Orders._DoCommand(sender, o)
   elseif k == Civ6Ai_Orders.K.TRADE then
     return Civ6Ai_Orders.Gov.MakeTradeRoute(owner, o.U, o.I)
   elseif k == Civ6Ai_Orders.K.EXPLORE then
-    return false, "explore_removed"
+    return Civ6Ai_Orders._ExploreOrder(owner, o.U)
   elseif k == Civ6Ai_Orders.K.ACTIVATE_GP then
     return Civ6Ai_Orders.Gov.ActivateGreatPerson(owner, o.U, o.V)
   elseif k == Civ6Ai_Orders.K.SPREAD then
@@ -2608,6 +2655,17 @@ function Civ6Ai_Orders._ContinueGoal(owner, u)
   if goal == nil then
     return false
   end
+  if goal.intent == Civ6Ai_Orders.INTENT.EXPLORE then
+    local eRan, eok, ewhy = pcall(Civ6Ai_Orders._ExploreOrder, owner, uid)
+    if not eRan then
+      log("goal_error|player=" .. tostring(owner) .. "|unit=" .. tostring(uid) .. "|" .. trimErr(eok))
+      Civ6Ai_Orders._ClearGoal(owner, uid)
+      return false
+    end
+    log("explore_continue|player=" .. tostring(owner) .. "|unit=" .. tostring(uid)
+      .. "|ok=" .. tostring(eok) .. "|reason=" .. tostring(ewhy))
+    return eok == true
+  end
   if turn - (goal.setTurn or 0) >= Civ6Ai_Orders.GOAL_MAX_AGE then
     Civ6Ai_Orders._ClearGoal(owner, uid)
     log("goal_expired|player=" .. tostring(owner) .. "|unit=" .. tostring(uid))
@@ -2848,6 +2906,7 @@ end
 function Civ6Ai_Orders.OnPlayerTurnStartComplete(owner)
   local turn = Game.GetCurrentGameTurn()
   log("turn_start|player=" .. tostring(owner) .. "|turn=" .. tostring(turn))
+  pcall(Civ6Ai_Orders._LogSettlers, "player_turn_start", owner)
   Game:SetProperty("CIV6AI_STARTED_" .. tostring(owner), turn)
   pcall(Civ6Ai_Orders.ApplyEarlyLock, owner)
   pcall(Civ6Ai_Orders.SweepBuildNext, owner)
@@ -3175,6 +3234,7 @@ function Civ6Ai_Orders.ProbeApi()
 end
 
 function Civ6Ai_Orders.OnGameTurnStarted(turn)
+  pcall(Civ6Ai_Orders._LogSettlers, "game_turn_start", nil)
   pcall(Civ6Ai_Orders.ProbeApi)
   Civ6Ai_Orders._FlushOpenBatches(turn)
   local h, n = Civ6Ai_Orders.Checksum()
@@ -3321,6 +3381,11 @@ end
 -- ---------------------------------------------------------------------------
 Civ6Ai_Orders.Gov = Civ6Ai_Orders.Gov or {}
 local Gov = Civ6Ai_Orders.Gov
+
+-- Host direct route for the model's Explore order (same as K.EXPLORE).
+function Gov.ExploreOrder(owner, unitId)
+  return Civ6Ai_Orders._ExploreOrder(owner, unitId)
+end
 
 local function rowName(row, key)
   if row == nil then
@@ -6428,6 +6493,11 @@ function Civ6Ai_Orders.Init()
     end
     Civ6Ai_Orders._PublishTurnStart(owner)
   end)
+  if Events ~= nil and Events.PlayerTurnDeactivated ~= nil then
+    Events.PlayerTurnDeactivated.Add(function(owner)
+      pcall(Civ6Ai_Orders._LogSettlers, "player_turn_end", owner)
+    end)
+  end
   Civ6Ai_Orders.RegisterForceStrategies()
   local nPrio = Civ6Ai_Orders.RegisterPriorityStrategies()
   local okNext, nNext = pcall(Civ6Ai_Orders.RegisterBuildNext)

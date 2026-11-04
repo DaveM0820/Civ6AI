@@ -312,7 +312,7 @@ def _civ6_post_bind(snapshot: dict, validated: dict, commands: list) -> tuple[di
     unresolved = civ6_command_wire.take_unresolved()
     dropped = list(repeat_notes) + list(chat_notes) + list(buy_notes) + list(contra_notes)
     for token in unresolved:
-        if str(token).endswith("=Automate(explore)"):
+        if str(token).endswith(("=Automate(explore)", "=Explore")):
             continue  # already automated: nothing to do
         token = str(token)
         if token.startswith("dropped:"):

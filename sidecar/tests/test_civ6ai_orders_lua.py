@@ -1978,10 +1978,31 @@ class WpAApplyCoreTests(unittest.TestCase):
 
 
 
+    def test_explore_order_moves_and_persists_as_goal_until_new_order(self):
+        self._install_explore_map(sea=True, reveal_on_move=True)
+        self.rt.execute("GameInfo.Units[0].Combat = 25; Players[2].units[1].moves = 3")
+        uid = self.rt.eval("Players[2].units[1].id")
+        ok, why = self.rt.eval("(function() return Civ6Ai_Orders._ExploreOrder(2, %d) end)()" % uid)
+        self.assertTrue(ok, why)
+        intent = self.rt.eval("(function() local g = Civ6Ai_Orders._ReadGoal(2, %d) return g and g.intent end)()" % uid)
+        self.assertEqual(intent, 5)
+        # nothing in FALLBACKS explores on its own
+        names = self.rt.eval("(function() local t={} for _,r in ipairs(Civ6Ai_Orders.FALLBACKS) do t[#t+1]=r.name end return table.concat(t,',') end)()")
+        self.assertNotIn("explore", names)
+
+    def test_explore_order_ends_goal_when_nothing_reachable(self):
+        self._install_explore_map(sea=False, move=False)
+        self.rt.execute("Players[2].units[1].moves = 2")
+        uid = self.rt.eval("Players[2].units[1].id")
+        self.rt.execute("Civ6Ai_Orders._StoreGoal(2, %d, 2, 1, 5)" % uid)
+        ok = self.rt.eval("(function() return (Civ6Ai_Orders._ExploreOrder(2, %d)) end)()" % uid)
+        self.assertFalse(ok)
+        self.assertIsNone(self.rt.eval("Civ6Ai_Orders._ReadGoal(2, %d)" % uid))
+
     def test_trade_explore_activate_guarded_fallback(self):
         self.order(0, K=25, P=2, U=7, S=100)
         self.assertFalse(self.last()["ok"])
-        self.assertIn("explore_removed", self.last()["reason"])
+        self.assertIn("explore", self.last()["reason"])  # opt-in Explore runs (no visibility in this fake)
         self.order(0, K=26, P=2, U=7, S=101)
         self.assertFalse(self.last()["ok"])
         self.assertIn("activate_unavailable", self.last()["reason"])

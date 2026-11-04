@@ -604,9 +604,6 @@ function Civ6Ai_Apply._ApplyCommand(playerID, command)
     return Civ6Ai_Apply._Deal(playerID, command, args)
   end
   if command.kind == "explore" then
-    return false, "explore_removed", args
-  end
-  if false then
     return Civ6Ai_Apply._Work(playerID, command, args)
   end
   if command.kind == "trade_route" and Game.GetLocalPlayer() == playerID then
@@ -2078,7 +2075,7 @@ function Civ6Ai_Apply._Work(playerID, command, args)
   -- reachable fog, verified by newly revealed tiles). The local seat used to
   -- send UNITOPERATION_AUTOMATE_EXPLORE, which reported ok every turn without
   -- a measurable reveal and differed from the other seats.
-  local ok, reason = Civ6Ai_Apply._GovRoute(command.kind == "explore" and "Explore" or "PillageImprovement", playerID, unitNum, x, y)
+  local ok, reason = Civ6Ai_Apply._GovRoute(command.kind == "explore" and "ExploreOrder" or "PillageImprovement", playerID, unitNum, x, y)
   return ok, reason, args
 end
 

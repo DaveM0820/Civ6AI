@@ -106,17 +106,17 @@ class T71AttentionTests(unittest.TestCase):
         snap["history"]["command_results"] = [
             {"turn": 5, "reason": "explore_no_reveal:explore_to=1,1", "affected_ids": ["UNIT_9"], "order_kind": "explore"},
         ]
-        self.assertIn("Automate(explore)", civ6_wire._civ6_unit_tokens(snap)["UNIT_9"])
+        self.assertIn("Explore", civ6_wire._civ6_unit_tokens(snap)["UNIT_9"])
         self.assertTrue(civ6_wire._explore_offered(snap))
         snap["history"]["command_results"].append(
             {"turn": 6, "reason": "explore_no_reveal:stuck", "affected_ids": ["CMD_explore_UNIT_9"], "order_kind": "explore"},
         )
         tokens = civ6_wire._civ6_unit_tokens(snap)["UNIT_9"]
-        self.assertIn("Automate(explore)", tokens)
+        self.assertIn("Explore", tokens)
         self.assertTrue(civ6_wire._explore_offered(snap))
         snap["known_map"] = {"explored_percent": 4}
         self.assertTrue(civ6_wire._explore_offered(snap))
-        self.assertIn("Automate(explore)", civ6_wire._civ6_unit_tokens(snap)["UNIT_9"])
+        self.assertIn("Explore", civ6_wire._civ6_unit_tokens(snap)["UNIT_9"])
 
     def test_step_toward_reason_names_impassable(self):
         text = results.describe_reason("step_toward:12,11>12,10:moved:12,10")

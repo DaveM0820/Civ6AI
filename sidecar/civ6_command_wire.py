@@ -363,7 +363,7 @@ def unit_command_token(command: dict[str, Any]) -> str | None:
     if kind in UNIT_POSTURE_TOKENS:
         return UNIT_POSTURE_TOKENS[kind]
     if kind == "explore":
-        return "Automate(explore)"
+        return "Explore"
     if kind == "found_city":
         return "FoundCity"
     if kind == "upgrade_unit":
@@ -549,9 +549,9 @@ def resolve_unit_token(snapshot: dict[str, Any], unit_id: str, value: Any) -> st
             return cmd_id
         candidates.append((token, cmd_id))
     # Tolerant matches: synonyms (RangedAttack, Move, Settle, Disband), a bare verb for
-    # arg-less orders (Automate for Automate(explore)), or bare coordinates meaning MoveTo.
+    # arg-less orders (Explore; the old Automate(explore) still maps to it), or bare coordinates meaning MoveTo.
     synonyms = {"rangedattack": "attackto", "attack": "attackto", "move": "moveto",
-                "found": "foundcity", "explore": "automate",
+                "found": "foundcity", "automate": "explore",
                 "disband": "delete", "improvetile": "improve"}
     match = _TOKEN_RE.match(str(value))
     has_verb = bool(match) and not str(value).strip().startswith("(")
@@ -1133,7 +1133,7 @@ def expand_civ6_command_wire(snapshot: dict[str, Any], response: dict[str, Any])
             continue
         if prop and head not in units and head.lower() not in cities and prop.lower() in {
             "command", "moveto", "move", "settle", "found", "traderoute", "trade_route",
-            "attack", "attackto", "fortify", "skip", "improve", "automate",
+            "attack", "attackto", "fortify", "skip", "improve", "automate", "explore",
         }:
             known = ", ".join(list(units)[:12])
             shown = f" Known units: {known}." if known else ""

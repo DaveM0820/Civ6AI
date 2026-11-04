@@ -2212,9 +2212,9 @@ def _advice_section(context: dict[str, Any]) -> list[str]:
         command = ""
         if _explore_offered(context):
             command = (
-                " Automate(explore), when it is listed on a unit's row, walks that scout, soldier, or ship "
-                "toward the nearest fog it can reach this turn. Order it again next turn to keep going. "
-                "Land units stop at the coast; ships explore water. MoveTo a tile you chose is just as valid."
+                " Explore, when it is listed on a unit's row, sends that scout, soldier, ship or embarked unit "
+                "toward the nearest fog it can reach and keeps it exploring each turn until you give it another "
+                "order. MoveTo a tile you chose is just as valid."
             )
         lines.append(
             f"- The world map is {explored}% explored and {100 - explored}% still unexplored gray fog.{command}"
@@ -2303,7 +2303,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         "",
         "Game orders (executable JSON keys — must match REQUIRED COMMANDS rows):",
         "unitId.command = MoveTo(x,y) | AttackTo(x,y) | "
-        + ("Automate(explore) | " if _explore_offered(snapshot) else "")
+        + ("Explore | " if _explore_offered(snapshot) else "")
         + "FoundCity | "
         + ("Improve(x,y,IMPROVEMENT_X) (builders) | " if _improve_offered(snapshot) else "")
         + "Fortify | Skip "
@@ -2315,9 +2315,8 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
         ),
         f"legal.research.tech, legal.research.civic, chat.all, {chat_dm_examples(snapshot)} — see OPTIONAL COMMANDS.",
         *(
-            ["Automate(explore), when it is listed on that unit's row, walks a scout, soldier, or ship toward "
-             "unrevealed tiles this turn. Order it again next turn to continue. Land units stop at the coast; "
-             "ships explore water. Nothing assigns this for you."]
+            ["Explore, when it is listed on that unit's row, keeps that unit (land, embarked or ship) moving "
+             "toward reachable unrevealed tiles every turn until you order it otherwise. Only you assign it."]
             if _explore_offered(snapshot) else []
         ),
         "",

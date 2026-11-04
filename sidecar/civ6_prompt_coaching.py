@@ -56,7 +56,8 @@ CIV6_GAME_PRIMER = (
     "ranged. Build a navy: ships explore coasts, escort embarked settlers to new land, screen embarked units, "
     "raid and besiege coastal cities and control sea lanes. Fog hides most of the map all game: exploring on land "
     "AND water never stops; scouts, ships and embarked units are all explorers (goody huts, city-states, natural "
-    "wonders, rivals, settle spots on other land). Tactics: read the map tactically; know each unit's movement and attack range; focus fire to "
+    "wonders, rivals, settle spots on other land); an Explore order, where listed, keeps a unit exploring until you "
+    "order it otherwise. Tactics: read the map tactically; know each unit's movement and attack range; focus fire to "
     "kill one unit before the next; a mutually supporting front, ranged behind melee; chokepoints; retreat and "
     "heal damaged units; take cities with siege plus melee."
 )

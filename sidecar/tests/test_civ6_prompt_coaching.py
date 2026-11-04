@@ -173,11 +173,11 @@ class Civ6PromptCoachingTests(unittest.TestCase):
         self.assertIn("map.unexplored = 82%", prompt)
         self.assertIn("delegation does not", prompt.lower())
         instructions = civ6_wire.build_civ6_response_instructions(snap)
-        self.assertIn("Automate(explore)", instructions)
-        self.assertIn("Nothing assigns this for you", instructions)
+        self.assertIn("Explore", instructions)
+        self.assertIn("Only you assign it", instructions)
         advice = "\n".join(civ6_wire._advice_section(snap))
         self.assertIn("82% still unexplored gray fog", advice)
-        self.assertIn("Automate(explore)", advice)
+        self.assertIn("Explore", advice)
         self.assertIn("just as valid", advice)
         # 612 / (74*46) is the real visibility. The cached 18% stays on map.explored.
         self.assertIn("map.revealed_tiles = 612 of 3404 tiles", prompt)
@@ -226,7 +226,7 @@ class Civ6PromptCoachingTests(unittest.TestCase):
             "game": {"map_width": 60, "wrap_x": True},
         }
         text = civ6_wire.build_civ6_response_instructions(snap)
-        self.assertNotIn("Automate(explore)", text)
+        self.assertNotIn("Explore", text)
 
     def test_advice_mentions_expansion_when_settler_present(self):
         snap = {

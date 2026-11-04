@@ -14,7 +14,7 @@ def _snap():
 
 def _hold(hint):
     opts = hint.split(" | ")
-    return next((o for o in ("Fortify", "Skip", "Automate(explore)") if o in opts), opts[-1])
+    return next((o for o in ("Fortify", "Skip", "Explore") if o in opts), opts[-1])
 
 
 def _full_reply(snap):

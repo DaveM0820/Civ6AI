@@ -73,3 +73,17 @@ class GovernorAssignTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExploreTokenTests(unittest.TestCase):
+    def test_explore_and_legacy_token_resolve_to_explore_command(self):
+        from sidecar import civ6_command_wire as cw
+        snap = {"your_units": [{"unit_id": "UNIT_9", "unit_type_id": "UNIT_GALLEY"}],
+                "legal_commands": [{"command_id": "CMD_explore_UNIT_9", "kind": "explore",
+                                    "fixed_arguments": {"unit_id": "UNIT_9"}}]}
+        self.assertEqual(cw.resolve_unit_token(snap, "UNIT_9", "Explore"), "CMD_explore_UNIT_9")
+        self.assertEqual(cw.resolve_unit_token(snap, "UNIT_9", "Automate(explore)"), "CMD_explore_UNIT_9")
+
+
+if __name__ == "__main__":
+    unittest.main()
