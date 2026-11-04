@@ -1886,16 +1886,6 @@ function Civ6Ai_Orders._IsExplorer(unit)
   return row.Domain == "DOMAIN_SEA"
 end
 
--- A combat ship (not a trader/civilian) is the only unit the host explore
--- fallback moves without a hint; land scouts stay under model orders.
-function Civ6Ai_Orders._IsIdleShip(unit)
-  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[call(unit, "GetType")] or nil
-  if row == nil or row.Domain ~= "DOMAIN_SEA" or row.MakeTradeRoute == true then
-    return false
-  end
-  return Civ6Ai_Orders._IsExplorer(unit)
-end
-
 -- Hint roles (param A on a K.HINT order). The sidecar proposes a target from
 -- the seat's snapshot, in the same synced batch; this pass decides.
 Civ6Ai_Orders.HINT_ROLE = { EXPLORE = 1, IMPROVE = 2, DEFEND = 3, SETTLE = 4, PRIORITY = 9 }
@@ -1909,7 +1899,6 @@ Civ6Ai_Orders.FALLBACKS = {
   { name = "settle", unit = "_FbSettle" },
   { name = "improve", unit = "_FbImprove" },
   { name = "defend", unit = "_FbDefend" },
-  { name = "explore", unit = "_FbExplore" },
   { name = "priority", seat = "_FbPriority" },
 }
 
@@ -1964,11 +1953,8 @@ function Civ6Ai_Orders._FbExplore(sender, owner, unit, hint, enabled)
   if hinted(hint, Civ6Ai_Orders.HINT_ROLE.EXPLORE) and hasTarget(hint) then
     return Civ6Ai_Orders._FbRun(sender, owner, unit, { K = Civ6Ai_Orders.K.MOVE, X = hint.X, Y = hint.Y }, "move_unit")
   end
-  -- With no hint, only an idle ship the model left without orders explores
-  -- (Gov.Explore walks toward reachable water fog; ocean needs Cartography,
-  -- so unreachable deep-water targets fail the path and are skipped).
   if not hinted(hint, Civ6Ai_Orders.HINT_ROLE.EXPLORE)
-      and not (hint == nil and enabled and Civ6Ai_Orders._IsIdleShip(unit)) then
+      and not (hint == nil and enabled and Civ6Ai_Orders._IsExplorer(unit)) then
     return false
   end
   local uid = unit:GetID()
