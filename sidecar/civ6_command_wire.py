@@ -650,6 +650,8 @@ INTENT_FOUND = "found"
 INTENT_IMPROVE = "improve"
 INTENT_FOUND_RELIGION = "found_religion"
 INTENT_TRADE = "trade"
+INTENT_EXPLORE = "explore"  # A=5: the model's Explore order as a standing goal (never packed as MOVE)
+GOAL_INTENT_NAMES = {"0": "move", "1": "found", "2": "improve", "3": "found_religion", "4": "trade", "5": "explore"}
 INTENT_A_CODES = {
     INTENT_MOVE: 0,
     INTENT_FOUND: 1,
@@ -1194,7 +1196,7 @@ def sitrep_offer_lines(snapshot: dict[str, Any]) -> list[str]:
             eta_bit = f" ETA~{eta}" if eta is not None else ""
             lines.append(pipeline_mod._wire_line(
                 f"{prefix}.goal",
-                f"({goal.get('x')},{goal.get('y')}) {goal.get('intent') or 'move'}{eta_bit}",
+                f"({goal.get('x')},{goal.get('y')}) {GOAL_INTENT_NAMES.get(str(goal.get('intent')), goal.get('intent')) or 'move'}{eta_bit}",
             ))
         settle = unit.get("settle")
         if not isinstance(settle, dict):

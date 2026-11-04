@@ -322,3 +322,17 @@ class LiveSnapshotSchemaTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GoalIntentSchemaTest(unittest.TestCase):
+    def test_every_lua_goal_intent_passes_schema(self):
+        import re
+        lua = (ROOT / "mod" / "Civ6Ai" / "Gameplay" / "Civ6Ai_Orders.lua").read_text(encoding="utf-8")
+        body = re.search(r"Civ6Ai_Orders\.INTENT = \{([^}]*)\}", lua).group(1)
+        codes = [int(v) for v in re.findall(r"=\s*(\d+)", body)]
+        self.assertIn(5, codes)  # EXPLORE
+        raw = json.loads((ROOT / "fixtures" / "civ6" / "live-runtime-t1-snapshot.json").read_text(encoding="utf-8"))
+        for a in codes:
+            snap = civ6_adapter.upgrade_runtime_snapshot(json.loads(json.dumps(raw)))
+            snap["your_units"][0]["goal"] = {"x": 3, "y": 4, "intent": str(a), "A": a, "eta": None, "set_turn": 1}
+            civ6_adapter.validate_civ6_snapshot(snap)
