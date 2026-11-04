@@ -1978,6 +1978,16 @@ class WpAApplyCoreTests(unittest.TestCase):
 
 
 
+    def test_explore_fallback_moves_idle_ship_not_land_unit(self):
+        self.assertIn("explore", self.rt.eval("(function() local t={} for _,r in ipairs(Civ6Ai_Orders.FALLBACKS) do t[#t+1]=r.name end return table.concat(t,',') end)()"))
+        self._install_explore_map(sea=True, reveal_on_move=True)
+        self.rt.execute("GameInfo.Units[0].Combat = 25; GameInfo.Units[0].UnitType = 'UNIT_GALLEY'; Players[2].units[1].moves = 3")
+        ok = self.rt.eval("(function() local u = Civ6Ai_Orders._Unit(2, Players[2].units[1].id) return (Civ6Ai_Orders._FbExplore(0, 2, u, nil, true)) end)()")
+        self.assertTrue(ok)
+        self.rt.execute("GameInfo.Units[0].Domain = 'DOMAIN_LAND'; GameInfo.Units[0].UnitType = 'UNIT_WARRIOR'; Players[2].units[1].moves = 3")
+        ok = self.rt.eval("(function() local u = Civ6Ai_Orders._Unit(2, Players[2].units[1].id) return (Civ6Ai_Orders._FbExplore(0, 2, u, nil, true)) end)()")
+        self.assertFalse(ok)
+
     def test_trade_explore_activate_guarded_fallback(self):
         self.order(0, K=25, P=2, U=7, S=100)
         self.assertFalse(self.last()["ok"])
