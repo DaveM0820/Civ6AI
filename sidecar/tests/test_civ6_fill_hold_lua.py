@@ -83,6 +83,7 @@ def test_api_probe_is_read_only_chunked_and_once():
       Game = {GetCurrentGameTurn = function() return 1 end}
       Civ6Ai_Orders.ProbeApi() Civ6Ai_Orders.ProbeApi()""")
     logs = list(lua.globals().LOG.values())
-    bq = [l for l in logs if "obj=BuildQueue" in l]
+    bq = [l for l in logs if "obj=BuildQueue" in l and "part=" in l]
     assert len(bq) == 2 and "part=1/2" in bq[0] and "count=45" in bq[0]
+    assert any("obj=BuildQueue|callable=" in l for l in logs)
     assert any("obj=CityManager|missing" in l for l in logs)

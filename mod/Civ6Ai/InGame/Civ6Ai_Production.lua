@@ -1178,6 +1178,39 @@ function Civ6Ai_Production._HoldFillForModel(playerID, turn)
   return rec.waits <= Civ6Ai_Production.FILL_HOLD_WAIT
 end
 
+
+-- Active build.next pick for this seat (synced CIV6AI_PICK_*), if still young.
+-- Used so host empty-queue fill honors an explicit pick instead of assuming
+-- weighted priorities are the only option (g12: fill ignored CIV6AI_PICK).
+function Civ6Ai_Production.ActiveBuildNextItem(playerID)
+  if Game == nil or Game.GetProperty == nil then
+    return nil
+  end
+  local idx = tonumber(Game:GetProperty("CIV6AI_PICK_" .. tostring(playerID))) or 0
+  if idx == 0 then
+    return nil
+  end
+  local setTurn = tonumber(Game:GetProperty("CIV6AI_PICK_T_" .. tostring(playerID))) or -1
+  local turn = Game.GetCurrentGameTurn and Game.GetCurrentGameTurn() or 0
+  local maxAge = 12
+  if Civ6Ai_Orders ~= nil and Civ6Ai_Orders.BUILD_NEXT_TURNS ~= nil then
+    maxAge = Civ6Ai_Orders.BUILD_NEXT_TURNS
+  end
+  if setTurn >= 0 and turn - setTurn > maxAge then
+    return nil
+  end
+  local item = nil
+  pcall(function()
+    local list = {}
+    for row in GameInfo.Civ6Ai_NextItems() do
+      list[#list + 1] = row.Item
+    end
+    table.sort(list)
+    item = list[idx]
+  end)
+  return item
+end
+
 function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID, afterApply)
   if Game == nil or Game.GetLocalPlayer == nil or Game.GetLocalPlayer() ~= playerID then
     return 0
@@ -1209,6 +1242,16 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID, afterApply)
       options, onlyNote = Civ6Ai_Production.SettlersOnly(options, situation)
       local seed = (playerID * 1000003 + (cid % 65536) * 7919 + turn * 104729) % 2147483648
       local pick, total = Civ6Ai_Production.WeightedPick(options, seed, situation)
+      -- Explicit build.next beats weighting when that item is buildable here.
+      local nextItem = Civ6Ai_Production.ActiveBuildNextItem(playerID)
+      if nextItem ~= nil then
+        for _, o in ipairs(options) do
+          if o.id == nextItem then
+            pick = o
+            break
+          end
+        end
+      end
       local outcome = "nothing_buildable"
       if pick ~= nil then
         local params = {}
@@ -1234,6 +1277,12 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID, afterApply)
       table.sort(top, function(a, b) return a.weight > b.weight or (a.weight == b.weight and a.id < b.id) end)
       local parts = {}
       for i = 1, math.min(5, #top) do parts[#parts + 1] = top[i].id .. "=" .. tostring(top[i].weight) end
+      local nextNote = ""
+      if nextItem ~= nil and pick ~= nil and pick.id == nextItem then
+        nextNote = "|honored_build_next=" .. nextItem
+      elseif nextItem ~= nil then
+        nextNote = "|build_next_unbuildable_here=" .. nextItem
+      end
       Civ6Ai_Util.Log("production|fill_empty|player=" .. tostring(playerID) .. "|turn=" .. tostring(turn)
         .. "|city=" .. tostring(cid) .. "|build=" .. tostring(pick and pick.id or "")
         .. "|weight=" .. tostring(pick and pick.weight or 0) .. "/" .. tostring(total)
@@ -1243,6 +1292,7 @@ function Civ6Ai_Production.FillEmptyQueuesWeighted(playerID, afterApply)
         .. "|hostiles=" .. tostring(select(2, Civ6Ai_Production.ThreatNear(playerID, cities)) or 0)
         .. "|defenders=" .. tostring(select(3, Civ6Ai_Production.ThreatNear(playerID, cities)) or 0)
         .. (onlyNote and ("|settlers_only=" .. onlyNote) or "")
+        .. nextNote
         .. "|" .. outcome)
     end
   end

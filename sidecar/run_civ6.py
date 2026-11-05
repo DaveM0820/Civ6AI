@@ -735,6 +735,12 @@ def main() -> None:
 
     raw = _read(state_path)
     snapshot = civ6_adapter.upgrade_runtime_snapshot(raw) if args.from_game else raw
+    try:
+        # Recover plots omitted by Lua MAX_MAP_PLOTS from visibility_grid before
+        # legality / prompt / apply treat missing JSON as "not explored".
+        pipeline.ensure_known_map_plots(snapshot)
+    except Exception as error:
+        print(f"known_map ensure skipped: {error}", file=sys.stderr)
     civ6_adapter.normalize_civ6_snapshot(snapshot)
     try:  # a captured/killed unit can linger one snapshot; it takes no orders
         civ6_apply_results.drop_gone_units(snapshot)

@@ -3231,6 +3231,29 @@ function Civ6Ai_Orders.ProbeApi()
         .. "/" .. tostring(#chunks) .. "|names=" .. table.concat(c, ","))
     end
   end
+  -- pairs/__index often only shows __instance for C++ userdata. Also try known
+  -- method names with pcall(obj.Name ~= nil / type(obj.Name)) — read-only, no calls
+  -- that mutate production. Logs which candidates exist as callable fields.
+  local bq = city ~= nil and call(city, "GetBuildQueue") or nil
+  if bq ~= nil then
+    local candidates = {
+      "CanProduce", "CurrentlyBuilding", "GetCurrentProductionTypeHash", "GetProductionProgress",
+      "GetProgress", "GetCost", "GetTurnsLeft", "GetSize", "HasDistrictBeenPlaced",
+      "CreateIncompleteBuilding", "AddUnit", "RemoveUnit", "FinishProgress", "GetConscriptUnitType",
+      "GetPreviousProductionTypeHash", "IsBuildingProductionPaused",
+    }
+    local present, absent = {}, {}
+    for _, name in ipairs(candidates) do
+      local ok, v = pcall(function() return bq[name] end)
+      if ok and type(v) == "function" then
+        present[#present + 1] = name
+      else
+        absent[#absent + 1] = name .. ":" .. tostring(ok and type(v) or v)
+      end
+    end
+    log("probe|api|obj=BuildQueue|callable=" .. table.concat(present, ",")
+      .. "|missing_or_nonfn=" .. table.concat(absent, ","))
+  end
 end
 
 function Civ6Ai_Orders.OnGameTurnStarted(turn)
@@ -5770,7 +5793,7 @@ end
 -- The pick clears when one of the seat's cities starts it. Answers come only
 -- from synced properties and game events, so every PC agrees.
 -- ---------------------------------------------------------------------------
-Civ6Ai_Orders.BUILD_NEXT_TURNS = 5
+Civ6Ai_Orders.BUILD_NEXT_TURNS = 12
 
 function Civ6Ai_Orders.BuildNextItems()
   if Civ6Ai_Orders._nextItems ~= nil then
@@ -5791,6 +5814,25 @@ function Civ6Ai_Orders.BuildNextPick(owner)
   local idx = num(Game:GetProperty("CIV6AI_PICK_" .. tostring(owner))) or 0
   local setTurn = num(Game:GetProperty("CIV6AI_PICK_T_" .. tostring(owner))) or -1
   return idx, setTurn
+end
+
+
+-- Match current city production to the pick. GetCurrentProductionTypeHash alone
+-- never cleared a pick in g12 (0 of ~80 starts logged started_city_*); CurrentlyBuilding
+-- is what InGame/checksum already use successfully in Gameplay.
+local function productionMatchesPick(bq, row, item)
+  if bq == nil or item == nil then
+    return false
+  end
+  local current = call(bq, "GetCurrentProductionTypeHash")
+  if row ~= nil and current ~= nil and current ~= 0 and current == row.Hash then
+    return true
+  end
+  local name = call(bq, "CurrentlyBuilding")
+  if type(name) == "string" and name ~= "" and name ~= "NONE" and name == item then
+    return true
+  end
+  return false
 end
 
 local function clearPick(owner, why)
@@ -5853,8 +5895,7 @@ function Civ6Ai_Orders.OnBuildNextProductionChanged(owner, cityID)
   local player = Players[owner]
   local city = player ~= nil and call(call(player, "GetCities"), "FindID", cityID) or nil
   local bq = city ~= nil and call(city, "GetBuildQueue") or nil
-  local current = bq ~= nil and call(bq, "GetCurrentProductionTypeHash") or nil
-  if row ~= nil and current ~= nil and current == row.Hash then
+  if productionMatchesPick(bq, row, item) then
     clearPick(owner, "started_city_" .. tostring(cityID))
   end
 end
@@ -5874,15 +5915,17 @@ function Civ6Ai_Orders.SweepBuildNext(owner)
     return
   end
   local item = Civ6Ai_Orders.BuildNextItems()[idx]
-  local row = item ~= nil and (GameInfo.Units[item] or GameInfo.Buildings[item] or GameInfo.Districts[item]) or nil
+  if item == nil then
+    return
+  end
+  local row = GameInfo.Units[item] or GameInfo.Buildings[item] or GameInfo.Districts[item]
   local player = Players[owner]
-  if row == nil or player == nil then
+  if player == nil then
     return
   end
   for _, city in call(player, "GetCities"):Members() do
     local bq = call(city, "GetBuildQueue")
-    local current = bq ~= nil and call(bq, "GetCurrentProductionTypeHash") or nil
-    if current ~= nil and current == row.Hash then
+    if productionMatchesPick(bq, row, item) then
       clearPick(owner, "started_city_" .. tostring(call(city, "GetID")))
       return
     end

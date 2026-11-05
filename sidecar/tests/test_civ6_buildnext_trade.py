@@ -219,3 +219,26 @@ class TradeSnapshotLuaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class BuildNextPromptHonestyTests(unittest.TestCase):
+    def test_prompt_says_bias_not_hard_queue(self):
+        from sidecar import civ6_build_next as bn
+        snap = {
+            "legal_commands": [{
+                "kind": "set_build_next",
+                "command_id": "CMD_NEXT_UNIT_SETTLER",
+                "fixed_arguments": {"item_id": "UNIT_SETTLER", "turns": 4, "city_name": "Rome"},
+            }],
+            "civ6": {"build_next": {"item_id": "UNIT_SETTLER", "set_turn": 10, "expires_turn": 22}},
+        }
+        text = "\n".join(bn.prompt_lines(snap))
+        self.assertIn("biases the game's production AI", text)
+        self.assertIn("does not hard-queue", text)
+        self.assertIn("Re-send build.next", text)
+        self.assertIn("Current pick: UNIT_SETTLER", text)
+        self.assertIn("lapses after T22", text)
+
+    def test_orders_build_next_turns_is_twelve(self):
+        orders = (ROOT / "mod/Civ6Ai/Gameplay/Civ6Ai_Orders.lua").read_text(encoding="utf-8")
+        self.assertIn("Civ6Ai_Orders.BUILD_NEXT_TURNS = 12", orders)
+        self.assertNotIn("Civ6Ai_Orders.BUILD_NEXT_TURNS = 5", orders)

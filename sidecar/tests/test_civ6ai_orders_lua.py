@@ -1375,6 +1375,58 @@ class OrdersGameplayTests(unittest.TestCase):
         self.order(0, K=37, P=2, I=9, S=73)
         self.assertFalse(self.last()["ok"])
 
+    def test_build_next_clears_via_currently_building_string(self):
+        """g12: GetCurrentProductionTypeHash never cleared picks; string path must."""
+        self.rt.execute(r"""
+          GameInfo.Units.UNIT_ARCHER = {Index=1, Hash=777}
+          GameInfo.Buildings = {BUILDING_GRANARY={Index=5, Hash=555}}
+          GameInfo.Districts = {}
+          local rows = {{Item="UNIT_ARCHER"}, {Item="BUILDING_GRANARY"}}
+          GameInfo.Civ6Ai_NextItems = function() local i = 0
+            return function() i = i + 1; return rows[i] end end
+          Civ6Ai_Orders._nextItems = nil
+          Civ6Ai_Orders.RegisterBuildNext()
+          CUR_NAME = "NONE"
+          Players[2].GetCities = function() return {
+            Members=function()
+              local once = true
+              return function()
+                if not once then return end
+                once = false
+                return 1, {GetID=function() return 9 end,
+                  GetBuildQueue=function() return {
+                    GetCurrentProductionTypeHash=function() return 0 end,
+                    CurrentlyBuilding=function() return CUR_NAME end,
+                  } end}
+              end
+            end,
+            FindID=function(_, id)
+              return {GetBuildQueue=function() return {
+                GetCurrentProductionTypeHash=function() return 0 end,
+                CurrentlyBuilding=function() return CUR_NAME end,
+              } end}
+            end} end
+        """)
+        self.order(0, K=37, P=2, I=1, S=80)
+        self.assertTrue(self.last()["ok"])
+        fire = lambda item, p: self.rt.eval("GameEvents.Civ6AiNext_%s.fns[1](%d, 0)" % (item, p))
+        self.assertTrue(fire("BUILDING_GRANARY", 2))
+        # Hash 0 + wrong name: still active
+        self.rt.execute("CUR_NAME = 'UNIT_ARCHER'; Civ6Ai_Orders.OnBuildNextProductionChanged(2, 9)")
+        self.assertTrue(fire("BUILDING_GRANARY", 2))
+        # String match clears even when hash is 0
+        self.rt.execute("CUR_NAME = 'BUILDING_GRANARY'; Civ6Ai_Orders.OnBuildNextProductionChanged(2, 9)")
+        self.assertFalse(fire("BUILDING_GRANARY", 2))
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_PICK_2')"), 0)
+        logs = _vals(self.rt.eval("logs"))
+        self.assertTrue(any("why=started_city_9" in l for l in logs))
+        # Sweep path too
+        self.order(0, K=37, P=2, I=2, S=81)
+        self.assertTrue(fire("UNIT_ARCHER", 2))
+        self.rt.execute("CUR_NAME = 'UNIT_ARCHER'; Civ6Ai_Orders.SweepBuildNext(2)")
+        self.assertFalse(fire("UNIT_ARCHER", 2))
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_PICK_2')"), 0)
+
     def test_force_build_needs_a_seat(self):
         self.order(0, K=49, V=1, S=53)
         self.order(0, K=63, I=1, S=54)

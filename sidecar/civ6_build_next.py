@@ -1,11 +1,13 @@
 """'Build next' for the game's AI seats (set_build_next).
 
-The model names one item for its seat. The mod switches on that item's
-one-entry favoured list (Data/Civ6Ai_BuildNext.sql, weight 1000) through a
-synced game property, so the engine AI starts it at the next empty queue in a
-city of its own choice, with vanilla costs and modifiers. The pick clears when
-a city starts it, or after BUILD_NEXT_TURNS turns. Several cities emptying
-their queues the same turn can all start it (accepted tradeoff).
+The model names one item for its seat. The mod turns on that item's
+favoured + category PseudoYield strategy (Data/Civ6Ai_BuildNext.sql) through a
+synced game property so the engine AI is biased to start it at the next empty
+queue in a city of its own choice (vanilla costs). This is a bias, not a hard
+queue: the native AI can still finish other buildings/units first (g12 P2
+CARAVEL active 16 turns while cities completed other items). The pick clears
+when a city starts it, or after BUILD_NEXT_TURNS turns without reaffirm. Host
+empty-queue fill prefers the active pick when CanProduce.
 """
 from __future__ import annotations
 
@@ -59,10 +61,11 @@ def prompt_lines(snapshot: dict[str, Any]) -> list[str]:
     pick = current_pick(snapshot)
     lines = ["=== BUILD NEXT ==="]
     lines.append(
-        "You can name one item your empire builds next. The game starts it in one of your cities the next time "
-        "a city's queue empties (the game picks the city, at normal cost); it does not interrupt a build in "
-        "progress. If several cities empty their queues the same turn, more than one may start it. The pick "
-        "ends when a city starts it, or after a few turns.")
+        "You can name one item your empire should build next. This biases the game's production AI "
+        "(it does not hard-queue that item and does not stop builds already in progress). The game "
+        "chooses which of your cities starts it when a queue empties, at normal cost. Re-send build.next "
+        "each turn until a city shows it as currentProduction — omitting it for several turns lets the "
+        "pick lapse. If several cities empty the same turn, more than one may start it.")
     if pick:
         exp = pick.get("expires_turn")
         lines.append(f"Current pick: {pick.get('item_id')} (set T{pick.get('set_turn', '?')}"

@@ -376,10 +376,13 @@ def found_block_text(snapshot: dict[str, Any], unit: dict[str, Any] | None, reas
 def embarked_text(unit: dict[str, Any], snapshot: dict[str, Any]) -> str | None:
     """'embarked on ocean' / 'embarked on coast' for a land unit standing on water."""
     from sidecar import civ6_legality
+    from sidecar import pipeline_v2 as pipeline
 
     if str(unit.get("domain_id") or "DOMAIN_LAND") != "DOMAIN_LAND":
         return None
     xy = civ6_legality.plot_xy(unit)
+    if xy is None:
+        return None
     known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
     for p in known.get("plots") or []:
         if isinstance(p, dict) and (p.get("x"), p.get("y")) == xy:
@@ -387,6 +390,10 @@ def embarked_text(unit: dict[str, Any], snapshot: dict[str, Any]) -> str | None:
                 return None
             ocean = str(p.get("terrain_id") or "") == "TERRAIN_OCEAN"
             return "embarked on " + ("ocean" if ocean else "coast") + " (cities are founded on land)"
+    # Plot list may be capped; visibility_grid still marks water (o/~).
+    cell = pipeline.visibility_cell_at(snapshot, *xy)
+    if cell in ("o", "~"):
+        return "embarked on " + ("ocean" if cell == "o" else "coast") + " (cities are founded on land)"
     return None
 
 
@@ -1289,8 +1296,10 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
         bits.append("inland")
     if bits:
         lines.append(pipeline._wire_line(f"{prefix}.settle.here", ", ".join(bits)))
-    # No settle-site suggestions: the settler gets MoveTo(x,y) and FoundCity on its own tile.
-    return lines
+    # Nearby sites when FoundCity is not legal here (g12 P4 settler_6: sites existed in
+    # the snapshot but an early return hid them). Skip when here is already legal.
+    if here_ok is True:
+        return lines
     sites = settle.get("sites") if settle else None
     if isinstance(sites, list) or (settle.get("no_reachable_site") and here_ok is not True):
         from sidecar import civ6_command_wire as command_wire
@@ -1317,7 +1326,7 @@ def settler_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, An
             bits.extend(command_wire._walk_bits(site))
             labels.append(", ".join(bits) if len(bits) > 1 else bits[0])
         if labels:
-            lines.append(pipeline._wire_line(f"{prefix}.settle.nearby", "; ".join(labels)))
+            lines.append(pipeline._wire_line(f"{prefix}.settle.nearby", "; ".join(labels[:8])))
         else:
             embark = settle.get("embark_site") if isinstance(settle.get("embark_site"), dict) else None
             if embark is not None:
