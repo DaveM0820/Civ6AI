@@ -299,8 +299,8 @@ class DiplomacyWireTests(unittest.TestCase):
             self.assertIn("did not end the war", status)
             self.assertNotIn("at peace", status.lower())
 
-    def test_respond_accept_with_trailing_terms_accepts_offer(self):
-        """ACCEPT give ... accepts the pending offer; extra terms are ignored, not a drop."""
+    def test_respond_accept_with_trailing_terms_is_rejected(self):
+        """ACCEPT give ... must NOT accept; conditional accept is refused with syntax guidance."""
         with tempfile.TemporaryDirectory() as tmp:
             a = _snap(session=tmp)
             ids, notes = diplo.bind_reply(a, "deal.Cleopatra", "give 50 gold for 1 RESOURCE_SILK")
@@ -308,10 +308,16 @@ class DiplomacyWireTests(unittest.TestCase):
             b = _snap(me="PLAYER_1", other="PLAYER_0", other_name="Amanitore", session=tmp, turn=13)
             b["civ6"]["diplomacy"]["your_trade"]["luxuries"] = [{"resource_id": "RESOURCE_SILK", "amount": 1}]
             ids, notes = diplo.bind_reply(b, "deal.Amanitore.respond", "ACCEPT give 134 gold for open_borders")
+            self.assertEqual(ids, [])
             joined = " ".join(notes)
-            self.assertNotIn("use ACCEPT, REJECT, or COUNTER", joined)
-            self.assertTrue(any("ignored extra terms" in n for n in notes), notes)
-            self.assertTrue(b["legal_commands"], "offer should have been accepted")
+            self.assertIn("ACCEPT must stand alone", joined)
+            self.assertIn("COUNTER give", joined)
+            self.assertFalse(b.get("legal_commands"), "conditional ACCEPT must not accept the offer")
+            self.assertTrue(diplo.required_rows(b), "offer must stay pending after conditional ACCEPT")
+            ids2, notes2 = diplo.bind_reply(b, "deal.Amanitore.respond", "ACCEPT")
+            joined2 = " ".join(notes2)
+            self.assertNotIn("ACCEPT must stand alone", joined2)
+            self.assertTrue(ids2, notes2)
             self.assertEqual(diplo.required_rows(b), [])
 
 

@@ -653,25 +653,34 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
                 gname, city_text = _split_pair(value, "@:=")
                 gid = _match_id(gname, app_ids, ("GOVERNOR_", "GOVERNOR_THE_"))
                 city_id = None
-                # Models copy the template as "CityMajapahit" / "CityName"; strip a
-                # leading "City" when the remainder matches a real city name.
-                city_candidates = [city_text.strip()]
-                stripped = city_text.strip()
-                if len(stripped) > 4 and stripped[:4].lower() == "city":
-                    city_candidates.append(stripped[4:].lstrip("_ "))
+                raw_city = city_text.strip()
+                # Pass 1: exact city name or city_id only (never rewrite a real name
+                # that begins with "City", e.g. Cityscape).
                 for city in _lst(gv.get("cities")):
                     if not isinstance(city, dict):
                         continue
                     cname = _norm(city.get("name")).replace("_", "")
                     cid = str(city.get("city_id"))
-                    for cand in city_candidates:
-                        if not cand:
-                            continue
-                        if cname == _norm(cand).replace("_", "") or cid == cand:
-                            city_id = cid
-                            break
-                    if city_id is not None:
+                    if cname == _norm(raw_city).replace("_", "") or cid == raw_city:
+                        city_id = cid
                         break
+                # Pass 2: verified placeholder misuse only — "CityName" / "City" +
+                # exact listed name — when the full string matched nothing.
+                if city_id is None:
+                    low = raw_city.lower().replace(" ", "").replace("_", "")
+                    remainder = None
+                    if low in ("cityname", "city", "<city>", "city_name"):
+                        remainder = ""
+                    elif len(raw_city) > 4 and raw_city[:4].lower() == "city":
+                        remainder = raw_city[4:].lstrip("_ ")
+                    if remainder:
+                        for city in _lst(gv.get("cities")):
+                            if not isinstance(city, dict):
+                                continue
+                            cname = _norm(city.get("name")).replace("_", "")
+                            if cname == _norm(remainder).replace("_", ""):
+                                city_id = str(city.get("city_id"))
+                                break
                 if gid is None:
                     notes.append(f"{key}={value}: governor not appointed")
                 elif city_id is None:

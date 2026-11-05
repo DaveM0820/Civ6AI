@@ -1,16 +1,18 @@
 from sidecar import civ6_water, civ6_apply_results as ar, civ6_recall_facts as rf
 
 
-def _plot(x, y, water=False, terrain=None):
+def _plot(x, y, water=False, terrain=None, area=None):
     p = {"x": x, "y": y, "terrain_id": terrain or ("TERRAIN_COAST" if water else "TERRAIN_PLAINS")}
     if water:
         p["water"] = True
+    if area is not None:
+        p["area_id"] = area
     return p
 
 
 def _snap(plots, units=None, cities=None, techs=None):
     return {"known_map": {"plots": plots}, "your_units": units or [], "your_cities": cities or [],
-            "civ6": {}, "game": {"map_width": 40},
+            "civ6": {}, "game": {"map_width": 40, "map_height": 40, "wrap_x": False},
             "your_empire": {"research": {"known_tech_ids": techs or []}}}
 
 
@@ -68,19 +70,34 @@ def test_landmass_clause_ignores_ships():
     assert rf._can_reach_other_land(s)
 
 
-def test_site_fact_known_water_gap_needs_embark_even_with_fog():
-    """Home landmass still has fog, but known water separates the site -> needs embark."""
-    # Land at x=0..2 and x=5..6, water wall at x=3..4. Fog: omit (0,3) so home has fog edge.
+def test_site_fact_different_area_id_needs_embark_even_with_fog():
+    """Different engine land area ids => needs embark; fog on home does not invent a bridge."""
     plots = []
     for x in range(7):
         for y in range(4):
             if (x, y) == (0, 3):
-                continue  # unrevealed
-            plots.append(_plot(x, y, water=(x in (3, 4))))
+                continue  # fog on home
+            water = x in (3, 4)
+            area = None if water else ("AREA_HOME" if x < 3 else "AREA_AWAY")
+            plots.append(_plot(x, y, water=water, area=area))
     s = _snap(plots)
     fact = civ6_water.site_fact(s, {"x": 5, "y": 1, "label": "S1"}, [("settler_1", (1, 1))])
     assert "needs embark" in fact, fact
     assert "no known land route yet" not in fact
+
+
+def test_site_fact_fog_on_home_without_area_says_unknown_route():
+    """Fog edge on the home landmass without area ids: do not claim needs embark."""
+    plots = []
+    for x in range(7):
+        for y in range(4):
+            if (x, y) == (0, 3):
+                continue
+            plots.append(_plot(x, y, water=(x in (3, 4))))
+    s = _snap(plots)
+    fact = civ6_water.site_fact(s, {"x": 5, "y": 1, "label": "S1"}, [("settler_1", (1, 1))])
+    assert "no known land route yet" in fact, fact
+    assert "needs embark" not in fact
 
 
 def test_site_fact_fog_land_bridge_says_unknown_route():

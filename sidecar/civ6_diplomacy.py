@@ -798,14 +798,18 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         raw_answer = text.strip()
         head = raw_answer.split(None, 1)[0].upper() if raw_answer else ""
         # Models often write "ACCEPT give N gold for X" (merging ACCEPT with COUNTER
-        # syntax). Bare ACCEPT accepts the pending offer unchanged; extra words are
-        # ignored so the deal is not silently rewritten.
-        trailing = ""
+        # syntax). That is not a bare accept: refuse with guidance so terms are never
+        # silently discarded. Bare ACCEPT/REJECT only; use COUNTER to rewrite.
         if head in ("ACCEPT", "YES", "REJECT", "NO"):
             answer = head
             rest = raw_answer[len(raw_answer.split(None, 1)[0]):].strip() if " " in raw_answer else ""
             if answer in ("ACCEPT", "YES") and rest:
-                trailing = rest
+                return [], [
+                    f"{key}={value}: ACCEPT must stand alone (accepts their offer as written). "
+                    f"Extra terms after ACCEPT are not applied. "
+                    f"To change terms use: COUNTER give <items> for <items>. "
+                    f"To accept unchanged: deal.<Leader>.respond = ACCEPT"
+                ]
         else:
             answer = raw_answer.upper()
         if answer not in ("ACCEPT", "REJECT", "YES", "NO"):
@@ -814,11 +818,6 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
         offer["done_turn"] = _turn(snapshot)
         ids: list[str] = []
         notes_extra: list[str] = []
-        if trailing:
-            notes_extra.append(
-                f"{key}: accepted the pending offer as written; ignored extra terms after ACCEPT "
-                f"({trailing!r}). To change terms, use COUNTER give <items> for <items>."
-            )
         if answer in ("ACCEPT", "YES"):
             kinds = {i.get("kind") for i in (offer.get("give") or []) + (offer.get("want") or []) if isinstance(i, dict)}
             problem = legality.pact_problem(snapshot, pid, kinds - {None}, require_unlock=False)

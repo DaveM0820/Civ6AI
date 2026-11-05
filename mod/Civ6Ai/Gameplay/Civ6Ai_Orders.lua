@@ -3913,7 +3913,10 @@ function Gov.Explore(owner, unitId)
       or string.find(text, "impassable", 1, true) ~= nil
   end
   local row = GameInfo.Units[unit:GetType()]
-  local sea = row ~= nil and row.Domain == "DOMAIN_SEA"
+  -- Embarked land units move on water; treat them like sea for fog domain and
+  -- cross-body reachability (same-landmass-only excluded their coastal fog).
+  local embarked = call(unit, "IsEmbarked") == true
+  local sea = (row ~= nil and row.Domain == "DOMAIN_SEA") or embarked
   local ux, uy = unit:GetX(), unit:GetY()
   local here = Map.GetPlot(ux, uy)
   local unitArea = areaOf(here)
@@ -4029,9 +4032,9 @@ function Gov.Explore(owner, unitId)
   local otherArea = false
   local tx, ty, okMove, why
   local attempts = 0
-  -- Land units stay on their own landmass. Other-area fog (another island) has
-  -- no land path; picking it ended Explore with other_area:no_path (game 12 P2).
-  -- Ships may still cross to another water body.
+  -- Non-embarked land: same landmass only (other_area fog has no land path;
+  -- game 12 P2 Explore ended other_area:no_path). Ships and embarked units may
+  -- path across water bodies; target domain is water when sea/embarked.
   local allowOther = sea
   while attempts < 6 do
     attempts = attempts + 1

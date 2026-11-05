@@ -91,35 +91,29 @@ def land_steps(snapshot: dict[str, Any], start: tuple[int, int]) -> dict[tuple[i
 
 
 
-def land_steps_via_fog(snapshot: dict[str, Any], start: tuple[int, int]) -> dict[tuple[int, int], int]:
-    """Land BFS that may step onto unrevealed tiles inside the known-map bbox.
+def _plot_at(snapshot: dict[str, Any], xy: tuple[int, int]) -> dict[str, Any] | None:
+    return _plots(snapshot).get(xy)
 
-    Known water and mountains still block. Unrevealed tiles outside the bbox of
-    known plots are ignored so the search cannot walk off the map around a water
-    gap (that falsely looked like a fog land bridge).
+
+def _area_id(snapshot: dict[str, Any], xy: tuple[int, int]) -> str | None:
+    p = _plot_at(snapshot, xy)
+    if not isinstance(p, dict):
+        return None
+    aid = p.get("area_id")
+    return str(aid) if aid not in (None, "") else None
+
+
+def _landmass_fully_explored(snapshot: dict[str, Any], start: tuple[int, int]) -> bool:
+    """True when every neighbour of the known land component is itself known.
+
+    Unrevealed neighbours are fog. Known water/mountains close the perimeter.
     """
     plots = _plots(snapshot)
-    if not plots:
-        return {start: 0}
-    xs = [x for x, _ in plots]
-    ys = [y for _, y in plots]
-    min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
-    dist = {start: 0}
-    q = deque([start])
-    while q:
-        cur = q.popleft()
-        for n in legality.hex_neighbors(*cur):
-            if n in dist:
-                continue
-            nx, ny = n
-            if not (min_x <= nx <= max_x and min_y <= ny <= max_y):
-                continue
-            p = plots.get(n)
-            if p is not None and (p.get("water") or legality.is_mountain(p)):
-                continue
-            dist[n] = dist[cur] + 1
-            q.append(n)
-    return dist
+    for t in land_steps(snapshot, start):
+        for n in legality.hex_neighbors(*t):
+            if n not in plots:
+                return False
+    return True
 
 
 def site_fact(snapshot: dict[str, Any], site: dict[str, Any], settlers: list[tuple[str, tuple[int, int]]],
@@ -134,13 +128,22 @@ def site_fact(snapshot: dict[str, Any], site: dict[str, Any], settlers: list[tup
     if best is not None:
         reach = f"on your landmass, land route ~{best[0]} tiles from {best[1]}"
     elif settlers:
-        # Known land cannot reach it. If even a fog-through path (bounded to the
-        # known map) cannot — blocked by revealed water/mountains — the site is
-        # on other land and needs embark (game 12 mislabeled water gaps).
-        if any((x, y) in land_steps_via_fog(snapshot, xy) for _, xy in settlers):
-            reach = "no known land route yet (any route runs through unexplored tiles)"
-        else:
+        # Prefer engine area ids when both ends are known land: different land
+        # areas means embark (do not invent fog land bridges across ocean).
+        site_area = _area_id(snapshot, (x, y))
+        area_diffs = []
+        if site_area is not None:
+            for _, xy in settlers:
+                sa = _area_id(snapshot, xy)
+                if sa is not None:
+                    area_diffs.append(sa != site_area)
+        if area_diffs and all(area_diffs):
             reach = "on other land (needs embark)"
+        elif all(_landmass_fully_explored(snapshot, xy) for _, xy in settlers):
+            # Known landmass perimeter closed; no fog land detour from here.
+            reach = "on other land (needs embark)"
+        else:
+            reach = "no known land route yet (any route runs through unexplored tiles)"
     else:
         reach = ""
     kind = shore_kind(snapshot, x, y, lakes)

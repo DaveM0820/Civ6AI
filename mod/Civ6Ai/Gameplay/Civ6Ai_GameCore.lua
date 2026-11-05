@@ -577,11 +577,11 @@ function Civ6Ai_GameCore._RestoreMoves(unit, before)
 end
 
 
--- Embark/disembark: UnitManager.MoveUnit sometimes refuses a step our rules and
--- GetMoveToPath both allow (game 12: P4 settler embark/disembark with full moves,
--- engine_path present, path_step/script_move_no_progress). The same top-up that
--- saves expensive land first-steps often lets the engine take the domain change;
--- on success the unit spends its remaining moves (embark/disembark ends the turn).
+-- Embark/disembark ends the unit's movement (vanilla). After a successful
+-- UnitManager.MoveUnit domain step, FinishMoves matches that rule. Do NOT bump
+-- moves to force a refused step: ChangeMovesRemaining would alter the budget and
+-- is not proven safe against illegal transitions (g12 refusals with full moves +
+-- engine_path are log-correlated only; not an in-engine proven API defect).
 function Civ6Ai_GameCore._IsDomainChange(kind)
   return kind == "embark" or kind == "disembark"
 end
@@ -599,41 +599,17 @@ function Civ6Ai_GameCore._TryMoveAdjacent(playerID, unit, x, y, before, cost, ki
       end
       print("CIV6AI|gamecore|domain_step|player=" .. tostring(playerID) .. "|unit=" .. tostring(unit:GetID())
         .. "|kind=" .. tostring(kind) .. "|route=move_unit|from=" .. fromX .. "," .. fromY
-        .. "|to=" .. tostring(x) .. "," .. tostring(y))
+        .. "|to=" .. tostring(x) .. "," .. tostring(y)
+        .. "|moves_before=" .. tostring(before) .. "|cost=" .. tostring(cost))
       return true, "domain_step:move_unit"
     end
     Civ6Ai_GameCore._ChargeStep(unit, before, cost)
     return true, ""
   end
   Civ6Ai_GameCore._RestoreMoves(unit, before)
-  if not Civ6Ai_GameCore._IsDomainChange(kind) or not Civ6Ai_GameCore.FIRST_STEP_TOPUP
-      or UnitManager.ChangeMovesRemaining == nil or type(cost) ~= "number" then
-    Civ6Ai_GameCore._LogStepRefusal(playerID, unit, x, y, before,
-      Civ6Ai_GameCore._IsDomainChange(kind) and ("domain_" .. tostring(kind)) or "script_move_no_progress")
-    return false, okMove and "script_move_no_progress" or ("move_unit_error:" .. tostring(err))
-  end
-  -- Game 12: embark/disembark refused with moves == cost (full). Bump above the
-  -- step cost so MoveUnit accepts, then FinishMoves ends the turn as the rule requires.
-  local now = Civ6Ai_GameCore._Call(unit, "GetMovesRemaining") or 0
-  local maxMoves = Civ6Ai_GameCore._Call(unit, "GetMaxMoves") or 0
-  local need = math.max(cost + 1, maxMoves, now)
-  if need > now then
-    pcall(function() UnitManager.ChangeMovesRemaining(unit, need - now) end)
-  end
-  okMove, err = pcall(function() UnitManager.MoveUnit(unit, x, y) end)
-  if moved() then
-    pcall(function() UnitManager.FinishMoves(unit) end)
-    print("CIV6AI|gamecore|domain_step|player=" .. tostring(playerID) .. "|unit=" .. tostring(unit:GetID())
-      .. "|kind=" .. tostring(kind) .. "|route=topup|from=" .. fromX .. "," .. fromY
-      .. "|to=" .. tostring(x) .. "," .. tostring(y) .. "|cost=" .. tostring(cost))
-    return true, "domain_step:topup"
-  end
-  local after = Civ6Ai_GameCore._Call(unit, "GetMovesRemaining") or 0
-  if after ~= before then
-    pcall(function() UnitManager.ChangeMovesRemaining(unit, before - after) end)
-  end
-  Civ6Ai_GameCore._LogStepRefusal(playerID, unit, x, y, before, "domain_" .. tostring(kind) .. "_topup")
-  return false, "script_move_no_progress"
+  local tag = Civ6Ai_GameCore._IsDomainChange(kind) and ("domain_" .. tostring(kind)) or "script_move_no_progress"
+  Civ6Ai_GameCore._LogStepRefusal(playerID, unit, x, y, before, tag)
+  return false, okMove and "script_move_no_progress" or ("move_unit_error:" .. tostring(err))
 end
 
 -- UnitManager.MoveUnit is reliable for short hops and pathfinds (sometimes) for

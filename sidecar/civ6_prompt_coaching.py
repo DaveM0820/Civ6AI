@@ -357,7 +357,20 @@ def found_block_text(snapshot: dict[str, Any], unit: dict[str, Any] | None, reas
         return "foreign territory (cannot found in another civilization's or city-state's borders)"
     if reason == "invalid_city_site":
         return "not a legal city site (water, mountain/impassable, or otherwise blocked)"
-    return reason.replace("_", " ")
+    if reason == "plot_not_found":
+        return "tile not found (settler plot is invalid)"
+    if reason == "unit_cannot_found_city":
+        return "this unit cannot found a city"
+    if reason == "city_create_unavailable":
+        return "the game has no city-create route for this seat right now"
+    if reason == "found_city_rejected":
+        return "the game refused founding here (site failed an engine check after our pre-check)"
+    if reason == "unit_not_found" or reason == "stale_unit_id":
+        return "settler not found (stale unit id)"
+    # Unknown engine/string reasons: surface them plain; do not invent a cause.
+    if reason:
+        return reason.replace("_", " ")
+    return "FoundCity not legal on this tile this turn"
 
 
 def embarked_text(unit: dict[str, Any], snapshot: dict[str, Any]) -> str | None:
