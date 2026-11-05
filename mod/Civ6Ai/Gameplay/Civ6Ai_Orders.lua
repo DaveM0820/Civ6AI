@@ -4029,6 +4029,10 @@ function Gov.Explore(owner, unitId)
   local otherArea = false
   local tx, ty, okMove, why
   local attempts = 0
+  -- Land units stay on their own landmass. Other-area fog (another island) has
+  -- no land path; picking it ended Explore with other_area:no_path (game 12 P2).
+  -- Ships may still cross to another water body.
+  local allowOther = sea
   while attempts < 6 do
     attempts = attempts + 1
     best, bestD, otherArea = nil, nil, false
@@ -4036,7 +4040,7 @@ function Gov.Explore(owner, unitId)
     if sea or stuck or attempts > 1 then
       local marks = beacons()
       best, bestD = nearestFog(true, marks)
-      if best == nil then
+      if best == nil and allowOther then
         best, bestD = nearestFog(false, marks)
         otherArea = best ~= nil
       end
@@ -4044,7 +4048,7 @@ function Gov.Explore(owner, unitId)
     if best == nil then
       otherArea = false
       best, bestD = nearestBorder(true)
-      if best == nil then
+      if best == nil and allowOther then
         best, bestD = nearestBorder(false)
         otherArea = best ~= nil
       end

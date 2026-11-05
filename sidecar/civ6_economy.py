@@ -149,8 +149,18 @@ def update_tracking(snapshot: dict[str, Any], state_dir: Path | str | None) -> d
     idle_for: dict[str, int] = {}
     ok_turn: dict[str, int] = {}  # unit id -> latest decision turn with a successful order
     history = snapshot.get("history") if isinstance(snapshot.get("history"), dict) else {}
+    # Skip/Fortify/Hold leave the unit on its tile; counting them as "active"
+    # hid ships parked for many turns (game 12 LETHARGY under-report).
+    _STATIONARY_OK = {"unit_skip", "unit_posture_fortify", "unit_posture_heal",
+                     "unit_posture_alert", "unit_posture_sleep"}
     for item in history.get("command_results") or []:
         if not isinstance(item, dict) or item.get("kind") != "APPLY_OK":
+            continue
+        order_kind = str(item.get("order_kind") or "")
+        summary = str(item.get("summary") or "")
+        if order_kind in _STATIONARY_OK:
+            continue
+        if " Skip:" in f" {summary}" or " Fortify:" in summary or " Sleep:" in summary:
             continue
         try:
             t_ok = int(item.get("turn") or 0)

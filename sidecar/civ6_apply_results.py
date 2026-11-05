@@ -1896,6 +1896,25 @@ def _failure_matcher(snapshot: dict[str, Any], located: bool = False):
         if fp is None or (located and (fp[2] is None or fp[3] is None)):
             continue
         fails.append((fp, int(item.get("turn") or 0), str(item.get("reason") or "failure")))
+    # Sidecar pre-apply drops (ocean, mountain, ...) live in legality rejections.
+    try:
+        from sidecar import civ6_legality as _leg
+        for row in _leg.load_state(snapshot).get("rejections") or []:
+            if not isinstance(row, dict):
+                continue
+            unit = str(row.get("unit_id") or "")
+            if not unit:
+                continue
+            x, y = row.get("x"), row.get("y")
+            if located and (not isinstance(x, int) or not isinstance(y, int)):
+                continue
+            order = "move_unit" if "MoveTo" in str(row.get("order") or "") else "order"
+            if "AttackTo" in str(row.get("order") or ""):
+                order = "attack_target"
+            fp = (order, unit, x if isinstance(x, int) else None, y if isinstance(y, int) else None)
+            fails.append((fp, int(row.get("turn") or 0), str(row.get("reason") or "rejected")))
+    except Exception:
+        pass
     units = [u for u in snapshot.get("your_units", []) if isinstance(u, dict)]
     wire_ids = pipeline._build_unit_wire_id_map(units)
     reverse = {v: k for k, v in wire_ids.items()}

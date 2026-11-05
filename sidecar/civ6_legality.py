@@ -546,6 +546,11 @@ def _legality_rule(snapshot: dict[str, Any], ctx: dict[str, Any]):
         row = {"order": order_label(command), "reason": problem, "turn": _turn(snapshot)}
         if args.get("unit_id"):
             row["unit_id"] = str(args.get("unit_id"))
+        # Coords let the next-turn repeat-failure guard match pre-apply drops
+        # (game 12: ocean MoveTo repeated for 3 turns because only APPLY failures counted).
+        for axis, key in (("x", "target_x"), ("y", "target_y")):
+            if isinstance(args.get(key), int):
+                row[axis] = int(args[key])
         return line, row
     return check
 

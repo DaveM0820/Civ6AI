@@ -44,4 +44,12 @@ def prompt_lines(snapshot: dict[str, Any], wire_ids: dict[str, str] | None = Non
         name = wire_ids.get(str(req.get("unit_id")), str(req.get("unit_id")))
         took = "started" if req.get("took") else "did NOT start (trader is not on a route)"
         lines.append(f"Trade route requested on T{req.get('turn')} for {name}: {took}.")
+    idle = [t for t in traders if not t.get("on_route")]
+    legal = snapshot.get("legal_commands") if isinstance(snapshot.get("legal_commands"), list) else []
+    can_route = any(isinstance(c, dict) and c.get("kind") == "trade_route" for c in legal)
+    if idle and isinstance(cap, int) and isinstance(routes, int) and cap > routes and not can_route:
+        lines.append(
+            "Idle traders with free route slots: this seat has no synced TradeRoute order "
+            "(the game's own AI is expected to start routes; if they stay idle, that is a known limitation)."
+        )
     return lines

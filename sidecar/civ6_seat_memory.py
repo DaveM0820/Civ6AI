@@ -729,8 +729,9 @@ def prompt_lines(memory: dict[str, Any], turn: int | None = None) -> list[tuple[
         # A plain age note, not advice: keeping the strategy is a fine answer.
         if isinstance(written, int) and isinstance(turn, int) and turn - written >= STRATEGY_STALE_TURNS:
             lines.append(("plan.strategy.age",
-                          f"written {turn - written} turns ago (T{written}). If your situation has changed "
-                          "since then, write a new plan.strategy; otherwise omit the key to keep it."))
+                          f"written {turn - written} turns ago (T{written}). Re-read it: if cities, wars, "
+                          "tech era, or expansion goals no longer match, write a new plan.strategy this turn; "
+                          "otherwise omit the key to keep it."))
     index = 0
     for obj in plan.get("objectives") or []:
         if not isinstance(obj, dict) or obj.get("status") == "done":

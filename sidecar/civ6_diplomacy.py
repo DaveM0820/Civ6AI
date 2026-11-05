@@ -240,7 +240,9 @@ def has_orders(snapshot: dict) -> bool:
 def required_rows(snapshot: dict) -> list[tuple[str, str]]:
     """Every open offer to this seat must be answered this turn."""
     return [(f"deal.{pipeline._player_chat_name(snapshot, d['from'])}.respond",
-             "ACCEPT | REJECT | COUNTER give <items> for <items>  # they give "
+             "ACCEPT | REJECT | COUNTER give <items> for <items>  "
+             "# bare ACCEPT or REJECT only (do not add terms after ACCEPT); "
+             "COUNTER rewrites the offer. They give "
              f"{_items_text(d.get('give', []))}; you give {_items_text(d.get('want', []))}")
             for d in _open_offers_to_me(snapshot)]
 
@@ -793,11 +795,30 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
                     break
             _save(snapshot, deals)
             return ids, []
-        answer = text.upper()
+        raw_answer = text.strip()
+        head = raw_answer.split(None, 1)[0].upper() if raw_answer else ""
+        # Models often write "ACCEPT give N gold for X" (merging ACCEPT with COUNTER
+        # syntax). Bare ACCEPT accepts the pending offer unchanged; extra words are
+        # ignored so the deal is not silently rewritten.
+        trailing = ""
+        if head in ("ACCEPT", "YES", "REJECT", "NO"):
+            answer = head
+            rest = raw_answer[len(raw_answer.split(None, 1)[0]):].strip() if " " in raw_answer else ""
+            if answer in ("ACCEPT", "YES") and rest:
+                trailing = rest
+        else:
+            answer = raw_answer.upper()
         if answer not in ("ACCEPT", "REJECT", "YES", "NO"):
-            return [], [f"{key}={value}: use ACCEPT, REJECT, or COUNTER give <items> for <items>"]
+            return [], [f"{key}={value}: use ACCEPT, REJECT, or COUNTER give <items> for <items> "
+                        f"(ACCEPT alone accepts their offer; do not add terms after ACCEPT)"]
         offer["done_turn"] = _turn(snapshot)
         ids: list[str] = []
+        notes_extra: list[str] = []
+        if trailing:
+            notes_extra.append(
+                f"{key}: accepted the pending offer as written; ignored extra terms after ACCEPT "
+                f"({trailing!r}). To change terms, use COUNTER give <items> for <items>."
+            )
         if answer in ("ACCEPT", "YES"):
             kinds = {i.get("kind") for i in (offer.get("give") or []) + (offer.get("want") or []) if isinstance(i, dict)}
             problem = legality.pact_problem(snapshot, pid, kinds - {None}, require_unlock=False)
@@ -822,7 +843,7 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
             offer["status"] = "rejected"
             offer["reason"] = "rejected"
         _save(snapshot, deals)
-        return ids, []
+        return ids, notes_extra
     if low.startswith("deal."):
         if text.lower() in ("", "none", "skip", "no"):
             return [], []

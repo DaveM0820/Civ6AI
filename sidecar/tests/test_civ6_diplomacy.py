@@ -299,6 +299,21 @@ class DiplomacyWireTests(unittest.TestCase):
             self.assertIn("did not end the war", status)
             self.assertNotIn("at peace", status.lower())
 
+    def test_respond_accept_with_trailing_terms_accepts_offer(self):
+        """ACCEPT give ... accepts the pending offer; extra terms are ignored, not a drop."""
+        with tempfile.TemporaryDirectory() as tmp:
+            a = _snap(session=tmp)
+            ids, notes = diplo.bind_reply(a, "deal.Cleopatra", "give 50 gold for 1 RESOURCE_SILK")
+            self.assertEqual((ids, notes), ([], []))
+            b = _snap(me="PLAYER_1", other="PLAYER_0", other_name="Amanitore", session=tmp, turn=13)
+            b["civ6"]["diplomacy"]["your_trade"]["luxuries"] = [{"resource_id": "RESOURCE_SILK", "amount": 1}]
+            ids, notes = diplo.bind_reply(b, "deal.Amanitore.respond", "ACCEPT give 134 gold for open_borders")
+            joined = " ".join(notes)
+            self.assertNotIn("use ACCEPT, REJECT, or COUNTER", joined)
+            self.assertTrue(any("ignored extra terms" in n for n in notes), notes)
+            self.assertTrue(b["legal_commands"], "offer should have been accepted")
+            self.assertEqual(diplo.required_rows(b), [])
+
 
 if __name__ == "__main__":
     unittest.main()

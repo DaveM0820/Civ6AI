@@ -88,7 +88,7 @@ class SeatMemoryTests(unittest.TestCase):
         self.assertEqual(5, stalled["_explore_metric"]["turns_since_reveal"])
         self.assertEqual(14, stalled["_explore_metric"]["percent"])
         note = coaching.civ6_exploration_attention(stalled)
-        self.assertEqual(line.format(n=5), note)
+        self.assertIn(line.format(n=5), note or '')
         prompt = civ6_wire.build_civ6_wire_prompt(stalled)
         self.assertIn("=== ATTENTION ===", prompt)
         self.assertIn(line.format(n=5), prompt)
@@ -103,7 +103,7 @@ class SeatMemoryTests(unittest.TestCase):
         stored = memory.note_exploration(still, stored)
         self.assertEqual(6, still["_explore_metric"]["turns_since_reveal"])
         self.assertEqual([line.format(n=6)], [row["text"] for row in nudge_rows(stored)])
-        self.assertEqual(line.format(n=6), coaching.civ6_exploration_attention(still))
+        self.assertIn(line.format(n=6), coaching.civ6_exploration_attention(still) or '')
 
         # A reveal clears the prompt line and the situation log.
         opened = snap(9, 20)

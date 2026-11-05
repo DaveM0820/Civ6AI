@@ -352,7 +352,7 @@ def attention_items(snapshot: dict) -> list[str]:
     if routes.get("governors", True):
         for gid in _unplaced_governors(gv):
             out.append(f"Governor {gid} is appointed but not in a city, so it does nothing: "
-                       f"assign it (\"governor.assign\" = {gid} @ CityName).")
+                       f"assign it (\"governor.assign\" = {gid} @ <city name from your cities list, e.g. Capital>).")
     gp = _dct(gov.get("great_people"))
     ready = [_short(x.get("id"), "GREAT_PERSON_INDIVIDUAL_") for x in _lst(gp.get("available"))
              if isinstance(x, dict) and x.get("can_recruit")]
@@ -408,8 +408,8 @@ def optional_key_hints(snapshot: dict) -> list[tuple[str, str]]:
                 _short(x.get("id"), "GOVERNOR_") for x in _lst(gv.get("candidates")) if isinstance(x, dict))))
         if _lst(gv.get("appointed")):
             unplaced = _unplaced_governors(gv)
-            out.append(("governor.assign", " | ".join(f"{g} @ CityName" for g in unplaced)
-                        if unplaced else "GOVERNOR_ID @ CityName"))
+            out.append(("governor.assign", " | ".join(f"{g} @ <City>" for g in unplaced)
+                        if unplaced else "GOVERNOR_ID @ <City>  # use the city name exactly as listed (e.g. Majapahit), not CityName or City+name"))
             if any(isinstance(a, dict) and a.get("can_promote") for a in _lst(gv.get("appointed"))):
                 out.append(("governor.promote", "GOVERNOR_ID: PROMOTION_ID"))
     gp = _dct(gov.get("great_people"))
@@ -653,10 +653,25 @@ def bind_reply(snapshot: dict, key: str, value: Any) -> tuple[list[str], list[st
                 gname, city_text = _split_pair(value, "@:=")
                 gid = _match_id(gname, app_ids, ("GOVERNOR_", "GOVERNOR_THE_"))
                 city_id = None
+                # Models copy the template as "CityMajapahit" / "CityName"; strip a
+                # leading "City" when the remainder matches a real city name.
+                city_candidates = [city_text.strip()]
+                stripped = city_text.strip()
+                if len(stripped) > 4 and stripped[:4].lower() == "city":
+                    city_candidates.append(stripped[4:].lstrip("_ "))
                 for city in _lst(gv.get("cities")):
-                    if isinstance(city, dict) and (_norm(city.get("name")).replace("_", "") == _norm(city_text).replace("_", "")
-                                                   or str(city.get("city_id")) == city_text.strip()):
-                        city_id = str(city.get("city_id"))
+                    if not isinstance(city, dict):
+                        continue
+                    cname = _norm(city.get("name")).replace("_", "")
+                    cid = str(city.get("city_id"))
+                    for cand in city_candidates:
+                        if not cand:
+                            continue
+                        if cname == _norm(cand).replace("_", "") or cid == cand:
+                            city_id = cid
+                            break
+                    if city_id is not None:
+                        break
                 if gid is None:
                     notes.append(f"{key}={value}: governor not appointed")
                 elif city_id is None:

@@ -16,3 +16,18 @@ def test_idle_for_counts_turns_since_move_or_ok_order(tmp_path):
     assert s["civ6"]["economy"]["tracking"]["idle_for"]["UNIT_1"] == 1
     s = _snap(15, "PLOT_2_1"); econ.update_tracking(s, tmp_path)
     assert s["civ6"]["economy"]["tracking"]["idle_for"]["UNIT_1"] == 0
+
+
+def test_idle_for_skip_does_not_reset_stationary_streak(tmp_path):
+    s = _snap(10, "PLOT_1_1"); econ.update_tracking(s, tmp_path)
+    s = _snap(12, "PLOT_1_1"); econ.update_tracking(s, tmp_path)
+    assert s["civ6"]["economy"]["tracking"]["idle_for"]["UNIT_1"] == 2
+    # APPLY_OK Skip must not count as activity
+    hist = {"command_results": [{
+        "kind": "APPLY_OK", "turn": 12, "order_kind": "unit_skip",
+        "summary": "warrior_1 Skip: ok", "affected_ids": ["UNIT_1"],
+    }]}
+    s = {"decision": {"turn": 13}, "history": hist,
+         "your_units": [{"unit_id": "UNIT_1", "plot_id": "PLOT_1_1", "needs_orders": True}]}
+    econ.update_tracking(s, tmp_path)
+    assert s["civ6"]["economy"]["tracking"]["idle_for"]["UNIT_1"] == 3

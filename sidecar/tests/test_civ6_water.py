@@ -66,3 +66,27 @@ def test_landmass_clause_ignores_ships():
     assert not rf._can_reach_other_land(s)
     s["your_empire"]["research"]["known_tech_ids"] = ["TECH_SHIPBUILDING"]
     assert rf._can_reach_other_land(s)
+
+
+def test_site_fact_known_water_gap_needs_embark_even_with_fog():
+    """Home landmass still has fog, but known water separates the site -> needs embark."""
+    # Land at x=0..2 and x=5..6, water wall at x=3..4. Fog: omit (0,3) so home has fog edge.
+    plots = []
+    for x in range(7):
+        for y in range(4):
+            if (x, y) == (0, 3):
+                continue  # unrevealed
+            plots.append(_plot(x, y, water=(x in (3, 4))))
+    s = _snap(plots)
+    fact = civ6_water.site_fact(s, {"x": 5, "y": 1, "label": "S1"}, [("settler_1", (1, 1))])
+    assert "needs embark" in fact, fact
+    assert "no known land route yet" not in fact
+
+
+def test_site_fact_fog_land_bridge_says_unknown_route():
+    plots = [_plot(x, y, water=False) for x in range(6) for y in range(3)]
+    # Remove middle land so only fog could connect — delete (2,*) and (3,*)
+    plots = [p for p in plots if p["x"] not in (2, 3)]
+    s = _snap(plots)
+    fact = civ6_water.site_fact(s, {"x": 5, "y": 1, "label": "S2"}, [("settler_1", (0, 1))])
+    assert "no known land route yet" in fact, fact

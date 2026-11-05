@@ -90,11 +90,42 @@ def land_steps(snapshot: dict[str, Any], start: tuple[int, int]) -> dict[tuple[i
     return dist
 
 
+
+def land_steps_via_fog(snapshot: dict[str, Any], start: tuple[int, int]) -> dict[tuple[int, int], int]:
+    """Land BFS that may step onto unrevealed tiles inside the known-map bbox.
+
+    Known water and mountains still block. Unrevealed tiles outside the bbox of
+    known plots are ignored so the search cannot walk off the map around a water
+    gap (that falsely looked like a fog land bridge).
+    """
+    plots = _plots(snapshot)
+    if not plots:
+        return {start: 0}
+    xs = [x for x, _ in plots]
+    ys = [y for _, y in plots]
+    min_x, max_x, min_y, max_y = min(xs), max(xs), min(ys), max(ys)
+    dist = {start: 0}
+    q = deque([start])
+    while q:
+        cur = q.popleft()
+        for n in legality.hex_neighbors(*cur):
+            if n in dist:
+                continue
+            nx, ny = n
+            if not (min_x <= nx <= max_x and min_y <= ny <= max_y):
+                continue
+            p = plots.get(n)
+            if p is not None and (p.get("water") or legality.is_mountain(p)):
+                continue
+            dist[n] = dist[cur] + 1
+            q.append(n)
+    return dist
+
+
 def site_fact(snapshot: dict[str, Any], site: dict[str, Any], settlers: list[tuple[str, tuple[int, int]]],
               lakes: set | None = None) -> str:
     """'S1 (19,32): sea coast; on your landmass, land route ~5 tiles from settler_4'."""
     x, y = site["x"], site["y"]
-    plots = _plots(snapshot)
     best: tuple[int, str] | None = None
     for name, xy in settlers:
         steps = land_steps(snapshot, xy).get((x, y))
@@ -102,11 +133,14 @@ def site_fact(snapshot: dict[str, Any], site: dict[str, Any], settlers: list[tup
             best = (steps, name)
     if best is not None:
         reach = f"on your landmass, land route ~{best[0]} tiles from {best[1]}"
-    elif settlers and all(not any(n not in plots for t in land_steps(snapshot, xy)
-                                  for n in legality.hex_neighbors(*t)) for _, xy in settlers):
-        reach = "on other land (needs embark)"
     elif settlers:
-        reach = "no known land route yet (any route runs through unexplored tiles)"
+        # Known land cannot reach it. If even a fog-through path (bounded to the
+        # known map) cannot — blocked by revealed water/mountains — the site is
+        # on other land and needs embark (game 12 mislabeled water gaps).
+        if any((x, y) in land_steps_via_fog(snapshot, xy) for _, xy in settlers):
+            reach = "no known land route yet (any route runs through unexplored tiles)"
+        else:
+            reach = "on other land (needs embark)"
     else:
         reach = ""
     kind = shore_kind(snapshot, x, y, lakes)

@@ -2938,8 +2938,11 @@ function Civ6Ai_Snapshot._PlotCitySiteProblem(playerID, x, y)
   if plot == nil then
     return "plot_not_found"
   end
-  if (plot.IsWater ~= nil and plot:IsWater()) or (plot.IsImpassable ~= nil and plot:IsImpassable()) then
-    return "invalid_city_site"
+  if plot.IsWater ~= nil and plot:IsWater() then
+    return "on_water"
+  end
+  if (plot.IsImpassable ~= nil and plot:IsImpassable()) or (plot.IsMountain ~= nil and plot:IsMountain()) then
+    return "impassable_tile"
   end
   -- The UI context only sees cities the host has revealed, so a city in the
   -- host's fog was missed and gameplay refused the founding (game 3 P3, three

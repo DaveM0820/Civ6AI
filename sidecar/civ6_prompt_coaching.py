@@ -52,8 +52,9 @@ CIV6_GAME_PRIMER = (
     "for districts, 3-4 tiles apart, little overlap. Settlers and builders are captured by an adjacent enemy or "
     "barbarian. Navy and the sea: "
     "coast (shallow water) is traversable by ships and by embarked land units; ocean needs Cartography. "
+    "Settlers and other land units embark themselves onto coast (no transport ship); ships escort and explore. "
     "Sailing, Shipbuilding, Celestial Navigation, Cartography; galleys, quadriremes, Harbors; naval melee vs naval "
-    "ranged. Build a navy: ships explore coasts, escort embarked settlers to new land, screen embarked units, "
+    "ranged. Build a navy: ships explore coasts, escort embarked settlers across open water, screen embarked units, "
     "raid and besiege coastal cities and control sea lanes. Fog hides most of the map all game: exploring on land "
     "AND water never stops; scouts, ships and embarked units are all explorers (goody huts, city-states, natural "
     "wonders, rivals, settle spots on other land); an Explore order, where listed, keeps a unit exploring until you "
@@ -273,7 +274,10 @@ def _water_and_embark_clause(snapshot: Any) -> str:
     from sidecar import civ6_legality
 
     if civ6_legality.can_embark(snapshot):
-        text += " Land units can embark: move a land unit onto a water tile next to land."
+        text += (" Land units can embark on their own: move a land unit (including Settlers "
+                 "and military) onto a coastal water tile next to land — no transport ship is required.")
+        text += (" Coastal (shallow) water tiles can be entered by ships and by embarked land units; "
+                 "continuous exploration on land and along coasts matters even when much of the map is water.")
         if civ6_legality.knows_tech(snapshot, "TECH_CARTOGRAPHY"):
             text += " With Cartography, ships and embarked units can cross ocean."
         else:
@@ -331,6 +335,13 @@ def found_block_text(snapshot: dict[str, Any], unit: dict[str, Any] | None, reas
         if embarked:
             return embarked
         xy = civ6_legality.plot_xy(unit)
+        if reason in ("on_water", "invalid_city_site") and xy is not None:
+            # Fallback when known_map lacks the water flag but the game said on_water.
+            known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+            for p in known.get("plots") or []:
+                if isinstance(p, dict) and (p.get("x"), p.get("y")) == xy and p.get("water"):
+                    ocean = str(p.get("terrain_id") or "") == "TERRAIN_OCEAN"
+                    return "embarked on " + ("ocean" if ocean else "coast") + " (cities are founded on land)"
         if reason == "too_close_to_city" and xy is not None:
             near = nearest_city(snapshot, *xy)
             if near is not None:
@@ -338,6 +349,14 @@ def found_block_text(snapshot: dict[str, Any], unit: dict[str, Any] | None, reas
                         "city centres must be at least 4 tiles apart")
     if reason == "too_close_to_city":
         return "too close to a city; city centres must be at least 4 tiles apart"
+    if reason == "on_water":
+        return "on water (cities are founded on land; MoveTo a land tile then FoundCity)"
+    if reason == "impassable_tile":
+        return "impassable tile (mountains and impassable terrain cannot host a city)"
+    if reason == "foreign_territory":
+        return "foreign territory (cannot found in another civilization's or city-state's borders)"
+    if reason == "invalid_city_site":
+        return "not a legal city site (water, mountain/impassable, or otherwise blocked)"
     return reason.replace("_", " ")
 
 
@@ -356,6 +375,30 @@ def embarked_text(unit: dict[str, Any], snapshot: dict[str, Any]) -> str | None:
             ocean = str(p.get("terrain_id") or "") == "TERRAIN_OCEAN"
             return "embarked on " + ("ocean" if ocean else "coast") + " (cities are founded on land)"
     return None
+
+
+def greatperson_fact_lines(prefix: str, unit: dict[str, Any], snapshot: dict[str, Any]) -> list[str]:
+    """Note when a Great Person has no synced Activate (UI-only; game AI keeps them)."""
+    from sidecar import pipeline_v2 as pipeline
+
+    typ = str(unit.get("unit_type_id") or "").upper()
+    if "GREAT_" not in typ and not unit.get("is_great_person"):
+        return []
+    if typ == "UNIT_GREAT_PROPHET" or "PROPHET" in typ:
+        return []  # Prophet uses MoveTo Holy Site + religion key
+    tokens = []
+    try:
+        from sidecar import civ6_wire
+        tokens = civ6_wire._civ6_unit_tokens(snapshot).get(str(unit.get("unit_id") or ""), [])
+    except Exception:
+        tokens = []
+    if any("Activate" in str(t) for t in tokens):
+        return []
+    return [pipeline._wire_line(
+        f"{prefix}.ability",
+        "Great Person action (write a Great Work, retire, etc.) is not a synced model order this build; "
+        "MoveTo a matching district tile and Skip, or let the game's AI activate when it can.",
+    )]
 
 
 def civ6_unit_health_percent(unit: dict[str, Any]) -> int | None:
@@ -503,7 +546,11 @@ def civ6_scouting_fact_line(snapshot: dict[str, Any]) -> str | None:
     pct = true[2] if true is not None else _civ6_explored_percent(snapshot)
     if not isinstance(pct, int) or (pct >= CIV6_EXPLORE_NUDGE_BELOW_PCT and frontier == 0):
         return None
-    text = f"SCOUTING: {pct}% of the map revealed; {frontier} revealed water tiles border unexplored tiles"
+    text = f"SCOUTING: {pct}% of the map revealed"
+    if frontier:
+        text += f"; {frontier} revealed water tiles border unexplored tiles"
+    else:
+        text += "; no revealed water tile borders unexplored fog yet (explore by land or build ships)"
     if open_frontier != frontier:
         text += f" ({open_frontier} reachable now, the rest are ocean)"
     text += "."
@@ -556,7 +603,11 @@ def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
             and percent < CIV6_EXPLORE_NUDGE_BELOW_PCT
             and since > CIV6_EXPLORE_QUIET_TURNS
         ):
-            return civ6_explore_stall_line(since)
+            # Keep the EXPLORATION facts; the stall alone used to replace them
+            # (game 12 P0 T92–104 had only the quiet-turn line).
+            base = civ6_explored_fact_line(snapshot, percent)
+            stall = civ6_explore_stall_line(since)
+            return f"{base} {stall}" if base else stall
     explored = _civ6_explored_percent(snapshot)
     if not isinstance(explored, int) or explored >= CIV6_EXPLORE_STALL_BELOW_PCT:
         return None

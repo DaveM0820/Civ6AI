@@ -1575,7 +1575,9 @@ class PathMoveTests(unittest.TestCase):
             start = src.index("function Civ6Ai_GameCore." + name + "(")
             return src[start:src.index("\nend\n", start) + 5]
         rt = lupa.LuaRuntime(unpack_returned_tuples=True)
-        rt.execute(PATH_ENV + "\n" + fn("_FirstStepCost") + fn("MoveUnitAlongPathForPlayer"))
+        # Domain-change helpers are called from MoveUnitAlongPathForPlayer (g12 embark fix).
+        rt.execute(PATH_ENV + "\n" + fn("_IsDomainChange") + fn("_TryMoveAdjacent")
+                   + fn("_FirstStepCost") + fn("MoveUnitAlongPathForPlayer"))
         rt.execute("unit.moves = %d" % moves)
         return rt, rt.eval("Civ6Ai_GameCore.MoveUnitAlongPathForPlayer(1, 7, 3, 0)")
 
