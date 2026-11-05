@@ -69,6 +69,8 @@ def test_api_probe_is_read_only_chunked_and_once():
     b = src.index("function Civ6Ai_Orders.OnGameTurnStarted")
     body = src[a:b]
     assert "SetProperty" not in body and "RequestOperation(" not in body
+    assert "CreateBuilding(" not in body and "FinishProgress(" not in body
+    assert "AddProgress(" not in body and "CreateTradeRoute(" not in body
     lua = lupa.LuaRuntime(unpack_returned_tuples=True)
     lua.execute("Civ6Ai_Orders={} LOG={} function log(s) LOG[#LOG+1]=s end "
                 "function call(o,m,...) local f=o and o[m] if f then return f(o,...) end end")
