@@ -684,13 +684,19 @@ function Civ6Ai_Snapshot._BuildPlotRecord(plot, playerID, turn, vis)
   local terrain_id = Civ6Ai_Snapshot._TerrainTypeName(plot)
   local fresh_water = plot:IsFreshWater() or plot:IsRiver()
   local river_edges = Civ6Ai_Snapshot._RiverEdges(plot)
+  -- Real landmass id (g12 B10: AREA_0 broke own-landmass / settle-site logic).
+  local areaId = "AREA_UNKNOWN"
+  local aid = Civ6Ai_Snapshot._AreaId(plot)
+  if aid ~= nil then
+    areaId = "AREA_" .. tostring(aid)
+  end
   local rec = {
     plot_id = Civ6Ai_Util.PlotId(x, y),
     x = x,
     y = y,
     knowledge = knowledge,
     last_seen_turn = visible and turn or Civ6Ai_Util.JsonNull(),
-    area_id = "AREA_0",
+    area_id = areaId,
     terrain_id = terrain_id,
     water = water,
     hills = plot:IsHills(),
@@ -1089,11 +1095,19 @@ function Civ6Ai_Snapshot._BuildYourCities(playerID)
     local name = Locale.Lookup(city:GetName())
     local productionId, productionProgress, productionCost, productionPerTurn, productionTurns =
       Civ6Ai_Production._GetCityProductionState(city)
+    local cityAreaId = "AREA_UNKNOWN"
+    local cityPlot = Map ~= nil and Map.GetPlot ~= nil and Map.GetPlot(x, y) or nil
+    if cityPlot ~= nil then
+      local aid = Civ6Ai_Snapshot._AreaId(cityPlot)
+      if aid ~= nil then
+        cityAreaId = "AREA_" .. tostring(aid)
+      end
+    end
     table.insert(out, {
       city_id = Civ6Ai_Production._WireCityId(city),
       name = name,
       plot_id = Civ6Ai_Util.PlotId(x, y),
-      area_id = "AREA_0",
+      area_id = cityAreaId,
       is_capital = city.IsCapital ~= nil and city:IsCapital() or false,
       is_coastal = Civ6Ai_Snapshot._PlotIsCoastal(x, y),
       population = Civ6Ai_Snapshot._Int(city:GetPopulation()),
@@ -4387,7 +4401,7 @@ function Civ6Ai_Snapshot._AddBuilderImproveCommands(commands, playerID, unit, un
           and (M(plot, "GetDistrictType") or -1) < 0 then
         local d = Map.GetPlotDistance(ux, uy, plot:GetX(), plot:GetY())
         if d <= 8 then
-          -- Snapshot plot records hardcode AREA_0. A nil GetArea on one side is
+          -- Plot/city area_id comes from GetArea. A nil GetArea on one side is
           -- unknown, not a different landmass; only two known differing ids exclude.
           -- Water tiles (fishing boats) are a different area by definition.
           local plotArea = Civ6Ai_Snapshot._AreaId(plot)
