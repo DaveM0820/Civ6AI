@@ -111,8 +111,9 @@ _SIMPLE_REASONS = {
     "unit_not_found": "that unit no longer exists",
     "no_units": "that unit no longer exists",
     "plot_not_found": "that tile is off the map",
-    "step_refused": "the game refused the next step of the route",
+    "step_refused": "the game refused the next step of the route (often closed borders, stacking, or terrain)",
     "first_step_refused": "the game refused the step onto that rough tile",
+    "foreign_borders": "that tile is inside another civilization's borders without open borders",
     "bad_path_plot": "the route ran off the map",
     "script_move_no_progress": "the game did not move the unit",
     "script_move_rejected": "the game rejected the move",
@@ -631,7 +632,40 @@ _STACK_RULE = ("one military unit and one civilian unit (settler, builder, trade
                "a tile; two military or two civilian units cannot")
 
 
-def _plot_facts(snapshot: dict[str, Any], x: int, y: int, player_id: str) -> list[str]:
+def _stack_occupant_label(
+    snapshot: dict[str, Any], x: int, y: int, unit: dict[str, Any] | None = None
+) -> tuple[str | None, bool]:
+    """Label the unit on (x,y). Prefer a same-class blocker when the mover is known.
+
+    g12 B9: naming a civilian while quoting the military/civilian share rule
+    contradicted itself when a military mover was refused for stacking.
+    Returns (label, is_same_class_blocker).
+    """
+    holders = legality.own_occupied_plots(snapshot).get((x, y)) or []
+    if not holders:
+        return None, False
+    mine = legality.stack_class(unit) if isinstance(unit, dict) else None
+    same: list[str] = []
+    other: list[str] = []
+    for other_id in holders:
+        uid = str(other_id)
+        if unit is not None and str(unit.get("unit_id") or "") == uid:
+            continue
+        other_unit = next(
+            (u for u in (snapshot.get("your_units") or []) if isinstance(u, dict) and str(u.get("unit_id") or "") == uid),
+            None,
+        )
+        if mine is not None and (other_unit is None or legality.stack_class(other_unit) == mine):
+            same.append(uid)
+        else:
+            other.append(uid)
+    pick = (same or other or [str(holders[0])])[0]
+    return _unit_label(snapshot, pick), bool(same)
+
+
+def _plot_facts(
+    snapshot: dict[str, Any], x: int, y: int, player_id: str, unit: dict[str, Any] | None = None
+) -> list[str]:
     """Tile problems the snapshot can see (water, mountain, owner, city, improvement)."""
     from sidecar import pipeline_v2 as pipeline
 
@@ -648,18 +682,18 @@ def _plot_facts(snapshot: dict[str, Any], x: int, y: int, player_id: str) -> lis
             facts.append("water")
         if cell == "^":
             facts.append("mountain")
-        occupied = legality.own_occupied_plots(snapshot)
-        if (x, y) in occupied:
-            facts.append(f"occupied by {_unit_label(snapshot, occupied[(x, y)][0])}")
+        label, _ = _stack_occupant_label(snapshot, x, y, unit)
+        if label:
+            facts.append(f"occupied by {label}")
         return facts
     facts = []
     if plot.get("water"):
         facts.append("water")
     if plot.get("peak") or legality.is_mountain(plot):
         facts.append("mountain")
-    occupied = legality.own_occupied_plots(snapshot)
-    if (x, y) in occupied:
-        facts.append(f"occupied by {_unit_label(snapshot, occupied[(x, y)][0])}")
+    label, _ = _stack_occupant_label(snapshot, x, y, unit)
+    if label:
+        facts.append(f"occupied by {label}")
     owner = plot.get("revealed_owner_id")
     if owner and owner != player_id:
         facts.append(f"owned by {owner}")
@@ -762,10 +796,13 @@ _MOVE_TAIL = ("Try a different tile. Remember to check the map before issuing mo
 def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reason: str, pid: str,
                       domain: str = "", unit: dict[str, Any] | None = None) -> str:
     """'You tried to move Warrior 1 to tile (x,y). Tile (x,y) is a mountain and is impassable. ...'"""
-    facts = _plot_facts(snapshot, x, y, pid)
+    facts = _plot_facts(snapshot, x, y, pid, unit)
     sea = domain == "DOMAIN_SEA"
     known = "tile not explored" not in facts
     occupied = next((f for f in facts if f.startswith("occupied by")), None)
+    me = pid or str(snapshot.get("player_id") or (snapshot.get("decision") or {}).get("player_id") or "")
+    foreign_owner = next((f for f in facts if f.startswith("owned by") and f != f"owned by {me}"), None)
+    stack_reason = "stack_limit" in str(reason or "") or str(reason or "") == "occupied"
     if reason in NO_EFFECT_REASONS:
         return (f"{actor or 'The unit'} is already on ({x},{y}); a MoveTo to its own tile does nothing. "
                 "Give it a different tile, or Skip.")
@@ -775,6 +812,23 @@ def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reas
         why = "ocean (deep water); ships and embarked units can enter ocean only after Cartography, coast is fine"
     elif sea and known and "water" not in facts and (x, y) not in legality.own_coastal_city_tiles(snapshot):
         why = "land; ships can't enter land tiles (your own coastal cities are fine)"
+    elif sea and foreign_owner and (
+        reason in ("step_refused", "first_step_refused", "no_path", "script_move_no_progress", "foreign_borders")
+        or "path_step" in str(reason or "")
+    ):
+        # g12 B14: ship steps into closed borders read as a generic refusal.
+        # Land embark onto foreign coast keeps the water/embark wording below.
+        why = (
+            f"{foreign_owner.replace('owned by', 'inside the borders of')}; "
+            "entry needs open borders or war (closed borders)"
+        )
+    elif "water" in facts and not sea and occupied and stack_reason:
+        label, same = _stack_occupant_label(snapshot, x, y, unit)
+        who = f"occupied by {label}" if label else occupied
+        if same:
+            why = f"water {who.replace('occupied by', 'with')} embarked on it (same-class stack limit; {_STACK_RULE})"
+        else:
+            why = f"water {who.replace('occupied by', 'with')} embarked on it ({_STACK_RULE})"
     elif "water" in facts and not sea and occupied:
         why = f"water {occupied.replace('occupied by', 'with')} embarked on it ({_STACK_RULE})"
     elif "water" in facts and not sea and not legality.can_embark(snapshot):
@@ -782,20 +836,31 @@ def move_failure_text(snapshot: dict[str, Any], actor: str, x: int, y: int, reas
     elif "water" in facts and not sea:
         # This seat can embark (Shipbuilding): coast is fine, so say what actually failed
         # instead of blaming the water (g7: ~30 no_path/stack_limit refusals read as "cannot enter").
-        me = pid or str(snapshot.get("player_id") or (snapshot.get("decision") or {}).get("player_id") or "")
-        owner = next((f for f in facts if f.startswith("owned by") and f != f"owned by {me}"), None)
         detail = describe_reason(reason) or "the game rejected it"
         why = f"coast your land units can embark onto, but this move failed: {detail}"
-        if owner:
-            why += (f" (the tile is {owner.replace('owned by', 'inside the borders of')}; "
+        if foreign_owner:
+            why += (f" (the tile is {foreign_owner.replace('owned by', 'inside the borders of')}; "
                     "the game may refuse entry into foreign borders without open borders)")
     elif reason == "impassable":
         why = ("not water; ships can't enter land tiles" if sea
                else "impassable for this unit (mountain, or water it cannot enter)")
-    elif any(f.startswith("occupied by") for f in facts):
-        why = f"{occupied} ({_STACK_RULE})"
+    elif stack_reason or any(f.startswith("occupied by") for f in facts):
+        label, same = _stack_occupant_label(snapshot, x, y, unit)
+        who = f"occupied by {label}" if label else (occupied or "occupied")
+        if same:
+            why = f"{who} (same-class stack limit; {_STACK_RULE})"
+        else:
+            why = f"{who} ({_STACK_RULE})"
     elif "tile not explored" in facts:
         why = "not explored (no known path)"
+    elif foreign_owner and (
+        reason in ("step_refused", "first_step_refused", "no_path", "script_move_no_progress", "foreign_borders")
+        or "path_step" in str(reason or "")
+    ):
+        why = (
+            f"{foreign_owner.replace('owned by', 'inside the borders of')}; "
+            "entry needs open borders or war (closed borders)"
+        )
     else:
         why = "not reachable: " + (describe_reason(reason) or "the game rejected it")
     hint = ""

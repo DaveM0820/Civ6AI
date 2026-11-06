@@ -22,6 +22,90 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+
+def _player_id_from_job(job: dict[str, Any], player_dir: Path) -> str:
+    args = job.get("args") if isinstance(job.get("args"), list) else []
+    for index, arg in enumerate(args):
+        if arg in ("--player-id", "--player") and index + 1 < len(args):
+            return str(args[index + 1])
+    name = player_dir.name
+    if name.upper().startswith("PLAYER_"):
+        return name.upper()
+    return name
+
+
+def _circuit_breaker_blocks(player_dir: Path, player_id: str) -> bool:
+    """True when this seat's circuit breaker is open (g12: poller retried for 29h)."""
+    try:
+        import sys
+
+        scripts_dir = Path(__file__).resolve().parents[1]
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        import circuit_breaker_state
+    except Exception:
+        return False
+    candidates = [
+        player_dir / "circuit_breaker.json",
+        player_dir.parent / "circuit_breaker.json",
+        player_dir.parent.parent / "circuit_breaker.json",
+    ]
+    # Also common: <civ6ai>/logs/circuit_breaker.json next to sessions.
+    sessions = player_dir.parent
+    if sessions.name.upper().startswith("PLAYER") or sessions.name.lower() == "sessions":
+        candidates.append(sessions.parent / "circuit_breaker.json")
+        candidates.append(sessions.parent / "logs" / "circuit_breaker.json")
+    for path in candidates:
+        failures, _err = circuit_breaker_state.read_failures(path)
+        if failures is None:
+            continue
+        open_seats = set(circuit_breaker_state.open_players(failures))
+        if player_id in open_seats or player_id.upper() in {s.upper() for s in open_seats}:
+            return True
+        # Accept PLAYER_2 vs player_2 / "2"
+        digits = "".join(ch for ch in player_id if ch.isdigit())
+        if digits and any(
+            "".join(ch for ch in seat if ch.isdigit()) == digits for seat in open_seats
+        ):
+            return True
+    return False
+
+
+def _civ_process_running() -> bool | None:
+    """True/False when we can tell; None when the check is unavailable."""
+    try:
+        import sys
+
+        scripts_dir = Path(__file__).resolve().parents[1]
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        from civ6_paths import civ_process_running  # type: ignore
+
+        return bool(civ_process_running())
+    except Exception:
+        pass
+    if os.name == "nt":
+        try:
+            import subprocess
+
+            out = subprocess.check_output(
+                ["tasklist", "/FI", "IMAGENAME eq CivilizationVI.exe", "/FO", "CSV", "/NH"],
+                text=True,
+                errors="replace",
+            )
+            if "CivilizationVI.exe" in out:
+                return True
+            out2 = subprocess.check_output(
+                ["tasklist", "/FI", "IMAGENAME eq CivilizationVI_DX12.exe", "/FO", "CSV", "/NH"],
+                text=True,
+                errors="replace",
+            )
+            return "CivilizationVI_DX12.exe" in out2
+        except Exception:
+            return None
+    return None
+
+
 def decision_suppresses_sidecar(player_dir: Path) -> bool:
     """Only skip sidecar when an approved decision matches the current snapshot turn."""
     decision_path = player_dir / "decision.json"
@@ -256,6 +340,20 @@ def _process_one(job_path: Path) -> bool:
     if not is_chat_job and decision_suppresses_sidecar(player_dir):
         job_path.unlink(missing_ok=True)
         return False
+    player_id = _player_id_from_job(job, player_dir)
+    if _circuit_breaker_blocks(player_dir, player_id):
+        # g12: after OpenRouter 402 the breaker stayed open and the poller
+        # re-ran the same dead job for ~29 hours after Civ closed.
+        log.warning("Skipping sidecar job for open circuit breaker: %s (%s)", player_id, job_path)
+        job_path.unlink(missing_ok=True)
+        return False
+    civ_up = _civ_process_running()
+    if civ_up is False:
+        age = time.time() - job_path.stat().st_mtime
+        if age > 120:
+            log.warning("Skipping stale sidecar job; Civ is not running (age=%.0fs): %s", age, job_path)
+            job_path.unlink(missing_ok=True)
+            return False
     repo = Path(str(job.get("repo") or ""))
     if not repo.is_dir():
         log.warning("Sidecar job missing repo: %s", job_path)
@@ -266,6 +364,10 @@ def _process_one(job_path: Path) -> bool:
         ran = True
     except Exception as error:
         log.warning("Sidecar job failed %s: %s", job_path, error)
+        # A hard breaker / credit failure must not leave the job for endless retry.
+        err_text = str(error)
+        if "circuit_breaker" in err_text or "credit_exhausted" in err_text or "Helper circuit breaker" in err_text:
+            job_path.unlink(missing_ok=True)
         return False
     finally:
         if decision_path.is_file() and decision_path.stat().st_size > 0:

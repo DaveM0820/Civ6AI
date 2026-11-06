@@ -621,13 +621,14 @@ def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
             isinstance(since, int) and not isinstance(since, bool)
             and isinstance(percent, int) and not isinstance(percent, bool)
             and percent < CIV6_EXPLORE_NUDGE_BELOW_PCT
-            and since > CIV6_EXPLORE_QUIET_TURNS
         ):
-            # Keep the EXPLORATION facts; the stall alone used to replace them
-            # (game 12 P0 T92–104 had only the quiet-turn line).
             base = civ6_explored_fact_line(snapshot, percent)
-            stall = civ6_explore_stall_line(since)
-            return f"{base} {stall}" if base else stall
+            # Keep EXPLORATION facts on quiet turns (g12 B6: P0 lost the line
+            # on 31/57 turns when only a stall/history path ran).
+            if since > CIV6_EXPLORE_QUIET_TURNS:
+                stall = civ6_explore_stall_line(since)
+                return f"{base} {stall}" if base else stall
+            return base
     explored = _civ6_explored_percent(snapshot)
     if not isinstance(explored, int) or explored >= CIV6_EXPLORE_STALL_BELOW_PCT:
         return None
@@ -641,7 +642,7 @@ def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
         newest_turn = int(newest.get("turn", -1))
         newest_revealed = int(newest.get("revealed", -1))
     except (TypeError, ValueError, AttributeError):
-        return None
+        return civ6_explored_fact_line(snapshot, explored)
     older = [
         row
         for row in samples
@@ -649,16 +650,19 @@ def civ6_exploration_attention(snapshot: dict[str, Any]) -> str | None:
         and int(row.get("turn", -1)) <= newest_turn - CIV6_EXPLORE_STALL_TURNS
     ]
     if not older:
-        return None
+        # Not enough history for a stall check yet — still show the fact line.
+        return civ6_explored_fact_line(snapshot, explored)
     try:
         baseline = max(int(row.get("revealed", -1)) for row in older)
     except (TypeError, ValueError):
-        return None
+        return civ6_explored_fact_line(snapshot, explored)
     if newest_revealed >= 0 and baseline >= 0 and newest_revealed <= baseline:
-        return (
+        base = civ6_explored_fact_line(snapshot, explored)
+        stall = (
             f"No new exploration in {CIV6_EXPLORE_STALL_TURNS}+ turns while map is only "
             f"{explored}% explored."
         )
+        return f"{base} {stall}" if base else stall
     return civ6_explored_fact_line(snapshot, explored)
 
 
