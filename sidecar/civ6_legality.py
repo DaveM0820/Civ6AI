@@ -411,7 +411,7 @@ REASON_TEXT = {
     "illegal_dof": "no open friendship offer",
     "government_locked": "a government can only be changed on a turn when a civic completed",
     "city_strike_unavailable": "city_strike_unavailable",
-    "self_tile_move": "the unit was already on that tile, so it stayed there (Skip)",
+    "self_tile_move": "MoveTo to the unit's own tile does nothing (already on that tile) — pick a different tile or Skip; stayed put",
     "off_map": "that tile is off the map",
     "improve_tile_not_offered": "no Improve is offered on that tile; use a listed Improve tile",
     "found_city_not_offered": "FoundCity is not offered for this settler here",
@@ -546,6 +546,11 @@ def _legality_rule(snapshot: dict[str, Any], ctx: dict[str, Any]):
         row = {"order": order_label(command), "reason": problem, "turn": _turn(snapshot)}
         if args.get("unit_id"):
             row["unit_id"] = str(args.get("unit_id"))
+        # Coords let the next-turn repeat-failure guard match pre-apply drops
+        # (game 12: ocean MoveTo repeated for 3 turns because only APPLY failures counted).
+        for axis, key in (("x", "target_x"), ("y", "target_y")):
+            if isinstance(args.get(key), int):
+                row[axis] = int(args[key])
         return line, row
     return check
 

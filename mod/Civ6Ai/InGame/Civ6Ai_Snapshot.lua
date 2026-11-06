@@ -38,13 +38,14 @@ function Civ6Ai_Snapshot._BuildNextPick(playerID)
     return nil
   end
   local setTurn = prop("CIV6AI_PICK_T_" .. tostring(playerID)) or -1
-  -- An expired pick no longer steers anything (Orders.BUILD_NEXT_TURNS = 5);
-  -- do not show it as current.
+  -- An expired pick no longer steers anything (Orders.BUILD_NEXT_TURNS);
+  -- do not show it as current. Keep InGame constant aligned with Gameplay.
+  local maxAge = (Civ6Ai_Orders ~= nil and Civ6Ai_Orders.BUILD_NEXT_TURNS) or 12
   local turn = Game ~= nil and Game.GetCurrentGameTurn ~= nil and Game.GetCurrentGameTurn() or nil
-  if setTurn >= 0 and turn ~= nil and turn - setTurn > 5 then
+  if setTurn >= 0 and turn ~= nil and turn - setTurn > maxAge then
     return nil
   end
-  return { item_id = item, set_turn = setTurn, expires_turn = setTurn >= 0 and (setTurn + 5) or nil }
+  return { item_id = item, set_turn = setTurn, expires_turn = setTurn >= 0 and (setTurn + maxAge) or nil }
 end
 
 -- Items an AI seat can name for "build next": every Civ6Ai_NextItems entry
@@ -775,13 +776,65 @@ function Civ6Ai_Snapshot._BuildKnownMap(playerID, turn, yourUnits, yourCities)
   minY = math.max(0, minY)
   maxX = math.min(mapWidth - 1, maxX)
   maxY = math.min(mapHeight - 1, maxY)
+  -- Priority plot keys (unit tiles, adjacent transition tiles, city tiles, settle
+  -- targets) must stay in the capped plots list. The visibility_grid still covers
+  -- every revealed tile in the viewport so sidecar can recover status without
+  -- inventing fog (g12: 700-cap caused false "not explored" on Dido's own tiles).
+  local must = {}
+  local function markMust(x, y)
+    if x == nil or y == nil then return end
+    if x < 0 or y < 0 or x >= mapWidth or y >= mapHeight then return end
+    must[x .. "," .. y] = { x = x, y = y }
+  end
+  for _, anchor in ipairs(anchors) do
+    markMust(anchor.x, anchor.y)
+    for dir = 0, 5 do
+      local n = Civ6Ai_Snapshot._AdjacentPlot(anchor.x, anchor.y, dir)
+      if n ~= nil then
+        markMust(n:GetX(), n:GetY())
+      end
+    end
+  end
+  if yourUnits ~= nil then
+    for _, unit in ipairs(yourUnits) do
+      local settle = unit.settle
+      if type(settle) == "table" then
+        local sites = settle.sites
+        if type(sites) == "table" then
+          for _, site in ipairs(sites) do
+            if type(site) == "table" then
+              markMust(site.x or site.X, site.y or site.Y)
+            end
+          end
+        end
+        local embark = settle.embark_site
+        if type(embark) == "table" then
+          markMust(embark.x or embark.X, embark.y or embark.Y)
+        end
+      end
+    end
+  end
+  local function pushPlot(plot)
+    if plot == nil or not vis:IsRevealed(plot:GetIndex()) then
+      return
+    end
+    if #plots >= Civ6Ai_Snapshot.MAX_MAP_PLOTS then
+      return
+    end
+    table.insert(plots, Civ6Ai_Snapshot._BuildPlotRecord(plot, playerID, turn, vis))
+  end
+  -- Pass 1: must-keep tiles.
+  for _, xy in pairs(must) do
+    pushPlot(Map.GetPlot(xy.x, xy.y))
+  end
+  -- Pass 2: fill remaining budget from the viewport scan (grid always full).
   for y = minY, maxY do
     local row = ""
     for x = minX, maxX do
       local plot = Map.GetPlot(x, y)
       if plot ~= nil and vis:IsRevealed(plot:GetIndex()) then
-        if #plots < Civ6Ai_Snapshot.MAX_MAP_PLOTS then
-          table.insert(plots, Civ6Ai_Snapshot._BuildPlotRecord(plot, playerID, turn, vis))
+        if must[x .. "," .. y] == nil then
+          pushPlot(plot)
         end
         row = row .. Civ6Ai_Snapshot._VisibilityChar(plot)
       else
@@ -2938,8 +2991,11 @@ function Civ6Ai_Snapshot._PlotCitySiteProblem(playerID, x, y)
   if plot == nil then
     return "plot_not_found"
   end
-  if (plot.IsWater ~= nil and plot:IsWater()) or (plot.IsImpassable ~= nil and plot:IsImpassable()) then
-    return "invalid_city_site"
+  if plot.IsWater ~= nil and plot:IsWater() then
+    return "on_water"
+  end
+  if (plot.IsImpassable ~= nil and plot:IsImpassable()) or (plot.IsMountain ~= nil and plot:IsMountain()) then
+    return "impassable_tile"
   end
   -- The UI context only sees cities the host has revealed, so a city in the
   -- host's fog was missed and gameplay refused the founding (game 3 P3, three

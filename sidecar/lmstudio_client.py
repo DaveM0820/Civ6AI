@@ -356,6 +356,16 @@ def call_lmstudio_chat(
                         f"{error.code}). Load a Qwen vision model in LM Studio, "
                         f"then retry. Detail: {detail[:300]}",
                     ) from error
+                # 402 payment/credit: fail immediately (no retry/sleep). Do not swap models
+                # or raise max_tokens spend. Seat is blocked until credits are topped up.
+                if error.code == 402:
+                    asked = body.get("max_tokens")
+                    raise pipeline.BoundaryError(
+                        "credit_exhausted",
+                        f"{label} HTTP 402 credit/quota exhausted (requested max_tokens="
+                        f"{asked}). Top up OpenRouter credits before this seat can run; "
+                        f"no auto-retry or model downgrade. Detail: {detail[:400]}",
+                    ) from error
                 if error.code in getattr(pipeline, "TRANSIENT_HTTP_CODES", {408, 429, 500, 502, 503, 504}):
                     last_error = error
                     time.sleep(2 * (attempt + 1))

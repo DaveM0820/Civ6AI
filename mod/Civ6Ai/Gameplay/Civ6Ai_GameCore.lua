@@ -169,8 +169,11 @@ function Civ6Ai_GameCore._CitySiteProblem(x, y)
   if plot == nil then
     return "plot_not_found"
   end
-  if (plot.IsWater ~= nil and plot:IsWater()) or (plot.IsImpassable ~= nil and plot:IsImpassable()) then
-    return "invalid_city_site"
+  if plot.IsWater ~= nil and plot:IsWater() then
+    return "on_water"
+  end
+  if (plot.IsImpassable ~= nil and plot:IsImpassable()) or (plot.IsMountain ~= nil and plot:IsMountain()) then
+    return "impassable_tile"
   end
   if Map.GetPlotDistance == nil then
     return nil
@@ -573,6 +576,42 @@ function Civ6Ai_GameCore._RestoreMoves(unit, before)
   return now >= before
 end
 
+
+-- Embark/disembark ends the unit's movement (vanilla). After a successful
+-- UnitManager.MoveUnit domain step, FinishMoves matches that rule. Do NOT bump
+-- moves to force a refused step: ChangeMovesRemaining would alter the budget and
+-- is not proven safe against illegal transitions (g12 refusals with full moves +
+-- engine_path are log-correlated only; not an in-engine proven API defect).
+function Civ6Ai_GameCore._IsDomainChange(kind)
+  return kind == "embark" or kind == "disembark"
+end
+
+function Civ6Ai_GameCore._TryMoveAdjacent(playerID, unit, x, y, before, cost, kind)
+  local fromX, fromY = unit:GetX(), unit:GetY()
+  local function moved()
+    return unit:GetX() ~= fromX or unit:GetY() ~= fromY
+  end
+  local okMove, err = pcall(function() UnitManager.MoveUnit(unit, x, y) end)
+  if moved() then
+    if Civ6Ai_GameCore._IsDomainChange(kind) then
+      if (Civ6Ai_GameCore._Call(unit, "GetMovesRemaining") or 0) > 0 then
+        pcall(function() UnitManager.FinishMoves(unit) end)
+      end
+      print("CIV6AI|gamecore|domain_step|player=" .. tostring(playerID) .. "|unit=" .. tostring(unit:GetID())
+        .. "|kind=" .. tostring(kind) .. "|route=move_unit|from=" .. fromX .. "," .. fromY
+        .. "|to=" .. tostring(x) .. "," .. tostring(y)
+        .. "|moves_before=" .. tostring(before) .. "|cost=" .. tostring(cost))
+      return true, "domain_step:move_unit"
+    end
+    Civ6Ai_GameCore._ChargeStep(unit, before, cost)
+    return true, ""
+  end
+  Civ6Ai_GameCore._RestoreMoves(unit, before)
+  local tag = Civ6Ai_GameCore._IsDomainChange(kind) and ("domain_" .. tostring(kind)) or "script_move_no_progress"
+  Civ6Ai_GameCore._LogStepRefusal(playerID, unit, x, y, before, tag)
+  return false, okMove and "script_move_no_progress" or ("move_unit_error:" .. tostring(err))
+end
+
 -- UnitManager.MoveUnit is reliable for short hops and pathfinds (sometimes) for
 -- longer ones; success is judged by whether the unit actually changed plot. The
 -- step is checked first (CanMoveUnitToForPlayer) so a move the engine would
@@ -602,6 +641,16 @@ function Civ6Ai_GameCore.MoveUnitForPlayer(playerID, unitNumericId, x, y)
     return Civ6Ai_GameCore._FirstStep(playerID, unit, x, y, firstCost)
   end
   local before = Civ6Ai_GameCore._Call(unit, "GetMovesRemaining")
+  local maxMoves = Civ6Ai_GameCore._Call(unit, "GetMaxMoves") or 0
+  local row = GameInfo ~= nil and GameInfo.Units ~= nil and GameInfo.Units[unit:GetType()] or nil
+  local cost, kind = nil, nil
+  if Civ6Ai_GameCore._IsAdjacent(fromX, fromY, x, y) == true then
+    cost, kind = Civ6Ai_GameCore.StepCost(unit, row ~= nil and row.Domain or "DOMAIN_LAND",
+      Map.GetPlot(fromX, fromY), Map.GetPlot(x, y), maxMoves)
+  end
+  if Civ6Ai_GameCore._IsDomainChange(kind) then
+    return Civ6Ai_GameCore._TryMoveAdjacent(playerID, unit, x, y, before, cost, kind)
+  end
   local okMove, err = pcall(function()
     UnitManager.MoveUnit(unit, x, y)
   end)
@@ -614,12 +663,7 @@ function Civ6Ai_GameCore.MoveUnitForPlayer(playerID, unitNumericId, x, y)
   end
   if toX == x and toY == y then
     if Civ6Ai_GameCore._IsAdjacent(fromX, fromY, x, y) == true then
-      local okCost, cost = pcall(function()
-        local row = GameInfo.Units[unit:GetType()]
-        return Civ6Ai_GameCore.StepCost(unit, row ~= nil and row.Domain or "DOMAIN_LAND", Map.GetPlot(fromX, fromY),
-          Map.GetPlot(x, y), Civ6Ai_GameCore._Call(unit, "GetMaxMoves") or 0)
-      end)
-      Civ6Ai_GameCore._ChargeStep(unit, before, okCost and cost or nil)
+      Civ6Ai_GameCore._ChargeStep(unit, before, cost)
     end
     return true, ""
   end
@@ -809,19 +853,34 @@ function Civ6Ai_GameCore.MoveUnitAlongPathForPlayer(playerID, unitNumericId, x, 
         row = okRow and row or nil
         local okCost, cost = pcall(Civ6Ai_GameCore.StepCost, unit, row ~= nil and row.Domain or "DOMAIN_LAND", fromStep, plot, maxMoves)
         cost = okCost and cost or nil
-        pcall(function() UnitManager.MoveUnit(unit, px, py) end)
-        if unit:GetX() == bx and unit:GetY() == by then
-          Civ6Ai_GameCore._RestoreMoves(unit, before)
-          Civ6Ai_GameCore._LogStepRefusal(playerID, unit, px, py, before, "path_step")
-          stop = "step_refused"
-          break
+        local stepKind = nil
+        if okCost then
+          -- StepCost returns cost, kind; pcall only kept the first return above.
+          local _, k2 = Civ6Ai_GameCore.StepCost(unit, row ~= nil and row.Domain or "DOMAIN_LAND", fromStep, plot, maxMoves)
+          stepKind = k2
         end
-        steps = steps + 1
-        -- The scripted UnitManager.MoveUnit ends the unit's movement after one
-        -- step (every partial walk stopped at steps=1 with no_moves_left). Charge
-        -- the step its real movement cost instead, so the walk continues the way
-        -- the game's own move would: moves left = before - cost of this step.
-        Civ6Ai_GameCore._ChargeStep(unit, before, cost)
+        if Civ6Ai_GameCore._IsDomainChange(stepKind) then
+          local okDom, whyDom = Civ6Ai_GameCore._TryMoveAdjacent(playerID, unit, px, py, before, cost, stepKind)
+          if not okDom then
+            stop = "step_refused"
+            break
+          end
+          steps = steps + 1
+        else
+          pcall(function() UnitManager.MoveUnit(unit, px, py) end)
+          if unit:GetX() == bx and unit:GetY() == by then
+            Civ6Ai_GameCore._RestoreMoves(unit, before)
+            Civ6Ai_GameCore._LogStepRefusal(playerID, unit, px, py, before, "path_step")
+            stop = "step_refused"
+            break
+          end
+          steps = steps + 1
+          -- The scripted UnitManager.MoveUnit ends the unit's movement after one
+          -- step (every partial walk stopped at steps=1 with no_moves_left). Charge
+          -- the step its real movement cost instead, so the walk continues the way
+          -- the game's own move would: moves left = before - cost of this step.
+          Civ6Ai_GameCore._ChargeStep(unit, before, cost)
+        end
       end
     end
   end

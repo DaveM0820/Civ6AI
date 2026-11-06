@@ -3231,6 +3231,92 @@ function Civ6Ai_Orders.ProbeApi()
         .. "/" .. tostring(#chunks) .. "|names=" .. table.concat(c, ","))
     end
   end
+  -- pairs/__index often only shows __instance for C++ userdata. Also try known
+  -- method names with pcall(obj.Name ~= nil / type(obj.Name)) — read-only, no calls
+  -- that mutate production. Logs which candidates exist as callable fields.
+  local bq = city ~= nil and call(city, "GetBuildQueue") or nil
+  if bq ~= nil then
+    -- Sukritact Civilization VI Modding Knowledge Base (CityBuildQueue): Script
+    -- context has CanProduce, CurrentlyBuilding, GetTurnsLeft, Has*, and the
+    -- grant/place writers (AddProgress, FinishProgress, CreateBuilding,
+    -- CreateDistrict, CreateIncomplete*, RemoveBuilding, RemoveDistrict).
+    -- GetAt/GetSize/GetCurrentProductionTypeHash are documented on the UI
+    -- object. None of those names is a "set the queue entry" call.
+    -- Create*/FinishProgress/AddProgress grant or place the item; they are
+    -- listed here only so the next game can log whether the field exists.
+    -- This probe never calls them.
+    local candidates = {
+      "CanProduce", "CurrentlyBuilding", "GetCurrentProductionTypeHash", "GetProductionProgress",
+      "GetProgress", "GetCost", "GetTurnsLeft", "GetSize", "GetAt",
+      "HasDistrictBeenPlaced", "HasBeenPlaced", "HasProductionProgress",
+      "HasBuildingBeenPlaced", "GetAvailableProductionTypes", "CheckActiveProduction",
+      "CreateIncompleteBuilding", "CreateIncompleteDistrict", "CreateBuilding", "CreateDistrict",
+      "AddProgress", "FinishProgress", "RemoveBuilding", "RemoveDistrict",
+      "AddUnit", "RemoveUnit", "GetConscriptUnitType",
+      "GetPreviousProductionTypeHash", "IsBuildingProductionPaused",
+    }
+    local present, absent = {}, {}
+    for _, name in ipairs(candidates) do
+      local ok, v = pcall(function() return bq[name] end)
+      if ok and type(v) == "function" then
+        present[#present + 1] = name
+      else
+        absent[#absent + 1] = name .. ":" .. tostring(ok and type(v) or v)
+      end
+    end
+    log("probe|api|obj=BuildQueue|callable=" .. table.concat(present, ",")
+      .. "|missing_or_nonfn=" .. table.concat(absent, ","))
+    -- Read-only return shape. pairs() only showed __instance in g12; the
+    -- clear-on-start path needs to know whether CurrentlyBuilding is a type
+    -- name or a hash number (productionName in this file already handles a number).
+    local function readFact(fnName)
+      local okGet, fn = pcall(function() return bq[fnName] end)
+      if not okGet or type(fn) ~= "function" then
+        return
+      end
+      local okC, result = pcall(fn, bq)
+      local shown = (okC and type(result)) or "error"
+      if okC and (type(result) == "number" or type(result) == "string" or type(result) == "boolean") then
+        local s = tostring(result)
+        if #s > 64 then
+          s = string.sub(s, 1, 64)
+        end
+        shown = shown .. ":" .. s
+      end
+      log("probe|api|obj=BuildQueue|read=" .. fnName .. "|result=" .. shown)
+    end
+    readFact("CurrentlyBuilding")
+    readFact("GetCurrentProductionTypeHash")
+    readFact("GetSize")
+  end
+  -- TradeManager is Script+UI (Game.GetTradeManager). Documented script methods
+  -- are yield math and CanStartRoute / CanStartRouteWithResource. CreateTradeRoute
+  -- is not in that list. UnitManager.RequestOperation / RequestCommand are UI-only
+  -- (the route and great-person activate verbs). Existence only — no calls.
+  local function callableProbe(objName, obj, names)
+    if obj == nil then
+      log("probe|api|obj=" .. objName .. "|missing=nil")
+      return
+    end
+    local present, absent = {}, {}
+    for _, name in ipairs(names) do
+      local ok, v = pcall(function() return obj[name] end)
+      if ok and type(v) == "function" then
+        present[#present + 1] = name
+      else
+        absent[#absent + 1] = name .. ":" .. tostring(ok and type(v) or v)
+      end
+    end
+    log("probe|api|obj=" .. objName .. "|callable=" .. table.concat(present, ",")
+      .. "|missing_or_nonfn=" .. table.concat(absent, ","))
+  end
+  local tm = call(Game, "GetTradeManager")
+  callableProbe("TradeManager", tm, {
+    "CanStartRoute", "CanStartRouteWithResource", "CreateTradeRoute", "CanCreateTradeRoute",
+  })
+  callableProbe("UnitManagerOps", UnitManager, {
+    "MoveUnit", "RequestOperation", "RequestCommand", "CanStartOperation", "CanStartCommand",
+  })
 end
 
 function Civ6Ai_Orders.OnGameTurnStarted(turn)
@@ -3765,8 +3851,10 @@ end
 -- into these fail-closed returns. The game's own AI keeps traders, great
 -- people, envoys, and formations.
 --
--- Trade routes. This script does not call the UI route creator.
--- Traders stay with the game's own AI (they are not model-commanded).
+-- Trade routes. Sukritact KB lists TradeManager:CanStartRoute in Script and
+-- does not list CreateTradeRoute. UnitManager.RequestOperation
+-- (MAKE_TRADE_ROUTE) is UI-only. ProbeApi logs whether those fields exist
+-- in this context; it does not call them. Traders stay with the game's own AI.
 function Gov.MakeTradeRoute(owner, unitId, destCityId)
   return false, "trade_route_unavailable:no_gameplay_route:player=" .. tostring(owner)
     .. ":unit=" .. tostring(unitId) .. ":city=" .. tostring(destCityId)
@@ -3913,7 +4001,10 @@ function Gov.Explore(owner, unitId)
       or string.find(text, "impassable", 1, true) ~= nil
   end
   local row = GameInfo.Units[unit:GetType()]
-  local sea = row ~= nil and row.Domain == "DOMAIN_SEA"
+  -- Embarked land units move on water; treat them like sea for fog domain and
+  -- cross-body reachability (same-landmass-only excluded their coastal fog).
+  local embarked = call(unit, "IsEmbarked") == true
+  local sea = (row ~= nil and row.Domain == "DOMAIN_SEA") or embarked
   local ux, uy = unit:GetX(), unit:GetY()
   local here = Map.GetPlot(ux, uy)
   local unitArea = areaOf(here)
@@ -4029,6 +4120,10 @@ function Gov.Explore(owner, unitId)
   local otherArea = false
   local tx, ty, okMove, why
   local attempts = 0
+  -- Non-embarked land: same landmass only (other_area fog has no land path;
+  -- game 12 P2 Explore ended other_area:no_path). Ships and embarked units may
+  -- path across water bodies; target domain is water when sea/embarked.
+  local allowOther = sea
   while attempts < 6 do
     attempts = attempts + 1
     best, bestD, otherArea = nil, nil, false
@@ -4036,7 +4131,7 @@ function Gov.Explore(owner, unitId)
     if sea or stuck or attempts > 1 then
       local marks = beacons()
       best, bestD = nearestFog(true, marks)
-      if best == nil then
+      if best == nil and allowOther then
         best, bestD = nearestFog(false, marks)
         otherArea = best ~= nil
       end
@@ -4044,7 +4139,7 @@ function Gov.Explore(owner, unitId)
     if best == nil then
       otherArea = false
       best, bestD = nearestBorder(true)
-      if best == nil then
+      if best == nil and allowOther then
         best, bestD = nearestBorder(false)
         otherArea = best ~= nil
       end
@@ -4106,10 +4201,12 @@ function Gov.ActivateGreatPerson(owner, unitId, mode)
     end
     return true, "retired"
   end
-  -- The great-person action is a UI command. See Gov.MakeTradeRoute: a host
-  -- RequestOperation does not sync for an AI seat, and this script cannot
-  -- call it. Retire (mode 1) still uses UnitManager.Kill above. The snapshot
-  -- does not offer either action; the game's own AI uses the unit.
+  -- Activating a great person (writer and the rest) is UnitManager.RequestCommand
+  -- in the UI (ACTIVATE_GREAT_PERSON). That call is not a Gameplay method.
+  -- Game.GetGreatPeople():GrantPerson / CreatePerson spawn a person; they do
+  -- not spend the unit on a great work. Game.CreateGreatWork is not a Script
+  -- method on Game. ProbeApi logs RequestCommand's presence and does not call
+  -- it. Retire (mode 1) still uses UnitManager.Kill above.
   return false, "activate_unavailable:no_gameplay_activate"
 end
 
@@ -5396,15 +5493,11 @@ Civ6Ai_Orders._steer = Civ6Ai_Orders._steer or {}
 
 local function productionName(city)
   local bq = call(city, "GetBuildQueue")
-  local cur = call(bq, "CurrentlyBuilding")
-  if type(cur) == "number" and GameInfo ~= nil and GameInfo.Types ~= nil then
-    for row in GameInfo.Types() do
-      if row.Hash == cur then
-        return row.Type
-      end
-    end
+  local name = Civ6Ai_Orders.CurrentProductionType(bq)
+  if name ~= nil then
+    return name
   end
-  return tostring(cur)
+  return tostring(call(bq, "CurrentlyBuilding"))
 end
 
 local function isUnitName(name)
@@ -5763,7 +5856,7 @@ end
 -- The pick clears when one of the seat's cities starts it. Answers come only
 -- from synced properties and game events, so every PC agrees.
 -- ---------------------------------------------------------------------------
-Civ6Ai_Orders.BUILD_NEXT_TURNS = 5
+Civ6Ai_Orders.BUILD_NEXT_TURNS = 12
 
 function Civ6Ai_Orders.BuildNextItems()
   if Civ6Ai_Orders._nextItems ~= nil then
@@ -5784,6 +5877,80 @@ function Civ6Ai_Orders.BuildNextPick(owner)
   local idx = num(Game:GetProperty("CIV6AI_PICK_" .. tostring(owner))) or 0
   local setTurn = num(Game:GetProperty("CIV6AI_PICK_T_" .. tostring(owner))) or -1
   return idx, setTurn
+end
+
+
+-- Current production type name. Gameplay CurrentlyBuilding() is a hash number
+-- in this file's productionName readback (GameInfo.Types). InGame also accepts
+-- a type-name string when the hash read is empty. GetCurrentProductionTypeHash
+-- is the UI accessor (Sukritact KB) and did not clear any g12 pick from this
+-- script. There is no Script method that sets the queue entry: CityManager
+-- .RequestOperation is UI-only, and CreateBuilding / FinishProgress / AddProgress
+-- place or grant the item. Picks stay a synced strategy bias.
+function Civ6Ai_Orders.CurrentProductionType(bq)
+  if bq == nil or GameInfo == nil or GameInfo.Types == nil then
+    local cur = bq ~= nil and call(bq, "CurrentlyBuilding") or nil
+    if type(cur) == "string" and cur ~= "" and cur ~= "NONE" then
+      return cur
+    end
+    return nil
+  end
+  local function fromHash(hash)
+    if type(hash) ~= "number" or hash == 0 then
+      return nil
+    end
+    local found = nil
+    pcall(function()
+      for row in GameInfo.Types() do
+        if row.Hash == hash then
+          found = row.Type
+          return
+        end
+      end
+    end)
+    return found
+  end
+  local named = fromHash(call(bq, "GetCurrentProductionTypeHash"))
+  if named ~= nil then
+    return named
+  end
+  local cur = call(bq, "CurrentlyBuilding")
+  if type(cur) == "string" and cur ~= "" and cur ~= "NONE" then
+    return cur
+  end
+  local asNum = tonumber(cur)
+  if type(cur) == "number" or asNum ~= nil then
+    return fromHash(type(cur) == "number" and cur or asNum)
+  end
+  return nil
+end
+
+local function sameProductionHash(value, row)
+  if row == nil or row.Hash == nil or value == nil or value == 0 or value == "0" or value == "" or value == "NONE" then
+    return false
+  end
+  if value == row.Hash then
+    return true
+  end
+  local n = tonumber(value)
+  return n ~= nil and n ~= 0 and n == row.Hash
+end
+
+-- Match current city production to the pick. Hash equality covers
+-- GetCurrentProductionTypeHash and a numeric CurrentlyBuilding() (the Gameplay
+-- shape). A type-name string covers the InGame fallback.
+local function productionMatchesPick(bq, row, item)
+  if bq == nil or item == nil then
+    return false
+  end
+  if sameProductionHash(call(bq, "GetCurrentProductionTypeHash"), row) then
+    return true
+  end
+  if sameProductionHash(call(bq, "CurrentlyBuilding"), row) then
+    return true
+  end
+  local name = Civ6Ai_Orders.CurrentProductionType(bq)
+  return name == item
 end
 
 local function clearPick(owner, why)
@@ -5846,8 +6013,7 @@ function Civ6Ai_Orders.OnBuildNextProductionChanged(owner, cityID)
   local player = Players[owner]
   local city = player ~= nil and call(call(player, "GetCities"), "FindID", cityID) or nil
   local bq = city ~= nil and call(city, "GetBuildQueue") or nil
-  local current = bq ~= nil and call(bq, "GetCurrentProductionTypeHash") or nil
-  if row ~= nil and current ~= nil and current == row.Hash then
+  if productionMatchesPick(bq, row, item) then
     clearPick(owner, "started_city_" .. tostring(cityID))
   end
 end
@@ -5867,15 +6033,17 @@ function Civ6Ai_Orders.SweepBuildNext(owner)
     return
   end
   local item = Civ6Ai_Orders.BuildNextItems()[idx]
-  local row = item ~= nil and (GameInfo.Units[item] or GameInfo.Buildings[item] or GameInfo.Districts[item]) or nil
+  if item == nil then
+    return
+  end
+  local row = GameInfo.Units[item] or GameInfo.Buildings[item] or GameInfo.Districts[item]
   local player = Players[owner]
-  if row == nil or player == nil then
+  if player == nil then
     return
   end
   for _, city in call(player, "GetCities"):Members() do
     local bq = call(city, "GetBuildQueue")
-    local current = bq ~= nil and call(bq, "GetCurrentProductionTypeHash") or nil
-    if current ~= nil and current == row.Hash then
+    if productionMatchesPick(bq, row, item) then
       clearPick(owner, "started_city_" .. tostring(call(city, "GetID")))
       return
     end

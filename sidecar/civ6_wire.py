@@ -1482,6 +1482,8 @@ def _empire_section(
                     lines.extend(coaching.settler_fact_lines(prefix, unit, context))
                 if not unit_compact and str(unit.get("unit_type_id") or "") == "UNIT_BUILDER" and unit.get("needs_orders"):
                     lines.extend(coaching.builder_fact_lines(prefix, unit, context))
+                if "GREAT_" in str(unit.get("unit_type_id") or "").upper():
+                    lines.extend(coaching.greatperson_fact_lines(prefix, unit, context))
                 lines.append("")
             if lines[-1] == "":
                 lines.pop()
@@ -2294,7 +2296,7 @@ def build_civ6_response_instructions(snapshot: dict[str, Any]) -> str:
              "you write a new one, which replaces it: the victory path and how policies, build orders, tech/civic "
              "direction, expansion (land and sea) and military fit together. Rewrite it when the situation changes; "
              "omit the key to keep it. "
-             "plan.research_target = a far tech (e.g. TECH_SHIPBUILDING) and plan.civic_target = a far civic: "
+             "plan.research_target = a far tech (e.g. TECH_SHIPBUILDING or TECH_CARTOGRAPHY for ocean) and plan.civic_target = a far civic: "
              "kept until reached; whenever you give no legal.research.tech / legal.research.civic order, the next "
              "prerequisite on the path is ordered for you. none clears it."]
             if isinstance(snapshot.get("_seat_memory"), dict) else []

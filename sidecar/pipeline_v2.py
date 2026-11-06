@@ -843,6 +843,27 @@ def _plot_from_grid_cell(x: int, y: int, cell: str, knowledge: str = "remembered
     return plot
 
 
+def visibility_cell_at(snapshot: dict[str, Any], x: int, y: int) -> str | None:
+    """Return the visibility_grid char for (x,y), or None if outside the grid / unknown.
+
+    '?' means unrevealed in the exported viewport. Missing plot JSON under the
+    MAX_MAP_PLOTS cap must not be treated as unexplored when the grid shows a
+    revealed terrain char (g12 P1 false 'not explored' on own tiles).
+    """
+    known = snapshot.get("known_map") if isinstance(snapshot.get("known_map"), dict) else {}
+    grid = known.get("visibility_grid")
+    if not isinstance(grid, list) or not grid:
+        return None
+    ox, oy = _visibility_grid_origin(known)
+    gy, gx = y - oy, x - ox
+    if gy < 0 or gy >= len(grid):
+        return None
+    row = grid[gy]
+    if not isinstance(row, str) or gx < 0 or gx >= len(row):
+        return None
+    return row[gx]
+
+
 def _visibility_grid_origin(known_map: dict[str, Any] | None) -> tuple[int, int]:
     """visibility_grid rows are cropped to known_map.viewport, not full-map (0,0)."""
     if not isinstance(known_map, dict):
@@ -4636,6 +4657,8 @@ def _http_error_category(status_code: int) -> str:
         return "rate_limit"
     if status_code in {401, 403}:
         return "http_auth"
+    if status_code == 402:
+        return "credit_exhausted"
     return "http_error"
 
 
@@ -5910,6 +5933,10 @@ class CircuitBreaker:
         if category == "response_schema" and "thought/" in message:
             return
         if category == "content_filter":
+            return
+        # OpenRouter/provider out of credit: one strike opens the seat (no 3×402).
+        if category == "credit_exhausted":
+            self.failures[player_id] = max(self.failures.get(player_id, 0), self.threshold)
             return
         self.record(player_id, False)
 

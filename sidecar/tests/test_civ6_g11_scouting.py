@@ -70,6 +70,21 @@ class GovernorAssignTests(unittest.TestCase):
         ids, notes = governance.bind_reply(self._gov_snap(), "governor.assign", "THE_BUILDER @ Lugdunum")
         self.assertEqual(len(ids), 1, notes)
 
+    def test_city_prefix_placeholder_strips_only_when_exact_fails(self):
+        snap = self._gov_snap()
+        snap["civ6"]["governance"]["governors"]["cities"].append(
+            {"city_id": "C3", "name": "Cityscape"})
+        # Exact real name beginning with City must not be rewritten.
+        ids, notes = governance.bind_reply(snap, "governor.assign", "THE_DEFENDER @ Cityscape")
+        self.assertEqual(len(ids), 1, notes)
+        args = snap["legal_commands"][-1]["fixed_arguments"]
+        self.assertEqual(args["city_id"], "C3")
+        # Placeholder CityRome -> Rome when exact CityRome is not a city.
+        snap2 = self._gov_snap()
+        ids2, notes2 = governance.bind_reply(snap2, "governor.assign", "THE_BUILDER @ CityRome")
+        self.assertEqual(len(ids2), 1, notes2)
+        self.assertEqual(snap2["legal_commands"][-1]["fixed_arguments"]["city_id"], "C1")
+
 
 if __name__ == "__main__":
     unittest.main()

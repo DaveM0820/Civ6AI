@@ -1375,6 +1375,101 @@ class OrdersGameplayTests(unittest.TestCase):
         self.order(0, K=37, P=2, I=9, S=73)
         self.assertFalse(self.last()["ok"])
 
+    def test_build_next_clears_via_currently_building_string(self):
+        """g12: GetCurrentProductionTypeHash never cleared picks; string path must."""
+        self.rt.execute(r"""
+          GameInfo.Units.UNIT_ARCHER = {Index=1, Hash=777}
+          GameInfo.Buildings = {BUILDING_GRANARY={Index=5, Hash=555}}
+          GameInfo.Districts = {}
+          local rows = {{Item="UNIT_ARCHER"}, {Item="BUILDING_GRANARY"}}
+          GameInfo.Civ6Ai_NextItems = function() local i = 0
+            return function() i = i + 1; return rows[i] end end
+          Civ6Ai_Orders._nextItems = nil
+          Civ6Ai_Orders.RegisterBuildNext()
+          CUR_NAME = "NONE"
+          Players[2].GetCities = function() return {
+            Members=function()
+              local once = true
+              return function()
+                if not once then return end
+                once = false
+                return 1, {GetID=function() return 9 end,
+                  GetBuildQueue=function() return {
+                    GetCurrentProductionTypeHash=function() return 0 end,
+                    CurrentlyBuilding=function() return CUR_NAME end,
+                  } end}
+              end
+            end,
+            FindID=function(_, id)
+              return {GetBuildQueue=function() return {
+                GetCurrentProductionTypeHash=function() return 0 end,
+                CurrentlyBuilding=function() return CUR_NAME end,
+              } end}
+            end} end
+        """)
+        self.order(0, K=37, P=2, I=1, S=80)
+        self.assertTrue(self.last()["ok"])
+        fire = lambda item, p: self.rt.eval("GameEvents.Civ6AiNext_%s.fns[1](%d, 0)" % (item, p))
+        self.assertTrue(fire("BUILDING_GRANARY", 2))
+        # Hash 0 + wrong name: still active
+        self.rt.execute("CUR_NAME = 'UNIT_ARCHER'; Civ6Ai_Orders.OnBuildNextProductionChanged(2, 9)")
+        self.assertTrue(fire("BUILDING_GRANARY", 2))
+        # String match clears even when hash is 0
+        self.rt.execute("CUR_NAME = 'BUILDING_GRANARY'; Civ6Ai_Orders.OnBuildNextProductionChanged(2, 9)")
+        self.assertFalse(fire("BUILDING_GRANARY", 2))
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_PICK_2')"), 0)
+        logs = _vals(self.rt.eval("logs"))
+        self.assertTrue(any("why=started_city_9" in l for l in logs))
+        # Sweep path too
+        self.order(0, K=37, P=2, I=2, S=81)
+        self.assertTrue(fire("UNIT_ARCHER", 2))
+        self.rt.execute("CUR_NAME = 'UNIT_ARCHER'; Civ6Ai_Orders.SweepBuildNext(2)")
+        self.assertFalse(fire("UNIT_ARCHER", 2))
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_PICK_2')"), 0)
+
+    def test_build_next_clears_via_currently_building_hash_number(self):
+        """Gameplay CurrentlyBuilding() is a hash (productionName), not only a type string."""
+        self.rt.execute(r"""
+          GameInfo.Units.UNIT_ARCHER = {Index=1, Hash=777}
+          GameInfo.Buildings = {BUILDING_GRANARY={Index=5, Hash=555}}
+          GameInfo.Districts = {}
+          local rows = {{Item="UNIT_ARCHER"}, {Item="BUILDING_GRANARY"}}
+          GameInfo.Civ6Ai_NextItems = function() local i = 0
+            return function() i = i + 1; return rows[i] end end
+          Civ6Ai_Orders._nextItems = nil
+          Civ6Ai_Orders.RegisterBuildNext()
+          CUR = 0
+          local function bq()
+            return {
+              GetCurrentProductionTypeHash=function() return 0 end,
+              CurrentlyBuilding=function() return CUR end,
+            }
+          end
+          Players[2].GetCities = function() return {
+            Members=function()
+              local once = true
+              return function()
+                if not once then return end
+                once = false
+                return 1, {GetID=function() return 4 end, GetBuildQueue=bq}
+              end
+            end,
+            FindID=function() return {GetBuildQueue=bq} end,
+          } end
+        """)
+        self.order(0, K=37, P=2, I=1, S=82)
+        fire = lambda item, p: self.rt.eval("GameEvents.Civ6AiNext_%s.fns[1](%d, 0)" % (item, p))
+        self.assertTrue(fire("BUILDING_GRANARY", 2))
+        self.rt.execute("CUR = 777; Civ6Ai_Orders.OnBuildNextProductionChanged(2, 4)")
+        self.assertTrue(fire("BUILDING_GRANARY", 2))
+        self.rt.execute("CUR = 555; Civ6Ai_Orders.OnBuildNextProductionChanged(2, 4)")
+        self.assertFalse(fire("BUILDING_GRANARY", 2))
+        self.order(0, K=37, P=2, I=2, S=83)
+        self.assertTrue(fire("UNIT_ARCHER", 2))
+        self.rt.execute("CUR = '777'; Civ6Ai_Orders.SweepBuildNext(2)")
+        self.assertFalse(fire("UNIT_ARCHER", 2))
+        self.assertEqual(self.rt.eval("GetProp('CIV6AI_PICK_2')"), 0)
+
     def test_force_build_needs_a_seat(self):
         self.order(0, K=49, V=1, S=53)
         self.order(0, K=63, I=1, S=54)
@@ -1575,7 +1670,9 @@ class PathMoveTests(unittest.TestCase):
             start = src.index("function Civ6Ai_GameCore." + name + "(")
             return src[start:src.index("\nend\n", start) + 5]
         rt = lupa.LuaRuntime(unpack_returned_tuples=True)
-        rt.execute(PATH_ENV + "\n" + fn("_FirstStepCost") + fn("MoveUnitAlongPathForPlayer"))
+        # Domain-change helpers are called from MoveUnitAlongPathForPlayer (g12 embark fix).
+        rt.execute(PATH_ENV + "\n" + fn("_IsDomainChange") + fn("_TryMoveAdjacent")
+                   + fn("_FirstStepCost") + fn("MoveUnitAlongPathForPlayer"))
         rt.execute("unit.moves = %d" % moves)
         return rt, rt.eval("Civ6Ai_GameCore.MoveUnitAlongPathForPlayer(1, 7, 3, 0)")
 
@@ -2381,6 +2478,11 @@ def _strip_lua_comments(source: str) -> str:
     return "".join(out)
 
 
+def _lua_calls(source: str, name: str) -> list[str]:
+    """Call-shaped uses of name. A quoted probe candidate is not a call."""
+    return re.findall(rf"(?:{re.escape(name)}\s*\(|[:.]{re.escape(name)}\b)", source)
+
+
 def _unknown_engine_calls(path: str, source: str) -> list[str]:
     found: list[str] = []
     for lineno, line in enumerate(_strip_lua_comments(source).splitlines(), 1):
@@ -2416,8 +2518,6 @@ class GameplayApiTests(unittest.TestCase):
             "CityManager.RequestOperation",
             "CityManager.CanStartOperation",
             "UI.RequestPlayerOperation",
-            "CreateTradeRoute",
-            "CanCreateTradeRoute",
             "RequestPolicyChanges",
             "ChangeTokensToGive",
             "ChangeTokensReceived",
@@ -2426,6 +2526,9 @@ class GameplayApiTests(unittest.TestCase):
             ":Activate(",
         ):
             self.assertNotIn(banned, body)
+        # ProbeApi may name these in a string list. A call is still banned.
+        for name in ("CreateTradeRoute", "CanCreateTradeRoute"):
+            self.assertEqual(_lua_calls(body, name), [], name)
 
     def test_host_ui_path_cannot_sync_trade_gp_envoy_or_formation(self):
         # These four have no Gameplay call. A host InGame RequestOperation is
@@ -2446,12 +2549,12 @@ class GameplayApiTests(unittest.TestCase):
         for banned in (
             "UnitManager.RequestOperation",
             "UI.RequestPlayerOperation",
-            "CreateTradeRoute",
             "ChangeTokensToGive",
             ".Activate(",
             ":Activate(",
         ):
             self.assertNotIn(banned, stripped)
+        self.assertEqual(_lua_calls(stripped, "CreateTradeRoute"), [])
         self.assertIn("trade_route_unavailable:no_gameplay_route", stripped)
         self.assertIn("activate_unavailable:no_gameplay_activate", stripped)
         self.assertIn("envoy_unavailable:no_gameplay_route", stripped)

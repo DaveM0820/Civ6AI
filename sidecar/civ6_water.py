@@ -90,11 +90,36 @@ def land_steps(snapshot: dict[str, Any], start: tuple[int, int]) -> dict[tuple[i
     return dist
 
 
+
+def _plot_at(snapshot: dict[str, Any], xy: tuple[int, int]) -> dict[str, Any] | None:
+    return _plots(snapshot).get(xy)
+
+
+def _area_id(snapshot: dict[str, Any], xy: tuple[int, int]) -> str | None:
+    p = _plot_at(snapshot, xy)
+    if not isinstance(p, dict):
+        return None
+    aid = p.get("area_id")
+    return str(aid) if aid not in (None, "") else None
+
+
+def _landmass_fully_explored(snapshot: dict[str, Any], start: tuple[int, int]) -> bool:
+    """True when every neighbour of the known land component is itself known.
+
+    Unrevealed neighbours are fog. Known water/mountains close the perimeter.
+    """
+    plots = _plots(snapshot)
+    for t in land_steps(snapshot, start):
+        for n in legality.hex_neighbors(*t):
+            if n not in plots:
+                return False
+    return True
+
+
 def site_fact(snapshot: dict[str, Any], site: dict[str, Any], settlers: list[tuple[str, tuple[int, int]]],
               lakes: set | None = None) -> str:
     """'S1 (19,32): sea coast; on your landmass, land route ~5 tiles from settler_4'."""
     x, y = site["x"], site["y"]
-    plots = _plots(snapshot)
     best: tuple[int, str] | None = None
     for name, xy in settlers:
         steps = land_steps(snapshot, xy).get((x, y))
@@ -102,11 +127,23 @@ def site_fact(snapshot: dict[str, Any], site: dict[str, Any], settlers: list[tup
             best = (steps, name)
     if best is not None:
         reach = f"on your landmass, land route ~{best[0]} tiles from {best[1]}"
-    elif settlers and all(not any(n not in plots for t in land_steps(snapshot, xy)
-                                  for n in legality.hex_neighbors(*t)) for _, xy in settlers):
-        reach = "on other land (needs embark)"
     elif settlers:
-        reach = "no known land route yet (any route runs through unexplored tiles)"
+        # Prefer engine area ids when both ends are known land: different land
+        # areas means embark (do not invent fog land bridges across ocean).
+        site_area = _area_id(snapshot, (x, y))
+        area_diffs = []
+        if site_area is not None:
+            for _, xy in settlers:
+                sa = _area_id(snapshot, xy)
+                if sa is not None:
+                    area_diffs.append(sa != site_area)
+        if area_diffs and all(area_diffs):
+            reach = "on other land (needs embark)"
+        elif all(_landmass_fully_explored(snapshot, xy) for _, xy in settlers):
+            # Known landmass perimeter closed; no fog land detour from here.
+            reach = "on other land (needs embark)"
+        else:
+            reach = "no known land route yet (any route runs through unexplored tiles)"
     else:
         reach = ""
     kind = shore_kind(snapshot, x, y, lakes)
